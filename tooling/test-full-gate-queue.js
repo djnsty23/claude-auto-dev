@@ -22,6 +22,10 @@
  *   M4  a waiter tries only lane 1                             -> a free lane 2 sits idle
  *   M5  a waiter that took a lane stays queued in the others   -> it blocks a lane it never uses
  *   M6  leave removes no ticket                                -> a stopped waiter keeps its place
+ *   M7  serving order ignores the class                        -> an older harness ticket beats a product
+ *   M8  no harness cap                                         -> harness gates take the last free lane
+ *   M9  the cap is lanes - 1 even on one lane                  -> a lone harness gate never runs
+ *   M10 no hand-over to a classless ticket at the front        -> an older version and a harness gate wait on each other
  */
 'use strict';
 
@@ -85,37 +89,60 @@ function fixture() {
     return { dir, lock: path.join(dir, 'full-gate.lock'), queue: path.join(dir, 'full-gate.queue') };
 }
 
-function envFor(fx) {
-    return Object.assign({}, process.env, {
+/** The suite's environment. A class or lane count set where the suite runs never leaks into a case. */
+function envFor(fx, extra = {}) {
+    const env = Object.assign({}, process.env, {
         AUTODEV_GATE_LOCK_PATH: fx.lock,
         AUTODEV_GATE_LOCK_POLL_MS: '100',
         AUTODEV_GATE_LOCK_REPORT_MS: '100000',
         AUTODEV_GATE_QUEUE_STALE_MS: '600000',
-    });
+    }, extra);
+    if (!('AUTODEV_GATE_CLASS' in extra)) delete env.AUTODEV_GATE_CLASS;
+    if (!('AUTODEV_GATE_LANES' in extra)) delete env.AUTODEV_GATE_LANES;
+    return env;
 }
 
-function run(subject, fx, args) {
+function run(subject, fx, args, extraEnv) {
     const r = spawnSync(process.execPath, [subject, ...args],
-        { env: envFor(fx), encoding: 'utf8', windowsHide: true, timeout: 120000 });
+        { env: envFor(fx, extraEnv), encoding: 'utf8', windowsHide: true, timeout: 120000 });
     return { code: r.status, out: `${r.stdout || ''}${r.stderr || ''}`, error: r.error };
 }
 
-const take = (s, fx, pid) => run(s, fx, ['take', '--pid', String(pid), '--what', `test waiter ${pid}`]);
+const take = (s, fx, pid, more = [], extraEnv) => run(s, fx, ['take', '--pid', String(pid), '--what', `test waiter ${pid}`, ...more], extraEnv);
 const release = (s, fx, pid) => run(s, fx, ['release', '--pid', String(pid)]);
 const lockPid = (fx) => { try { return Number(fs.readFileSync(fx.lock, 'utf8').split(/\r?\n/)[0]); } catch { return null; } };
 const tickets = (fx) => (fs.existsSync(fx.queue) ? fs.readdirSync(fx.queue).filter((f) => f.endsWith('.ticket')).sort() : []);
 const ticketPids = (fx) => tickets(fx).map((f) => Number(f.split('-')[1].replace('.ticket', '')));
 const asides = (fx, kind) => fs.readdirSync(fx.dir).filter((f) => f.startsWith(`full-gate.lock.${kind}-`));
+/** A file's lines, or [] when it does not exist. */
+const linesOf = (file) => { try { return fs.readFileSync(file, 'utf8').split(/\r?\n/); } catch { return []; } };
+const pidIn = (file) => Number(linesOf(file)[0]) || null;
+/** Line n (1-based) of `pid`'s ticket in `queueDir`, or null when it has none. */
+function ticketLine(queueDir, pid, n) {
+    const name = (fs.existsSync(queueDir) ? fs.readdirSync(queueDir) : []).find((f) => f.endsWith(`-${String(pid).padStart(10, '0')}.ticket`));
+    return name ? (linesOf(path.join(queueDir, name))[n - 1] || '') : null;
+}
 
-/** A ticket written by hand, `agoMs` in the past, as a queued waiter would have left it. */
-function plantTicket(fx, pid, agoMs, heartbeatAgoMs = 0) {
-    fs.mkdirSync(fx.queue, { recursive: true });
+/**
+ * A ticket written by hand, `agoMs` in the past, as a queued waiter would have
+ * left it. With `cls` it carries a class line as this version writes one.
+ * Without one, it is a ticket from a version that had no classes.
+ */
+function plantTicket(fx, pid, agoMs, heartbeatAgoMs = 0, { cls = null, queueDir = fx.queue } = {}) {
+    fs.mkdirSync(queueDir, { recursive: true });
     const d = new Date(Date.now() - agoMs);
     const name = `${d.toISOString().replace(/[-:.]/g, '')}-${String(pid).padStart(10, '0')}.ticket`;
-    const file = path.join(fx.queue, name);
-    fs.writeFileSync(file, `${pid}\nplanted ticket ${pid}\n${d.toISOString()}\n`);
+    const file = path.join(queueDir, name);
+    fs.writeFileSync(file, `${pid}\nplanted ticket ${pid}\n${d.toISOString()}\n${cls ? `class ${cls}\n` : ''}`);
     if (heartbeatAgoMs) { const h = new Date(Date.now() - heartbeatAgoMs); fs.utimesSync(file, h, h); }
     return file;
+}
+
+/** The same planted ticket in each of the first `lanes` lanes' queues, as a waiter queues in every lane. */
+function plantEverywhere(fx, pid, agoMs, cls, lanes) {
+    for (let k = 1; k <= lanes; k++) {
+        plantTicket(fx, pid, agoMs, 0, { cls, queueDir: k === 1 ? fx.queue : path.join(fx.dir, `full-gate-${k}.queue`) });
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -266,6 +293,129 @@ function scenarioLeave(subject) {
         fs.readFileSync(fx.lock, 'utf8') === holderText, `${holder.out}\nlock: ${lockPid(fx)}`]);
     rows.push(['Y\'s ticket still remains after every leave', JSON.stringify(pidsIn(fx.queue)) === JSON.stringify([y]), pidsIn(fx.queue).join()]);
     return rows;
+}
+
+/** One lane: a product ticket goes before an older harness ticket, at a release and after it. */
+function scenarioClassOrder(subject) {
+    const fx = fixture();
+    const [h, a, p] = [sleeper(), sleeper(), sleeper()];
+    fs.writeFileSync(fx.lock, `${h}\nhand-written holder\n`);
+    plantTicket(fx, a, 90000, 0, { cls: 'harness' });
+    const rows = [];
+    const rp = take(subject, fx, p);
+    rows.push(['product P arrives after harness A: queued (exit 3) at place 1 of 2, ahead of A', rp.code === 3 && /place 1 of 2/.test(rp.out), rp.out]);
+    const ra = take(subject, fx, a);
+    rows.push(['harness A, the older ticket, is at place 2 of 2', ra.code === 3 && /place 2 of 2/.test(ra.out), ra.out]);
+    const rel = release(subject, fx, h);
+    rows.push(['H releases: the lock is handed to product P, not to the older harness A',
+        rel.code === 0 && lockPid(fx) === p, `${rel.out}\nlock: ${lockPid(fx)}`]);
+    rows.push(['the lock handed to P says "class product" on line 3', linesOf(fx.lock)[2] === 'class product', linesOf(fx.lock).join(' | ')]);
+    take(subject, fx, p);
+    const rel2 = release(subject, fx, p);
+    rows.push(['P releases with only harness A waiting on a one-lane machine: the lock is handed to A',
+        rel2.code === 0 && lockPid(fx) === a, `${rel2.out}\nlock: ${lockPid(fx)}`]);
+    rows.push(['the lock handed to A says "class harness" on line 3', linesOf(fx.lock)[2] === 'class harness', linesOf(fx.lock).join(' | ')]);
+    return rows;
+}
+
+/** One lane, free: a harness ticket that arrived first still waits while a product ticket waits. */
+function scenarioHarnessWaits(subject) {
+    const fx = fixture();
+    const [a, p] = [sleeper(), sleeper()];
+    plantTicket(fx, a, 90000, 0, { cls: 'harness' });
+    plantTicket(fx, p, 30000, 0, { cls: 'product' });
+    const rows = [];
+    const ra = take(subject, fx, a);
+    rows.push(['the lock is free and harness A, the older ticket, polls first: A stays queued (exit 3) at place 2 of 2',
+        ra.code === 3 && /place 2 of 2/.test(ra.out), ra.out]);
+    rows.push(['A did not create the free lock', !fs.existsSync(fx.lock), linesOf(fx.lock).join(' | ')]);
+    const rp = take(subject, fx, p);
+    rows.push(['product P, which arrived later, takes the free lock (exit 0)', rp.code === 0 && lockPid(fx) === p, rp.out]);
+    return rows;
+}
+
+/**
+ * A ticket with no class line, as every version before classes wrote it, is a
+ * product. That version takes a free lock only as the OLDEST ticket, so the
+ * harness ticket ahead of it in arrival hands the free lane over.
+ */
+function scenarioOlderVersion(subject) {
+    const fx = fixture();
+    const [a, o] = [sleeper(), sleeper()];
+    plantTicket(fx, a, 90000, 0, { cls: 'harness' });
+    plantTicket(fx, o, 30000);
+    const rows = [];
+    let parsed = null;
+    try { parsed = JSON.parse(run(subject, fx, ['status', '--json']).out); } catch { /* reported below */ }
+    const q = parsed && parsed.lanes ? parsed.lanes[0].queue : [];
+    rows.push(['status --json reads the classless ticket O as a product, served before the older harness A',
+        q.length === 2 && q[0].pid === o && q[0].class === 'product' && q[1].pid === a && q[1].class === 'harness', JSON.stringify(q)]);
+    const ra = take(subject, fx, a);
+    rows.push(['harness A polls the free lock: A stays queued (exit 3)', ra.code === 3, ra.out]);
+    rows.push(['A handed the lock to O, as a release would, and said so', lockPid(fx) === o && new RegExp(`handed the free lock to pid ${o}`).test(ra.out),
+        `${ra.out}\nlock: ${linesOf(fx.lock).join(' | ')}`]);
+    rows.push(['O\'s ticket is consumed and A\'s remains', JSON.stringify(ticketPids(fx)) === JSON.stringify([a]), tickets(fx).join(', ')]);
+    const ro = take(subject, fx, o);
+    rows.push(['O takes the handed-over lock (exit 0)', ro.code === 0 && lockPid(fx) === o, ro.out]);
+    return rows;
+}
+
+/** Two lanes, then three: harness gates hold at most lanes - 1, so one lane stays open to products. */
+function scenarioReserve(subject) {
+    const rows = [];
+    {
+        const fx = fixture();
+        fs.writeFileSync(path.join(fx.dir, 'full-gate.lanes'), '2\n');
+        const lane2 = path.join(fx.dir, 'full-gate-2.lock');
+        const queue2 = path.join(fx.dir, 'full-gate-2.queue');
+        const [h, a, p, b, q] = [sleeper(), sleeper(), sleeper(), sleeper(), sleeper()];
+        fs.writeFileSync(fx.lock, `${h}\nharness gate on lane 1\nclass harness\n`);
+        plantEverywhere(fx, a, 90000, 'harness', 2);
+        const ra = take(subject, fx, a);
+        rows.push(['2 lanes, harness H holds lane 1: harness A is refused the free lane 2 (exit 3, no lane 2 lock)',
+            ra.code === 3 && !fs.existsSync(lane2), `${ra.out}\nlane 2: ${linesOf(lane2).join(' | ')}`]);
+        rows.push(['A is told the lane is kept for product gates',
+            /kept for product gates: harness gates already hold 1 of 2 lane\(s\)/.test(ra.out), ra.out]);
+        const rp = take(subject, fx, p);
+        rows.push(['product P, arriving later, takes lane 2 at once (exit 0)', rp.code === 0 && pidIn(lane2) === p, rp.out]);
+        const relH = release(subject, fx, h);
+        rows.push(['harness H releases lane 1 while product P holds lane 2: lane 1 is handed to harness A',
+            relH.code === 0 && lockPid(fx) === a, `${relH.out}\nlane 1: ${lockPid(fx)}`]);
+        take(subject, fx, a);
+        plantEverywhere(fx, b, 10000, 'harness', 2);
+        const relP = release(subject, fx, p);
+        rows.push(['product P releases lane 2 while harness A holds lane 1: not handed to harness B, renamed aside',
+            relP.code === 0 && !fs.existsSync(lane2) && new RegExp(`not handed to harness pid ${b}`).test(relP.out), relP.out]);
+        rows.push(['B stays queued for lane 2', ticketLine(queue2, b, 1) === String(b), fs.existsSync(queue2) ? fs.readdirSync(queue2).join(', ') : '']);
+        const rq = take(subject, fx, q);
+        rows.push(['product Q takes lane 2 ahead of the older harness B (exit 0)', rq.code === 0 && pidIn(lane2) === q, rq.out]);
+    }
+    {
+        const fx = fixture();
+        fs.writeFileSync(path.join(fx.dir, 'full-gate.lanes'), '3\n');
+        const lane2 = path.join(fx.dir, 'full-gate-2.lock');
+        const lane3 = path.join(fx.dir, 'full-gate-3.lock');
+        const [h, a, b] = [sleeper(), sleeper(), sleeper()];
+        fs.writeFileSync(fx.lock, `${h}\nharness gate on lane 1\nclass harness\n`);
+        plantEverywhere(fx, a, 90000, 'harness', 3);
+        plantEverywhere(fx, b, 60000, 'harness', 3);
+        const ra = take(subject, fx, a);
+        rows.push(['3 lanes, harness on lane 1: a second harness gate A takes lane 2 (exit 0)', ra.code === 0 && pidIn(lane2) === a, ra.out]);
+        const rb = take(subject, fx, b);
+        rows.push(['harness on 2 of 3 lanes: a third harness gate B is refused the free lane 3 (exit 3)',
+            rb.code === 3 && !fs.existsSync(lane3) && /harness gates already hold 2 of 3 lane\(s\)/.test(rb.out), rb.out]);
+    }
+    return rows;
+}
+
+/** One lane: the cap is that lane, so a harness gate with nobody else waiting takes it. */
+function scenarioOneLane(subject) {
+    const fx = fixture();
+    const a = sleeper();
+    plantTicket(fx, a, 30000, 0, { cls: 'harness' });
+    const ra = take(subject, fx, a);
+    return [['one lane, free, a lone harness ticket: it takes the lock (exit 0) and line 3 says "class harness"',
+        ra.code === 0 && lockPid(fx) === a && linesOf(fx.lock)[2] === 'class harness', `${ra.out}\nlock: ${linesOf(fx.lock).join(' | ')}`]];
 }
 
 function report(label, rows) {
@@ -422,7 +572,7 @@ async function main() {
         const ia = st.out.indexOf(`pid ${a},`);
         const ib = st.out.indexOf(`pid ${b},`);
         check('status: prints the live holder and the queue oldest first',
-            st.code === 0 && st.out.includes(`holder: pid ${h} (alive): holder text`) && ia > 0 && ib > ia, st.out);
+            st.code === 0 && st.out.includes(`holder: pid ${h} (alive, product): holder text`) && ia > 0 && ib > ia, st.out);
         check('status: marks the dead ticket and deletes nothing',
             /will be dropped: pid \d+ is not running/.test(st.out) && tickets(fx).join(',') === before, st.out);
         const js = run(SUBJECT, fx, ['status', '--json']);
@@ -436,6 +586,57 @@ async function main() {
 
     report('two lanes', scenarioLanes(SUBJECT));
     report('leave', scenarioLeave(SUBJECT));
+    report('class order', scenarioClassOrder(SUBJECT));
+    report('harness waits', scenarioHarnessWaits(SUBJECT));
+    report('older version', scenarioOlderVersion(SUBJECT));
+    report('harness cap', scenarioReserve(SUBJECT));
+    report('one lane', scenarioOneLane(SUBJECT));
+
+    // The class a take queues as: --class, then AUTODEV_GATE_CLASS, then product.
+    {
+        const fx = fixture();
+        const [h, a, b, c, d] = [sleeper(), sleeper(), sleeper(), sleeper(), sleeper()];
+        fs.writeFileSync(fx.lock, `${h}\nholder\n`);
+        const ra = take(SUBJECT, fx, a, ['--class', 'harness']);
+        check('class: --class harness queues (exit 3), says so, and line 4 of the ticket is "class harness"',
+            ra.code === 3 && /as harness/.test(ra.out) && ticketLine(fx.queue, a, 4) === 'class harness', `${ra.out}\nline 4: ${ticketLine(fx.queue, a, 4)}`);
+        const rb = take(SUBJECT, fx, b);
+        check('class: with no --class and no env the ticket is "class product"',
+            rb.code === 3 && ticketLine(fx.queue, b, 4) === 'class product', `${rb.out}\nline 4: ${ticketLine(fx.queue, b, 4)}`);
+        const rc = take(SUBJECT, fx, c, [], { AUTODEV_GATE_CLASS: 'harness' });
+        check('class: AUTODEV_GATE_CLASS=harness queues as harness',
+            rc.code === 3 && ticketLine(fx.queue, c, 4) === 'class harness', `${rc.out}\nline 4: ${ticketLine(fx.queue, c, 4)}`);
+        const rd = take(SUBJECT, fx, d, [], { AUTODEV_GATE_CLASS: 'urgent' });
+        check('class: an AUTODEV_GATE_CLASS that is no class queues as product and is named in a note',
+            rd.code === 3 && ticketLine(fx.queue, d, 4) === 'class product' && /AUTODEV_GATE_CLASS=urgent is not product or harness/.test(rd.out), rd.out);
+        const bad = take(SUBJECT, fx, d, ['--class', 'urgent']);
+        check('class: --class urgent exits 1 and names the two classes', bad.code === 1 && /--class needs product or harness, got urgent/.test(bad.out), bad.out);
+        const fx2 = fixture();
+        const rf = take(SUBJECT, fx2, a, ['--class', 'harness']);
+        check('class: a harness take of a free lock writes "class harness" on line 3 of the lock',
+            rf.code === 0 && linesOf(fx2.lock)[2] === 'class harness', `${rf.out}\nlock: ${linesOf(fx2.lock).join(' | ')}`);
+    }
+
+    // status names each holder's and each ticket's class, in the order they are served.
+    {
+        const fx = fixture();
+        const [h, a, p] = [sleeper(), sleeper(), sleeper()];
+        fs.writeFileSync(fx.lock, `${h}\nharness holder\nclass harness\n`);
+        plantTicket(fx, a, 90000, 0, { cls: 'harness' });
+        plantTicket(fx, p, 30000, 0, { cls: 'product' });
+        const st = run(SUBJECT, fx, ['status']);
+        const ip = st.out.indexOf(`pid ${p}, product,`);
+        const ia = st.out.indexOf(`pid ${a}, harness,`);
+        check('status: the holder line names its class, and the product ticket is listed before the older harness one',
+            st.out.includes(`holder: pid ${h} (alive, harness): harness holder`) && ip > 0 && ia > ip, st.out);
+        check('status: it states the order and the harness cap', /Harness gates hold at most 1 of 1 lane\(s\)/.test(st.out), st.out);
+        let parsed = null;
+        try { parsed = JSON.parse(run(SUBJECT, fx, ['status', '--json']).out); } catch { /* reported below */ }
+        const lane = parsed && parsed.lanes && parsed.lanes[0];
+        check('status --json: holder.class, each ticket\'s class in serving order, and harnessCap',
+            Boolean(lane) && lane.holder.class === 'harness' && parsed.harnessCap === 1 &&
+            lane.queue.map((t) => `${t.pid}:${t.class}`).join() === `${p}:product,${a}:harness`, JSON.stringify(parsed));
+    }
 
     // The lane count: flag over env over file, and a bad value is named, not guessed at.
     {
@@ -563,6 +764,17 @@ async function main() {
     if (m5) expectRed('M5', 'a waiter that took a lane stays queued in the others', scenarioLanes(m5));
     const m6 = mutant('M6', 'leaveQueues(lockPaths, leaving);', '/* planted: leaves nothing */');
     if (m6) expectRed('M6', 'leave removes nothing', scenarioLeave(m6));
+    const m7 = mutant('M7', 'return [...tickets.filter((t) => t.cls === PRODUCT), ...tickets.filter((t) => t.cls === HARNESS)];', 'return tickets;');
+    if (m7) {
+        expectRed('M7', 'serving order ignores the class', scenarioClassOrder(m7));
+        expectRed('M7', 'serving order ignores the class', scenarioHarnessWaits(m7));
+    }
+    const m8 = mutant('M8', 'return held + 1 > cap ? { held, cap, lanes: lockPaths.length } : null;', 'return null;');
+    if (m8) expectRed('M8', 'no harness cap', scenarioReserve(m8));
+    const m9 = mutant('M9', 'return Math.max(1, laneCount - 1);', 'return laneCount - 1;');
+    if (m9) expectRed('M9', 'the cap is lanes - 1 on one lane too', scenarioOneLane(m9));
+    const m10 = mutant('M10', 'if (front.classed || front === oldest) return false;', 'return false;');
+    if (m10) expectRed('M10', 'no hand-over to a classless front', scenarioOlderVersion(m10));
 
     const msys = await msysPid();
     if (msys.pid) {
