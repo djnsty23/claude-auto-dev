@@ -1,0 +1,114 @@
+<!doctype html>
+<html lang="en"><head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>components clean</title>
+<!--
+  The control for the component rules: shapes that look like defects to a
+  naive checker and are none. It must report zero findings at every width.
+
+    a header row of consistent 44px controls, one of them a pill and one a
+      circular avatar (radius is compared only among non-pill controls)
+    a segmented button group: three controls touching, all one height, frame
+      and fill (GLUED-CONTROLS exempts a consistent group)
+    a progress track whose fill does not span it (a track, not a stripe)
+    a centred 48px accent on a section's bottom edge (an accent, not a stripe)
+    a card whose top stripe spans it
+    a search field inside a bordered wrapper with 6px of padding (not a
+      double border)
+    a horizontal rail that runs to the screen edge (a rail, not a gutter)
+    links inside a sentence (the inline tap-target exception)
+    a 28px icon button whose ::before extends the hit area to 44px
+    a checkbox inside a 44px label
+    three cards with equal spacing (rhythm)
+    a title with an ellipsis that fits (a truncation candidate, not truncated)
+
+  ?plant=<rule> breaks exactly one of these, so each rule is shown to fire
+  on its own defect. The plants are the CSS under body.plant-*.
+-->
+<style>
+  *,*::before,*::after{box-sizing:border-box}
+  body{margin:0;font:16px/1.5 system-ui,sans-serif;color:#1a1a1a;background:#fff}
+  header{background:#fff;border-bottom:1px solid #e5e5e5}
+  .bar{display:flex;align-items:center;gap:8px;padding:8px 16px}
+  .ctl{height:44px;display:inline-flex;align-items:center;padding:0 12px;border:1px solid #d4d4d4;border-radius:8px;background:#fff;color:#333;text-decoration:none;font-size:14px}
+  .ctl.solid{background:#1d4ed8;border-color:#1d4ed8;color:#fff}
+  .pill{border-radius:999px}
+  .avatar{width:44px;height:44px;border:1px solid #d4d4d4;border-radius:999px;display:grid;place-items:center;background:#f3f3f3;font-size:13px;margin-left:auto}
+  main{max-width:960px;margin:0 auto;padding:24px 16px}
+  section{position:relative;padding:16px 0 32px}
+  .accent{position:absolute;left:50%;bottom:0;width:48px;height:4px;margin-left:-24px;background:#1d4ed8;border-radius:2px}
+  .seg{display:inline-flex}
+  .seg button{height:44px;padding:0 14px;border:1px solid #d4d4d4;background:#fff;font:inherit;font-size:14px}
+  .track{height:8px;background:#eee;border-radius:4px;margin:16px 0}
+  .fill{height:8px;width:60%;background:#16a34a;border-radius:4px}
+  .card{position:relative;border:1px solid #e5e5e5;border-radius:12px;overflow:hidden;margin:0 0 24px;padding:16px}
+  .card .top{position:absolute;left:0;right:0;top:0;height:4px;background:#1d4ed8}
+  .card h3{margin:8px 0 4px;font-size:16px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .search{display:flex;border:1px solid #d4d4d4;border-radius:10px;padding:6px;margin:16px 0}
+  .search input{flex:1;height:44px;border:1px solid #e5e5e5;border-radius:6px;padding:0 10px;font:inherit;min-width:0}
+  .search button{height:44px;margin-left:6px;border:0;border-radius:6px;background:#1d4ed8;color:#fff;padding:0 12px;font:inherit}
+  .rail{display:flex;gap:12px;overflow-x:auto;margin:16px -16px;padding:0 0 8px}
+  .rail .tile{flex:0 0 200px;height:80px;background:#f4f4f5;border-radius:8px;padding:8px}
+  .icon{position:relative;width:28px;height:28px;border:1px solid #d4d4d4;border-radius:6px;background:#fff;padding:0;display:inline-grid;place-items:center}
+  .icon::before{content:"";position:absolute;inset:-9px}
+  .check{display:inline-flex;align-items:center;gap:8px;min-height:44px;min-width:44px;padding-right:8px}
+
+  /* ---------------------------------------------------------- plants */
+  body.plant-row-height .bar .counter{height:36px}
+  body.plant-row-center .bar .counter{position:relative;top:6px}
+  body.plant-row-border .bar .counter{border-width:2px}
+  body.plant-row-radius .bar .counter{border-radius:2px}
+  body.plant-row-padding .bar .counter{padding:0 22px}
+  body.plant-glued-controls .bar .solid{margin-left:-8px}
+  body.plant-double-border .search{padding:0}
+  body.plant-double-border .search button{display:none}
+  body.plant-short-bar .card .top{left:12px;right:24px}
+  body.plant-no-gutter main{padding-left:4px;padding-right:4px}
+  body.plant-no-gutter .rail{margin-left:-4px;margin-right:-4px}
+  body.plant-tap-target .icon::before{content:none}
+  body.plant-truncated-text .card h3{width:60px}
+  body.plant-rhythm .card[data-second]{margin-bottom:56px}
+</style>
+<script>
+  (function () {
+    var m = /[?&]plant=([a-z-]+)/.exec(location.search);
+    if (m) document.documentElement.setAttribute('data-plant', m[1]);
+    document.addEventListener('DOMContentLoaded', function () { if (m) document.body.classList.add('plant-' + m[1]); });
+  })();
+</script>
+</head><body>
+<header>
+  <div class="bar">
+    <a class="ctl" href="#">Home</a>
+    <p class="ctl counter" style="margin:0">2/5</p>
+    <a class="ctl solid" href="#">Upgrade</a>
+    <span class="avatar">A</span>
+  </div>
+</header>
+<main>
+  <section>
+    <h1>Overview</h1>
+    <p>Read the <a href="#">guide</a> or the <a href="#">changelog</a> before you start.</p>
+    <div class="seg" role="group" aria-label="Range">
+      <button>Day</button><button>Week</button><button>Month</button>
+    </div>
+    <div class="track"><div class="fill"></div></div>
+    <span class="accent"></span>
+  </section>
+  <form class="search" onsubmit="return false">
+    <input aria-label="Search" placeholder="Search">
+    <button>Go</button>
+  </form>
+  <div class="rail">
+    <div class="tile">One</div><div class="tile">Two</div><div class="tile">Three</div>
+  </div>
+  <p>
+    <button class="icon" aria-label="Edit">E</button>
+    <label class="check"><input type="checkbox"> Remember</label>
+  </p>
+  <div class="card"><span class="top"></span><h3>First card</h3><p>Some words.</p></div>
+  <div class="card" data-second><span class="top"></span><h3>Second card</h3><p>Some words.</p></div>
+  <div class="card"><span class="top"></span><h3>Third card</h3><p>Some words.</p></div>
+</main>
+</body></html>

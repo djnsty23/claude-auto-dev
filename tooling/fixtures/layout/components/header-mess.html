@@ -1,0 +1,52 @@
+<!doctype html>
+<html lang="en"><head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>header mess</title>
+<!--
+  The signed-in app header this suite exists for, rebuilt without any
+  product's code. Four controls in one row, each assembled separately:
+
+    a bordered 36px menu button, 4px corners
+    a 44px usage counter with a 1px border and 8px left corners, glued to
+    a solid 40px upgrade button with 8px right corners and wider padding
+    a 30px avatar with its own 1px border inside a 2px ring, flush
+
+  plus a decorative stripe that stops short of both edges, and a row with
+  4px side padding, so on a phone the menu button sits against the glass.
+  header-fixed.html is the same header built from one control size.
+-->
+<style>
+  *,*::before,*::after{box-sizing:border-box}
+  body{margin:0;font:16px/1.5 system-ui,sans-serif;color:#1a1a1a;background:#fff}
+  header{position:relative;background:#fff;border-bottom:1px solid #e5e5e5}
+  .stripe{height:4px;margin:0 24px 0 12px;background:linear-gradient(90deg,#7c3aed,#db2777)}
+  .row{display:flex;align-items:flex-start;justify-content:space-between;gap:12px;padding:8px 4px}
+  .menu{width:36px;height:36px;border:1px solid #d4d4d4;border-radius:4px;background:#fff;display:grid;place-items:center;padding:0}
+  .menu span{display:block;width:16px;height:2px;background:#333;box-shadow:0 5px 0 #333,0 -5px 0 #333}
+  .brand{font-weight:700;color:#111;text-decoration:none;display:inline-flex;align-items:center;min-height:44px}
+  .right{display:flex;align-items:center}
+  .counter{margin:0;height:44px;display:flex;align-items:center;padding:0 10px;border:1px solid #d4d4d4;border-right:0;border-radius:8px 0 0 8px;font-size:14px;color:#555}
+  .pro{height:40px;display:flex;align-items:center;padding:0 16px;background:#7c3aed;color:#fff;border-radius:0 8px 8px 0;text-decoration:none;font-weight:600;font-size:14px}
+  .ring{margin-left:10px;display:inline-flex;border:2px solid #7c3aed;border-radius:999px}
+  .avatar{width:30px;height:30px;border:1px solid #d4d4d4;border-radius:999px;display:grid;place-items:center;background:#f3f3f3;font-size:13px}
+  main{max-width:960px;margin:0 auto;padding:24px 16px}
+</style>
+</head><body>
+<header>
+  <div class="stripe"></div>
+  <div class="row">
+    <button class="menu" aria-label="Menu"><span></span></button>
+    <a class="brand" href="#">Brand</a>
+    <div class="right">
+      <p class="counter">0/3</p>
+      <a class="pro" href="#">Pro</a>
+      <span class="ring"><span class="avatar">A</span></span>
+    </div>
+  </div>
+</header>
+<main>
+  <h1>Your codes</h1>
+  <p>Nothing here yet. Create your first one to see it listed.</p>
+</main>
+</body></html>
