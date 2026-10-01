@@ -22,6 +22,8 @@
     a 28px icon button whose ::before extends the hit area to 44px
     a checkbox inside a 44px label
     three cards with equal spacing (rhythm)
+    a narrow paragraph whose inline nowrap phrases wrap onto lines 1, 2
+      and 4 (inline runs are text, not stacked blocks, so not a rhythm)
     a title with an ellipsis that fits (a truncation candidate, not truncated)
 
   ?plant=<rule> breaks exactly one of these, so each rule is shown to fire
@@ -71,6 +73,8 @@
   body.plant-tap-target .icon::before{content:none}
   body.plant-truncated-text .card h3{width:60px}
   body.plant-rhythm .card[data-second]{margin-bottom:56px}
+  .terms{width:220px;font-size:14px;line-height:24px}
+  .terms .nw{white-space:nowrap}
 </style>
 <script>
   (function () {
@@ -112,5 +116,6 @@
   <div class="card"><span class="top"></span><h3>First card</h3><p>Some words.</p></div>
   <div class="card" data-second><span class="top"></span><h3>Second card</h3><p>Some words.</p></div>
   <div class="card"><span class="top"></span><h3>Third card</h3><p>Some words.</p></div>
+  <p class="terms">Pay <span class="nw">once a year</span> for the plan you pick today, or <span class="nw">every month</span> if you would rather, and the price you started on is the price you keep while the plan stays open, with <span class="nw">no renewal jump</span>.</p>
 </main>
 </body></html>

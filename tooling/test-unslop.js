@@ -121,6 +121,14 @@ for (const w of WIDTHS) {
     const r = CHECKS.analyse(load('components-clean-390'));
     // An exemption that never fires on the control is not shown to be needed.
     for (const k of EXEMPTIONS) check(`components-clean @390: the ${k} exemption is exercised`, r.counts.components.exempt[k] > 0, r.counts.components.exempt);
+    // The inline-run case is really there: three nowrap phrases of one
+    // paragraph, inline, stacked on different lines, spaced unevenly. Without
+    // this the "inline is not a rhythm" guard could pass on an empty case.
+    const nw = load('components-clean-390').components.elements.filter((e) => /span\.nw/.test(e.sel));
+    const gaps = nw.slice(1).map((e, k) => e.box.t - nw[k].box.b);
+    check('components-clean @390: its inline phrases wrap onto separate lines, unevenly spaced',
+        nw.length === 3 && nw.every((e) => e.d === 'inline') && gaps.every((g) => g >= -1) && Math.max(...gaps) - Math.min(...gaps) > CHECKS.DEFAULTS.rhythmTolPx,
+        nw.map((e) => [e.d, e.box.t, e.box.b]));
     const pop = r.componentPopulation;
     check('components-clean @390: every rule had something to judge',
         pop.rowLines > 0 && pop.framedPairs > 0 && pop.barCandidates > 0 && pop.gutterCandidates > 0 &&
