@@ -174,6 +174,11 @@ not prove its text has sufficient contrast, and a static tool does not always
 assume white. Inspect both elements on cards and those over images/transparent
 surfaces; keep the measurement method and unsupported cases explicit.
 
+For a whole product, or before shipping any UI change, run the `unslop` skill: it
+sweeps every route at 390, 414 and 1280 and measures control rows, glued
+controls, double borders, gutters, tap targets, truncation and rhythm against
+named thresholds, so the screenshots you inspect come with numbers.
+
 Check for trimmed text, unintended overlap, scroll behavior, consistent spacing,
 focus/keyboard operation, supported themes and reduced motion. Visual appeal is
 not evidence that a control performs the intended action.

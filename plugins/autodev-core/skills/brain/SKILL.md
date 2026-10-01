@@ -157,6 +157,12 @@ Choose a channel that actually starts work:
   record yourself, write your call with `unattended-worker.js verdict
   --task-id <id> --decision <d> --reason <why> --by brain`: a judge never
   overwrites it, and `brain-judge.js compare` grades the judge against it.
+- Sweep each product with a user-facing surface for layout slop on a schedule
+  (weekly, and after a batch of UI merges): write the brief with
+  `unslop-sweep.js brief --repo <path> --base http://localhost:<port> --return <address>`
+  to a file, then queue it with `unattended-worker.js enqueue --slug unslop-<product>`.
+  The worker runs the `unslop` skill locally, writes component stories, fixes
+  them through `auto`, and returns the compare verdict and before/after counts.
 
 Every brief stands alone: mission, acceptance, exact refs, evidence, ownership,
 permitted actions, actual verification commands, artifact path and return
