@@ -156,9 +156,13 @@ const sweepDirsFor = (pid) => fs.readdirSync(os.tmpdir())
 // run is the sweep reporting its evidence as a conflict. Classified as
 // infrastructure there, that regression exited this suite 2 and never reached
 // the assertion written to catch it (measured by mutation while writing this).
+// The pair cache (shadow by default) writes its entries under a private
+// directory, never the operator's home cache: fixture pairs are not real ones.
+const PAIR_CACHE_DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'suites-red-evidence-cache-'));
 function runSweep(dir, exit2IsVerdict) {
     const r = sb.runBudgeted(process.execPath, [path.join(dir, 'tooling', path.basename(SWEEP))], {
         cwd: dir, encoding: 'utf8', timeout: BUDGET_MS, windowsHide: true, input: '',
+        env: Object.assign({}, process.env, { AUTODEV_SUITE_CACHE_DIR: PAIR_CACHE_DIR }),
     });
     if (sb.classify(r, exit2IsVerdict ? 'exit2' : undefined) !== 'verdict') {
         infra++;
@@ -168,7 +172,7 @@ function runSweep(dir, exit2IsVerdict) {
     return { code: r.status, all: (r.stdout || '') + '\n' + (r.stderr || '') };
 }
 
-const dirs = [];
+const dirs = [PAIR_CACHE_DIR];
 try {
     // ---- HELP: usage, exit 0, and no sweep ----------------------------------
     const markerDir = fs.mkdtempSync(path.join(os.tmpdir(), 'suites-help-marker-'));

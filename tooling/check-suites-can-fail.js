@@ -21,6 +21,12 @@
 // Every file is restored from git afterwards and the tree is verified clean.
 //
 // Usage: node tooling/check-suites-can-fail.js [--verbose] [--all-subjects]
+//        [--cache | --cache-shadow | --no-cache] [--cache-report <file>]
+//
+// The pair cache (suite-pair-cache.js) runs in SHADOW mode by default: every
+// pair runs fresh and the summary says what the cache would have answered.
+// --cache (or AUTODEV_SUITE_CACHE=on) skips a stub run whose entry is valid;
+// --no-cache (or AUTODEV_SUITE_CACHE=off) turns tracing and lookups off.
 //
 // --all-subjects stubs EVERY derived candidate rather than stopping at the first
 // one that proves the suite can fail. Same verdicts, more runs: it is there for
@@ -36,6 +42,7 @@ const sv = require('./suite-verdict-summary.js');
 // Every suite child runs on its own temp root, removed when it exits: see
 // suite-tmp.js for the leak that made this necessary.
 const { spawnSuiteSync } = require('./suite-tmp.js');
+const pairCacheLib = require('./suite-pair-cache.js');
 
 const ROOT = path.resolve(__dirname, '..');
 
@@ -51,6 +58,9 @@ if (process.argv.includes('--help') || process.argv.includes('-h')) {
         'Grades HEAD in a private git worktree under the OS temp dir; refuses a dirty tree.\n' +
         '--verbose: print the note on every row, not only on rows that are not ok.\n' +
         '--all-subjects: stub every derived subject, not only the first that turns the suite red.\n' +
+        '--cache: reuse a stub run whose cache entry is still valid (AUTODEV_SUITE_CACHE=on).\n' +
+        '--cache-shadow: the default; run every pair and report what the cache would have said.\n' +
+        '--no-cache: no tracing, no lookups (AUTODEV_SUITE_CACHE=off). --cache-report <file>: JSON per pair.\n' +
         'Exit: 0 every suite verified, 1 at least one NOT verified, 2 indeterminate\n' +
         '      (dirty tree, no worktree, or a mid-sweep conflict).');
     process.exitCode = 0;
@@ -579,17 +589,28 @@ const suiteEnv = (extra) => {
     delete env.CLAUDE_CONFIG_DIR;
     return env;
 };
-const runSuite = (suite) => {
+// `traced` is a pair-cache run from pairCache.beginRun(): its env adds the
+// tracer preload and the run's private coverage and trace directories. null
+// (cache off, or the trace could not start) runs the suite exactly as before.
+const runSuite = (suite, traced) => {
     // checkRunner's child is the WHOLE of test-all.js — ~40x a single suite, and
     // measured at 827-890s against the 900s every suite used to share.
     const budget = sb.sweepBudgetFor(suite);
     return spawnSuiteSync(process.execPath, [path.join(SWEEP_TOOLING, suite)], {
         cwd: SWEEP_ROOT, encoding: 'utf8', timeout: budget,
-        env: suiteEnv({
+        env: suiteEnv(Object.assign({
             [sb.DEADLINE_ENV]: String(Date.now() + budget - REPORT_MARGIN_MS),
-        }),
+        }, traced ? traced.env : {})),
     }, { label: suite });
 };
+
+// THE PAIR CACHE. Shadow by default, so it changes no verdict until it has been
+// qualified: see suite-pair-cache.js for the key, the evidence and the modes.
+// The baseline and the two special canaries below always run fresh.
+const pairCache = pairCacheLib.open({
+    argv: process.argv, env: process.env, root: ROOT, sweepRoot: SWEEP_ROOT, checkerDir: __dirname,
+    stub: STUB, head: HEAD_SHA, suiteEnv: suiteEnv({}), excludeEnv: [sb.DEADLINE_ENV, 'CLAUDE_CONFIG_DIR'],
+});
 
 const rows = [];
 
@@ -760,7 +781,9 @@ for (const suite of suites) {
 
     // Baseline: it must be green before the mutation means anything — and it
     // must have actually RUN. A timed-out or signalled baseline is not a red.
-    const base = runSuite(suite);
+    const baseRun = pairCache.beginRun(process.env);
+    const base = runSuite(suite, baseRun);
+    const baseEv = pairCache.endRun(baseRun, base);
     if (!completed(base, suite + ' (baseline)')) {
         rows.push({ suite, status: 'UNCHECKED', cause: sv.CAUSE.RUN_INCOMPLETE, note: 'baseline did not complete — indeterminate, not a verdict' });
         continue;
@@ -789,15 +812,36 @@ for (const suite of suites) {
     // (subject-evidence.js asserts that over every outcome pattern), and a suite
     // that is genuinely VACUOUS still pays for every candidate, because proving a
     // negative costs all of them.
+    //
+    // The pair cache answers first, and only in --cache mode does its answer
+    // replace the run. Otherwise the run is fresh and settle() records it: an
+    // entry is queued only for a completed run whose install and restore raised
+    // no conflict, and written only at the end of a run with none at all.
     const runStub = (rel) => {
+        const pair = pairCache.pair(suite, rel, baseEv);
+        const reused = pairCache.reuse(pair);
+        if (reused) return reused;
         const full = path.join(SWEEP_ROOT, rel);
-        if (!installOwn(rel, full, STUB)) return 'incomplete';
+        const conflictsBefore = conflicts.length;
+        if (!installOwn(rel, full, STUB)) {
+            pairCache.settle(pair, 'incomplete', baseEv, null, false);
+            return 'incomplete';
+        }
+        const traced = pairCache.beginRun(process.env);
+        let outcome = 'incomplete';
+        let r = null;
         try {
-            const r = runSuite(suite);
+            r = runSuite(suite, traced);
             if (!completed(r, suite + ' (with ' + rel + ' stubbed)')) return 'incomplete';
-            return r.status !== 0 ? 'killed' : 'green';
+            outcome = r.status !== 0 ? 'killed' : 'green';
+            return outcome;
         } finally {
             removeOwn(rel);
+            // MEASURED ON THE RESTORED TREE: with the stub still in place the
+            // subject's state is the stub's bytes and its directory lists the
+            // .orig- name, so an entry recorded then would never match again.
+            const ev = pairCache.endRun(traced, r);
+            pairCache.settle(pair, outcome, baseEv, ev, conflicts.length === conflictsBefore);
         }
     };
     const killed = [];
@@ -890,6 +934,10 @@ if (after) {
     }
 }
 
+// Entries are written only now, after every restore and the source-ref and
+// tree checks above, and only when none of them raised a conflict.
+pairCache.flush(conflicts.length === 0);
+
 console.log('\nCan each suite fail?\n');
 const sum = sv.summarise(rows);
 for (const r of rows) {
@@ -931,6 +979,13 @@ console.log(`\n${rows.length} suite(s) · ${sum.verified} verified able to fail 
             // since that is the part a reader actually wants and the part
             // `git status` cannot answer.
             (conflicts.length ? '' : ' · sweep worktree clean, source tree refs unmoved') + '\n');
+
+// The cache's populations, in every mode, so a reader can see what it skipped
+// (--cache), what it would have skipped (shadow), or that it was off.
+for (const line of pairCache.summary({ verbose: VERBOSE })) console.log(line);
+const reportFile = pairCache.writeReport(rows);
+if (reportFile) console.log('[pair-cache] report: ' + reportFile);
+console.log('');
 
 // A detected mid-sweep conflict poisons every verdict above: suites that ran
 // after the tree changed were measured against a tree this script knows it
