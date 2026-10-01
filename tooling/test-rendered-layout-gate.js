@@ -273,6 +273,24 @@ for (const w of [360, 390, 414]) {
     check('and it is still reported', r.counts.occluded === 1, r.counts);
 }
 
+// ----------------- an ancestor's tap-area overlay is not paint over its words
+//
+// FOUND ON A REAL PAGE. A blog index whose cards are one link each, with a
+// transparent ::after stretched over the card: hit testing returns the link
+// above its own heading, and the link's opaque card colour was read as paint
+// over the words. An ancestor's own background paints beneath its children,
+// so only its pseudo-elements can cover them.
+
+{
+    const s = load('clean-390');
+    const hits = s.text.filter((t) => /stretch/.test(t.sel || '')).flatMap((t) => t.samples || [])
+        .filter((x) => x.occluder && x.occluder.viaPseudo);
+    check('the stretched link sits above its own words in the hit stack', hits.length > 0, hits.length);
+    check('and the paint read there is its transparent overlay, not the card colour',
+        hits.every((x) => x.occluder.bgAlpha < 0.5), hits.map((x) => x.occluder.bgAlpha));
+    check('so the clean control still reports no occlusion', CHECKS.analyse(s).counts.occluded === 0);
+}
+
 // ------------------------------- text inside a control is a name, not body copy
 //
 // FOUND ON A REAL PAGE. Wikipedia at 390 produced 25 CLIPPED-TEXT findings and
