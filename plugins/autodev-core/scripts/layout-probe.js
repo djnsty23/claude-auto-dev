@@ -136,7 +136,17 @@ function harvest(opt) {
     function paintFacts(el) {
         var cs = getComputedStyle(el);
         var bf = cs.backdropFilter || cs.webkitBackdropFilter || 'none';
+        // The nearest fixed or sticky box at or above it. The hit at a point
+        // is usually a CHILD of the pinned bar (a stripe, a button), whose own
+        // position is static, so its own position alone cannot say it rides
+        // with the viewport.
+        var pinnedBy = null;
+        for (var an = el; an && an.nodeType === 1; an = an.parentElement) {
+            var ap = an === el ? cs.position : getComputedStyle(an).position;
+            if (ap === 'fixed' || ap === 'sticky') { pinnedBy = ap; break; }
+        }
         return {
+            pinnedBy: pinnedBy,
             bgAlpha: r4(alphaOf(cs.backgroundColor)),
             hasBgImage: cs.backgroundImage !== 'none',
             hasBackdrop: bf !== 'none',
@@ -381,6 +391,7 @@ function harvest(opt) {
                             hasBackdrop: pf.hasBackdrop,
                             opacity: pf.opacity,
                             position: pf.position,
+                            pinnedBy: pf.pinnedBy,
                             modal: modalKind(cand, vw, vh),
                         };
                         if (occ.modal && !modalSeen) modalSeen = occ.modal;

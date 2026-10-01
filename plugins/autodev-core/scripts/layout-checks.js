@@ -471,7 +471,13 @@ function analyse(snapshot, options) {
             // and nothing is wrong with the page. Without this branch the check
             // fires on every site with a sticky header, at every scroll step,
             // and the planted defect - which sits at scrollY 0 - drowns in it.
-            if (PINNED.has(o.position) && (t.scrollY || 0) > 0) return false;
+            //
+            // `[measured 2026-10-01]` on a real product the hit was a CHILD of
+            // the sticky header (its colour stripe, its language button),
+            // static itself, and the exemption missed every one: 10 of the top
+            // 10 ranked findings were text scrolled under that header.
+            // pinnedBy is the nearest fixed or sticky box at or above the hit.
+            if ((PINNED.has(o.position) || PINNED.has(o.pinnedBy)) && (t.scrollY || 0) > 0) return false;
             return true;
         });
         if (!covered.length) {
