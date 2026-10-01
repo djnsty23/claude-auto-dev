@@ -48,8 +48,12 @@ AUTODEV_GATE_LOCK=0 npm run gate; code=$?
 node "${CLAUDE_PLUGIN_ROOT}/scripts/full-gate-queue.js" release --pid "$PID"
 ```
 
-Only the oldest live ticket may take the lock, and a release hands the lock
-straight to it, so arrival order decides and poll timing does not. Running the
+Only the ticket at the front may take the lock, and a release hands the lock
+straight to it, so the queue decides and poll timing does not. Product gates
+are served first and harness gates after them, first come within each class.
+A gate defaults to product, and a harness or tooling repo passes `--class harness`
+(autodev's own gate does). Harness gates never hold more than lanes minus one
+lanes when there are two or more, and nobody is preempted. Running the
 gate's steps one by one is still a full gate and still queues. A machine that
 allows more than one gate at a time sets its lane count once with `lanes N`;
 every waiter then takes whichever lane frees first. `status` shows each lane's

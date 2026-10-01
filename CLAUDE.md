@@ -38,7 +38,7 @@ When the first step fails, run the remaining twelve yourself.
 The chain's exit status is a verdict on one step, not on thirteen.
 
 - **`npm run gate` waits its turn** in the machine-wide `full-gate-queue.js` queue
-  (`tooling/gate-lock.js`), then runs `scripts["gate:chain"]` and passes its exit code through.
+  (`tooling/gate-lock.js`), as a harness gate behind every product gate, then runs `scripts["gate:chain"]` and passes its exit code through.
   A waiter stopped by hand leaves its ticket: `full-gate-queue.js leave --pid <pid>` removes it.
 - **Exit 2 is INDETERMINATE**, never a pass or a fail: a chain the lock did not see finish, or a
   conflict. Read the conflict line before re-running.

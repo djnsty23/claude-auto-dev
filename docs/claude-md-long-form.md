@@ -542,8 +542,9 @@ base without being touched.
 ## Moved out of CLAUDE.md on 2026-09-29 (the 8 KB diet)
 
 - **The gate lock.** `npm run gate` takes the machine-wide full-gate lock (`tooling/gate-lock.js`).
-  It waits in autodev-core's `full-gate-queue.js` queue, first come first served across every lane the
-  machine allows, and prints who it is behind. It moves a dead holder's lock aside to `.stale-HHMM`,
+  It waits in autodev-core's `full-gate-queue.js` queue across every lane the machine allows, and
+  prints who it is behind. It queues as a harness gate: product gates are served first, first come
+  within each class, and harness gates hold at most lanes minus one lanes when there are two or more. It moves a dead holder's lock aside to `.stale-HHMM`,
   and on any outcome hands the lock to the next ticket or renames it to `.released-HHMM`. A chain it
   did not see finish exits 2. `AUTODEV_GATE_LOCK=0` skips the lock.
 - **`gate:fast`** runs the cheap steps it derives from `scripts["gate:chain"]`, takes no lock, and

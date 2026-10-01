@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 /**
- * full-gate-queue.js - a first-come ticket queue in front of the machine-wide
- * full-gate lock.
+ * full-gate-queue.js - a ticket queue in front of the machine-wide full-gate
+ * lock: product gates first, harness gates after them, first come within each.
  *
  * WHY. One machine runs one full gate at a time, guarded by a lock file that
  * every session writes the same way: pid on line 1, what and where on line 2,
@@ -14,11 +14,12 @@
  * THE QUEUE. A directory beside the lock (`full-gate.queue/` for
  * `full-gate.lock`) holds one ticket per waiter. A ticket's file name is its
  * arrival time and pid, so a directory listing sorted by name is the queue:
- *   20260926T132800123Z-0000073024.ticket   line 1 pid, line 2 what, line 3 arrival
- * Three rules make it first-come:
- *   1. Only the OLDEST LIVE ticket may take the lock. A newcomer that polls
+ *   20260926T132800123Z-0000073024.ticket   line 1 pid, line 2 what, line 3 arrival, line 4 class
+ * Three rules make it first-come within a class. CLASSES below sets the order
+ * between classes, and "the front" is the first live ticket in that order:
+ *   1. Only the ticket at the FRONT may take the lock. A newcomer that polls
  *      first after a release finds itself behind an older ticket and waits.
- *   2. A release HANDS the lock to the oldest live ticket. The lock is copied
+ *   2. A release HANDS the lock to the ticket at the front. The lock is copied
  *      to `.released-HHMM` and then replaced in place with the new holder's pid
  *      and description, so it never disappears while someone is queued and an
  *      exclusive-create poller outside the queue has no gap to win.
@@ -28,6 +29,24 @@
  *      treated as alive. A ticket whose heartbeat (its mtime, touched on every
  *      poll) is older than the stale window is dropped too: its pid may live on
  *      as an idle shell while nobody is waiting on it any more.
+ *
+ * CLASSES. Every ticket is a PRODUCT gate (the default) or a HARNESS gate
+ * (`--class harness`, or AUTODEV_GATE_CLASS=harness). This plugin's own repo
+ * gate passes it. `[measured 2026-09-23..10-01, 239 lock records]` A harness
+ * gate held a lane for a median 93 min against 31 and 11 for the two busiest
+ * product repos, and product gates waited 65 to 83 min behind two of them.
+ *   - The front of a lane's queue is its oldest live product ticket. A harness
+ *     ticket reaches the front only when no live product ticket waits there.
+ *   - Harness gates hold at most lanes - 1 lanes, so one lane always stays open
+ *     to product gates. On a one-lane machine the cap is that one lane, which a
+ *     harness ticket takes only when no product ticket waits.
+ *   - Nothing is preempted: a running holder keeps its lane, whatever its class.
+ * The class is a `class <name>` line after line 2, in the ticket and in the
+ * lock. A ticket or lock without one (written by an older version, or by hand)
+ * is a product. An older version takes a free lock only as the OLDEST ticket,
+ * so when such a ticket is at the front but not the oldest, the waiter that
+ * finds the lane free hands it over as a release would. Otherwise the older
+ * waiter and the harness ticket ahead of it would each wait for the other.
  *
  * WHAT IT NEVER DOES. Delete a lock, kill a process, or move a lock whose holder
  * any probe says is alive. A dead holder's lock is renamed to `.stale-HHMM`, and
@@ -52,8 +71,8 @@
  * and takes whichever lane it reaches the head of while that lane is free, then
  * leaves the other queues. `release` frees every lane whose lock names the pid.
  *
- *   node full-gate-queue.js take    [--pid N] [--what TEXT]   one attempt: 0 holds a lane, 3 queued
- *   node full-gate-queue.js wait    [--pid N] [--what TEXT] [--timeout-ms N]   blocks until 0
+ *   node full-gate-queue.js take    [--pid N] [--what TEXT] [--class C]   one attempt: 0 holds a lane, 3 queued
+ *   node full-gate-queue.js wait    [--pid N] [--what TEXT] [--class C] [--timeout-ms N]   blocks until 0
  *   node full-gate-queue.js release [--pid N]                 0 released or handed over, 1 not ours
  *   node full-gate-queue.js leave   [--pid N]                 0 no ticket of --pid is left, 1 one is
  *   node full-gate-queue.js status  [--json]                  read-only, every lane
@@ -70,6 +89,7 @@
  *
  * ENVIRONMENT (the lock variables are shared with the gate wrapper, so both
  * always name the same file):
+ *   AUTODEV_GATE_CLASS=product|harness take and wait's class when --class is not given (default product)
  *   AUTODEV_GATE_LANES=N               lane count, over the lanes file (default 1)
  *   AUTODEV_GATE_LOCK_PATH=FILE        lane 1's lock (default <home>/.claude/autodev/locks/full-gate.lock)
  *   AUTODEV_GATE_LOCK_POLL_MS=N        wait's poll interval (default 5000)
@@ -88,6 +108,9 @@ const EXIT_QUEUED = 3;
 const MAX_POLL_ERRORS = 10;
 const TICKET_RE = /^(\d{8}T\d{9}Z)-(\d{10})\.ticket$/;
 const MAX_LANES = 8;
+const PRODUCT = 'product';
+const HARNESS = 'harness';
+const CLASS_LINE_RE = /^class (product|harness)$/;
 
 // ---------------------------------------------------------------------------
 // Paths and small helpers.
@@ -150,6 +173,69 @@ function laneCount(base, env, flag) {
     return { count: 1, source: 'default', notes };
 }
 
+function parseClass(v) {
+    const s = String(v === undefined || v === null ? '' : v).trim().toLowerCase();
+    return s === PRODUCT || s === HARNESS ? s : null;
+}
+
+/**
+ * The class take and wait queue as: --class, then AUTODEV_GATE_CLASS, then
+ * product. An env value that is neither class is named in `note` and the
+ * ticket queues as a product, the class every older version queued as.
+ */
+function gateClass(env, flag) {
+    if (flag) return { cls: flag, note: null };
+    const raw = env.AUTODEV_GATE_CLASS;
+    if (raw === undefined || raw === '') return { cls: PRODUCT, note: null };
+    const cls = parseClass(raw);
+    return cls ? { cls, note: null } : { cls: PRODUCT, note: `AUTODEV_GATE_CLASS=${raw} is not product or harness, so it queued as product` };
+}
+
+/**
+ * The `class <name>` line after line 2 of a ticket or a lock. `classed` is
+ * false when there is none: an older version or a hand-written file, read as a
+ * product.
+ */
+function classOf(lines) {
+    for (const line of lines.slice(2)) {
+        const m = CLASS_LINE_RE.exec(line.trim());
+        if (m) return { cls: m[1], classed: true };
+    }
+    return { cls: PRODUCT, classed: false };
+}
+
+/** The order a lane serves its tickets: products, then harness, each in arrival (name) order. */
+function servingOrder(tickets) {
+    return [...tickets.filter((t) => t.cls === PRODUCT), ...tickets.filter((t) => t.cls === HARNESS)];
+}
+
+/** How many lanes harness gates may hold at once: all but one, and the one lane of a one-lane machine. */
+function harnessCap(laneCount) {
+    return Math.max(1, laneCount - 1);
+}
+
+/**
+ * Null when a harness gate may take `lockPath`, else { held, cap, lanes }:
+ * taking it would put harness gates on more than `cap` lanes. A lane counts
+ * when its holder says `class harness` and is not known to be dead, so a
+ * holder no probe could judge counts. `lockPath` itself never counts: whoever
+ * takes it replaces its holder.
+ */
+function harnessReserve(lockPaths, lockPath) {
+    const held = lockPaths.filter((lp) => {
+        if (lp === lockPath) return false;
+        const h = readLock(lp);
+        return Boolean(h) && h.cls === HARNESS && isAlive(h.pid) !== false;
+    }).length;
+    const cap = harnessCap(lockPaths.length);
+    return held + 1 > cap ? { held, cap, lanes: lockPaths.length } : null;
+}
+
+/** Why a free lane is not given to the harness ticket at the front, in one phrase. */
+function reservedLine(r) {
+    return `kept for product gates: harness gates already hold ${r.held} of ${r.lanes} lane(s), the most they may`;
+}
+
 /** HHMM in UTC, the suffix the hand-written convention uses. */
 function hhmm(d = new Date()) {
     return d.toISOString().slice(11, 16).replace(':', '');
@@ -198,7 +284,7 @@ function readLock(file) {
     const lines = text.split(/\r?\n/);
     const first = (lines[0] || '').trim();
     const pid = /^\d+$/.test(first) ? Number(first) : null;
-    return { text, pid, what: (lines[1] || '').trim() || '(no description on line 2)' };
+    return { text, pid, what: (lines[1] || '').trim() || '(no description on line 2)', cls: classOf(lines).cls };
 }
 
 /**
@@ -324,7 +410,7 @@ function readTickets(queueDir) {
         try { text = fs.readFileSync(file, 'utf8'); mtimeMs = fs.statSync(file).mtimeMs; } catch { continue; }
         const lines = text.split(/\r?\n/);
         tickets.push({ file, name, pid: Number(m[2]), arrived: stampToIso(m[1]), mtimeMs,
-                       what: (lines[1] || '').trim() || '(no description)' });
+                       what: (lines[1] || '').trim() || '(no description)', ...classOf(lines) });
     }
     return { tickets, other };
 }
@@ -348,8 +434,11 @@ function liveQueue(queueDir, staleMs, log) {
     return live;
 }
 
-/** This pid's ticket, created on first call, heartbeat touched on every later one. */
-function ensureTicket(queueDir, pid, what) {
+/**
+ * This pid's ticket, created on first call, heartbeat touched on every later
+ * one. The class is written once, at creation: a waiter keeps its class.
+ */
+function ensureTicket(queueDir, pid, what, cls) {
     fs.mkdirSync(queueDir, { recursive: true });
     const own = readTickets(queueDir).tickets.find((t) => t.pid === pid);
     if (own) {
@@ -358,7 +447,7 @@ function ensureTicket(queueDir, pid, what) {
     }
     const d = new Date();
     const file = path.join(queueDir, `${stamp(d)}-${String(pid).padStart(10, '0')}.ticket`);
-    tryCreate(file, `${pid}\n${what}\n${d.toISOString()}\n`);
+    tryCreate(file, `${pid}\n${what}\n${d.toISOString()}\nclass ${cls}\n`);
     return file;
 }
 
@@ -396,17 +485,38 @@ function takeOverStale(lockPath, judged, body, log) {
     }
 }
 
-function lockBody(pid, what) {
-    return `${pid}\n${what}, lock taken ${new Date().toISOString().slice(11, 16)}Z\n`;
+function lockBody(pid, what, cls) {
+    return `${pid}\n${what}, lock taken ${new Date().toISOString().slice(11, 16)}Z\nclass ${cls}\n`;
+}
+
+/**
+ * The compatibility hand-over (CLASSES in the header). `live` is in serving
+ * order and the lane is open. When the ticket at the front has no class line
+ * and is not the oldest, an older version behind it would never take the lane,
+ * so the lock is written naming the front's pid, which every version reads as
+ * handed to it. Skipped when the front already holds a lane. True when the
+ * lock now names the front.
+ */
+function handToOlderVersion({ lockPath, lockPaths, live, held, log }) {
+    const front = live[0];
+    const oldest = live.reduce((a, t) => (t.name < a.name ? t : a));
+    if (front.classed || front === oldest) return false;
+    if (lockPaths.some((lp) => { const h = readLock(lp); return Boolean(h) && h.pid === front.pid; })) return false;
+    const body = lockBody(front.pid, `${front.what}, handed over by the queue`, front.cls);
+    if (!(held ? takeOverStale(lockPath, held, body, log) : tryCreate(lockPath, body))) return false;
+    try { fs.unlinkSync(front.file); } catch { /* its waiter saw the handoff first */ }
+    log(`${TAG} handed the free lock to pid ${front.pid}: its ticket has no class line, and a version without classes takes a lock only as the oldest ticket`);
+    return true;
 }
 
 /**
  * One attempt. Returns { acquired: true } once the lock names `pid`, else
- * { acquired: false, position, of, holder }. The one rule that makes the queue
- * first-come is the head check below: a ticket that is not the oldest live one
- * never touches the lock, however free it is.
+ * { acquired: false, position, of, holder, reserved? }. The rule that orders
+ * the queue is the front check below: a ticket that is not first in serving
+ * order never takes the lock, however free it is. A harness ticket at the
+ * front is still refused a lane its class may not hold (`reserved`).
  */
-function takeTurn({ lockPath, pid, what, body: givenBody, staleMs, log }) {
+function takeTurn({ lockPath, lockPaths = [lockPath], pid, what, cls = PRODUCT, body: givenBody, staleMs, log }) {
     const queueDir = queueDirFor(lockPath);
     fs.mkdirSync(path.dirname(lockPath), { recursive: true });
     const held = readLock(lockPath);
@@ -414,41 +524,49 @@ function takeTurn({ lockPath, pid, what, body: givenBody, staleMs, log }) {
         removeTicket(queueDir, pid);
         return { acquired: true, handedOver: true };
     }
-    ensureTicket(queueDir, pid, what);
-    const live = liveQueue(queueDir, staleMs, log);
+    ensureTicket(queueDir, pid, what, cls);
+    const live = servingOrder(liveQueue(queueDir, staleMs, log));
     const mine = live.findIndex((t) => t.pid === pid);
-    const queued = (holder) => ({ acquired: false, position: mine + 1, of: live.length, holder });
+    const queued = (holder, extra) => ({ acquired: false, position: mine + 1, of: live.length, holder, ...extra });
+    const open = () => !held || (held.pid !== null && isAlive(held.pid) === false);
+    if (mine > 0 && !live[0].classed && open() && handToOlderVersion({ lockPath, lockPaths, live, held, log })) {
+        return queued(readLock(lockPath));
+    }
     if (mine !== 0) return queued(held);
-    const body = givenBody || lockBody(pid, what);
-    let got = false;
-    if (!held) got = tryCreate(lockPath, body);
-    else if (held.pid !== null && isAlive(held.pid) === false) got = takeOverStale(lockPath, held, body, log);
+    if (!open()) return queued(held);
+    const reserved = live[0].cls === HARNESS ? harnessReserve(lockPaths, lockPath) : null;
+    if (reserved) return queued(held, { reserved });
+    const body = givenBody || lockBody(pid, what, live[0].cls);
+    const got = held ? takeOverStale(lockPath, held, body, log) : tryCreate(lockPath, body);
     if (!got) return queued(readLock(lockPath));
     removeTicket(queueDir, pid);
     return { acquired: true, handedOver: false };
 }
 
 /**
- * Releases a lock `pid` holds. Hands it to the oldest live ticket when there is
- * one; otherwise renames it to `.released-HHMM` as the hand-written convention
- * does. Returns { released, to, aside, why }.
+ * Releases a lock `pid` holds. Hands it to the ticket at the front of serving
+ * order when there is one its class may give the lane to. Otherwise it renames
+ * the lock to `.released-HHMM` as the hand-written convention does. `lockPaths` is every
+ * lane, for the harness cap. Returns { released, to, aside, reserved, waiting, why }:
+ * `reserved` and `waiting` say a harness ticket waits that the cap kept out.
  */
-function releaseLock({ lockPath, pid, staleMs, log }) {
+function releaseLock({ lockPath, lockPaths = [lockPath], pid, staleMs, log }) {
     const held = readLock(lockPath);
     if (!held) return { released: false, why: `no lock at ${lockPath}; nothing to release` };
     if (held.pid !== pid) {
         return { released: false, why: `the lock names pid ${held.pid}, not ${pid}; left untouched (it says: ${held.what})` };
     }
     const queueDir = queueDirFor(lockPath);
-    const live = liveQueue(queueDir, staleMs, log).filter((t) => t.pid !== pid);
+    const live = servingOrder(liveQueue(queueDir, staleMs, log).filter((t) => t.pid !== pid));
     const aside = asideName(lockPath, 'released');
     const next = live[0];
-    if (!next) {
+    const reserved = next && next.cls === HARNESS ? harnessReserve(lockPaths, lockPath) : null;
+    if (!next || reserved) {
         fs.renameSync(lockPath, aside);
-        return { released: true, to: null, aside };
+        return { released: true, to: null, aside, reserved, waiting: reserved ? next : null };
     }
     fs.copyFileSync(lockPath, aside, fs.constants.COPYFILE_EXCL);
-    replaceInPlace(lockPath, lockBody(next.pid, `${next.what}, handed over by the queue`));
+    replaceInPlace(lockPath, lockBody(next.pid, `${next.what}, handed over by the queue`, next.cls));
     try { fs.unlinkSync(next.file); } catch { /* its waiter saw the handoff first */ }
     return { released: true, to: next, aside };
 }
@@ -459,15 +577,17 @@ function leaveQueues(lockPaths, pid) {
 }
 
 /**
- * Releases every lane whose lock names `pid`. More than one only after a race:
- * a release that read a queue just before the waiter left it can still hand
- * that lane over. Returns one releaseLock result per lane it held.
+ * Releases every lane whose lock names `pid`, except `keep`. More than one only
+ * after a race: a release that read a queue just before the waiter left it can
+ * still hand that lane over. `lockPaths` is every lane, so the harness cap
+ * counts the kept one too. Returns one releaseLock result per lane released.
  */
-function releaseLanes({ lockPaths, pid, staleMs, log }) {
+function releaseLanes({ lockPaths, pid, staleMs, log, keep = null }) {
     const out = [];
     for (const lp of lockPaths) {
+        if (lp === keep) continue;
         const held = readLock(lp);
-        if (held && held.pid === pid) out.push({ lockPath: lp, ...releaseLock({ lockPath: lp, pid, staleMs, log }) });
+        if (held && held.pid === pid) out.push({ lockPath: lp, ...releaseLock({ lockPath: lp, lockPaths, pid, staleMs, log }) });
     }
     return out;
 }
@@ -478,14 +598,15 @@ function releaseLanes({ lockPaths, pid, staleMs, log }) {
  * order and stops at the first it acquires. Having acquired one, it leaves
  * every other queue and hands on any other lane a racing release gave it, so a
  * waiter never sits on two lanes. Returns { acquired, lockPath } or, queued,
- * the lane where it stands best: { acquired: false, lockPath, position, of,
- * holder, lanes }.
+ * the lane where it stands best (a lane kept from its class first among equal
+ * places, since that is the one that would otherwise be free): { acquired:
+ * false, lockPath, position, of, holder, reserved?, lanes }.
  */
-function takeAnyLane({ lockPaths, pid, what, body, staleMs, log }) {
+function takeAnyLane({ lockPaths, pid, what, cls = PRODUCT, body, staleMs, log }) {
     const settle = (lockPath, r) => {
         const others = lockPaths.filter((p) => p !== lockPath);
         leaveQueues(others, pid);
-        releaseLanes({ lockPaths: others, pid, staleMs, log });
+        releaseLanes({ lockPaths, keep: lockPath, pid, staleMs, log });
         return { ...r, acquired: true, lockPath };
     };
     for (const lp of lockPaths) {
@@ -494,14 +615,15 @@ function takeAnyLane({ lockPaths, pid, what, body, staleMs, log }) {
     }
     const queued = [];
     for (const lane of lockPaths) {
-        const r = takeTurn({ lockPath: lane, pid, what, body, staleMs, log });
+        const r = takeTurn({ lockPath: lane, lockPaths, pid, what, cls, body, staleMs, log });
         if (r.acquired) return settle(lane, r);
         queued.push({ ...r, lockPath: lane });
     }
-    const best = queued.slice().sort((a, b) => a.position - b.position)[0];
+    const best = queued.slice().sort((a, b) => a.position - b.position || Number(Boolean(b.reserved)) - Number(Boolean(a.reserved)))[0];
     return { ...best, lanes: queued };
 }
 
+/** One lane, read-only: its holder and its queue in serving order, each with its class. */
 function readStatus(lockPath, staleMs) {
     const queueDir = queueDirFor(lockPath);
     const held = readLock(lockPath);
@@ -510,11 +632,11 @@ function readStatus(lockPath, staleMs) {
     return {
         lockPath,
         queueDir,
-        holder: held ? { pid: held.pid, alive: held.pid === null ? null : isAlive(held.pid), what: held.what } : null,
+        holder: held ? { pid: held.pid, alive: held.pid === null ? null : isAlive(held.pid), class: held.cls, what: held.what } : null,
         ticketFilesRead: tickets.length,
         otherFiles: other,
-        queue: tickets.map((t) => ({
-            pid: t.pid, arrived: t.arrived, heartbeatAgeS: Math.round((now - t.mtimeMs) / 1000),
+        queue: servingOrder(tickets).map((t) => ({
+            pid: t.pid, class: t.cls, arrived: t.arrived, heartbeatAgeS: Math.round((now - t.mtimeMs) / 1000),
             alive: isAlive(t.pid), dropReason: deadReason(t, staleMs, now), what: t.what,
         })),
     };
@@ -543,14 +665,18 @@ function describe() {
 function help() {
     console.log(`usage: node full-gate-queue.js <take|wait|release|leave|status|lanes> [options]
 
-A first-come ticket queue in front of the machine-wide full-gate lock.
-Only the oldest live ticket may take a lane's lock, and a release hands the
-lock straight to it, so a newcomer cannot jump the queue.
+A ticket queue in front of the machine-wide full-gate lock. Product gates go
+first, harness gates after them, first come within each class. Only the
+ticket at the front may take a lane's lock, and a release hands the lock
+straight to it, so a newcomer cannot jump its class. Harness gates hold at
+most lanes - 1 lanes (the one lane, on a one-lane machine), so one lane stays
+open to product gates. A running holder is never preempted.
 
   take     one attempt. Exit 0: --pid holds a lane. Exit 3: queued, place printed.
   wait     take until a lane is held. Exit 0, or 3 when --timeout-ms runs out.
-  release  hand each lane --pid holds to its oldest live ticket, or rename the
-           lock to .released-HHMM when nobody waits. Exit 1 when it holds none.
+  release  hand each lane --pid holds to the ticket at its front, or rename the
+           lock to .released-HHMM when nobody it may go to waits. Exit 1 when
+           it holds none.
   leave    remove --pid's ticket from every lane's queue, for a waiter stopped
            from outside whose shell lives on. Never touches a lock. Exit 0 when
            no ticket of --pid is left, 1 when one could not be removed.
@@ -560,6 +686,9 @@ lock straight to it, so a newcomer cannot jump the queue.
   --pid N         the process that runs the gate and outlives it (default: the
                   parent shell). The lock and the ticket name this pid.
   --what TEXT     line 2 of the lock (default: branch, head and worktree).
+  --class C       take and wait: product (default) or harness. Pass harness
+                  for a gate of the plugin's own repo, so it waits behind
+                  every product gate.
   --timeout-ms N  wait only: give up after N ms and remove the tickets.
   --lanes N       this call only: use N lanes instead of the machine's count.
 
@@ -574,21 +703,25 @@ so the pid lives throughout:
   node full-gate-queue.js release --pid "$PID"
 
 env: AUTODEV_GATE_LOCK_PATH (lane 1; default <home>/.claude/autodev/locks/full-gate.lock),
+AUTODEV_GATE_CLASS (product or harness, under --class),
 AUTODEV_GATE_LANES (over the lanes file), AUTODEV_GATE_LOCK_POLL_MS (5000),
 AUTODEV_GATE_LOCK_REPORT_MS (180000), AUTODEV_GATE_QUEUE_STALE_MS (600000).`);
 }
 
 function parseArgs(argv) {
-    const out = { cmd: null, arg: null, pid: null, what: null, timeoutMs: null, lanes: null, json: false, help: false, bad: null };
+    const out = { cmd: null, arg: null, pid: null, what: null, cls: null, timeoutMs: null, lanes: null, json: false, help: false, bad: null };
     for (let i = 0; i < argv.length; i++) {
         const a = argv[i];
         if (a === '--help' || a === '-h') out.help = true;
         else if (a === '--json') out.json = true;
-        else if (a === '--pid' || a === '--what' || a === '--timeout-ms' || a === '--lanes') {
+        else if (a === '--pid' || a === '--what' || a === '--timeout-ms' || a === '--lanes' || a === '--class') {
             const v = argv[++i];
             if (v === undefined) { out.bad = `${a} needs a value`; break; }
             if (a === '--what') out.what = v;
-            else if (a === '--lanes') {
+            else if (a === '--class') {
+                out.cls = parseClass(v);
+                if (out.cls === null) { out.bad = `--class needs product or harness, got ${v}`; break; }
+            } else if (a === '--lanes') {
                 out.lanes = parseLanes(v);
                 if (out.lanes === null) { out.bad = `--lanes needs a whole number from 1 to ${MAX_LANES}, got ${v}`; break; }
             } else if (!/^\d+$/.test(v)) { out.bad = `${a} needs a whole number, got ${v}`; break; }
@@ -607,25 +740,27 @@ function printLane(s, k, count) {
     if (!s.holder) console.log(`${label}holder: none, the lock is free`);
     else {
         const state = s.holder.alive === true ? 'alive' : s.holder.alive === false ? 'NOT running' : 'liveness unknown';
-        console.log(`${label}holder: pid ${s.holder.pid === null ? '(line 1 is not a pid)' : s.holder.pid} (${state}): ${s.holder.what}`);
+        console.log(`${label}holder: pid ${s.holder.pid === null ? '(line 1 is not a pid)' : s.holder.pid} (${state}, ${s.holder.class}): ${s.holder.what}`);
     }
-    console.log(`${label}queue:  ${s.queue.length} ticket(s) in ${s.queueDir}` +
+    console.log(`${label}queue:  ${s.queue.length} ticket(s) in ${s.queueDir}, in the order they are served` +
         (s.otherFiles ? `, plus ${s.otherFiles} file(s) that are not tickets` : ''));
     s.queue.forEach((t, i) => {
         const note = t.dropReason ? ` [will be dropped: ${t.dropReason}]` : '';
-        console.log(`  ${i + 1}. pid ${t.pid}, arrived ${t.arrived}, heartbeat ${t.heartbeatAgeS} s ago${note}: ${t.what}`);
+        console.log(`  ${i + 1}. pid ${t.pid}, ${t.class}, arrived ${t.arrived}, heartbeat ${t.heartbeatAgeS} s ago${note}: ${t.what}`);
     });
 }
 
 function printStatus(s, json) {
     if (json) { console.log(JSON.stringify(s, null, 2)); return; }
     console.log(`lanes:  ${s.laneCount} (from ${s.laneSource})`);
+    console.log(`order:  product gates first, then harness, first come within each. Harness gates hold at most ${s.harnessCap} of ${s.laneCount} lane(s)`);
     for (const n of s.notes) console.log(`note:   ${n}`);
     s.lanes.forEach((lane, i) => printLane(lane, i + 1, s.laneCount));
 }
 
-function holderLine(h) {
-    return h ? `pid ${h.pid}: ${h.what}` : 'nobody (free, but an older ticket goes first)';
+function holderLine(r) {
+    if (r.reserved) return `nobody (free, but ${reservedLine(r.reserved)})`;
+    return r.holder ? `pid ${r.holder.pid}: ${r.holder.what}` : 'nobody (free, but a ticket ahead goes first)';
 }
 
 async function main() {
@@ -664,7 +799,7 @@ async function main() {
     const inLane = (lp) => (lanes.count > 1 ? ` (lane ${lockPaths.indexOf(lp) + 1} of ${lanes.count})` : '');
 
     if (args.cmd === 'status') {
-        printStatus({ laneCount: lanes.count, laneSource: lanes.source, notes: lanes.notes,
+        printStatus({ laneCount: lanes.count, laneSource: lanes.source, harnessCap: harnessCap(lanes.count), notes: lanes.notes,
                       lanes: lockPaths.map((lp) => readStatus(lp, staleMs)) }, args.json);
         return;
     }
@@ -709,20 +844,22 @@ async function main() {
             return;
         }
         for (const r of held) {
-            log(r.to
-                ? `${TAG} released${inLane(r.lockPath)}; the lock was handed to pid ${r.to.pid}, queued since ${r.to.arrived} (record ${path.basename(r.aside)})`
-                : `${TAG} released${inLane(r.lockPath)} to ${path.basename(r.aside)}; nobody was queued`);
+            if (r.to) log(`${TAG} released${inLane(r.lockPath)}; the lock was handed to ${r.to.cls} pid ${r.to.pid}, queued since ${r.to.arrived} (record ${path.basename(r.aside)})`);
+            else if (r.reserved) log(`${TAG} released${inLane(r.lockPath)} to ${path.basename(r.aside)} and not handed to harness pid ${r.waiting.pid}, because the lane is ${reservedLine(r.reserved)}`);
+            else log(`${TAG} released${inLane(r.lockPath)} to ${path.basename(r.aside)}; nobody was queued`);
         }
         return;
     }
 
     const what = args.what || describe();
-    const attempt = () => { resetProbes(); return takeAnyLane({ lockPaths, pid, what, staleMs, log }); };
+    const { cls, note } = gateClass(env, args.cls);
+    if (note) log(`${TAG} note: ${note}`);
+    const attempt = () => { resetProbes(); return takeAnyLane({ lockPaths, pid, what, cls, staleMs, log }); };
 
     if (args.cmd === 'take') {
         const r = attempt();
         if (r.acquired) { log(`${TAG} pid ${pid} holds ${r.lockPath}`); return; }
-        log(`${TAG} queued: place ${r.position} of ${r.of}${inLane(r.lockPath)}. Holder: ${holderLine(r.holder)}`);
+        log(`${TAG} queued: place ${r.position} of ${r.of}${inLane(r.lockPath)} as ${cls}. Holder: ${holderLine(r)}`);
         process.exitCode = EXIT_QUEUED;
         return;
     }
@@ -758,9 +895,9 @@ async function main() {
             log(`${TAG} pid ${pid} holds ${r.lockPath} after ${Math.round((Date.now() - started) / 1000)} s`);
             return;
         }
-        const key = `${r.lockPath}/${r.position}/${r.of}/${r.holder ? r.holder.pid : '-'}`;
+        const key = `${r.lockPath}/${r.position}/${r.of}/${r.holder ? r.holder.pid : '-'}/${r.reserved ? 'reserved' : ''}`;
         if (key !== lastKey || Date.now() - lastReport >= reportMs) {
-            log(`${TAG} waiting: place ${r.position} of ${r.of}${inLane(r.lockPath)}. Holder: ${holderLine(r.holder)}`);
+            log(`${TAG} waiting: place ${r.position} of ${r.of}${inLane(r.lockPath)} as ${cls}. Holder: ${holderLine(r)}`);
             lastKey = key;
             lastReport = Date.now();
         }
@@ -785,4 +922,5 @@ if (require.main === module) {
 module.exports = {
     takeTurn, takeAnyLane, releaseLock, releaseLanes, leaveQueues, readStatus, readLock, resetProbes,
     queueDirFor, lanePath, lanePaths, lanesFileFor, laneCount, defaultLockPath, isAlive, parseArgs,
+    reservedLine, HARNESS,
 };
