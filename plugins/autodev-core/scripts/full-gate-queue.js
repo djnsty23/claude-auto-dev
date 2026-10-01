@@ -87,9 +87,32 @@
  * lane is told to run `release`. It runs for a pid that is not running too,
  * because a dead waiter's ticket is one of the tickets it exists to remove.
  *
+ * OWNERSHIP RECORDS (gate-records.js, gate-identity.js). Every ticket and lock
+ * this version writes ends with a `meta {json}` line that older versions skip:
+ *   - The CLASS comes from the caller's checkout (`--repo DIR`, default the
+ *     working directory): a tree carrying this marketplace's markers is a
+ *     harness gate, and so is a directory git cannot name. `--class` and
+ *     AUTODEV_GATE_CLASS may demote a product gate to harness, never promote.
+ *   - The ADMISSION MUTEX beside lane 1 serialises ticket registration, the
+ *     class and cap checks, acquisition, hand-over, fencing and leaving the
+ *     other queues, so two waiters released at once cannot both pass the cap.
+ *   - Every admission mints the next FENCING TOKEN. A release that carries
+ *     --run-id and --token must match the lock's, so a late release from an
+ *     earlier admission never frees a newer holder's lane.
+ *   - The lock names the holder's run id, original ARRIVAL (its ticket's
+ *     stamp, kept through hand-over), lane, admission time, and its OWNER: the
+ *     native pid with its creation time, the boot it ran in, and an MSYS pid.
+ *     A holder is judged by that identity and its execution journal (the chain
+ *     root and every descendant seen), so a reused pid, a lock from an earlier
+ *     boot and a launcher whose chain still runs are each read correctly. An
+ *     answer no probe can give is unknown, and unknown is alive. A meta line
+ *     that does not parse is unknown too, never vacant.
+ *
  * ENVIRONMENT (the lock variables are shared with the gate wrapper, so both
  * always name the same file):
- *   AUTODEV_GATE_CLASS=product|harness take and wait's class when --class is not given (default product)
+ *   AUTODEV_GATE_CLASS=product|harness take and wait's declared class (it can only demote; default product)
+ *   AUTODEV_GATE_SNAPSHOT_MAX_AGE_MS=N how long a process snapshot is reused (default 30000)
+ *   AUTODEV_GATE_BOOT_CACHE=FILE       where this boot's identity is cached (default beside lane 1)
  *   AUTODEV_GATE_LANES=N               lane count, over the lanes file (default 1)
  *   AUTODEV_GATE_LOCK_PATH=FILE        lane 1's lock (default <home>/.claude/autodev/locks/full-gate.lock)
  *   AUTODEV_GATE_LOCK_POLL_MS=N        wait's poll interval (default 5000)
@@ -102,6 +125,8 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 const { spawnSync } = require('child_process');
+const ident = require(path.join(__dirname, 'gate-identity.js'));
+const records = require(path.join(__dirname, 'gate-records.js'));
 
 const TAG = 'full-gate-queue:';
 const EXIT_QUEUED = 3;
@@ -225,7 +250,7 @@ function harnessReserve(lockPaths, lockPath) {
     const held = lockPaths.filter((lp) => {
         if (lp === lockPath) return false;
         const h = readLock(lp);
-        return Boolean(h) && h.cls === HARNESS && isAlive(h.pid) !== false;
+        return Boolean(h) && h.cls === HARNESS && holderAlive(h, lockPaths[0]) !== false;
     }).length;
     const cap = harnessCap(lockPaths.length);
     return held + 1 > cap ? { held, cap, lanes: lockPaths.length } : null;
@@ -284,7 +309,7 @@ function readLock(file) {
     const lines = text.split(/\r?\n/);
     const first = (lines[0] || '').trim();
     const pid = /^\d+$/.test(first) ? Number(first) : null;
-    return { text, pid, what: (lines[1] || '').trim() || '(no description on line 2)', cls: classOf(lines).cls };
+    return { text, pid, what: (lines[1] || '').trim() || '(no description on line 2)', cls: classOf(lines).cls, ...records.parseMeta(lines) };
 }
 
 /**
@@ -335,7 +360,9 @@ const aliveCache = new Map();
 /** Liveness answers are cached per attempt; a waiter re-asks on every poll. */
 function resetProbes() {
     aliveCache.clear();
+    holderCache.clear();
     msysPids = undefined;
+    ident.forgetMsys();
 }
 
 function isAlive(pid) {
@@ -389,6 +416,86 @@ function probeAlive(pid) {
 }
 
 // ---------------------------------------------------------------------------
+// Judging a holder by its ownership record. A lock with no meta line (an older
+// version, or written by hand) keeps the pid probe above. A lock with one is
+// judged by its owner's identity and its execution journal: a different boot is
+// dead; the owner's pid created at the recorded time, its MSYS pid, its chain
+// root or any descendant is alive; anything no probe can settle is unknown.
+// A "dead" answer from a reused snapshot is confirmed against a fresh one.
+// ---------------------------------------------------------------------------
+
+const holderCache = new Map();
+let bootCached;
+
+function snapshotMaxAgeMs() {
+    const n = Number(process.env.AUTODEV_GATE_SNAPSHOT_MAX_AGE_MS);
+    return Number.isFinite(n) && n >= 0 ? n : 30000;
+}
+
+/** This boot's identity, cached per process and in a file per boot. Null when no probe answered. */
+function bootNow(base) {
+    if (bootCached !== undefined) return bootCached;
+    try { bootCached = ident.bootIdentity({ cacheFile: process.env.AUTODEV_GATE_BOOT_CACHE || records.bootCachePath(base) }); } catch { bootCached = null; }
+    return bootCached;
+}
+
+function judgeMeta(meta, base, maxAgeMs) {
+    const owner = meta.owner;
+    if (!owner.startUtc && !owner.msysPid) {
+        // An identity recorded without a creation time (a hand-over to a
+        // waiter whose ticket had none): the boot and the pid probe decide.
+        const boot = bootNow(base);
+        if (owner.bootId && boot && owner.bootId !== boot.id) return { alive: false, why: 'it was written in an earlier boot' };
+        const a = isAlive(owner.pid);
+        return { alive: a, why: a === false ? `pid ${owner.pid} is not running` : `pid ${owner.pid} answers a liveness probe` };
+    }
+    const snap = ident.snapshot({ maxAgeMs });
+    const boot = snap.ok ? snap.boot : bootNow(base);
+    let execution = null;
+    let journalUnreadable = false;
+    if (meta.runId) {
+        const r = records.readRun(base, meta.runId);
+        if (r.state === 'ok') execution = r.value;
+        else if (r.state === 'malformed') journalUnreadable = true;
+    }
+    return ident.judgeExecution({ owner, execution, journalUnreadable, snap, boot, msys: ident.msysTable(), legacyAlive: isAlive });
+}
+
+/**
+ * Is the gate a lock names still running? true, false, or null (unknown,
+ * which every caller treats as alive). `base` is lane 1's lock.
+ */
+function holderAlive(held, base) {
+    if (!held) return false;
+    if (held.malformed) return null;
+    const meta = held.meta;
+    if (!meta || !meta.owner || typeof meta.owner !== 'object' || !Number.isInteger(meta.owner.pid)) {
+        if (meta) return null;
+        return held.pid === null ? null : isAlive(held.pid);
+    }
+    if (meta.owner.pid === process.pid) return true;
+    if (holderCache.has(held.text)) return holderCache.get(held.text).alive;
+    let j;
+    try {
+        j = judgeMeta(meta, base, snapshotMaxAgeMs());
+        if (j.alive === false && snapshotMaxAgeMs() > 0) { ident.forgetMsys(); j = judgeMeta(meta, base, 0); }
+    } catch (e) { j = { alive: null, why: `the judgement threw (${e.message})` }; }
+    holderCache.set(held.text, j);
+    return j.alive;
+}
+
+/** Why holderAlive answered as it did, for status lines. */
+function holderWhy(held) {
+    const j = held && holderCache.get(held.text);
+    return j ? j.why : null;
+}
+
+/** True only when the holder is known not to be running. */
+function holderDead(held, base) {
+    return Boolean(held) && holderAlive(held, base) === false;
+}
+
+// ---------------------------------------------------------------------------
 // The queue.
 // ---------------------------------------------------------------------------
 
@@ -410,24 +517,30 @@ function readTickets(queueDir) {
         try { text = fs.readFileSync(file, 'utf8'); mtimeMs = fs.statSync(file).mtimeMs; } catch { continue; }
         const lines = text.split(/\r?\n/);
         tickets.push({ file, name, pid: Number(m[2]), arrived: stampToIso(m[1]), mtimeMs,
-                       what: (lines[1] || '').trim() || '(no description)', ...classOf(lines) });
+                       what: (lines[1] || '').trim() || '(no description)', ...classOf(lines), ...records.parseMeta(lines) });
     }
     return { tickets, other };
 }
 
-/** Why a ticket no longer counts, or null when it does. */
-function deadReason(t, staleMs, now) {
+/**
+ * Why a ticket no longer counts, or null when it does. `boot` is this boot's
+ * identity or null; a ticket written in another boot is dead whatever its pid.
+ */
+function deadReason(t, staleMs, now, boot = null) {
+    if (boot && t.meta && t.meta.bootId && t.meta.bootId !== boot.id) return 'it was written in an earlier boot';
     if (isAlive(t.pid) === false) return `pid ${t.pid} is not running`;
     if (now - t.mtimeMs > staleMs) return `no heartbeat for ${Math.round((now - t.mtimeMs) / 1000)} s`;
     return null;
 }
 
 /** The queue with dead tickets removed from disk, oldest first. */
-function liveQueue(queueDir, staleMs, log) {
+function liveQueue(queueDir, staleMs, log, base = null) {
     const now = Date.now();
     const live = [];
-    for (const t of readTickets(queueDir).tickets) {
-        const why = deadReason(t, staleMs, now);
+    const all = readTickets(queueDir).tickets;
+    const boot = base && all.some((t) => t.meta && t.meta.bootId) ? bootNow(base) : null;
+    for (const t of all) {
+        const why = deadReason(t, staleMs, now, boot);
         if (!why) { live.push(t); continue; }
         try { fs.unlinkSync(t.file); log(`${TAG} dropped the ticket of pid ${t.pid} (${why}); it said: ${t.what}`); } catch { /* another waiter dropped it first */ }
     }
@@ -438,17 +551,19 @@ function liveQueue(queueDir, staleMs, log) {
  * This pid's ticket, created on first call, heartbeat touched on every later
  * one. The class is written once, at creation: a waiter keeps its class.
  */
-function ensureTicket(queueDir, pid, what, cls) {
+function ensureTicket(queueDir, pid, what, cls, meta = null, arrivedMs = null) {
     fs.mkdirSync(queueDir, { recursive: true });
     const own = readTickets(queueDir).tickets.find((t) => t.pid === pid);
     if (own) {
         const now = new Date();
-        try { fs.utimesSync(own.file, now, now); return own.file; } catch { /* dropped under us: take a new place */ }
+        try { fs.utimesSync(own.file, now, now); return own; } catch { /* dropped under us: take a new place */ }
     }
-    const d = new Date();
+    // A re-admitted run keeps its original arrival: its ticket is named by it.
+    const d = Number.isFinite(arrivedMs) ? new Date(arrivedMs) : new Date();
     const file = path.join(queueDir, `${stamp(d)}-${String(pid).padStart(10, '0')}.ticket`);
-    tryCreate(file, `${pid}\n${what}\n${d.toISOString()}\nclass ${cls}\n`);
-    return file;
+    const metaText = meta ? `${records.metaLine({ ...meta, arrival: d.toISOString() })}\n` : '';
+    tryCreate(file, `${pid}\n${what}\n${d.toISOString()}\nclass ${cls}\n${metaText}`);
+    return readTickets(queueDir).tickets.find((t) => t.file === file) || { file, pid, arrived: d.toISOString(), meta: null };
 }
 
 function removeTicket(queueDir, pid) {
@@ -463,7 +578,7 @@ function removeTicket(queueDir, pid) {
 // other's fresh lock.
 // ---------------------------------------------------------------------------
 
-function takeOverStale(lockPath, judged, body, log) {
+function takeOverStale(lockPath, judged, body, log, base = lockPath) {
     const mutex = `${lockPath}.takeover`;
     if (!tryCreate(mutex, `${process.pid}\n`)) {
         const m = readLock(mutex);
@@ -475,18 +590,102 @@ function takeOverStale(lockPath, judged, body, log) {
     try {
         const now = readLock(lockPath);
         if (!now) return tryCreate(lockPath, body);
-        if (now.text !== judged.text || isAlive(now.pid) !== false) return false;
+        if (now.text !== judged.text || holderAlive(now, base) !== false) return false;
         const aside = asideName(lockPath, 'stale');
-        fs.renameSync(lockPath, aside);
-        log(`${TAG} holder pid ${now.pid} is not running; moved its lock aside to ${path.basename(aside)} (it said: ${now.what})`);
+        records.renameRetry(lockPath, aside);
+        const why = holderWhy(now);
+        log(`${TAG} holder pid ${now.pid} is not running${why ? ` (${why})` : ''}; moved its lock aside to ${path.basename(aside)} (it said: ${now.what})`);
         return tryCreate(lockPath, body);
     } finally {
         try { fs.unlinkSync(mutex); } catch { /* already gone */ }
     }
 }
 
-function lockBody(pid, what, cls) {
-    return `${pid}\n${what}, lock taken ${new Date().toISOString().slice(11, 16)}Z\nclass ${cls}\n`;
+function lockBody(pid, what, cls, meta = null) {
+    return `${pid}\n${what}, lock taken ${new Date().toISOString().slice(11, 16)}Z\nclass ${cls}\n${meta ? `${records.metaLine(meta)}\n` : ''}`;
+}
+
+/** A caller's own lock body (line 1 to 3) with the meta line appended. */
+function withMeta(body, meta) {
+    const lines = String(body).split(/\r?\n/).filter((l, i, a) => !(i === a.length - 1 && l === '') && !l.startsWith('meta '));
+    return `${lines.join('\n')}\n${records.metaLine(meta)}\n`;
+}
+
+/** The arrival a lock records: its ticket's stamp, which survives hand-over and re-admission. */
+function arrivalOf(ticket) {
+    return ticket.arrived;
+}
+
+/** A run id: unique, and safe as a file name. */
+function mintRunId(pid) {
+    return `${stamp()}-${pid}-${Math.random().toString(36).slice(2, 8)}`;
+}
+
+const ADMISSION_TIMEOUT_MS = 30000;
+
+/** Runs fn() under the machine's admission mutex beside lane 1 (re-entrant). */
+function admitted(lockPaths, fn) {
+    return records.withAdmission(lockPaths[0], fn, { timeoutMs: ADMISSION_TIMEOUT_MS, isDead: (p) => isAlive(p) === false });
+}
+
+/** Test seam: a pause inside the admission mutex, after the cap check, to widen a race window. */
+function testPause() {
+    const ms = Number(process.env.AUTODEV_GATE_TEST_ADMIT_PAUSE_MS) || 0;
+    if (ms > 0) Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, Math.min(ms, 60000));
+}
+
+/**
+ * The meta a lock records for the ticket it admits. `owner` is a full
+ * identity when the caller could take one, else the ticket's own.
+ */
+function admissionMeta({ ticket, lockPath, lockPaths, cls, owner, runId }) {
+    const tm = (ticket && ticket.meta) || {};
+    return {
+        runId: runId || tm.runId || null,
+        token: records.mintToken(lockPaths[0]),
+        lane: lockPaths.indexOf(lockPath) + 1,
+        admittedUtc: new Date().toISOString(),
+        arrival: ticket ? arrivalOf(ticket) : null,
+        cls,
+        owner: owner || tm.owner || (ticket ? { pid: ticket.pid, startUtc: null, bootId: (bootNow(lockPaths[0]) || {}).id || null } : null),
+        repo: tm.repo || null,
+    };
+}
+
+/** The identity to record for `pid`, from a snapshot no older than the reuse window. */
+function ownerIdentity(pid) {
+    try { return ident.identityOf(pid, { snap: ident.snapshot({ maxAgeMs: snapshotMaxAgeMs() }) }); } catch { return null; }
+}
+
+/**
+ * Why a release carrying `runId` and `token` may not free `held`, or null when
+ * it may. A lock with no meta line (an older writer) is matched by pid alone.
+ */
+function fenceMismatch(held, runId, token) {
+    if (token === null || token === undefined || !held.meta) return null;
+    if (held.meta.token !== token || (runId && held.meta.runId !== runId)) {
+        return `the lock now belongs to run ${held.meta.runId} with token ${held.meta.token}, not run ${runId || '(any)'} token ${token}; left untouched`;
+    }
+    return null;
+}
+
+/**
+ * Does a lock naming `pid` belong to this caller? A lock from another run of
+ * the same pid number is foreign only when creation times prove it is another
+ * process; without that proof it is ours, as before ownership records.
+ */
+function namesUs(held, pid, runId) {
+    if (!held || held.pid !== pid) return false;
+    const m = held.meta;
+    if (!m || !runId || !m.runId || m.runId === runId) return true;
+    const start = m.owner && m.owner.startUtc;
+    if (!start) return true;
+    return ownStartMatches(pid, start);
+}
+
+function ownStartMatches(pid, start) {
+    const me = ownerIdentity(pid);
+    return !me || !me.startUtc || me.startUtc === start;
 }
 
 /**
@@ -502,8 +701,9 @@ function handToOlderVersion({ lockPath, lockPaths, live, held, log }) {
     const oldest = live.reduce((a, t) => (t.name < a.name ? t : a));
     if (front.classed || front === oldest) return false;
     if (lockPaths.some((lp) => { const h = readLock(lp); return Boolean(h) && h.pid === front.pid; })) return false;
-    const body = lockBody(front.pid, `${front.what}, handed over by the queue`, front.cls);
-    if (!(held ? takeOverStale(lockPath, held, body, log) : tryCreate(lockPath, body))) return false;
+    const meta = admissionMeta({ ticket: front, lockPath, lockPaths, cls: front.cls });
+    const body = lockBody(front.pid, `${front.what}, handed over by the queue`, front.cls, meta);
+    if (!(held ? takeOverStale(lockPath, held, body, log, lockPaths[0]) : tryCreate(lockPath, body))) return false;
     try { fs.unlinkSync(front.file); } catch { /* its waiter saw the handoff first */ }
     log(`${TAG} handed the free lock to pid ${front.pid}: its ticket has no class line, and a version without classes takes a lock only as the oldest ticket`);
     return true;
@@ -514,66 +714,85 @@ function handToOlderVersion({ lockPath, lockPaths, live, held, log }) {
  * { acquired: false, position, of, holder, reserved? }. The rule that orders
  * the queue is the front check below: a ticket that is not first in serving
  * order never takes the lock, however free it is. A harness ticket at the
- * front is still refused a lane its class may not hold (`reserved`).
+ * front is still refused a lane its class may not hold (`reserved`). The
+ * whole attempt runs under the admission mutex, so the cap check and the
+ * create it permits are one step.
  */
-function takeTurn({ lockPath, lockPaths = [lockPath], pid, what, cls = PRODUCT, body: givenBody, staleMs, log }) {
-    const queueDir = queueDirFor(lockPath);
-    fs.mkdirSync(path.dirname(lockPath), { recursive: true });
-    const held = readLock(lockPath);
-    if (held && held.pid === pid) {
+function takeTurn({ lockPath, lockPaths = [lockPath], pid, what, cls = PRODUCT, body: givenBody, staleMs, log, runId = null, repo = null, arrivedMs = null }) {
+    return admitted(lockPaths, () => {
+        const queueDir = queueDirFor(lockPath);
+        fs.mkdirSync(path.dirname(lockPath), { recursive: true });
+        const held = readLock(lockPath);
+        if (namesUs(held, pid, runId)) {
+            removeTicket(queueDir, pid);
+            return { acquired: true, handedOver: true };
+        }
+        const boot = bootNow(lockPaths[0]);
+        const own = ensureTicket(queueDir, pid, what, cls,
+            { runId: runId || mintRunId(pid), cls, bootId: boot ? boot.id : null, owner: { pid, startUtc: null, bootId: boot ? boot.id : null }, repo }, arrivedMs);
+        const live = servingOrder(liveQueue(queueDir, staleMs, log, lockPaths[0]));
+        const mine = live.findIndex((t) => t.pid === pid);
+        const queued = (holder, extra) => ({ acquired: false, position: mine + 1, of: live.length, holder, ...extra });
+        const open = () => !held || holderDead(held, lockPaths[0]);
+        if (mine > 0 && !live[0].classed && open() && handToOlderVersion({ lockPath, lockPaths, live, held, log })) {
+            return queued(readLock(lockPath));
+        }
+        if (mine !== 0) return queued(held);
+        if (!open()) return queued(held);
+        const reserved = live[0].cls === HARNESS ? harnessReserve(lockPaths, lockPath) : null;
+        if (reserved) return queued(held, { reserved });
+        testPause();
+        const owner = ownerIdentity(pid);
+        const ticket = live[0];
+        const meta = admissionMeta({ ticket, lockPath, lockPaths, cls: ticket.cls, owner, runId: runId || (own.meta && own.meta.runId) });
+        const body = givenBody ? withMeta(givenBody, meta) : lockBody(pid, what, ticket.cls, meta);
+        const got = held ? takeOverStale(lockPath, held, body, log, lockPaths[0]) : tryCreate(lockPath, body);
+        if (!got) return queued(readLock(lockPath));
         removeTicket(queueDir, pid);
-        return { acquired: true, handedOver: true };
-    }
-    ensureTicket(queueDir, pid, what, cls);
-    const live = servingOrder(liveQueue(queueDir, staleMs, log));
-    const mine = live.findIndex((t) => t.pid === pid);
-    const queued = (holder, extra) => ({ acquired: false, position: mine + 1, of: live.length, holder, ...extra });
-    const open = () => !held || (held.pid !== null && isAlive(held.pid) === false);
-    if (mine > 0 && !live[0].classed && open() && handToOlderVersion({ lockPath, lockPaths, live, held, log })) {
-        return queued(readLock(lockPath));
-    }
-    if (mine !== 0) return queued(held);
-    if (!open()) return queued(held);
-    const reserved = live[0].cls === HARNESS ? harnessReserve(lockPaths, lockPath) : null;
-    if (reserved) return queued(held, { reserved });
-    const body = givenBody || lockBody(pid, what, live[0].cls);
-    const got = held ? takeOverStale(lockPath, held, body, log) : tryCreate(lockPath, body);
-    if (!got) return queued(readLock(lockPath));
-    removeTicket(queueDir, pid);
-    return { acquired: true, handedOver: false };
+        return { acquired: true, handedOver: false, token: meta.token, runId: meta.runId };
+    });
 }
 
 /**
  * Releases a lock `pid` holds. Hands it to the ticket at the front of serving
  * order when there is one its class may give the lane to. Otherwise it renames
  * the lock to `.released-HHMM` as the hand-written convention does. `lockPaths` is every
- * lane, for the harness cap. Returns { released, to, aside, reserved, waiting, why }:
- * `reserved` and `waiting` say a harness ticket waits that the cap kept out.
+ * lane, for the harness cap. With `token` (and `runId`), the lock must carry
+ * the same ones: a release from an earlier admission frees nothing. Returns
+ * { released, to, aside, reserved, waiting, fenced, why }: `reserved` and
+ * `waiting` say a harness ticket waits that the cap kept out.
  */
-function releaseLock({ lockPath, lockPaths = [lockPath], pid, staleMs, log }) {
-    const held = readLock(lockPath);
-    if (!held) return { released: false, why: `no lock at ${lockPath}; nothing to release` };
-    if (held.pid !== pid) {
-        return { released: false, why: `the lock names pid ${held.pid}, not ${pid}; left untouched (it says: ${held.what})` };
-    }
-    const queueDir = queueDirFor(lockPath);
-    const live = servingOrder(liveQueue(queueDir, staleMs, log).filter((t) => t.pid !== pid));
-    const aside = asideName(lockPath, 'released');
-    const next = live[0];
-    const reserved = next && next.cls === HARNESS ? harnessReserve(lockPaths, lockPath) : null;
-    if (!next || reserved) {
-        fs.renameSync(lockPath, aside);
-        return { released: true, to: null, aside, reserved, waiting: reserved ? next : null };
-    }
-    fs.copyFileSync(lockPath, aside, fs.constants.COPYFILE_EXCL);
-    replaceInPlace(lockPath, lockBody(next.pid, `${next.what}, handed over by the queue`, next.cls));
-    try { fs.unlinkSync(next.file); } catch { /* its waiter saw the handoff first */ }
-    return { released: true, to: next, aside };
+function releaseLock({ lockPath, lockPaths = [lockPath], pid, staleMs, log, runId = null, token = null }) {
+    return admitted(lockPaths, () => {
+        const held = readLock(lockPath);
+        if (!held) return { released: false, why: `no lock at ${lockPath}; nothing to release` };
+        if (held.pid !== pid) {
+            return { released: false, why: `the lock names pid ${held.pid}, not ${pid}; left untouched (it says: ${held.what})` };
+        }
+        const fence = fenceMismatch(held, runId, token);
+        if (fence) return { released: false, fenced: true, why: fence };
+        const queueDir = queueDirFor(lockPath);
+        const live = servingOrder(liveQueue(queueDir, staleMs, log, lockPaths[0]).filter((t) => t.pid !== pid));
+        const aside = asideName(lockPath, 'released');
+        const next = live[0];
+        const reserved = next && next.cls === HARNESS ? harnessReserve(lockPaths, lockPath) : null;
+        testPause();
+        if (!next || reserved) {
+            records.renameRetry(lockPath, aside);
+            return { released: true, to: null, aside, reserved, waiting: reserved ? next : null };
+        }
+        fs.copyFileSync(lockPath, aside, fs.constants.COPYFILE_EXCL);
+        const meta = admissionMeta({ ticket: next, lockPath, lockPaths, cls: next.cls });
+        replaceInPlace(lockPath, lockBody(next.pid, `${next.what}, handed over by the queue`, next.cls, meta));
+        try { fs.unlinkSync(next.file); } catch { /* its waiter saw the handoff first */ }
+        return { released: true, to: next, aside, token: meta.token };
+    });
 }
 
 /** Removes `pid`'s ticket from each of these lanes' queues. */
 function leaveQueues(lockPaths, pid) {
-    for (const lp of lockPaths) removeTicket(queueDirFor(lp), pid);
+    if (!lockPaths.length) return;
+    admitted(lockPaths, () => { for (const lp of lockPaths) removeTicket(queueDirFor(lp), pid); });
 }
 
 /**
@@ -581,15 +800,19 @@ function leaveQueues(lockPaths, pid) {
  * after a race: a release that read a queue just before the waiter left it can
  * still hand that lane over. `lockPaths` is every lane, so the harness cap
  * counts the kept one too. Returns one releaseLock result per lane released.
+ * With `token`, only a lane carrying that token (and `runId`) is released; a
+ * refused one is returned with `fenced`.
  */
-function releaseLanes({ lockPaths, pid, staleMs, log, keep = null }) {
-    const out = [];
-    for (const lp of lockPaths) {
-        if (lp === keep) continue;
-        const held = readLock(lp);
-        if (held && held.pid === pid) out.push({ lockPath: lp, ...releaseLock({ lockPath: lp, lockPaths, pid, staleMs, log }) });
-    }
-    return out;
+function releaseLanes({ lockPaths, pid, staleMs, log, keep = null, runId = null, token = null }) {
+    return admitted(lockPaths, () => {
+        const out = [];
+        for (const lp of lockPaths) {
+            if (lp === keep) continue;
+            const held = readLock(lp);
+            if (held && held.pid === pid) out.push({ lockPath: lp, ...releaseLock({ lockPath: lp, lockPaths, pid, staleMs, log, runId, token }) });
+        }
+        return out;
+    });
 }
 
 /**
@@ -597,47 +820,62 @@ function releaseLanes({ lockPaths, pid, staleMs, log, keep = null }) {
  * release handed it over) is held. Otherwise it takes a turn in each lane in
  * order and stops at the first it acquires. Having acquired one, it leaves
  * every other queue and hands on any other lane a racing release gave it, so a
- * waiter never sits on two lanes. Returns { acquired, lockPath } or, queued,
- * the lane where it stands best (a lane kept from its class first among equal
- * places, since that is the one that would otherwise be free): { acquired:
- * false, lockPath, position, of, holder, reserved?, lanes }.
+ * waiter never sits on two lanes. Returns { acquired, lockPath, token, runId }
+ * or, queued, the lane where it stands best (a lane kept from its class first
+ * among equal places, since that is the one that would otherwise be free):
+ * { acquired: false, lockPath, position, of, holder, reserved?, lanes }.
  */
-function takeAnyLane({ lockPaths, pid, what, cls = PRODUCT, body, staleMs, log }) {
-    const settle = (lockPath, r) => {
-        const others = lockPaths.filter((p) => p !== lockPath);
-        leaveQueues(others, pid);
-        releaseLanes({ lockPaths, keep: lockPath, pid, staleMs, log });
-        return { ...r, acquired: true, lockPath };
-    };
-    for (const lp of lockPaths) {
-        const held = readLock(lp);
-        if (held && held.pid === pid) return settle(lp, { handedOver: true });
-    }
-    const queued = [];
-    for (const lane of lockPaths) {
-        const r = takeTurn({ lockPath: lane, lockPaths, pid, what, cls, body, staleMs, log });
-        if (r.acquired) return settle(lane, r);
-        queued.push({ ...r, lockPath: lane });
-    }
-    const best = queued.slice().sort((a, b) => a.position - b.position || Number(Boolean(b.reserved)) - Number(Boolean(a.reserved)))[0];
-    return { ...best, lanes: queued };
+function takeAnyLane({ lockPaths, pid, what, cls = PRODUCT, body, staleMs, log, runId = null, repo = null, arrivedMs = null }) {
+    return admitted(lockPaths, () => {
+        const settle = (lockPath, r) => {
+            const others = lockPaths.filter((p) => p !== lockPath);
+            leaveQueues(others, pid);
+            releaseLanes({ lockPaths, keep: lockPath, pid, staleMs, log });
+            const now = readLock(lockPath);
+            const m = now && now.meta;
+            if (m && m.owner && m.owner.pid === pid && !m.owner.startUtc) {
+                // Handed over with the ticket's identity, which has no creation
+                // time: record the full one now that this waiter holds the lane.
+                const owner = ownerIdentity(pid);
+                if (owner && owner.startUtc) replaceInPlace(lockPath, withMeta(now.text, { ...m, owner }));
+            }
+            const after = readLock(lockPath);
+            return { ...r, acquired: true, lockPath, token: after && after.meta ? after.meta.token : null, runId: after && after.meta ? after.meta.runId : null };
+        };
+        for (const lp of lockPaths) {
+            const held = readLock(lp);
+            if (namesUs(held, pid, runId)) return settle(lp, { handedOver: true });
+        }
+        const queued = [];
+        for (const lane of lockPaths) {
+            const r = takeTurn({ lockPath: lane, lockPaths, pid, what, cls, body, staleMs, log, runId, repo, arrivedMs });
+            if (r.acquired) return settle(lane, r);
+            queued.push({ ...r, lockPath: lane });
+        }
+        const best = queued.slice().sort((a, b) => a.position - b.position || Number(Boolean(b.reserved)) - Number(Boolean(a.reserved)))[0];
+        return { ...best, lanes: queued };
+    });
 }
 
 /** One lane, read-only: its holder and its queue in serving order, each with its class. */
-function readStatus(lockPath, staleMs) {
+function readStatus(lockPath, staleMs, base = lockPath) {
     const queueDir = queueDirFor(lockPath);
     const held = readLock(lockPath);
     const now = Date.now();
     const { tickets, other } = readTickets(queueDir);
+    const boot = tickets.some((t) => t.meta && t.meta.bootId) ? bootNow(base) : null;
+    const alive = held ? holderAlive(held, base) : null;
     return {
         lockPath,
         queueDir,
-        holder: held ? { pid: held.pid, alive: held.pid === null ? null : isAlive(held.pid), class: held.cls, what: held.what } : null,
+        holder: held ? { pid: held.pid, alive, why: holderWhy(held), class: held.cls, what: held.what,
+                         malformed: held.malformed || undefined, meta: held.meta || undefined } : null,
         ticketFilesRead: tickets.length,
         otherFiles: other,
         queue: servingOrder(tickets).map((t) => ({
             pid: t.pid, class: t.cls, arrived: t.arrived, heartbeatAgeS: Math.round((now - t.mtimeMs) / 1000),
-            alive: isAlive(t.pid), dropReason: deadReason(t, staleMs, now), what: t.what,
+            alive: isAlive(t.pid), dropReason: deadReason(t, staleMs, now, boot), what: t.what,
+            runId: t.meta ? t.meta.runId : undefined,
         })),
     };
 }
@@ -686,9 +924,17 @@ open to product gates. A running holder is never preempted.
   --pid N         the process that runs the gate and outlives it (default: the
                   parent shell). The lock and the ticket name this pid.
   --what TEXT     line 2 of the lock (default: branch, head and worktree).
-  --class C       take and wait: product (default) or harness. Pass harness
-                  for a gate of the plugin's own repo, so it waits behind
-                  every product gate.
+  --class C       take and wait: product (default) or harness. It can only
+                  demote: the class comes from the checkout (--repo), and a
+                  checkout of this plugin's repo, or one git cannot name, is
+                  a harness gate whatever this says.
+  --repo DIR      take and wait: the checkout the gate runs in (default: the
+                  working directory).
+  --run-id ID     take, wait and release: this run's id, recorded in the
+                  ticket and the lock (default: minted, or the ticket's).
+  --token N       release only: free a lane only while its lock carries this
+                  fencing token (and --run-id), so a late release from an
+                  earlier admission frees nothing.
   --timeout-ms N  wait only: give up after N ms and remove the tickets.
   --lanes N       this call only: use N lanes instead of the machine's count.
 
@@ -709,15 +955,24 @@ AUTODEV_GATE_LOCK_REPORT_MS (180000), AUTODEV_GATE_QUEUE_STALE_MS (600000).`);
 }
 
 function parseArgs(argv) {
-    const out = { cmd: null, arg: null, pid: null, what: null, cls: null, timeoutMs: null, lanes: null, json: false, help: false, bad: null };
+    const out = { cmd: null, arg: null, pid: null, what: null, cls: null, timeoutMs: null, lanes: null, json: false, help: false, bad: null,
+                  repo: null, runId: null, token: null };
     for (let i = 0; i < argv.length; i++) {
         const a = argv[i];
         if (a === '--help' || a === '-h') out.help = true;
         else if (a === '--json') out.json = true;
-        else if (a === '--pid' || a === '--what' || a === '--timeout-ms' || a === '--lanes' || a === '--class') {
+        else if (['--pid', '--what', '--timeout-ms', '--lanes', '--class', '--repo', '--run-id', '--token'].includes(a)) {
             const v = argv[++i];
             if (v === undefined) { out.bad = `${a} needs a value`; break; }
             if (a === '--what') out.what = v;
+            else if (a === '--repo') out.repo = v;
+            else if (a === '--run-id') {
+                if (!/^[A-Za-z0-9._-]{1,120}$/.test(v)) { out.bad = `--run-id needs letters, digits, dot, dash or underscore, got ${v}`; break; }
+                out.runId = v;
+            } else if (a === '--token') {
+                if (!/^\d+$/.test(v)) { out.bad = `--token needs a whole number, got ${v}`; break; }
+                out.token = Number(v);
+            }
             else if (a === '--class') {
                 out.cls = parseClass(v);
                 if (out.cls === null) { out.bad = `--class needs product or harness, got ${v}`; break; }
@@ -740,7 +995,10 @@ function printLane(s, k, count) {
     if (!s.holder) console.log(`${label}holder: none, the lock is free`);
     else {
         const state = s.holder.alive === true ? 'alive' : s.holder.alive === false ? 'NOT running' : 'liveness unknown';
-        console.log(`${label}holder: pid ${s.holder.pid === null ? '(line 1 is not a pid)' : s.holder.pid} (${state}, ${s.holder.class}): ${s.holder.what}`);
+        const m = s.holder.meta;
+        const run = m ? `, run ${m.runId}, token ${m.token}, arrived ${m.arrival}` : s.holder.malformed ? ', its meta line does not parse' : '';
+        console.log(`${label}holder: pid ${s.holder.pid === null ? '(line 1 is not a pid)' : s.holder.pid} (${state}, ${s.holder.class}${run}): ${s.holder.what}`);
+        if (s.holder.why) console.log(`${label}judged: ${s.holder.why}`);
     }
     console.log(`${label}queue:  ${s.queue.length} ticket(s) in ${s.queueDir}, in the order they are served` +
         (s.otherFiles ? `, plus ${s.otherFiles} file(s) that are not tickets` : ''));
@@ -800,7 +1058,7 @@ async function main() {
 
     if (args.cmd === 'status') {
         printStatus({ laneCount: lanes.count, laneSource: lanes.source, harnessCap: harnessCap(lanes.count), notes: lanes.notes,
-                      lanes: lockPaths.map((lp) => readStatus(lp, staleMs)) }, args.json);
+                      lanes: lockPaths.map((lp) => readStatus(lp, staleMs, base)) }, args.json);
         return;
     }
 
@@ -836,14 +1094,15 @@ async function main() {
     }
 
     if (args.cmd === 'release') {
-        const held = releaseLanes({ lockPaths, pid, staleMs, log });
+        const held = releaseLanes({ lockPaths, pid, staleMs, log, runId: args.runId, token: args.token });
         if (!held.length) {
             // Nothing names this pid: report why from lane 1, as a single-lane release would.
-            console.error(`${TAG} ${releaseLock({ lockPath: base, pid, staleMs, log }).why}`);
+            console.error(`${TAG} ${releaseLock({ lockPath: base, lockPaths, pid, staleMs, log }).why}`);
             process.exitCode = 1;
             return;
         }
         for (const r of held) {
+            if (r.fenced) { console.error(`${TAG} not released${inLane(r.lockPath)}: ${r.why}`); process.exitCode = 1; continue; }
             if (r.to) log(`${TAG} released${inLane(r.lockPath)}; the lock was handed to ${r.to.cls} pid ${r.to.pid}, queued since ${r.to.arrived} (record ${path.basename(r.aside)})`);
             else if (r.reserved) log(`${TAG} released${inLane(r.lockPath)} to ${path.basename(r.aside)} and not handed to harness pid ${r.waiting.pid}, because the lane is ${reservedLine(r.reserved)}`);
             else log(`${TAG} released${inLane(r.lockPath)} to ${path.basename(r.aside)}; nobody was queued`);
@@ -852,13 +1111,17 @@ async function main() {
     }
 
     const what = args.what || describe();
-    const { cls, note } = gateClass(env, args.cls);
-    if (note) log(`${TAG} note: ${note}`);
-    const attempt = () => { resetProbes(); return takeAnyLane({ lockPaths, pid, what, cls, staleMs, log }); };
+    const declared = gateClass(env, args.cls);
+    if (declared.note) log(`${TAG} note: ${declared.note}`);
+    const repo = ident.repoIdentity(path.resolve(args.repo || process.cwd()));
+    const cls = repo.harness ? HARNESS : declared.cls;
+    if (repo.harness && declared.cls === PRODUCT) log(`${TAG} note: queued as harness, not product: ${repo.why}`);
+    const repoMeta = { worktree: repo.worktree, commonDir: repo.commonDir, origin: repo.origin, derivedClass: repo.harness ? HARNESS : PRODUCT };
+    const attempt = () => { resetProbes(); return takeAnyLane({ lockPaths, pid, what, cls, staleMs, log, runId: args.runId, repo: repoMeta }); };
 
     if (args.cmd === 'take') {
         const r = attempt();
-        if (r.acquired) { log(`${TAG} pid ${pid} holds ${r.lockPath}`); return; }
+        if (r.acquired) { log(`${TAG} pid ${pid} holds ${r.lockPath}${r.token ? ` (run ${r.runId}, token ${r.token})` : ''}`); return; }
         log(`${TAG} queued: place ${r.position} of ${r.of}${inLane(r.lockPath)} as ${cls}. Holder: ${holderLine(r)}`);
         process.exitCode = EXIT_QUEUED;
         return;
@@ -892,7 +1155,7 @@ async function main() {
             continue;
         }
         if (r.acquired) {
-            log(`${TAG} pid ${pid} holds ${r.lockPath} after ${Math.round((Date.now() - started) / 1000)} s`);
+            log(`${TAG} pid ${pid} holds ${r.lockPath} after ${Math.round((Date.now() - started) / 1000)} s${r.token ? ` (run ${r.runId}, token ${r.token})` : ''}`);
             return;
         }
         const key = `${r.lockPath}/${r.position}/${r.of}/${r.holder ? r.holder.pid : '-'}/${r.reserved ? 'reserved' : ''}`;
@@ -919,8 +1182,55 @@ if (require.main === module) {
     });
 }
 
+/**
+ * After a take, the caller confirms the lock is its own run's before starting
+ * anything: { ok, meta, adopted, why }. A lock naming `pid` with no meta line
+ * (written by an older version on its behalf) is adopted: given a token and
+ * the caller's identity. A lock carrying another run id, or a meta line that
+ * does not parse, is not the caller's, and nothing may start under it.
+ */
+function confirmOwnership({ lockPath, lockPaths = [lockPath], pid, runId }) {
+    return admitted(lockPaths, () => {
+        const now = readLock(lockPath);
+        if (!now || now.pid !== pid) return { ok: false, why: now ? `the lock names pid ${now.pid}, not ${pid}` : 'the lock is gone' };
+        if (now.malformed) return { ok: false, why: 'the lock\'s meta line does not parse' };
+        if (now.meta) {
+            if (now.meta.runId === runId && Number.isInteger(now.meta.token)) return { ok: true, meta: now.meta, adopted: false };
+            return { ok: false, why: `the lock carries run ${now.meta.runId} token ${now.meta.token}, not run ${runId}` };
+        }
+        const meta = { runId, token: records.mintToken(lockPaths[0]), lane: lockPaths.indexOf(lockPath) + 1, admittedUtc: new Date().toISOString(),
+                       arrival: null, cls: now.cls, owner: ownerIdentity(pid), repo: null };
+        replaceInPlace(lockPath, withMeta(now.text, meta));
+        return { ok: true, meta, adopted: true };
+    });
+}
+
+/**
+ * Readers for other tools (the build-output reaper): every lane's lock with its
+ * judged liveness, and every lane's tickets, both read-only. `base` is lane 1.
+ */
+function readLaneLocks(base, env = process.env) {
+    return lanePaths(base, laneCount(base, env, null).count).map((lockPath, i) => {
+        let lock = null;
+        let unreadable = null;
+        try { lock = readLock(lockPath); } catch (e) { unreadable = e.code || e.message; }
+        return { lane: i + 1, lockPath, lock, unreadable, alive: lock ? holderAlive(lock, base) : null, why: lock ? holderWhy(lock) : null };
+    });
+}
+
+function readLaneTickets(base, env = process.env) {
+    return lanePaths(base, laneCount(base, env, null).count).map((lockPath, i) => ({ lane: i + 1, lockPath, tickets: readTickets(queueDirFor(lockPath)).tickets }));
+}
+
+/** The lease key and record for a worktree directory. */
+function leaseFor(base, dir) {
+    const key = ident.pathKey(ident.canonicalPath(dir));
+    return { key, ...records.readLease(base, key) };
+}
+
 module.exports = {
     takeTurn, takeAnyLane, releaseLock, releaseLanes, leaveQueues, readStatus, readLock, resetProbes,
     queueDirFor, lanePath, lanePaths, lanesFileFor, laneCount, defaultLockPath, isAlive, parseArgs,
-    reservedLine, HARNESS,
+    reservedLine, HARNESS, PRODUCT, holderAlive, holderWhy, admitted, bootNow, confirmOwnership,
+    readLaneLocks, readLaneTickets, leaseFor, readLeases: records.readLeases, withWorktreeMutex: records.withWorktreeMutex,
 };
