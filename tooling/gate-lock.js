@@ -17,8 +17,11 @@
  *   release renames the file to `full-gate.lock.released-HHMM` (UTC).
  *
  * WHAT IT DOES. The lock is taken through autodev-core's full-gate-queue.js,
- * the same first-come queue `full-gate-queue.js wait` uses, so a newcomer
- * running `npm run gate` never jumps a session already waiting.
+ * the same queue `full-gate-queue.js wait` uses, so a newcomer running
+ * `npm run gate` never jumps a session already waiting. It queues as a HARNESS
+ * gate: this repo's gate holds a lane for about an hour and a half, so it
+ * waits behind every product gate and never takes the last lane open to them
+ * (CLASSES in full-gate-queue.js). Its lock says `class harness` on line 3.
  *   1. Takes a ticket in the queue beside the lock, in every lane when the
  *      machine has more than one, and takes the first lane it heads while that
  *      lane is free (an atomic `wx` create).
@@ -103,6 +106,7 @@ const queue = require(path.join(__dirname, '..', 'plugins', 'autodev-core', 'scr
 
 const STALE_MS = 600000;
 const MAX_POLL_ERRORS = 10;
+const GATE_CLASS = queue.HARNESS;
 
 function lockDisabled(env) {
     const v = String(env.AUTODEV_GATE_LOCK || '').trim().toLowerCase();
@@ -114,7 +118,8 @@ function whyWaiting(r) {
     const h = r.holder;
     const ahead = r.position - 1;
     const behind = ahead > 0 ? ` (place ${r.position} of ${r.of} in its queue)` : '';
-    if (!h) return `free, but ${ahead} waiter(s) arrived first${behind}`;
+    if (r.reserved) return `free, but ${queue.reservedLine(r.reserved)}`;
+    if (!h) return `free, but ${ahead} waiter(s) go first${behind}`;
     if (h.pid === null) {
         return `line 1 is not a pid, so its holder cannot be checked; move it aside by hand if nobody holds it${behind}`;
     }
@@ -141,10 +146,10 @@ function acquire(lockPaths, body, what, opts) {
             if (isStopped()) { queue.leaveQueues(lockPaths, pid); resolve(null); return; }
             try {
                 queue.resetProbes();
-                const r = queue.takeAnyLane({ lockPaths, pid, what, body, staleMs: STALE_MS, log });
+                const r = queue.takeAnyLane({ lockPaths, pid, what, cls: GATE_CLASS, body, staleMs: STALE_MS, log });
                 errors = 0;
                 if (r.acquired) { resolve(r.lockPath); return; }
-                const seen = `${r.lockPath}|${r.position}|${r.holder ? r.holder.text : ''}`;
+                const seen = `${r.lockPath}|${r.position}|${r.holder ? r.holder.text : ''}|${r.reserved ? 'reserved' : ''}`;
                 const now = Date.now();
                 if (seen !== lastSeen || now - lastReport >= reportMs) {
                     const says = r.holder ? r.holder.what : '(no lock)';
@@ -172,7 +177,7 @@ function release(lockPaths, log, { quiet = false } = {}) {
     const done = queue.releaseLanes({ lockPaths, pid: process.pid, staleMs: STALE_MS, log });
     for (const r of done) {
         if (r.to) log(`${TAG} lock handed to queued pid ${r.to.pid} (${r.to.what}); record kept as ${path.basename(r.aside)}`);
-        else log(`${TAG} lock released to ${path.basename(r.aside)}`);
+        else log(`${TAG} lock released to ${path.basename(r.aside)}${r.reserved ? ` and not handed to harness pid ${r.waiting.pid}, because the lane is ${queue.reservedLine(r.reserved)}` : ''}`);
     }
     if (done.length || quiet) return;
     const held = queue.readLock(lockPaths[0]);
@@ -271,9 +276,9 @@ function label(exit) {
 function help() {
     console.log('usage: node tooling/gate-lock.js [--root DIR]');
     console.log('');
-    console.log('What `npm run gate` runs. Queues for the machine-wide full-gate lock');
-    console.log('(first come, first served, through autodev-core full-gate-queue.js; moves');
-    console.log('a dead holder\'s lock aside to .stale-HHMM), runs `npm run gate:chain`,');
+    console.log('What `npm run gate` runs. Queues for the machine-wide full-gate lock as a');
+    console.log('harness gate behind every product gate (autodev-core full-gate-queue.js),');
+    console.log('moves a dead holder\'s lock aside to .stale-HHMM, runs `npm run gate:chain`,');
     console.log('hands the lock to the next waiter or renames it to .released-HHMM, and');
     console.log('exits with the chain\'s own exit code. A chain it did not see finish exits 2.');
     console.log('');
@@ -389,7 +394,7 @@ function main() {
     for (const note of lanes.notes) log(`${TAG} ${note}`);
     if (lanes.count > 1) log(`${TAG} ${lanes.count} lanes (from ${lanes.source}); taking whichever frees first`);
     const what = describe(root);
-    const body = `${process.pid}\n${what}\n`;
+    const body = `${process.pid}\n${what}\nclass ${GATE_CLASS}\n`;
     acquire(lockPaths, body, what, { pollMs, reportMs, log, isStopped: () => Boolean(interrupted) })
         .then((lane) => {
             if (!lane) return;

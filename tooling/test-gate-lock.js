@@ -362,8 +362,8 @@ async function main() {
         const run = start(fx);
         const waiting = await waitFor(() => /waiting for/.test(run.out), 20000, 'the waiting line');
         check('queue: a newcomer waits behind an earlier ticket though the lock is free', waiting, run.out);
-        check('queue: the waiting line says who arrived first',
-            /free, but 1 waiter\(s\) arrived first \(place 2 of 2 in its queue\)/.test(run.out), run.out);
+        check('queue: the waiting line says a waiter goes first',
+            /free, but 1 waiter\(s\) go first \(place 2 of 2 in its queue\)/.test(run.out), run.out);
         await sleep(800);
         check('queue: the chain has not run and no lock was created', saw(fx) === null && !fs.existsSync(fx.lockPath), run.out);
         check("queue: the wrapper holds a ticket of its own",
@@ -416,6 +416,53 @@ async function main() {
             && fs.readFileSync(path.join(fx.lockDir, rel[0]), 'utf8').split(/\r?\n/)[0] === String(run.child.pid), JSON.stringify(rel));
         check("handover: the peer's ticket is consumed", ticketsOf(fx).length === 0, JSON.stringify(ticketsOf(fx)));
     }
+
+    // -- 15. The wrapper queues as a harness gate: a later product goes first --
+    {
+        const fx = fixture('node probe.js 0');
+        fs.mkdirSync(fx.lockDir, { recursive: true });
+        const holder = keepAlive();
+        const product = keepAlive();
+        fs.writeFileSync(fx.lockPath, `${holder.pid}\npeer gate holding lane 1\n`);
+        const run = start(fx);
+        const queuedUp = await waitFor(() => ticketsOf(fx).length === 1, 20000, 'the wrapper\'s ticket');
+        check('harness class: the wrapper queues behind a live holder', queuedUp && saw(fx) === null, run.out);
+        await sleep(50);
+        const productTicket = writeTicket(fx, product.pid, 'product gate that arrived later', new Date(), 'product');
+        fs.renameSync(fx.lockPath, fx.lockPath + '.released-peer');
+        await sleep(1500);
+        check('harness class: once the lock is free, the wrapper still waits behind the product ticket that arrived after it',
+            saw(fx) === null && !fs.existsSync(fx.lockPath) && /free, but 1 waiter\(s\) go first/.test(run.out), run.out);
+        fs.rmSync(productTicket, { force: true });
+        const r = await finished(run);
+        killTree(holder.pid);
+        killTree(product.pid);
+        const s = saw(fx);
+        check('harness class: when the product ticket leaves, the wrapper runs and exits 0', r.code === 0, `exit=${r.code}\n${r.out}`);
+        check('harness class: its lock says "class harness" on line 3',
+            Boolean(s) && s.exists && s.content.split(/\r?\n/)[2] === 'class harness', JSON.stringify(s));
+    }
+
+    // -- 16. Two lanes, a harness gate on one: the other stays open to products --
+    {
+        const fx = fixture('node probe.js 0');
+        const peer = keepAlive();
+        const lane1 = `${peer.pid}\nharness gate holding lane 1\nclass harness\n`;
+        fs.mkdirSync(fx.lockDir, { recursive: true });
+        fs.writeFileSync(fx.lockPath, lane1);
+        fs.writeFileSync(path.join(fx.lockDir, 'full-gate.lanes'), '2\n');
+        const lane2 = path.join(fx.lockDir, 'full-gate-2.lock');
+        const run = start(fx);
+        const told = await waitFor(() => /kept for product gates/.test(run.out), 20000, 'the kept-for-products line');
+        await sleep(500);
+        check('harness cap: the wrapper does not take the free lane 2 and says it is kept for product gates',
+            told && !fs.existsSync(lane2) && saw(fx) === null, run.out);
+        fs.renameSync(fx.lockPath, fx.lockPath + '.released-peer');
+        const r = await finished(run);
+        killTree(peer.pid);
+        check('harness cap: once lane 1 frees, the wrapper takes it and exits 0',
+            r.code === 0 && /lock taken: .*full-gate\.lock \(pid \d+\)/.test(r.out), `exit=${r.code}\n${r.out}`);
+    }
 }
 
 /**
@@ -430,12 +477,16 @@ function keepAlive() {
     return p;
 }
 
-/** A queue ticket in full-gate-queue.js's format, dated 2000 so it is always first. */
-function writeTicket(fx, pid, what) {
+/**
+ * A queue ticket in full-gate-queue.js's format, dated 2000 so it is always
+ * first unless `when` is given. With no `cls` it has no class line, as a
+ * version before classes wrote it, and reads as a product.
+ */
+function writeTicket(fx, pid, what, when = new Date('2000-01-01T00:00:00.000Z'), cls = null) {
     const dir = path.join(fx.lockDir, 'full-gate.queue');
     fs.mkdirSync(dir, { recursive: true });
-    const file = path.join(dir, `20000101T000000000Z-${String(pid).padStart(10, '0')}.ticket`);
-    fs.writeFileSync(file, `${pid}\n${what}\n`);
+    const file = path.join(dir, `${when.toISOString().replace(/[-:.]/g, '')}-${String(pid).padStart(10, '0')}.ticket`);
+    fs.writeFileSync(file, `${pid}\n${what}\n${cls ? `${when.toISOString()}\nclass ${cls}\n` : ''}`);
     return file;
 }
 
