@@ -227,11 +227,11 @@ if (process.platform !== 'win32') {
     // platform, and these cases are about the census, not about which host
     // happens to run them.
     const fx = fixture({ runnerCalls: [], emptyPlugins: true });
-    const r = run(['--root', fx.root, '--gate', '--platform', 'linux']);
+    const r = run(['--root', fx.root, '--gate', '--fresh', '--platform', 'linux']);
     check('a plugins/ directory with no source files is NO VERDICT: exit 2, not a clean floor',
         r.status === 2 && !r.error && /nothing was measured/.test(r.stderr) && /NO VERDICT/.test(r.stderr), detail(r));
     check('  control: the runner ran and passed, so the suite is not what refused', ranRunner(fx), fx.marker);
-    const j = run(['--root', fx.root, '--gate', '--platform', 'linux', '--json']);
+    const j = run(['--root', fx.root, '--gate', '--fresh', '--platform', 'linux', '--json']);
     let payload = null;
     try { payload = JSON.parse(j.stdout); } catch { /* asserted below */ }
     check('  --json: exit 2, suitePassed true, emptyCensus names the reason, sourceFiles 0',
@@ -241,14 +241,14 @@ if (process.platform !== 'win32') {
     check('  bare mode refuses the same census rather than printing "every function is entered"',
         bare.status === 2 && !bare.error && !/Every named function/.test(bare.stdout), detail(bare));
     const ok = fixture({ runnerCalls: ['enteredByTheRunner', 'neverEnteredByAnything'] });
-    const g = run(['--root', ok.root, '--gate', '--platform', 'linux']);
+    const g = run(['--root', ok.root, '--gate', '--fresh', '--platform', 'linux']);
     check('  control: the two-function fixture under --gate still exits 0', g.status === 0 && !g.error && /2 named function\(s\)/.test(g.stdout), detail(g));
 }
 
 // --- 7. --gate carries a dated floor, and names the platform it belongs to ---------------
 {
     const fx = fixture({ runnerCalls: ['enteredByTheRunner', 'neverEnteredByAnything'] });
-    const r = run(['--root', fx.root, '--gate', '--platform', 'linux']);
+    const r = run(['--root', fx.root, '--gate', '--fresh', '--platform', 'linux']);
     check('--gate prints the floor with its platform, a date and a commit',
         r.status === 0 && !r.error && /linux floor measured \d{4}-\d{2}-\d{2} at [0-9a-f]{7,}/.test(r.stdout), detail(r));
 }
@@ -261,20 +261,20 @@ if (process.platform !== 'win32') {
 // measured on, so an unmeasured platform refuses (exit 2) before the suite runs.
 {
     const fx = fixture({ runnerCalls: ['enteredByTheRunner'] });
-    const r = run(['--root', fx.root, '--gate', '--platform', 'plan9'], 15000);
+    const r = run(['--root', fx.root, '--gate', '--fresh', '--platform', 'plan9'], 15000);
     check('--gate on a platform with no measured floor exits 2 (no verdict), naming the platform',
         r.status === 2 && !r.error && /NO VERDICT: no coverage floor has been measured for plan9/.test(r.stderr), detail(r));
     check('  and did not run the suite', !ranRunner(fx), fx.marker);
 
     // Explicit ceilings need no floor, so the same platform grades normally.
     const ex = fixture({ runnerCalls: ['enteredByTheRunner'] });
-    const e = run(['--root', ex.root, '--gate', '--platform', 'plan9', '--max-untested', '0', '--max-never-loaded', '0']);
+    const e = run(['--root', ex.root, '--gate', '--fresh', '--platform', 'plan9', '--max-untested', '0', '--max-never-loaded', '0']);
     check('control: the same unmeasured platform with both ceilings explicit still grades (exit 1 on the dead function)',
         e.status === 1 && !e.error && /✗ neverEnteredByAnything\(\)/.test(e.stdout) && ranRunner(ex), detail(e));
 
     for (const bad of [[], ['Linux!']]) {
         const b = fixture({ runnerCalls: ['enteredByTheRunner'] });
-        const m = run(['--root', b.root, '--gate', '--platform', ...bad], 15000);
+        const m = run(['--root', b.root, '--gate', '--fresh', '--platform', ...bad], 15000);
         check(`a malformed --platform (${bad.length ? JSON.stringify(bad[0]) : 'missing'}) exits 2 and does not run the suite`,
             m.status === 2 && !m.error && /--platform needs a platform name/.test(m.stderr) && !ranRunner(b), detail(m));
     }
@@ -284,7 +284,7 @@ if (process.platform !== 'win32') {
     // that graded every host against one platform's floor passes neither branch
     // on any host but that one.
     const h = fixture({ runnerCalls: ['enteredByTheRunner', 'neverEnteredByAnything'] });
-    const hr = run(['--root', h.root, '--gate', '--json']);
+    const hr = run(['--root', h.root, '--gate', '--fresh', '--json']);
     let hp = null;
     try { hp = JSON.parse(hr.stdout); } catch { /* the refusal branch prints no JSON */ }
     const graded = hr.status === 0 && hp && hp.gate && hp.gate.platform === process.platform && typeof hp.gate.floorMeasured === 'string';
@@ -347,9 +347,25 @@ if (process.platform !== 'win32') {
         mr.status === 2 && !mr.error && /--refused needs a plugin-relative file path/.test(mr.stderr) && !ranRunner(m), detail(mr));
 }
 
+// --- 7d. a bare --gate reads the receipt and runs nothing ----------------------
+// `npm test` publishes a coverage receipt and check:coverage grades it rather
+// than running every suite a second time. With no receipt for this root the
+// gate has no verdict: exit 2, and the fixture's runner never starts.
+{
+    const fx = fixture({ runnerCalls: ['enteredByTheRunner'] });
+    const r = run(['--root', fx.root, '--gate', '--platform', 'linux'], 15000);
+    check('a bare --gate with no receipt for the root exits 2, names the missing receipt and runs no suite',
+        r.status === 2 && !r.error && /NO VERDICT: no coverage receipt/.test(r.stderr) && !ranRunner(fx), detail(r));
+    const both = run(['--root', fx.root, '--fresh', '--receipt'], 15000);
+    check('--fresh with --receipt names opposite sources: exit 2, nothing run',
+        both.status === 2 && !both.error && /opposite sources/.test(both.stderr) && !ranRunner(fx), detail(both));
+    const fresh = run(['--root', fx.root, '--gate', '--fresh', '--platform', 'linux']);
+    check('  control: the same fixture under --gate --fresh does run its suite', ranRunner(fx) && fresh.status === 0, detail(fresh));
+}
+
 // --- 8. HEAD, on request only (see the header for why) --------------------------------
 if (process.env.AUTODEV_COVERAGE_FULL === '1' && !process.env.NODE_V8_COVERAGE) {
-    const r = run(['--gate', '--json'], 45 * 60 * 1000);
+    const r = run(['--gate', '--fresh', '--json'], 45 * 60 * 1000);
     let payload = null;
     try { payload = JSON.parse(r.stdout); } catch { /* asserted below */ }
     check('HEAD: the gate is green on this tree',

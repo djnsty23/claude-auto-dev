@@ -6,6 +6,7 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 const { spawnSync } = require('child_process');
+const { spawnSyncCpu } = require('./cpu-telemetry.js');
 
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'imgscan-'));
 const hook = path.resolve(__dirname, '..', 'plugins', 'autodev-core', 'hooks', 'user-prompt-image-scan.js');
@@ -108,9 +109,8 @@ function timeOnce(transcriptPath, opts = {}) {
         hook_event_name: 'UserPromptSubmit',
         prompt: opts.prompt || 'test',
     };
-    const start = process.hrtime.bigint();
-    spawnSync('node', [hook], { input: JSON.stringify(payload), encoding: 'utf8' });
-    return Number(process.hrtime.bigint() - start) / 1e6;
+    // CPU the hook process spent, read from its own record (null: no record).
+    return spawnSyncCpu('node', [hook], { input: JSON.stringify(payload), encoding: 'utf8' }).cpu.cpuMs;
 }
 
 // --- Run ---
@@ -184,25 +184,24 @@ assert('case 6 writes NOTHING at all (not an empty envelope)', results[5].stdout
 assert('case 5 uses auto-mode directive', results[4].context.includes('AUTO MODE IS ACTIVE'));
 assert('case 2 uses base directive (not auto)', !results[1].context.includes('AUTO MODE IS ACTIVE'));
 
-// Performance budget.
+// Performance budget, in CPU milliseconds.
 //
-// A fixed wall-clock threshold flakes: most of each run is Node process startup,
-// which swings by 5-10x between an idle laptop and a loaded CI runner. Measure
-// this machine's bare `node` startup first and budget the hook's OWN work
-// against that, so the assertion tracks the thing that can actually regress.
-const timeBareNode = () => {
-    const t0 = process.hrtime.bigint();
-    spawnSync('node', ['-e', ''], { encoding: 'utf8' });
-    return Number(process.hrtime.bigint() - t0) / 1e6;
-};
+// Most of each run is Node process startup, so the hook's OWN work is budgeted
+// against a bare `node` run beside it. Both are CPU the process measured itself
+// (tooling/cpu-telemetry.js), never a wall clock: the history below is four
+// wall-clock designs that each flaked under load, and the last paragraph is why
+// this one does not.
+const timeBareNode = () => spawnSyncCpu('node', ['-e', ''], { encoding: 'utf8' }).cpu.cpuMs;
 
-// The allowance for the hook's OWN work, on top of whatever Node startup costs
-// right now. Deliberately unchanged: raising it hides a real regression of up to
-// the new margin, which the note below already rejected once.
+// The allowance for the hook's OWN work, on top of whatever Node startup costs.
+// The number is the one the wall-clock budget carried, now in CPU ms. Raising it
+// hides a real regression of up to the new margin, which the note below rejected.
 const OWN_WORK_BUDGET_MS = 150;
 
+const minOf = (xs) => (xs.some((x) => x === null) ? null : Math.min(...xs));
+const startup = minOf([timeBareNode(), timeBareNode(), timeBareNode()]);
 console.log('');
-console.log('Node startup, min of 3 taken now: ' + Math.min(timeBareNode(), timeBareNode(), timeBareNode()).toFixed(1) + ' ms');
+console.log('Node startup CPU, min of 3 taken now: ' + (startup === null ? 'NOT MEASURED' : startup.toFixed(1) + ' ms'));
 
 // Compare FLOOR to FLOOR, and never on a single sample.
 //
@@ -252,13 +251,17 @@ console.log('Node startup, min of 3 taken now: ' + Math.min(timeBareNode(), time
 // load varies on a shorter timescale than the sampling. More samples raise the
 // cost without removing the failure.
 //
-// So this now REFUSES TO JUDGE when the machine is too noisy to time anything,
-// and says so. Detected from the baseline's own spread, which needs no knowledge
-// of the hook. A budget that reports NOT MEASURED under load never produces a
-// false red, and a false red is worse than a false green here: it looks like
-// diligence, so it gets acted on, and the action is a change to working code.
+// The wall-clock version then REFUSED TO JUDGE when the bare-node spread said the
+// machine was too noisy, which stopped the false reds and left the budget
+// unmeasured on exactly the loaded runs where a gate spends its time.
+//
+// `[2026-10-02]` THE ROOT PROBLEM IS GONE RATHER THAN DETECTED. Each process now
+// reports its own CPU (tooling/cpu-telemetry.js). Other processes on the machine
+// move a wall clock by multiples and CPU time far less, so the spread refusal is
+// retired. Windows counts CPU in 15.6 ms ticks, which is why the floors are still
+// minimums over samples. A sample with no CPU record (a killed run, a preload
+// that did not load) is NOT MEASURED for its case, never zero.
 const TIMING_SAMPLES = 5;
-const NOISE_CEILING = 2.5;   // max/min bare-node spread we will still time under
 let timedCases = 0;
 
 for (let i = 0; i < caseSpecs.length; i++) {
@@ -269,34 +272,30 @@ for (let i = 0; i < caseSpecs.length; i++) {
         bares.push(timeBareNode());
         totals.push(timeOnce(transcriptPath, opts));
     }
-    const bareFloor = Math.min(...bares);
-    const spread = Math.max(...bares) / bareFloor;
-    const ownWork = Math.min(...totals) - bareFloor;
-
-    if (spread > NOISE_CEILING) {
-        // Worded as a deficiency, not a category. "Not applicable" invites
-        // agreement; NOT MEASURED invites someone to re-run it on a quiet box.
-        console.log('  NOT MEASURED  case ' + (i + 1) + ' timing is unjudgeable: bare-node spread '
-            + spread.toFixed(1) + 'x over ' + TIMING_SAMPLES + ' samples (ceiling '
-            + NOISE_CEILING + 'x). The machine is too loaded to time a subprocess.');
+    const bareFloor = minOf(bares);
+    const totalFloor = minOf(totals);
+    if (bareFloor === null || totalFloor === null) {
+        console.log('  NOT MEASURED  case ' + (i + 1) + ': a sample left no CPU record ('
+            + bares.filter((x) => x === null).length + ' bare, ' + totals.filter((x) => x === null).length
+            + ' hook, of ' + TIMING_SAMPLES + ' each).');
         continue;
     }
+    const ownWork = totalFloor - bareFloor;
     timedCases++;
     assert(
-        'case ' + (i + 1) + ' own work within budget (' + ownWork.toFixed(1) + ' ms of '
-        + OWN_WORK_BUDGET_MS + ' ms; floors ' + Math.min(...totals).toFixed(0) + ' total - '
-        + bareFloor.toFixed(0) + ' bare, spread ' + spread.toFixed(1) + 'x)',
+        'case ' + (i + 1) + ' own work within budget (' + ownWork.toFixed(1) + ' CPU ms of '
+        + OWN_WORK_BUDGET_MS + ' ms; floors ' + totalFloor.toFixed(0) + ' total - '
+        + bareFloor.toFixed(0) + ' bare)',
         ownWork < OWN_WORK_BUDGET_MS
     );
 }
 
-// Skipping every case is not a pass. If the machine was too loaded to time even
-// one, this check had NO subject, and a gate with no subject reporting green is
-// how absent coverage becomes reported coverage. Fail instead, so somebody re-runs
-// it somewhere quiet rather than reading silence as health.
+// Skipping every case is not a pass. If no case could be measured, this check
+// had NO subject, and a gate with no subject reporting green is how absent
+// coverage becomes reported coverage. Fail instead.
 assert(
     'the timing budget had at least one measurable case (' + timedCases + ' of '
-    + caseSpecs.length + ' timed; the rest were too noisy)',
+    + caseSpecs.length + ' timed; the rest left no CPU record)',
     timedCases > 0
 );
 

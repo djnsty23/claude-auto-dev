@@ -21,6 +21,9 @@
 //   5. Case variants of TEMP/TMP/TMPDIR in the base env are replaced, never
 //      left beside the new keys, and the child's os.tmpdir() is the root.
 //   6. The four runners that start suites all route through the helper.
+//   7. The async spawnSuite resolves only after the child closed AND its root
+//      is gone, keeps spawnSync's result shape (status, ETIMEDOUT, a spawn
+//      error), and does not hang on a grandchild that holds its pipes.
 //
 // Run: node tooling/test-suite-tmp.js
 
@@ -69,13 +72,15 @@ const leaky = (name, exit) => [
     fs.mkdirSync(tooling);
     fs.copyFileSync(path.join(TOOLING, 'test-all.js'), path.join(tooling, 'test-all.js'));
     fs.copyFileSync(HELPER, path.join(tooling, 'suite-tmp.js'));
+    fs.copyFileSync(path.join(TOOLING, 'coverage-receipt.js'), path.join(tooling, 'coverage-receipt.js'));
     fs.writeFileSync(path.join(tooling, 'validate.js'), 'process.exit(0);\n');
     fs.writeFileSync(path.join(tooling, 'test-a-leak-pass.js'), leaky('a', 0));
     fs.writeFileSync(path.join(tooling, 'test-b-leak-fail.js'), leaky('b', 1));
 
     const parent = mk('runner-parent');
     const r = spawnSync(process.execPath, [path.join(tooling, 'test-all.js')], {
-        cwd: root, encoding: 'utf8', timeout: 120000, env: tmpEnv(parent),
+        cwd: root, encoding: 'utf8', timeout: 120000,
+        env: Object.assign(tmpEnv(parent), { AUTODEV_COVERAGE_STORE: mk('runner-store') }),
     });
     const out = (r.stdout || '') + (r.stderr || '');
     if (r.error || r.signal) {
@@ -201,10 +206,63 @@ const leaky = (name, exit) => [
 const RUNNERS = ['test-all.js', 'check-suites-can-fail.js', 'find-untested-functions.js', 'find-vacuous-assertions.js'];
 for (const f of RUNNERS) {
     const src = fs.readFileSync(path.join(TOOLING, f), 'utf8');
-    check(`${f} requires suite-tmp.js and starts suites with spawnSuiteSync`,
-        /require\('\.\/suite-tmp\.js'\)/.test(src) && /spawnSuiteSync\(/.test(src));
+    check(`${f} requires suite-tmp.js and starts suites with spawnSuiteSync or spawnSuite`,
+        /require\('\.\/suite-tmp\.js'\)/.test(src) && /spawnSuite(Sync)?\(/.test(src));
 }
 
+// --- 7. the async spawnSuite ------------------------------------------------
+async function asyncCases() {
+    const parent = mk('async-parent');
+    {
+        const chunks = [];
+        let rootAtResolve = null;
+        const r = await st.spawnSuite(process.execPath, ['-e', "process.stdout.write(require('os').tmpdir()); process.exitCode = 3"],
+            { stdio: ['ignore', 'pipe', 'pipe'] }, { label: 'async-ok', parent, onStdout: (c) => chunks.push(c) });
+        rootAtResolve = r.tmpRoot && fs.existsSync(r.tmpRoot);
+        const saw = Buffer.concat(chunks).toString('utf8');
+        check('spawnSuite resolves with the child\'s own status (3)', r.status === 3 && r.signal === null && !r.error, JSON.stringify(r));
+        check('  the child ran in its root, and the root is gone BY THE TIME it resolves',
+            saw === r.tmpRoot && rootAtResolve === false && r.tmpRemoved === true, `saw=${saw} root=${r.tmpRoot} existed=${rootAtResolve}`);
+    }
+    {
+        const t0 = Date.now();
+        const r = await st.spawnSuite(process.execPath, ['-e', 'setInterval(() => {}, 1000)'],
+            { stdio: 'ignore', timeout: 1500 }, { label: 'async-timeout', parent });
+        check('a timeout kill resolves with error ETIMEDOUT, like spawnSync',
+            r.error && r.error.code === 'ETIMEDOUT' && Date.now() - t0 < 60000, JSON.stringify({ e: r.error && r.error.code, s: r.status, sig: r.signal }));
+        check('  and its root is removed', r.tmpRemoved === true && !fs.existsSync(r.tmpRoot), r.tmpRoot);
+    }
+    {
+        const r = await st.spawnSuite(path.join(WORK, 'no-such-executable'), [], { stdio: 'ignore' }, { label: 'async-enoent', parent });
+        check('a spawn that never starts resolves with its error and removes the root',
+            r.error && r.error.code === 'ENOENT' && r.tmpRemoved === true, JSON.stringify({ e: r.error && r.error.code, removed: r.tmpRemoved }));
+    }
+    {
+        // A grandchild that inherits the pipes and outlives the child would hold
+        // 'close' until it exits. The grace period ends that wait.
+        const pidFile = path.join(WORK, 'grandchild.pid');
+        const body = "const { spawn } = require('child_process');"
+            + "const g = spawn(process.execPath, ['-e', 'setTimeout(() => {}, 30000)'], { stdio: 'inherit', detached: true });"
+            + `require('fs').writeFileSync(${JSON.stringify(pidFile)}, String(g.pid)); g.unref();`;
+        const t0 = Date.now();
+        const r = await st.spawnSuite(process.execPath, ['-e', body], { stdio: ['ignore', 'pipe', 'pipe'] },
+            { label: 'async-held', parent, closeGraceMs: 1000, onStdout: () => {}, onStderr: () => {} });
+        const took = Date.now() - t0;
+        let gpid = null;
+        try { gpid = Number(fs.readFileSync(pidFile, 'utf8')); } catch { /* checked below */ }
+        if (gpid) { try { process.kill(gpid); } catch { /* already gone */ } }
+        if (!gpid) {
+            infra++;
+            indeterminate.push('the held-pipe case never started its grandchild');
+        } else {
+            check('a grandchild holding the pipes does not hold the runner: resolved well before its 30 s',
+                r.status === 0 && took < 20000, `took ${took} ms, status ${r.status}`);
+            check('  and the result says the pipes were held', r.stdioHeld === true, JSON.stringify(r));
+        }
+    }
+}
+
+function report() {
 let pass = 0, fail = 0;
 for (const [label, ok, detail] of cases) {
     console.log((ok ? 'PASS' : 'FAIL') + '  ' + label + (ok || !detail ? '' : '  -> ' + detail));
@@ -213,3 +271,6 @@ for (const [label, ok, detail] of cases) {
 console.log(`\n${tally(pass, fail, infra)}  (runners checked: ${RUNNERS.length}, subject: tooling/suite-tmp.js)`);
 if (infra) console.log(`indeterminate: ${indeterminate.join(' | ')}`);
 process.exitCode = exitCode(fail, infra);
+}
+
+asyncCases().then(report, (e) => { check('the async cases ran to the end', false, e && e.stack); report(); });

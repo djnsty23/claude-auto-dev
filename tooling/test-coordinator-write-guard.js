@@ -23,6 +23,7 @@
 // rail is worse than no acceptance test.
 
 const { classify, reason, runBudgeted, tally, exitCode } = require('./spawn-budget.js');
+const cpu = require('./cpu-telemetry.js');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
@@ -537,22 +538,21 @@ expectSilentAllow('a Bash call with no command is passed through untouched',
 // plugins/*/hooks/*.js this way with stdin closed and a 10s budget; a hook that
 // blocks on stdin there is reported as a hang.
 {
-    const t0 = Date.now();
-    const res = run({ payload: null, raw: '', args: ['--help'] });
-    const ms = Date.now() - t0;
-    // A RETRIED RUN CANNOT ANSWER A WALL-CLOCK QUESTION. `ms` spans every
-    // attempt plus the contention probe between them, so on a retry it exceeds
-    // the budget that provoked the retry and would fail this for the one reason
-    // it must not: the machine was busy, which is not a fact about the hook.
-    if (res.attempts > 1) {
+    // The budget is the hook's own CPU over the empty-node floor, measured
+    // inside the hook (tooling/cpu-telemetry.js), so a busy machine cannot move
+    // it. A RETRIED RUN, or one that left no CPU record, CANNOT ANSWER IT: the
+    // measurement spans a killed attempt, which is indeterminate, never zero.
+    const { value: res, cpu: c } = cpu.measure(() => run({ payload: null, raw: '', args: ['--help'] }));
+    const own = cpu.ownCpuMs(c);
+    if (res.attempts > 1 || own.ms === null) {
         infra++;
-        indeterminate.push('--help timing (the run retried, so the wall clock spans a killed attempt)');
-        console.error('infrastructure: --help timing not measurable (' + res.attempts
-            + ' attempt(s), ' + ms + 'ms spans a killed attempt)');
+        const why = res.attempts > 1 ? 'the run retried, so the measurement spans a killed attempt' : own.why;
+        indeterminate.push('--help CPU (' + why + ')');
+        console.error('infrastructure: --help CPU not measurable (' + why + ')');
     } else {
-        const ok = res.exit === 0 && res.stdout.length > 0 && !res.timedOut && ms < 10000;
-        check('--help returns 0 with usage on stdout, well inside the entrypoint budget', ok,
-            `exit ${res.exit}, ${ms}ms, stdout ${res.stdout.length}B`);
+        const ok = res.exit === 0 && res.stdout.length > 0 && !res.timedOut && own.ms < 10000;
+        check('--help returns 0 with usage on stdout, well inside the entrypoint CPU budget', ok,
+            `exit ${res.exit}, ${Math.round(own.ms)} CPU ms over the node floor, stdout ${res.stdout.length}B`);
     }
 }
 
@@ -560,18 +560,18 @@ expectSilentAllow('a Bash call with no command is passed through untouched',
 // lesson, applied to this hook's own scanning.
 {
     writeRole({ session_id: 'SESSION-A', home_repos: [HOME_REPO] });
-    const t0 = Date.now();
-    const res = run({ payload: bash('echo ' + '"a b c" && '.repeat(4000) + 'true') });
-    const ms = Date.now() - t0;
-    // Same reasoning as the --help timing above: a retry makes the clock unreadable.
-    if (res.attempts > 1) {
+    const { value: res, cpu: c } = cpu.measure(() => run({ payload: bash('echo ' + '"a b c" && '.repeat(4000) + 'true') }));
+    const own = cpu.ownCpuMs(c);
+    // Same reasoning as the --help budget above: a retry or a missing record
+    // makes the CPU unreadable. The spawn's own timeout stays the hang watchdog.
+    if (res.attempts > 1 || own.ms === null) {
         infra++;
-        indeterminate.push('4,000-segment timing (the run retried, so the wall clock spans a killed attempt)');
-        console.error('infrastructure: 4,000-segment timing not measurable (' + res.attempts
-            + ' attempt(s), ' + ms + 'ms spans a killed attempt)');
+        const why = res.attempts > 1 ? 'the run retried, so the measurement spans a killed attempt' : own.why;
+        indeterminate.push('4,000-segment CPU (' + why + ')');
+        console.error('infrastructure: 4,000-segment CPU not measurable (' + why + ')');
     } else {
-        const ok = res.exit === 0 && !res.timedOut && ms < 5000;
-        check('a 4,000-segment command does not hang the hook', ok, `exit ${res.exit}, ${ms}ms`);
+        const ok = res.exit === 0 && !res.timedOut && own.ms < 5000;
+        check('a 4,000-segment command does not hang the hook', ok, `exit ${res.exit}, ${Math.round(own.ms)} CPU ms over the node floor`);
     }
 }
 
