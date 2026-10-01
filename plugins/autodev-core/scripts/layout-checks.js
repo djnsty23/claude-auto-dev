@@ -894,7 +894,7 @@ function analyseComponents(snapshot, T) {
             }
             if (wrapped) { exempt.wrappedByTarget++; continue; }
             push(CODES.TAP_TARGET, e.sel, { w, h, kind: e.ia, text: e.txt || null },
-                `a ${e.ia} target measures ${w}x${h}px`,
+                `a ${e.ia === 'a' ? 'link' : e.ia} target measures ${w}x${h}px`,
                 `tap target < ${T.tapMinPx}x${T.tapMinPx}px at width <= ${T.touchMaxWidth}`, [e]);
         }
     }
@@ -921,6 +921,11 @@ function analyseComponents(snapshot, T) {
     // space between consecutive ones (the gap, plus their facing padding when
     // they are unpainted, because then the padding is visible whitespace)
     // should not spread wider than rhythmTolPx.
+    //
+    // Only boxes that stack count. `[measured 2026-10-01]` on a real product
+    // three or four inline nowrap spans inside one paragraph wrapped onto
+    // lines 1, 2 and 4 and read as "unevenly spaced blocks" on 6 captures:
+    // where an inline run breaks is the text's business, not a rhythm.
     for (const [, sibs] of kids) {
         let run = [];
         const flush = () => {
@@ -942,6 +947,7 @@ function analyseComponents(snapshot, T) {
             run = [];
         };
         for (const e of sibs) {
+            if (e.d === 'inline' || e.d === 'contents') { flush(); continue; }
             const prev = run[run.length - 1];
             const same = prev && prev.tag === e.tag && prev.cls === e.cls && e.box.t >= prev.box.b - 1;
             if (!same) flush();
