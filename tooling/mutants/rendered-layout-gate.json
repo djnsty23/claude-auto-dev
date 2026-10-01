@@ -110,7 +110,7 @@
       "id": "M17",
       "name": "a pinned bar counts at every scroll position, sticky-header noise",
       "file": "plugins/autodev-core/scripts/layout-checks.js",
-      "from": "if (PINNED.has(o.position) && (t.scrollY || 0) > 0) return false;",
+      "from": "if ((PINNED.has(o.position) || PINNED.has(o.pinnedBy)) && (t.scrollY || 0) > 0) return false;",
       "to": "",
       "expect": "clean @\\d+: ZERO findings|clean control still reports nothing"
     },
@@ -118,9 +118,17 @@
       "id": "M18",
       "name": "a pinned bar is exempt at EVERY scroll position, rest included",
       "file": "plugins/autodev-core/scripts/layout-checks.js",
-      "from": "if (PINNED.has(o.position) && (t.scrollY || 0) > 0) return false;",
-      "to": "if (PINNED.has(o.position)) return false;",
+      "from": "if ((PINNED.has(o.position) || PINNED.has(o.pinnedBy)) && (t.scrollY || 0) > 0) return false;",
+      "to": "if (PINNED.has(o.position) || PINNED.has(o.pinnedBy)) return false;",
       "expect": "an occlusion finding exists to inspect|and it is still reported"
+    },
+    {
+      "id": "M22",
+      "name": "a static child of a pinned bar is judged as if it scrolled with the page",
+      "file": "plugins/autodev-core/scripts/layout-checks.js",
+      "from": "if ((PINNED.has(o.position) || PINNED.has(o.pinnedBy)) && (t.scrollY || 0) > 0) return false;",
+      "to": "if (PINNED.has(o.position) && (t.scrollY || 0) > 0) return false;",
+      "expect": "clean @\\d+: ZERO findings|clean control still reports nothing"
     },
     {
       "id": "M10",

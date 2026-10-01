@@ -1,7 +1,7 @@
 ---
 name: unslop
-description: Sweep a product's routes at phone and desktop widths for layout slop (mismatched control rows, glued controls, double borders, short stripes, missing gutters, small tap targets, truncated text, broken rhythm, overflow), turn what is measured into fix stories by component, hand them to auto, and prove each fix with a before/after scorecard. One word starts the whole operation.
-when_to_use: "Invoked when the user says \"unslop\", \"sweep the UI\", \"is it sloppy\", \"clean up the UI\", \"visual sweep\", before ship on any UI change, or when the Brain dispatches a periodic per-product sweep."
+description: Sweep a product's routes at phone and desktop widths for layout slop (mismatched control rows, glued controls, double borders, short stripes, missing gutters, small tap targets, truncated text, broken rhythm, overflow), turn what is measured into fix stories by component, hand them to auto, and prove each fix with a before/after scorecard.
+when_to_use: "Invoked when the user says \"unslop\", \"sweep the UI\", \"is it sloppy\", \"clean up the UI\", \"visual sweep\", before ship on any UI change, or when the Brain dispatches a scheduled per-product sweep."
 allowed-tools: Bash, Read, Write, Edit, Grep, Glob, Agent, Task
 model: opus
 user-invocable: true
