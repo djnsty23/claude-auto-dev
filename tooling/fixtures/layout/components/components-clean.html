@@ -9,8 +9,9 @@
 
     a header row of consistent 44px controls, one of them a pill and one a
       circular avatar (radius is compared only among non-pill controls)
-    a segmented button group: three controls touching, all one height, frame
-      and fill (GLUED-CONTROLS exempts a consistent group)
+    a segmented button group: three controls touching, all one height and
+      frame, square where they join, the last one selected and filled
+      (GLUED-CONTROLS exempts a consistent group and a selected segment)
     a progress track whose fill does not span it (a track, not a stripe)
     a centred 48px accent on a section's bottom edge (an accent, not a stripe)
     a card whose top stripe spans it
@@ -40,6 +41,7 @@
   .accent{position:absolute;left:50%;bottom:0;width:48px;height:4px;margin-left:-24px;background:#1d4ed8;border-radius:2px}
   .seg{display:inline-flex}
   .seg button{height:44px;padding:0 14px;border:1px solid #d4d4d4;background:#fff;font:inherit;font-size:14px}
+  .seg button[aria-pressed="true"]{background:#111;border-color:#111;color:#fff}
   .track{height:8px;background:#eee;border-radius:4px;margin:16px 0}
   .fill{height:8px;width:60%;background:#16a34a;border-radius:4px}
   .card{position:relative;border:1px solid #e5e5e5;border-radius:12px;overflow:hidden;margin:0 0 24px;padding:16px}
@@ -91,7 +93,7 @@
     <h1>Overview</h1>
     <p>Read the <a href="#">guide</a> or the <a href="#">changelog</a> before you start.</p>
     <div class="seg" role="group" aria-label="Range">
-      <button>Day</button><button>Week</button><button>Month</button>
+      <button aria-pressed="false">Day</button><button aria-pressed="false">Week</button><button aria-pressed="true">Month</button>
     </div>
     <div class="track"><div class="fill"></div></div>
     <span class="accent"></span>
