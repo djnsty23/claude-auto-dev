@@ -236,8 +236,16 @@ const card = (entries) => SWEEP.scorecardOf(entries.map(([route, name, w, extra]
     check('pair-score: a judge that always picks after scores 1', SWEEP.scorePairs(p1.key, perfect).winRate === 1);
     const inverted = Object.fromEntries(Object.entries(p1.key).map(([id, k]) => [id, k.after === 'a' ? 'b' : 'a']));
     check('pair-score: one that always picks before scores 0', SWEEP.scorePairs(p1.key, inverted).winRate === 0);
-    const partial = SWEEP.scorePairs(p1.key, { p001: 'tie' });
-    check('pair-score: ties and unanswered pairs are counted apart', partial.ties === 1 && partial.missing === 3 && partial.winRate === 0, partial);
+    check('pairs: every capture is shown twice, once with the after image on each side', p1.manifest.length === 8 && Object.keys(before).every((c) => { const s = Object.values(p1.key).filter((k) => k.capture === c).map((k) => k.after).sort().join(''); return s === 'ab'; }), p1.key);
+    const byCap = (c) => Object.entries(p1.key).filter(([, k]) => k.capture === c);
+    const tieA = Object.fromEntries(byCap('a').map(([id]) => [id, 'tie']));
+    const halfB = { [byCap('b')[0][0]]: byCap('b')[0][1].after };
+    const partial = SWEEP.scorePairs(p1.key, { ...tieA, ...halfB });
+    check('pair-score: ties and unanswered captures are counted apart', partial.ties === 1 && partial.missing === 3 && partial.judged === 1 && partial.winRate === 0, partial);
+    const allA = SWEEP.scorePairs(p1.key, Object.fromEntries(Object.keys(p1.key).map((id) => [id, 'a'])));
+    check('pair-score: a judge that always answers "a" wins nothing and is caught as inconsistent', allA.wins === 0 && allA.losses === 0 && allA.inconsistent === 4 && allA.winRate === 0 && allA.positionBias.a === 8 && allA.positionBias.b === 0, allA);
+    const swapped = SWEEP.scorePairs(p1.key, Object.fromEntries(Object.entries(p1.key).map(([id, k]) => [id, (k.capture === 'a' && k.after === 'a') ? 'b' : k.after])));
+    check('pair-score: one swapped label makes that capture inconsistent, not a win', swapped.wins === 3 && swapped.inconsistent === 1 && swapped.winRate === 0.75, swapped);
 }
 
 // ------------------------------------------------------------ routes
@@ -329,7 +337,7 @@ function page(ctx) {
 module.exports = {
   log,
   chromium: { launch: async () => ({
-    newContext: async (opt) => { log.push('ctx ' + opt.viewport.width + ' ' + opt.isMobile); const ctx = { signedIn: false }; return { addInitScript: async () => { log.push('init'); }, newPage: async () => page(ctx), close: async () => {} }; },
+    newContext: async (opt) => { log.push('ctx ' + opt.viewport.width + ' ' + opt.isMobile); const ctx = { signedIn: false }; return { addInitScript: async () => { log.push('init'); }, addCookies: async (c) => { log.push('cookies ' + c.map((x) => x.name + '=' + x.value + '@' + x.url).join(';')); }, newPage: async () => page(ctx), close: async () => {} }; },
     close: async () => {},
   }) },
 };
@@ -344,10 +352,11 @@ async function sweepTests() {
     fs.writeFileSync(listFile, '/\n/pricing\n/app/codes\n/app/settings\n');
     const out1 = path.join(tmp, 'sweep1');
     const fake = require(FAKE);
-    const r1 = await SWEEP.sweep({ base: 'http://localhost:3999', out: out1, 'routes-file': listFile, playwright: FAKE, axe: AXE, 'init-storage': STORAGE, quiet: true, widths: '390,1280' });
+    const r1 = await SWEEP.sweep({ base: 'http://localhost:3999', out: out1, 'routes-file': listFile, playwright: FAKE, axe: AXE, 'init-storage': STORAGE, cookies: 'consent=v1.0.0', quiet: true, widths: '390,1280' });
     check('sweep: every route at every width was captured', r1.captures.length === 8, r1.captures.map((c) => c.label));
     check('sweep: a touch width gets a mobile context, a desktop one does not', fake.log.includes('ctx 390 true') && fake.log.includes('ctx 1280 false'));
     check('sweep: the stored consent choice is set before every page', fake.log.filter((l) => l === 'init').length === 2);
+    check('sweep: a consent cookie is set for the base host in every context', fake.log.filter((l) => l === 'cookies consent=v1.0.0@http://localhost:3999').length === 2, fake.log.filter((l) => l.startsWith('cookies')));
     const redirected = r1.captures.filter((c) => c.redirectedTo);
     check('sweep: a protected route that redirects to login is recorded as redirected', redirected.length === 4 && redirected.every((c) => c.redirectedTo === '/login'), redirected.map((c) => c.redirectedTo));
     const dup = r1.captures.filter((c) => c.result.status === 'REDIRECT');

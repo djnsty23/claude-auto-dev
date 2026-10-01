@@ -18,7 +18,7 @@
  *   stories       group the findings by component into prd.json fix stories
  *   compare       the before/after delta table, and whether a fix COUNTS
  *   pairs         blind before/after screenshot pairs for a vision judge
- *   pair-score    the judge's win rate for the after side, from its verdicts
+ *   pair-score    the judge's win rate for the after side, per capture, from its verdicts
  *   vision-pack   the screenshots and rubric for the vision pass
  *   vision-merge  validate the vision findings, drop what the rules already
  *                 measured, and keep the rest as a separate ADVISORY section
@@ -468,37 +468,71 @@ function rng(seed) {
 }
 
 /**
- * Before/after shot pairs in shuffled order. Returns the judge's manifest
- * (pair id, image A, image B, nothing else) and the key (which side is the
- * after), kept apart so the judge never sees it.
+ * Before/after shot pairs for a blind judge. Every capture is shown TWICE, once
+ * with the after image as A and once as B, under ids shuffled across the whole
+ * set, so a judge that reads by position, or swaps its labels, cannot score.
+ * Returns the judge's manifest (pair id, image A, image B, nothing else) and
+ * the key (capture and which side is the after), kept apart.
  */
 function makePairs(beforeShots, afterShots, seed) {
     const rand = rng(seed);
+    const entries = [];
+    for (const k of Object.keys(beforeShots).filter((c) => afterShots[c]).sort()) {
+        entries.push({ capture: k, after: 'a' }, { capture: k, after: 'b' });
+    }
+    for (let i = entries.length - 1; i > 0; i--) {
+        const j = Math.floor(rand() * (i + 1));
+        [entries[i], entries[j]] = [entries[j], entries[i]];
+    }
     const manifest = [];
     const key = {};
-    const ids = Object.keys(beforeShots).filter((k) => afterShots[k]).sort();
-    ids.forEach((k, i) => {
+    entries.forEach((e, i) => {
         const id = 'p' + String(i + 1).padStart(3, '0');
-        const afterIsA = rand() < 0.5;
-        manifest.push({ id, a: afterIsA ? afterShots[k] : beforeShots[k], b: afterIsA ? beforeShots[k] : afterShots[k] });
-        key[id] = { capture: k, after: afterIsA ? 'a' : 'b' };
+        const k = e.capture;
+        manifest.push({ id, a: e.after === 'a' ? afterShots[k] : beforeShots[k], b: e.after === 'a' ? beforeShots[k] : afterShots[k] });
+        key[id] = { capture: k, after: e.after };
     });
     return { manifest, key };
 }
 
-/** Win rate of the after side over the judge's verdicts {id: 'a'|'b'|'tie'}. */
+/**
+ * The after side's win rate per CAPTURE over the judge's verdicts
+ * {id: 'a'|'b'|'tie'}. A capture counts for a side only when every ordering of
+ * it agrees. One that flips with the order is `inconsistent`: it is judged, so
+ * it lowers the win rate, and `positionBias` says which label the judge leaned on.
+ */
 function scorePairs(key, verdicts) {
-    let wins = 0, losses = 0, ties = 0, missing = 0;
-    const per = [];
+    const byCapture = new Map();
+    let pickedA = 0, pickedB = 0;
     for (const [id, k] of Object.entries(key)) {
         const v = verdicts ? verdicts[id] : undefined;
-        if (v !== 'a' && v !== 'b' && v !== 'tie') { missing++; continue; }
-        const outcome = v === 'tie' ? 'tie' : v === k.after ? 'after' : 'before';
-        if (outcome === 'after') wins++; else if (outcome === 'before') losses++; else ties++;
-        per.push({ id, capture: k.capture, preferred: outcome });
+        const list = byCapture.get(k.capture) || [];
+        if (v !== 'a' && v !== 'b' && v !== 'tie') list.push(null);
+        else {
+            if (v === 'a') pickedA++; else if (v === 'b') pickedB++;
+            list.push(v === 'tie' ? 'tie' : v === k.after ? 'after' : 'before');
+        }
+        byCapture.set(k.capture, list);
     }
-    const judged = wins + losses + ties;
-    return { pairs: Object.keys(key).length, judged, wins, losses, ties, missing, winRate: judged ? Math.round((wins / judged) * 1000) / 1000 : null, per };
+    let wins = 0, losses = 0, ties = 0, inconsistent = 0, missing = 0;
+    const per = [];
+    for (const [capture, list] of byCapture) {
+        let preferred;
+        if (list.includes(null)) { missing++; preferred = 'unanswered'; }
+        else if (list.every((o) => o === list[0])) {
+            preferred = list[0];
+            if (preferred === 'after') wins++; else if (preferred === 'before') losses++; else ties++;
+        } else { inconsistent++; preferred = 'inconsistent'; }
+        per.push({ capture, preferred, verdicts: list });
+    }
+    const judged = wins + losses + ties + inconsistent;
+    const sided = pickedA + pickedB;
+    return {
+        pairs: Object.keys(key).length, captures: byCapture.size, judged, wins, losses, ties, inconsistent, missing,
+        winRate: judged ? Math.round((wins / judged) * 1000) / 1000 : null,
+        positionBias: sided ? { a: pickedA, b: pickedB } : null,
+        per,
+    };
 }
 
 // ---------------------------------------------------------------- vision
@@ -674,6 +708,14 @@ async function sweep(args) {
         } catch { axeSource = null; }
     }
     const initStorage = args['init-storage'] ? JSON.parse(fs.readFileSync(path.resolve(args['init-storage']), 'utf8')) : null;
+    // A consent choice kept in a cookie rather than storage: --cookies name=value[,name=value].
+    const initCookies = typeof args.cookies === 'string'
+        ? args.cookies.split(',').map((kv) => kv.trim()).filter(Boolean).map((kv) => {
+            const at = kv.indexOf('=');
+            if (at < 1) throw new Bail(2, `--cookies wants name=value, got: ${kv}`);
+            return { name: kv.slice(0, at), value: kv.slice(at + 1), url: base };
+        })
+        : null;
     const baseline = args.baseline ? path.resolve(args.baseline) : null;
 
     fs.mkdirSync(path.join(out, 'shots'), { recursive: true });
@@ -697,6 +739,7 @@ async function sweep(args) {
                 if (initStorage) {
                     await ctx.addInitScript((kv) => { try { for (const k of Object.keys(kv)) localStorage.setItem(k, kv[k]); } catch (e) { /* storage blocked */ } }, initStorage);
                 }
+                if (initCookies) await ctx.addCookies(initCookies);
                 const page = await ctx.newPage();
                 let ok = true;
                 if (st.name === 'signed-in') {
@@ -924,7 +967,7 @@ function selftest() {
     const cardB = { routes: [{ route: '/', state: 'signed-out', widths: { 390: { status: 'MEASURED', rules: {}, ruleHits: 0, axe: 0, ooc: 0 } } }] };
     say(compareScorecards(cardA, cardB).verdict === 'COUNTS' && compareScorecards(cardB, cardA).verdict === 'NO-DROP', 'compare: a drop counts and its reverse does not');
     const pr = makePairs({ x: 'b.png' }, { x: 'a.png' }, 7);
-    say(scorePairs(pr.key, { p001: pr.key.p001.after }).winRate === 1, 'pairs: a judge that picks the after side scores 1');
+    say(scorePairs(pr.key, Object.fromEntries(Object.entries(pr.key).map(([id, k]) => [id, k.after]))).winRate === 1, 'pairs: a judge that picks the after side scores 1');
     say(findLoginSources(path.join(__dirname, 'no-such-dir')).names.length === 0, 'an unreadable root has no login sources');
     console.log(bad ? `${bad} selftest check(s) failed` : 'selftest passed');
     return bad ? 1 : 0;
@@ -939,7 +982,7 @@ function usage() {
   sweep         --base <local url> [--root <app>] [--out <dir>] [--widths 390,414,1280]
                 [--sitemap ..] [--routes-file ..] [--max-routes 60] [--samples 1]
                 [--email-env NAME --password-env NAME] [--login-path /login] [--signed-in-all]
-                [--init-storage <json>] [--baseline <earlier out>] [--playwright <dir>] [--axe <file>|--no-axe]
+                [--init-storage <json>] [--cookies name=value,..] [--baseline <earlier out>] [--playwright <dir>] [--axe <file>|--no-axe]
                 [--sha <commit>] [--strict] [--quiet]
   report        <out> [--top 10] [--json]
   stories       <out> [--prd prd.json] [--write] [--sprint N]
@@ -1051,7 +1094,7 @@ async function main(argv) {
         // The key is written beside, never inside, what the judge reads. Give
         // the judge pairs.json and the images only.
         fs.writeFileSync(path.join(dir, '.key.json'), JSON.stringify(pr.key, null, 1));
-        console.log(`${manifest.length} blind pairs in ${dir} (judge reads pairs.json and the images; .key.json stays with you)`);
+        console.log(`${manifest.length} blind pairs (${manifest.length / 2} captures, each in both orders) in ${dir} (judge reads pairs.json and the images; .key.json stays with you)`);
         return 0;
     }
     if (cmd === 'pair-score') {
@@ -1059,7 +1102,9 @@ async function main(argv) {
         const key = JSON.parse(fs.readFileSync(path.join(dir, '.key.json'), 'utf8'));
         const verdicts = JSON.parse(fs.readFileSync(path.resolve(args.verdicts), 'utf8'));
         const s = scorePairs(key, verdicts);
-        console.log(`after preferred in ${s.wins} of ${s.judged} judged pairs (win rate ${s.winRate == null ? 'n/a' : s.winRate}); before ${s.losses}, tie ${s.ties}, unanswered ${s.missing}`);
+        console.log(`after preferred in ${s.wins} of ${s.judged} judged captures (win rate ${s.winRate == null ? 'n/a' : s.winRate}); before ${s.losses}, tie ${s.ties}, inconsistent across orderings ${s.inconsistent}, unanswered ${s.missing}`);
+        if (s.positionBias) console.log(`labels picked: a ${s.positionBias.a}, b ${s.positionBias.b} over ${s.pairs} pairs (each capture is shown in both orders)`);
+        for (const p of s.per) if (p.preferred === 'inconsistent') console.log(`  inconsistent: ${p.capture} (${p.verdicts.join(' / ')})`);
         return 0;
     }
     if (cmd === 'vision-pack') {
