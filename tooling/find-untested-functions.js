@@ -35,7 +35,9 @@
 // Usage:
 //   node tooling/find-untested-functions.js          # runs the suite, then reports
 //   node tooling/find-untested-functions.js --json
-//   node tooling/find-untested-functions.js --gate   # npm run check:coverage
+//   node tooling/find-untested-functions.js --gate   # npm run check:coverage: grades the receipt npm test left
+//   node tooling/find-untested-functions.js --gate --fresh   # the same gate, from a fresh run of every suite
+//   node tooling/find-untested-functions.js --receipt        # the bare report, from the receipt
 //   node tooling/find-untested-functions.js --max-untested N [--max-never-loaded M]
 //   node tooling/find-untested-functions.js --root DIR ...   # measure another tree
 //
@@ -123,17 +125,21 @@ const os = require('os');
 const path = require('path');
 const { spawnSync } = require('child_process');
 const { spawnSuiteSync } = require('./suite-tmp.js');
+const receipts = require('./coverage-receipt.js');
 
 const argv = process.argv.slice(2);
 // `[measured 2026-09-02]` --help fell through to the full coverage run, so a
 // probe for what this does got a sweep instead; check-entrypoints.js gates it.
 if (argv.includes('--help') || argv.includes('-h')) {
-    console.log('usage: node tooling/find-untested-functions.js [--json] [--gate]\n' +
+    console.log('usage: node tooling/find-untested-functions.js [--json] [--gate] [--fresh | --receipt]\n' +
         '         [--max-untested N] [--max-never-loaded M] [--root DIR] [--platform P]\n' +
         'Runs every suite under coverage and lists plugin functions never entered.\n' +
         'Bare: exit 1 if anything is never entered (informational).\n' +
         '--gate: exit 1 only ABOVE this platform\'s measured floor (npm run check:coverage);\n' +
-        '        exit 2 on a platform with no measured floor.\n' +
+        '        exit 2 on a platform with no measured floor. Reads the coverage receipt the last\n' +
+        '        npm test published and spawns no test; a missing, stale, partial or red receipt is exit 2.\n' +
+        '--fresh: run every suite under coverage now instead of reading the receipt (the bare default).\n' +
+        '--receipt: read the receipt without --gate.\n' +
         '--platform P: grade against P\'s floor instead of this host\'s (printed in the verdict).\n' +
         '--refused FILE: report FILE\'s never-called functions apart and do not grade them (repeatable,\n' +
         '        for fixtures; the host platform\'s REFUSED_BY_DESIGN table applies without it).\n' +
@@ -245,6 +251,15 @@ function ceilingOf(flag) {
     return Number(v);
 }
 const gateMode = argv.includes('--gate');
+// WHERE THE COVERAGE COMES FROM. The gate grades the receipt the first test
+// pass published (tooling/coverage-receipt.js), so the chain no longer runs
+// every suite twice. --fresh measures from scratch the old way, and is the
+// bare default, so a hand run with no receipt still answers.
+if (argv.includes('--fresh') && argv.includes('--receipt')) {
+    console.error('--fresh and --receipt name opposite sources; pass one');
+    process.exit(2);
+}
+const receiptMode = argv.includes('--receipt') || (gateMode && !argv.includes('--fresh'));
 // --platform grades against another platform's floor. It exists so a suite can
 // reach the unmeasured-platform refusal from any host; the platform used is
 // printed in every gate verdict, so an override cannot pass for this host.
@@ -280,30 +295,14 @@ if (rootArg !== undefined && !(fs.existsSync(path.join(ROOT, 'plugins')) && fs.e
     process.exit(2);
 }
 
-// basename -> plugin-relative path, for attributing copies back to their source.
-// Ambiguous basenames are dropped rather than guessed.
-// Every plugin source file, deduped by nothing. SOURCE_BY_BASENAME drops
-// ambiguous basenames, which is right for ATTRIBUTION and wrong for a
-// population: a file this check never sees is exactly the file worth naming.
-const ALL_SOURCES = new Set();
-
-const SOURCE_BY_BASENAME = (() => {
-    const map = new Map(); const dupes = new Set();
-    const walk = (dir) => {
-        for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
-            if (e.name === 'node_modules' || e.name.startsWith('.')) continue;
-            const full = path.join(dir, e.name);
-            if (e.isDirectory()) { walk(full); continue; }
-            if (!/\.(js|mjs|cjs)$/.test(e.name)) continue;
-            ALL_SOURCES.add(path.relative(ROOT, full));
-            if (map.has(e.name)) dupes.add(e.name);
-            else map.set(e.name, path.relative(ROOT, full));
-        }
-    };
-    walk(path.join(ROOT, 'plugins'));
-    for (const d of dupes) map.delete(d);
-    return map;
-})();
+// ALL_SOURCES is every plugin source file, deduped by nothing. The basename map
+// used to attribute temp copies back to their source drops ambiguous basenames,
+// which is right for ATTRIBUTION and wrong for a population: a file this check
+// never sees is exactly the file worth naming. The walk and the attribution live in coverage-receipt.js, shared with the
+// runner that reduces each suite's dumps, so a census from a receipt and a
+// census from a fresh run attribute every dump entry the same way.
+const ATTR = receipts.attribution(ROOT);
+const ALL_SOURCES = ATTR.allSources;
 
 // The refused-by-design set for this run: the HOST platform's table entry, when
 // this repo is the tree measured (a --root fixture has none of its files), the
@@ -321,7 +320,20 @@ for (let i = 0; i < argv.length; i++) {
     refusedFiles.set(v.split('\\').join('/'), 'named with --refused');
 }
 
-// --- 1. run the suite with coverage on -------------------------------------
+// --- 1. the coverage: the receipt, or a fresh run under coverage -------------
+let run = { status: 0, signal: null };
+let runnerOut = '';
+let keptLog = null;
+let census = null;
+let receiptRefusal = null;
+let receiptInfo = null;
+if (receiptMode) {
+    const c = receipts.check(ROOT);
+    if (c.ok) {
+        census = c.census;
+        receiptInfo = { runId: c.receipt.runId, path: c.receiptPath, suites: c.receipt.expectedSuites.length, dumps: c.census.dumps };
+    } else receiptRefusal = c.problem;
+} else {
 const covDir = fs.mkdtempSync(path.join(os.tmpdir(), 'autodev-cov-'));
 // The runner's output goes to a FILE, never through spawnSync's buffer.
 // `[measured 2026-09-08]` the review of this gate bracketed a cliff at node's
@@ -337,7 +349,9 @@ const logFd = fs.openSync(runnerLog, 'w');
 // Through suite-tmp.js like every suite spawn: test-all.js gives each suite its
 // own temp root, and this gives the runner one, so nothing it or they leave in
 // os.tmpdir() survives. NODE_V8_COVERAGE is absolute and outside that root.
-const run = spawnSuiteSync(process.execPath, [path.join(ROOT, 'tooling', 'test-all.js')], {
+// --no-receipt: this run brings its own NODE_V8_COVERAGE, so the runner must
+// not replace it per suite or publish a receipt for a run it did not shape.
+run = spawnSuiteSync(process.execPath, [path.join(ROOT, 'tooling', 'test-all.js'), '--no-receipt'], {
     cwd: ROOT,
     stdio: ['ignore', logFd, logFd],
     // CLAUDE_CONFIG_DIR is dropped for the reason test-all.js gives: a suite
@@ -345,7 +359,7 @@ const run = spawnSuiteSync(process.execPath, [path.join(ROOT, 'tooling', 'test-a
     env: (({ CLAUDE_CONFIG_DIR, ...rest }) => ({ ...rest, NODE_V8_COVERAGE: covDir }))(process.env),
 });
 fs.closeSync(logFd);
-const runnerOut = fs.readFileSync(runnerLog, 'utf8');
+runnerOut = fs.readFileSync(runnerLog, 'utf8');
 // A red or killed run KEEPS its log. The summary below names the failed suite
 // and the last twelve lines, and the failing assertion is almost never in
 // either: it sits above the summary, in the suite's own block. Deleting the
@@ -354,7 +368,10 @@ const runnerOut = fs.readFileSync(runnerLog, 'utf8');
 // has nothing to explain, so its log is removed as before.
 const runGreen = run.status === 0 && !run.signal;
 if (runGreen) fs.rmSync(logDir, { recursive: true, force: true });
-const keptLog = runGreen ? null : runnerLog;
+keptLog = runGreen ? null : runnerLog;
+census = receipts.foldDir(covDir, ATTR);
+fs.rmSync(covDir, { recursive: true, force: true });
+}
 
 // WHICH suites failed, when the run is red. The runner prints a summary block
 // of `PASS  <label>` / `FAIL  <label>` lines; before this the exit-2 path said
@@ -368,53 +385,16 @@ const runnerTail = runnerOut.trim().split('\n').slice(-12).join('\n');
 
 // --- 2. fold every process's coverage into one map -------------------------
 // A function counts as EXECUTED if any process entered it. Suites spawn their
-// subjects, so the hits are spread across hundreds of dumps.
+// subjects, so the hits are spread across hundreds of dumps. The fold itself
+// (file:/// URLs, the Windows leading slash, attributing a temp copy back to
+// its source by basename) is coverage-receipt.js foldDump(), shared with the
+// runner's per-suite reduction.
 const seen = new Map();   // "relPath::functionName" -> {file, name, count}
 const filesWithCoverage = new Set();   // ran at all, named functions or not
-
-for (const f of fs.readdirSync(covDir)) {
-    let data;
-    try { data = JSON.parse(fs.readFileSync(path.join(covDir, f), 'utf8')); } catch { continue; }
-    for (const script of data.result || []) {
-        if (!script.url || !script.url.startsWith('file://')) continue;
-        // V8 emits file:///C:/... on Windows - a LEADING SLASH and forward
-        // slashes - so a raw startsWith against path.join(ROOT,'plugins') never
-        // matched there and every file fell through to basename attribution.
-        // That fallback DROPS ambiguous basenames, so the day two plugins share
-        // a filename both would vanish from this check without a word.
-        let abs = decodeURIComponent(script.url.slice('file://'.length));
-        if (abs.charAt(0) === '/' && abs.charAt(2) === ':') abs = abs.slice(1);
-        abs = path.resolve(abs);
-        if (abs.includes('/node_modules/')) continue;
-
-        // Suites that build a fake plugin root COPY the script into a temp dir
-        // and run the copy, so the hit lands outside plugins/. Attributing by
-        // basename brings those back: without it memory-db's getStats reads as
-        // dead while a suite calls it every run — a false positive that would
-        // have sent someone deleting live code.
-        let rel;
-        if (abs.startsWith(path.join(ROOT, 'plugins'))) {
-            rel = path.relative(ROOT, abs);
-        } else {
-            const owner = SOURCE_BY_BASENAME.get(path.basename(abs));
-            if (!owner) continue;          // not one of ours
-            rel = owner;
-        }
-
-        filesWithCoverage.add(rel);
-
-        for (const fn of script.functions || []) {
-            // The unnamed top-level wrapper is the module body, not a function
-            // anyone declared; counting it would report every file as covered.
-            if (!fn.functionName) continue;
-            const key = `${rel}::${fn.functionName}`;
-            const count = (fn.ranges && fn.ranges[0] && fn.ranges[0].count) || 0;
-            const prev = seen.get(key);
-            if (!prev || count > prev.count) seen.set(key, { file: rel, name: fn.functionName, count });
-        }
-    }
+for (const [rel, fns] of Object.entries((census && census.files) || {})) {
+    filesWithCoverage.add(rel);
+    for (const [name, count] of Object.entries(fns)) seen.set(`${rel}::${name}`, { file: rel, name, count });
 }
-fs.rmSync(covDir, { recursive: true, force: true });
 
 // THE BLIND SPOT THIS CHECK USED TO HIDE.
 //
@@ -463,6 +443,13 @@ const staleRefused = refusedByFile.filter((r) => !r.exists || !r.loaded || r.nev
 // change is one wrapper. Every early exit below is a return, and the code is
 // set once at the end.
 function report() {
+if (receiptRefusal) {
+    if (asJson) console.log(JSON.stringify({ source: 'receipt', receiptRefused: receiptRefusal }, null, 2));
+    console.error('\n[coverage] NO VERDICT: ' + receiptRefusal + '.');
+    console.error('The gate grades the receipt the last `npm test` published and refuses anything it cannot');
+    console.error('tie to this exact tree. `--fresh` measures from scratch instead (a full suite run).');
+    return 2;
+}
 // The gate verdict, computed once for both renderers. Bare mode ignores it.
 const overUntested = maxUntested !== null && graded.length > maxUntested;
 const overNeverLoaded = maxNeverLoaded !== null && neverLoaded.length > maxNeverLoaded;
@@ -495,6 +482,8 @@ const gate = gating ? {
 
 if (asJson) {
     console.log(JSON.stringify({
+        source: receiptMode ? 'receipt' : 'fresh',
+        receipt: receiptInfo,
         suitePassed: run.status === 0,
         failedSuites,
         runnerSignal: run.signal || null,
@@ -555,6 +544,7 @@ if (staleVerdict) {
     return 2;
 }
 
+if (receiptInfo) console.log(`\n[coverage] graded receipt ${receiptInfo.runId}: ${receiptInfo.suites} suite(s), ${receiptInfo.dumps} coverage dump(s), no test spawned`);
 console.log(`\n${ALL_SOURCES.size} source file(s) in plugins/ · ${filesWithCoverage.size} executed · ${neverLoaded.length} NEVER LOADED · ${loadedNoNamed.length} ran but declare no named function`);
 console.log(`${all.length} named function(s) IN THE LOADED FILES · ${all.length - dead.length} executed · ${dead.length} NEVER CALLED\n`);
 

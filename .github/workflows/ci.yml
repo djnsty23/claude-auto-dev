@@ -147,9 +147,11 @@ jobs:
         if: matrix.os == 'ubuntu-latest'
         run: npm run check:claude-md
 
-      # A FLOOR against coverage regression, not a quality claim. Runs every
-      # suite again under NODE_V8_COVERAGE (no dependency; c8 was costed and
-      # rejected in docs/evidence-coverage-gate-2026-09-08.md) and fails only
+      # A FLOOR against coverage regression, not a quality claim. Grades the
+      # coverage receipt that `npm test` above published (every suite ran once
+      # under NODE_V8_COVERAGE; no dependency, c8 was costed and rejected in
+      # docs/evidence-coverage-gate-2026-09-08.md), refuses a missing, stale,
+      # partial or red receipt with exit 2, and fails only
       # when the count of plugin functions no suite enters, or of plugin files
       # no suite loads, rises ABOVE what HEAD scored when the floor was measured.
       # Coverage measures execution, not verification: a function entered every

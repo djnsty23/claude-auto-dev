@@ -25,6 +25,7 @@
 
 const { spawnSync } = require('child_process');
 const { classify, reason, runBudgeted, tally, exitCode } = require('./spawn-budget.js');
+const cpu = require('./cpu-telemetry.js');
 const path = require('path');
 
 const HOOK = path.resolve(__dirname, '..', 'plugins', 'autodev-core', 'hooks', 'pre-tool-filter.js');
@@ -303,7 +304,9 @@ for (const [label, tool, input, expected] of cases) {
   fs.writeFileSync(path.join(bombRepo, 'tooling', 'check-no-private-names.js'),
     "const NAMES = [\n    '(a+)+$',\n];\n");
   const t0 = Date.now();
-  const r = runBudgeted('node', [HOOK], {
+  // The hook's own CPU, not the wall clock (tooling/cpu-telemetry.js): a
+  // backtracking regex burns CPU, and a loaded machine only stretches the wall.
+  const { value: r, cpu: c } = cpu.measure(() => runBudgeted('node', [HOOK], {
     input: JSON.stringify({
       tool_name: 'Write',
       tool_input: { file_path: path.join(bombRepo, 'docs/a.md'), content: 'a'.repeat(40) + 'b' },
@@ -311,9 +314,11 @@ for (const [label, tool, input, expected] of cases) {
     encoding: 'utf8',
     timeout: 20000,
     maxTimeout: 300000,   // contention is clamped at 20; cap the widened retry
-  });
+  }));
   const ms = Date.now() - t0;
-  // THIS IS THE ONE ASSERTION IN THIS FILE THAT READS A CLOCK, and both halves
+  const own = cpu.ownCpuMs(c);
+  const cpuMs = own.ms;
+  // THIS WAS THE ONE ASSERTION IN THIS FILE THAT READ A CLOCK, and both halves
   // of it break under load in different directions. Measured 2026-09-08 by
   // forcing this spawn to return `status=null signal=SIGTERM ETIMEDOUT`: it
   // printed `FAIL  a backtracking-bomb denylist entry does not hang the hook
@@ -325,19 +330,21 @@ for (const [label, tool, input, expected] of cases) {
   // retried run is guaranteed to blow the 2s bound even when the retry
   // SUCCEEDED. A retry means the machine was busy, which is not a fact about
   // the hook: the timing question could not be measured, and that is not the
-  // same as the answer being no.
-  if (classify(r) === 'infrastructure' || r.attempts > 1) {
+  // same as the answer being no. A retried run stays unmeasured under CPU too:
+  // the killed attempt left no record, so the sum cannot be attributed.
+  if (classify(r) === 'infrastructure' || r.attempts > 1 || cpuMs === null) {
     infra++;
     const why = classify(r) === 'infrastructure' ? reason(r)
-      : 'the run retried, so the wall clock spans a killed attempt';
+      : r.attempts > 1 ? 'the run retried, so the measurement spans a killed attempt'
+        : 'no CPU record: ' + own.why;
     indeterminate.push('the backtracking-bomb probe (' + why + ')');
     console.error('infrastructure: the backtracking-bomb probe produced no measurable answer ('
       + why + '; ' + r.attempts + ' attempt(s), budget ' + r.budgetMs + 'ms, ' + ms + 'ms elapsed)');
   } else {
-    const ok = r.status === 0 && ms < 2000;
+    const ok = r.status === 0 && cpuMs < 2000;
     if (ok) pass++; else fail++;
     console.log(`${ok ? 'PASS' : 'FAIL'}  a backtracking-bomb denylist entry does not hang the hook  `
-      + `(exit ${r.status}, ${ms}ms)`);
+      + `(exit ${r.status}, ${cpuMs.toFixed(0)} CPU ms over bare node, ${ms}ms wall)`);
   }
 }
 
