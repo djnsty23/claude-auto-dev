@@ -442,8 +442,8 @@ function rawMergeSegment(segments) {
             const t = rest[j];
             if (t === '-X' || t === '--method') { method = rest[j + 1] || ''; j++; continue; }
             if (API_VALUE_OPTS.has(t)) { j++; continue; }
-            let m;
-            if ((m = /^(?:-X|--method=)(.+)$/.exec(t))) { method = m[1]; continue; }
+            const glued = t.match(/^(?:-X|--method=)(.+)$/);
+            if (glued) { method = glued[1]; continue; }
             if (t.startsWith('-')) continue;
             if (endpoint === null) endpoint = t;
         }
