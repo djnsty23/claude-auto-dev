@@ -29,6 +29,14 @@
  * this cannot classify counts as not-ready, and says so by name, rather than
  * falling through to success.
  *
+ * TEST-EDITS (advisory). A worker told to turn a red suite green can edit the
+ * test instead of the code. For a PR that changes at least one non-test file,
+ * this lists every assertion line a test file loses or rewrites (with the OLD
+ * text), every test file deleted outright, and every skip/only/todo added. A
+ * test-only PR is the legitimate way to change a test and is not flagged. It
+ * never changes the verdict or the exit code; --json carries it as testEdits,
+ * null when `gh pr diff` could not be read.
+ *
  * IT PRINTS THE POPULATION. A verdict with no denominator is indistinguishable
  * from a finder that returned nothing, so every run says how many checks it saw
  * and how each was classified.
@@ -64,6 +72,59 @@ function gh(args, cwd) {
 /** An empty string is not a value. jq's `//` disagrees, which is trap 1 and 2. */
 function present(v) {
     return v !== null && v !== undefined && String(v).trim() !== '';
+}
+
+// A test file: *.test.*, *.spec.*, anything under __tests__/, test/ or tests/,
+// and this repo's own tooling/test-*.js suites.
+const TEST_FILE = /(^|\/)(__tests__|tests?)\/|\.(test|spec)\.[^/]+$|(^|\/)tooling\/test-[^/]+\.js$/;
+// An assertion. check( and ok( are this repo's own: check( alone carried 6748
+// lines across 173 suites on 2026-10-02, against 141 lines of assert.
+const ASSERTION = /\bassert\b|\bexpect\w*\(|\.should\b|\bt\.(is|not|true|false|truthy|falsy|deepEqual|notDeepEqual|equal|notEqual|ok|throws|regex)\(|\.to(Be|Equal|StrictEqual|Match|Throw|Have|Contain)\w*\(|\bcheck\(|\bok\(|\beq\(/;
+// A test switched off, or the rest of a file switched off by an .only.
+const SKIP_ADDED = /\.(skip|only|todo)\s*\(|\b(xit|xdescribe|xtest)\s*\(|\bskip\s*:\s*true\b/;
+
+/** One entry per file in a unified diff: its paths, whether it was deleted, and its -/+ lines with line numbers. */
+function parseDiff(text) {
+    const files = [];
+    let cur = null, oldLine = 0, newLine = 0;
+    for (const line of String(text).split(/\r?\n/)) {
+        const head = /^diff --git a\/(.+?) b\/(.+)$/.exec(line);
+        if (head) { cur = { oldPath: head[1], path: head[2], deleted: false, removed: [], added: [] }; files.push(cur); continue; }
+        if (!cur) continue;
+        if (line.startsWith('deleted file mode')) { cur.deleted = true; continue; }
+        const hunk = /^@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@/.exec(line);
+        if (hunk) { oldLine = Number(hunk[1]); newLine = Number(hunk[2]); continue; }
+        if (line.startsWith('--- ') || line.startsWith('+++ ')) continue;
+        if (line.startsWith('-')) { cur.removed.push({ line: oldLine++, text: line.slice(1) }); continue; }
+        if (line.startsWith('+')) { cur.added.push({ line: newLine++, text: line.slice(1) }); continue; }
+        if (line.startsWith(' ')) { oldLine++; newLine++; }
+    }
+    return files;
+}
+
+/**
+ * The test edits a diff carries. A removed or rewritten assertion shows as a
+ * `-` line, so its OLD text is what gets listed. An added assertion never is.
+ * @returns {{testEdits:Array, population:object}}
+ */
+function findTestEdits(diffText) {
+    const files = parseDiff(diffText);
+    const tests = files.filter((f) => TEST_FILE.test(f.path) || TEST_FILE.test(f.oldPath));
+    const code = files.length - tests.length;
+    const found = [];
+    let assertionLinesRemoved = 0;
+    for (const f of tests) {
+        const removed = f.removed.filter((l) => ASSERTION.test(l.text));
+        assertionLinesRemoved += removed.length;
+        if (f.deleted) { found.push({ file: f.oldPath, line: null, kind: 'file-deleted', text: removed.length + ' assertion line(s) in the deleted file' }); continue; }
+        for (const l of removed) found.push({ file: f.path, line: l.line, kind: 'assertion-removed', text: l.text });
+        for (const l of f.added) if (SKIP_ADDED.test(l.text)) found.push({ file: f.path, line: l.line, kind: 'skip-added', text: l.text });
+    }
+    const testOnly = code === 0;
+    return {
+        testEdits: testOnly ? [] : found,
+        population: { filesInDiff: files.length, testFilesTouched: tests.length, codeFilesTouched: code, assertionLinesRemoved, flaggable: found.length, testOnly },
+    };
 }
 
 /**
@@ -174,7 +235,11 @@ function checkPrReady(prNumber, cwd) {
     // artifact, and an empty rollup the path filters fully account for.
     const blocking = reasons.filter((r) => !r.startsWith('mergeStateStatus is UNSTABLE with no')
         && !r.startsWith('the rollup is EMPTY and that is the path filter working'));
-    return { verdict: blocking.length === 0 ? 'READY' : 'NOT_READY', reasons, population, checks, pr };
+    // Advisory: read after the verdict is fixed, and nothing below feeds it.
+    const diff = gh(['pr', 'diff', String(prNumber)], cwd);
+    const edits = diff === null ? { testEdits: null, population: null } : findTestEdits(diff);
+    return { verdict: blocking.length === 0 ? 'READY' : 'NOT_READY', reasons, population, checks, pr,
+        testEdits: edits.testEdits, testEditsPopulation: edits.population };
 }
 
 function render(r) {
@@ -190,7 +255,20 @@ function render(r) {
         + (p.rollupArtifacts || 0) + ' artifact, ' + (p.unrecognised || 0) + ' unrecognised');
     for (const [n, s] of r.checks) out.push('    ' + n + ': ' + s);
     if (r.reasons.length) { out.push('  why not ready:'); for (const x of r.reasons) out.push('    - ' + x); }
+    out.push(...renderTestEdits(r));
     return out.join('\n');
+}
+
+function renderTestEdits(r) {
+    if (r.verdict === 'CANNOT_TELL') return [];
+    if (!Array.isArray(r.testEdits)) return ['  TEST-EDITS could not tell: gh pr diff gave no answer, so test edits were not checked'];
+    const p = r.testEditsPopulation;
+    const out = ['  TEST-EDITS ' + r.testEdits.length + ' (advisory, never changes the verdict)',
+        '    read ' + p.filesInDiff + ' file(s) in the diff: ' + p.testFilesTouched + ' test file(s) touched, '
+        + p.codeFilesTouched + ' other, ' + p.assertionLinesRemoved + ' assertion line(s) removed or rewritten'
+        + (p.testOnly ? '; a test-only PR, so nothing is flagged' : '')];
+    for (const e of r.testEdits) out.push('    ' + e.file + (e.line === null ? '' : ':' + e.line) + '  ' + e.kind + '  ' + e.text.trim());
+    return out;
 }
 
 function selftest() {
@@ -214,7 +292,7 @@ function selftest() {
     return fail === 0;
 }
 
-module.exports = { checkPrReady, present, render };
+module.exports = { checkPrReady, present, render, parseDiff, findTestEdits };
 
 function main() {
     const argv = process.argv.slice(2);
@@ -222,6 +300,7 @@ function main() {
     if (argv.includes('--help') || argv.length === 0) {
         console.log('check-pr-ready.js <pr-number> [--repo <path>] [--json]\n'
             + 'Answers whether a PR is safe to merge, treating an unrecognised state as NOT ready.\n'
+            + 'TEST-EDITS lists assertion lines a code-changing PR removes from its tests (advisory).\n'
             + 'Exit 0 ready, 2 not ready, 3 could not tell.');
         return 0;
     }
