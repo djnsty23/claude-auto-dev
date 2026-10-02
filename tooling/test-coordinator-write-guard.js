@@ -1046,6 +1046,12 @@ expectAsk('role held + push INSIDE the home repo with --no-verify still asks',
         'gh api -X PUT repos/acme/widget/pulls/12/merge -f merge_method=rebase',
         'gh api --method PUT /repos/acme/widget/pulls/12/merge',
         'gh api repos/{owner}/{repo}/pulls/12/merge --method=PUT',
+        // Review round 1: forms the first recogniser let through.
+        'gh pr --repo acme/widget merge 12',
+        'env GH_TOKEN=x gh pr merge 12',
+        '"g""h" pr "mer""ge" 12',
+        "gh api -X PUT 'repos/acme/widget/pulls/12/merge?x=1'",
+        'gh api -XPUT https://api.github.com/repos/acme/widget/pulls/12/merge',
     ];
     const QUIET = [
         'gh pr view 12 --json state',
@@ -1055,6 +1061,11 @@ expectAsk('role held + push INSIDE the home repo with --no-verify still asks',
         'gh api repos/acme/widget/pulls/12/merge',
         'gh api -X GET repos/acme/widget/pulls/12/merge',
         'gh api -X PUT repos/acme/widget/pulls/12/requested_reviewers',
+        // Review round 1: an option value is not the endpoint, and help or
+        // cancelling auto-merge merges nothing.
+        'gh api -X PUT repos/acme/widget/actions/permissions --input /tmp/pulls/12/merge',
+        'gh pr merge --help',
+        'gh pr merge 12 --disable-auto',
         `node "${path.join('plugins', 'autodev-core', 'scripts', 'merge-lock.js')}" merge --repo acme/widget --pr 12 --head ${'a'.repeat(40)} --gate-receipt r.log`,
     ];
 

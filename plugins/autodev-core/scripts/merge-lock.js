@@ -29,9 +29,11 @@
  *   4. Reads the base branch head, then `gh api repos/R/compare/<base>...<head>`:
  *      refuses unless behind_by is 0, so the candidate already contains the base.
  *   5. `gh pr merge N --repo R --rebase --match-head-commit <head>`.
- *   6. Reads the base branch back until it moves, and compares its tree with
+ *   6. Reads the PR back until it is MERGED, because gh can fail after GitHub
+ *      accepted the merge, and compares the tree of the PR's merge commit with
  *      the tree of --head. A difference exits 1 loudly. The merge stands:
- *      nothing here undoes it.
+ *      nothing here undoes it. The base branch is read only to report a writer
+ *      that moved it after this merge.
  *   7. Releases the lock in a finally block: to the next queued merger, else by
  *      rename to `.released-HHMM`.
  *
@@ -39,8 +41,10 @@
  * a machine-readable pass verdict keyed by commit: the lock records only who
  * ran and where, and is renamed on release. So no receipt format is invented
  * here. --gate-receipt is a captured log of the gate on that tree, and it
- * passes when it names the full --head sha and its LAST `gate-lock: verdict`
- * line is `gate-lock: verdict PASS (exit 0)`, the line gate-lock.js prints.
+ * passes when its LAST `gate-lock: verdict` line is
+ * `gate-lock: verdict PASS (exit 0)`, the line gate-lock.js prints, the full
+ * --head sha appears between that line and the verdict before it, and nothing
+ * after it starts another run (a gate-lock line or a sha).
  * Capture one with (bash):
  *   { git rev-parse HEAD; npm run gate; } > receipt.log 2>&1
  * A receipt is text, so a hand-written one passes. It stops an honest mistake
@@ -49,8 +53,15 @@
  * EXIT. 0 merged and the merged tree matches the proved tree. 1 refused (bad
  * arguments, receipt, PR state, head or base mismatch, GitHub refused the
  * merge) or merged with a different tree. 2 indeterminate: gh could not be run
- * or did not answer, the lock wait timed out or was interrupted, or the merge
- * reported success and the base never moved. Exit 2 means look before retrying.
+ * or did not answer, the lock wait timed out or was interrupted, or the PR did
+ * not read MERGED within the readback window after gh succeeded or timed out.
+ * Exit 2 means look before retrying.
+ *
+ * NOT CLOSED HERE. GitHub's merge is conditioned on the PR head only. A writer
+ * that bypasses this lock (the web UI, a direct push, another machine) can
+ * move the base between step 4 and step 5. The readback then reports the tree
+ * GitHub produced; only branch protection that requires an up-to-date branch
+ * closes that race on the server.
  *
  * gh is spawned with an args array and no shell. AUTODEV_GH_BIN names another
  * binary; a path ending .js, .cjs or .mjs is run with this node, because a .cmd
@@ -59,7 +70,7 @@
  * ENVIRONMENT.
  *   AUTODEV_GH_BIN=PATH                 the gh binary (default gh)
  *   AUTODEV_MERGE_LOCK_POLL_MS=N        a waiter's poll interval (default 3000)
- *   AUTODEV_MERGE_LOCK_READBACK_MS=N    how long to wait for the base to move (default 60000)
+ *   AUTODEV_MERGE_LOCK_READBACK_MS=N    how long to wait for the PR to read MERGED (default 60000)
  */
 'use strict';
 
@@ -113,11 +124,24 @@ function receiptProblem(file, head) {
     if (!file) return 'no --gate-receipt given. Capture the gate on this tree: { git rev-parse HEAD; npm run gate; } > receipt.log 2>&1';
     let text;
     try { text = readText(file); } catch (e) { return `cannot read --gate-receipt ${file} (${e.code || e.message})`; }
-    if (!text.toLowerCase().includes(head)) return `--gate-receipt ${file} does not name head ${head}`;
-    const verdicts = text.match(VERDICT_RE) || [];
-    if (!verdicts.length) return `--gate-receipt ${file} has no "gate-lock: verdict" line, so the gate did not finish in it`;
-    const last = verdicts[verdicts.length - 1];
-    if (last !== PASS_LINE) return `--gate-receipt ${file} ends with "${last}", not "${PASS_LINE}"`;
+    const lower = text.toLowerCase();
+    if (!lower.includes(head)) return `--gate-receipt ${file} does not name head ${head}`;
+    const found = [...text.matchAll(VERDICT_RE)];
+    if (!found.length) return `--gate-receipt ${file} has no "gate-lock: verdict" line, so the gate did not finish in it`;
+    const last = found[found.length - 1];
+    if (last[0] !== PASS_LINE) return `--gate-receipt ${file} ends with "${last[0]}", not "${PASS_LINE}"`;
+    // A log can hold several runs. The PASS counts only for the run it ended:
+    // the head must appear after the verdict before it, and no run may start
+    // after it.
+    const tail = text.slice(last.index + last[0].length);
+    if (/gate-lock:/.test(tail) || /\b[0-9a-f]{40}\b/i.test(tail)) {
+        return `--gate-receipt ${file} goes on after its last verdict: another run started there and did not finish`;
+    }
+    const prev = found[found.length - 2];
+    const from = prev ? prev.index + prev[0].length : 0;
+    if (!lower.slice(from, last.index).includes(head)) {
+        return `--gate-receipt ${file} names ${head} only outside the run that printed the last PASS, so that PASS proves another head`;
+    }
     return null;
 }
 
@@ -166,6 +190,14 @@ function branchHead(repo, branch, env) {
     return { sha, tree };
 }
 
+/** { state, oid }: the PR's state and, once merged, its merge commit. */
+function prMergeState(repo, pr, env) {
+    const j = ghJson(['pr', 'view', String(pr), '--repo', repo, '--json', 'state,mergeCommit'], `reading ${repo}#${pr} after the merge`, env);
+    const oid = j && j.mergeCommit && String(j.mergeCommit.oid || '').toLowerCase();
+    if (j && j.state === 'MERGED' && !SHA_RE.test(oid)) return { state: 'MERGED without a merge commit yet', oid: null };
+    return { state: String(j && j.state), oid: oid || null };
+}
+
 function commitTree(repo, sha, env) {
     const j = ghJson(['api', `repos/${repo}/commits/${sha}`], `reading ${repo} commit ${sha}`, env);
     const tree = j && j.commit && j.commit.tree && j.commit.tree.sha;
@@ -186,24 +218,38 @@ function holderLine(h) {
  * Waits for the repo's lock, first come first served. Resolves true once held,
  * false on timeout or a stop signal. Every poll refreshes this process's ticket.
  */
-async function acquire({ lockPath, what, timeoutMs, pollMs, log, isStopped }) {
+/**
+ * Leaves the queue, and releases the lock if a holder handed it over in the
+ * moment between this process's last poll and its leaving. Without this a
+ * timed-out or stopped waiter would leave a lock naming itself.
+ */
+function leave(lockPath, log, q = queue) {
+    q.leaveQueues([lockPath], process.pid);
+    try {
+        q.resetProbes();
+        const r = q.releaseLock({ lockPath, pid: process.pid, staleMs: STALE_MS, log });
+        if (r.released) log(`${TAG} the lock was handed over while leaving; released it`);
+    } catch { /* a lock naming a dead pid is reclaimed by the next waiter */ }
+}
+
+async function acquire({ lockPath, what, timeoutMs, pollMs, log, isStopped, q = queue }) {
     const pid = process.pid;
     const body = `${pid}\n${what}\n`;
     const started = Date.now();
     let lastKey = null;
     let errors = 0;
     for (;;) {
-        if (isStopped()) { queue.leaveQueues([lockPath], pid); return false; }
+        if (isStopped()) { leave(lockPath, log, q); return false; }
         let r;
         try {
-            queue.resetProbes();
-            r = queue.takeTurn({ lockPath, pid, what, body, staleMs: STALE_MS, log });
+            q.resetProbes();
+            r = q.takeTurn({ lockPath, pid, what, body, staleMs: STALE_MS, log });
             errors = 0;
         } catch (e) {
             // Windows refuses a read while another process renames the file.
             errors++;
             log(`${TAG} lock poll failed (${e.code || e.message}), attempt ${errors} of 10`);
-            if (errors >= 10) { queue.leaveQueues([lockPath], pid); throw unsure(`could not poll ${lockPath}`); }
+            if (errors >= 10) { leave(lockPath, log, q); throw unsure(`could not poll ${lockPath}`); }
             await sleep(pollMs);
             continue;
         }
@@ -213,7 +259,7 @@ async function acquire({ lockPath, what, timeoutMs, pollMs, log, isStopped }) {
             log(`${TAG} waiting for ${path.basename(lockPath)}: place ${r.position} of ${r.of}. Held by ${holderLine(r.holder)}`);
             lastKey = key;
         }
-        if (Date.now() - started >= timeoutMs) { queue.leaveQueues([lockPath], pid); return false; }
+        if (Date.now() - started >= timeoutMs) { leave(lockPath, log, q); return false; }
         await sleep(pollMs);
     }
 }
@@ -228,7 +274,7 @@ function signalHandler({ lockPath, state, exit = (code) => process.exit(code), e
     return (sig) => {
         state.stopped = sig;
         if (state.held) return;
-        try { queue.leaveQueues([lockPath], process.pid); } catch { /* the heartbeat expires it */ }
+        try { leave(lockPath, err); } catch { /* the heartbeat expires it */ }
         err(`${TAG} INDETERMINATE: stopped by ${sig} while waiting; lock NOT taken`);
         exit(2);
     };
@@ -271,27 +317,36 @@ async function mergeHeld({ repo, pr, head, env, log, readbackMs, pollMs }) {
     log(`${TAG} ${repo}#${pr}: head ${head} contains ${baseRef} at ${base.sha.slice(0, 7)}; merging`);
 
     const m = runGh(['pr', 'merge', String(pr), '--repo', repo, '--rebase', '--match-head-commit', head], env);
-    if (m.error) throw unsure(`gh pr merge could not run (${m.error}); read ${repo}#${pr} before retrying`);
 
-    // Read the base back until it moves. A failed merge whose base did not move
-    // was refused; one whose base moved anyway is judged by its tree.
-    const deadline = Date.now() + (m.ok ? readbackMs : 0);
-    let now = branchHead(repo, baseRef, env);
-    while (now.sha === base.sha && Date.now() < deadline) {
+    // Judge THIS PR, never the branch: another writer can move the base at any
+    // moment, and gh can fail after GitHub accepted the request (a timeout, a
+    // dropped connection). So the PR's own state says whether the merge landed,
+    // and its merge commit's tree is compared. gh failing to run or timing out
+    // gets the whole readback window; a gh that answered with an error gets a
+    // short grace, then counts as GitHub's refusal.
+    const waitMs = m.ok || m.error ? readbackMs : Math.min(readbackMs, 3 * pollMs);
+    const deadline = Date.now() + waitMs;
+    let after = prMergeState(repo, pr, env);
+    while (after.state !== 'MERGED' && Date.now() < deadline) {
         await sleep(Math.min(pollMs, 2000));
-        now = branchHead(repo, baseRef, env);
+        after = prMergeState(repo, pr, env);
     }
-    if (now.sha === base.sha) {
-        if (!m.ok) throw refuse(`GitHub refused the merge (gh exited ${m.status}): ${m.stderr.split(/\r?\n/)[0] || '(no stderr)'}`);
-        throw unsure(`gh pr merge exited 0 but ${baseRef} is still ${base.sha} after ${Math.round(readbackMs / 1000)} s; read ${repo}#${pr} before retrying`);
+    if (after.state !== 'MERGED') {
+        const secs = `${Math.round(waitMs / 1000)} s`;
+        if (m.error) throw unsure(`gh pr merge did not complete (${m.error}) and ${repo}#${pr} is ${after.state} after ${secs}; read it before retrying`);
+        if (!m.ok) throw refuse(`GitHub refused the merge (gh exited ${m.status}): ${m.stderr.split(/\r?\n/)[0] || '(no stderr)'}; ${repo}#${pr} is ${after.state}`);
+        throw unsure(`gh pr merge exited 0 but ${repo}#${pr} is ${after.state} after ${secs}; read it before retrying`);
     }
-    if (!m.ok) log(`${TAG} gh pr merge exited ${m.status}, but ${baseRef} moved; judging the tree it moved to`);
-    if (now.tree !== provedTree) {
-        throw refuse(`MERGED TREE DIFFERS FROM THE PROVED TREE. ${baseRef} is now ${now.sha} with tree ${now.tree}; `
+    if (!m.ok) log(`${TAG} gh pr merge ${m.error ? `failed (${m.error})` : `exited ${m.status}`}, but ${repo}#${pr} is MERGED; judging its merge commit`);
+    const mergedTree = commitTree(repo, after.oid, env);
+    if (mergedTree !== provedTree) {
+        throw refuse(`MERGED TREE DIFFERS FROM THE PROVED TREE. ${repo}#${pr} merged as ${after.oid} with tree ${mergedTree}; `
             + `the gated head ${head} has tree ${provedTree}. The merge stands and nothing undoes it: `
-            + `gate ${baseRef} at ${now.sha} now`);
+            + `gate ${baseRef} at ${after.oid} now`);
     }
-    log(`${TAG} merged ${repo}#${pr}: ${baseRef} is ${now.sha}, tree ${now.tree.slice(0, 12)} matches the proved tree`);
+    const now = branchHead(repo, baseRef, env);
+    const since = now.sha === after.oid ? '' : `; ${baseRef} has since moved to ${now.sha}, past this merge`;
+    log(`${TAG} merged ${repo}#${pr} as ${after.oid}: tree ${mergedTree.slice(0, 12)} matches the proved tree${since}`);
 }
 
 // ---------------------------------------------------------------------------
@@ -324,7 +379,7 @@ function help() {
     console.log('');
     console.log('Merges one PR under a per-repo lock (<home>/.claude/autodev/locks/merge-<owner>__<name>.lock),');
     console.log('first come first served. Refuses unless the PR head is --head, --head is not behind its base,');
-    console.log('and the receipt names --head and ends with "gate-lock: verdict PASS (exit 0)". Merges with');
+    console.log('and the last run in the receipt names --head and ends with "gate-lock: verdict PASS (exit 0)". Merges with');
     console.log('gh pr merge --rebase --match-head-commit, then reads the merged tree back.');
     console.log('Exit 0 merged with the proved tree, 1 refused or a different tree, 2 indeterminate.');
     console.log('env: AUTODEV_GH_BIN (default gh), AUTODEV_MERGE_LOCK_POLL_MS, AUTODEV_MERGE_LOCK_READBACK_MS');
@@ -379,7 +434,7 @@ async function main() {
     }
 }
 
-module.exports = { lockPathFor, receiptProblem, readText, parseArgs, ghCommand, signalHandler, PASS_LINE };
+module.exports = { lockPathFor, receiptProblem, readText, parseArgs, ghCommand, signalHandler, acquire, PASS_LINE };
 
 if (require.main === module) {
     main().catch((e) => {
