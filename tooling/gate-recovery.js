@@ -19,6 +19,11 @@
  *     floor (default 1 GiB) after the attempt.
  *   - PORT: the output said EADDRINUSE with a port AND that port still cannot be
  *     bound after the attempt.
+ * Evidence counts only from the npm step that failed. In the suite runner's
+ * step (tooling/test-all.js runs every suite in one npm step) it counts only
+ * when EVERY failed suite's own log carries it, read through the coverage
+ * receipt that attempt published. A passing suite that prints ENOSPC, or a
+ * second suite that failed on its own, leaves the failure standing.
  * An attempt with evidence is INDETERMINATE (exit 2). Without, its exit stands.
  *
  * RE-ADMISSION is off unless a recovery config exists (`full-gate.recovery.json`
@@ -216,6 +221,60 @@ function readRecoveryConfig(base, env = process.env) {
 // Classifying one attempt.
 // ---------------------------------------------------------------------------
 
+/** Whether npm step `step` of `root` runs the suite runner, tooling/test-all.js: true, false, or null when package.json cannot say. */
+function runsSuiteRunner(root, step) {
+    let pkg;
+    try { pkg = JSON.parse(fs.readFileSync(path.join(root, 'package.json'), 'utf8')); } catch { return null; }
+    const s = pkg && pkg.scripts && pkg.scripts[step];
+    return typeof s === 'string' && /\btest-all\.js\b/.test(s);
+}
+
+/**
+ * The suite runner's failed rows, each with the infrastructure hits its own
+ * log printed. test-all.js runs every suite inside ONE npm step, so the step's
+ * output mixes a passing suite's text (a suite testing ENOSPC handling) with
+ * another suite's real failure. Its coverage receipt (coverage-receipt.js)
+ * names the failed suites and each one's log. Only a receipt this attempt
+ * published counts: this tree, started and finished inside the attempt, a
+ * failing verdict. A failed row with no readable log carries no evidence.
+ * Returns { ok: true, rows: [{ label, hits }] } or { ok: false, why }.
+ */
+function runnerRows(root, rec, env) {
+    const receipts = require(path.join(__dirname, 'coverage-receipt.js'));
+    let r;
+    try { r = JSON.parse(fs.readFileSync(path.join(receipts.storeDir(root, env), receipts.RECEIPT), 'utf8')); } catch (e) {
+        return { ok: false, why: `the suite runner's receipt could not be read (${e.code || e.message})` };
+    }
+    if (!r || typeof r !== 'object' || Array.isArray(r)) return { ok: false, why: "the suite runner's receipt is not a JSON object" };
+    if (r.root !== receipts.canonicalRoot(root)) return { ok: false, why: "the suite runner's receipt is for another tree" };
+    const from = Date.parse(rec.startUtc);
+    const to = Date.parse(rec.endUtc);
+    const started = Date.parse(r.startedAt);
+    const finished = Date.parse(r.finishedAt);
+    if (![from, to, started, finished].every(Number.isFinite) || started < from || finished > to) {
+        return { ok: false, why: "the suite runner's receipt was not published inside this attempt" };
+    }
+    if (r.verdict !== 'fail' || !Array.isArray(r.outcomes) || typeof r.runDir !== 'string') {
+        return { ok: false, why: "the suite runner's receipt does not record a failed run with its outcomes" };
+    }
+    const failed = r.outcomes.filter((o) => !o || (o.state !== 'pass' && o.state !== 'indet'));
+    if (r.treeInert && r.treeInert.state === 'fail') failed.push({ label: 'tree-inert', log: null });
+    if (!failed.length) return { ok: false, why: "the suite runner's receipt names no failed suite" };
+    const runDir = path.resolve(r.runDir);
+    const rows = failed.map((o) => {
+        const scan = createScanner();
+        if (o && typeof o.log === 'string') {
+            const file = path.resolve(runDir, o.log);
+            const rel = path.relative(runDir, file);
+            if (rel && !rel.startsWith('..') && !path.isAbsolute(rel)) {
+                try { scan.feed(fs.readFileSync(file)); } catch { /* an unreadable log carries no evidence */ }
+            }
+        }
+        return { label: o && typeof o.label === 'string' ? o.label : '(unnamed)', hits: scan.hits() };
+    });
+    return { ok: true, rows };
+}
+
 /**
  * `v` is gate-lock's verdict for the attempt; `rec` the runner's record.
  * Returns { exit, finished, why, cause: null | { kind, evidence, port? } }.
@@ -239,20 +298,39 @@ async function classify({ v, rec, root, diskFloorBytes = DEFAULT_DISK_FLOOR, env
     // passing step printed (a suite testing ENOSPC handling) is not a cause.
     const all = Array.isArray(rec.infra) ? rec.infra : [];
     const hits = rec.lastStep ? all.filter((h) => h.step === rec.lastStep) : all;
-    if (hits.some((h) => h.kind === 'ENOSPC')) {
+    if (!hits.length) return { ...v, cause: null };
+    // The suite runner's step holds every suite, so there the step is too
+    // coarse: each failed suite must carry the cause in its own log.
+    let rows = [{ label: null, hits }];
+    const runner = rec.lastStep ? runsSuiteRunner(root, rec.lastStep) : false;
+    if (runner === null) {
+        return { ...v, cause: null, why: `${v.why}, and package.json could not say whether ${rec.lastStep} is the suite runner, so it stands as a failure` };
+    }
+    if (runner) {
+        const per = runnerRows(root, rec, env);
+        if (!per.ok) return { ...v, cause: null, why: `${v.why}, and ${per.why}, so it stands as a failure` };
+        rows = per.rows;
+    }
+    const where = (h) => (runner ? ` in every failed suite (${rows.map((r) => r.label).join(', ')})` : h && h.step ? ` in ${h.step}` : '');
+    const enospc = rows.every((r) => r.hits.some((h) => h.kind === 'ENOSPC'));
+    if (enospc) {
         const d = diskFree(root);
         if (d.status === 'ok' && d.freeBytes < diskFloorBytes) {
-            const step = hits.find((h) => h.kind === 'ENOSPC').step;
             return { exit: 2, finished: true, cause: { kind: 'disk', evidence: `${d.freeBytes} bytes free, under the ${diskFloorBytes} floor` },
-                     why: `the chain exited ${v.exit} with ENOSPC${step ? ` in ${step}` : ''}, and ${d.freeBytes} bytes are free, under the ${diskFloorBytes}-byte floor` };
+                     why: `the chain exited ${v.exit} with ENOSPC${where(hits.find((h) => h.kind === 'ENOSPC'))}, and ${d.freeBytes} bytes are free, under the ${diskFloorBytes}-byte floor` };
         }
     }
-    for (const h of hits.filter((x) => x.kind === 'EADDRINUSE' && x.port)) {
-        const p = await portState(h.port);
+    const ports = [...new Set(rows[0].hits.filter((x) => x.kind === 'EADDRINUSE' && x.port).map((x) => x.port))];
+    for (const port of ports) {
+        if (!rows.every((r) => r.hits.some((h) => h.kind === 'EADDRINUSE' && h.port === port))) continue;
+        const p = await portState(port);
         if (p.status === 'busy') {
-            return { exit: 2, finished: true, cause: { kind: 'port', port: h.port, evidence: `port ${h.port} still cannot be bound` },
-                     why: `the chain exited ${v.exit} with EADDRINUSE on port ${h.port}${h.step ? ` in ${h.step}` : ''}, and the port is still taken` };
+            return { exit: 2, finished: true, cause: { kind: 'port', port, evidence: `port ${port} still cannot be bound` },
+                     why: `the chain exited ${v.exit} with EADDRINUSE on port ${port}${where(hits.find((h) => h.kind === 'EADDRINUSE' && h.port === port))}, and the port is still taken` };
         }
+    }
+    if (runner) {
+        return { ...v, cause: null, why: `${v.why}, and the failed suites (${rows.map((r) => r.label).join(', ')}) do not all carry one confirmed machine cause, so it stands as a failure` };
     }
     return { ...v, cause: null };
 }
@@ -333,7 +411,7 @@ function spendReadmission(file, worktree, head, max) {
 
 module.exports = {
     CRASH_EXITS, DEFAULT_DISK_FLOOR, createScanner, memoryEvents, commitHeadroom, diskFree, portState,
-    readRecoveryConfig, classify, sample, awaitClearance, counterFile, readmissionsSpent, spendReadmission,
+    readRecoveryConfig, runsSuiteRunner, runnerRows, classify, sample, awaitClearance, counterFile, readmissionsSpent, spendReadmission,
 };
 
 if (require.main === module) {
