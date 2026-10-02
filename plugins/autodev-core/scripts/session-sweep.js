@@ -169,7 +169,7 @@ const MERGED_MIN_MINUTES = mergedMinMinutes();
 const AS_JSON = flag('--json');
 const WRITE_RESUME = flag('--write-resume');
 // The ONLY mode in which this script mutates anything. Off by default and never
-// implied: it marks SAFE records archived by editing the store, for workspaces
+// implied: it marks clean records archived by editing the store, for workspaces
 // the app no longer tracks. It still never touches a git worktree.
 const ARCHIVE_ORPHANED = flag('--archive-orphaned');
 
@@ -270,6 +270,27 @@ function detectWorkspaces(sessions) {
     orphaned.add(ws);
   }
   return { current, orphaned, newest };
+}
+
+/**
+ * Where one record sits against the workspace the app is using. That decides
+ * who can archive it, because archive_session and get_session resolve a session
+ * id in the live workspace only. [measured 2026-10-02] after an account switch,
+ * every SAFE row in a 69-row sweep sat in the previous account's workspace, and
+ * get_session answered "not found" for each one tried.
+ *
+ *   live          the app's own workspace: archive_session can reach it.
+ *   orphaned      no recent activity: --archive-orphaned may write it.
+ *   other         warm but not live (another account is using it), or the
+ *                 record sits outside any workspace directory. Neither route
+ *                 is open from here, so it fails closed.
+ *   undetermined  no record names a workspace at all. Treated as reachable,
+ *                 which is how every row was read before workspaces counted.
+ */
+function workspaceStanding(ws, current, orphaned) {
+  if (current === null) return 'undetermined';
+  if (ws === current) return 'live';
+  return ws && orphaned.has(ws) ? 'orphaned' : 'other';
 }
 
 // ------------------------------------------------------------- git inspection
@@ -800,7 +821,9 @@ function main() {
     const { states: prStates, byHead } = refreshPrStates(live);
 
     /**
-     * Mark SAFE records archived by editing the store, for orphaned workspaces only.
+     * Mark clean records archived by editing the store, for orphaned workspaces only.
+     * It reads `clean`, not `safe`: a SAFE row is in the live workspace by
+     * definition, so `safe` would leave this nothing it is allowed to write.
      *
      * A string replace, deliberately, not parse-then-stringify: reserializing would
      * rewrite field order and escaping across a file the app owns, so any breakage
@@ -813,8 +836,12 @@ function main() {
       const skipped = [];
 
       for (const r of rows) {
-        if (!r.safe) continue;
+        if (!r.clean) continue;
         const ws = r.s.__workspace;
+        if (r.standing === 'other') {
+          skipped.push([r.s.title, 'not the live workspace and not orphaned: archive it from the account that uses it']);
+          continue;
+        }
         if (!ws || ws === currentWorkspace || !orphanedWorkspaces.has(ws)) {
           skipped.push([r.s.title, 'app tracks this workspace — use archive_session']);
           continue;
@@ -844,9 +871,15 @@ function main() {
       const risk = finished ? worktreeRisk(s, all) : null;
       // The app has its own opt-out. Honour it rather than inventing a second one.
       const exempt = s.autoArchiveExempt === true;
+      // `clean` is everything archiving could lose, checked and empty. `safe`
+      // adds the one thing the model's archive call needs: a record it can
+      // resolve. A clean row outside the live workspace comes back "not found".
+      const clean = finished && !thirdParty && !exempt && risk === null;
+      const standing = workspaceStanding(s.__workspace, currentWorkspace, orphanedWorkspaces);
+      const reachable = standing === 'live' || standing === 'undetermined';
       return {
-        s, c, risk, thirdParty, exempt, unbound,
-        safe: finished && !thirdParty && !exempt && risk === null,
+        s, c, risk, thirdParty, exempt, unbound, clean, standing, reachable,
+        safe: clean && reachable,
       };
     });
 
@@ -903,6 +936,9 @@ function main() {
         ephemeral: r.c.ephemeral,
         exempt: r.exempt,
         risk: r.risk,
+        clean: r.clean,
+        workspace: r.s.__workspace || null,
+        reachable: r.reachable,
         safe: r.safe,
         unboundPrs: r.unbound,
       })), null, 2));
@@ -925,7 +961,11 @@ function main() {
     console.log(pad('VERDICT', 9) + pad('AGE', 6) + pad('TITLE', 40) + pad('DISPOSITION', 22) + 'PROJECT');
     console.log('-'.repeat(112));
     for (const r of rows) {
-      const disp = r.safe ? 'SAFE' : r.exempt ? 'exempt' : r.thirdParty ? 'third-party' : (r.risk || 'keep');
+      // A clean row that is not SAFE is clean in a workspace archive_session
+      // cannot reach, and the label names the route that can.
+      const disp = r.safe ? 'SAFE'
+        : r.clean ? (r.standing === 'orphaned' ? 'orphaned-ws' : 'other-ws')
+        : r.exempt ? 'exempt' : r.thirdParty ? 'third-party' : (r.risk || 'keep');
       console.log(
         pad(r.c.state, 9) +
         pad(Math.floor(r.c.ageDays) + 'd', 6) +
@@ -936,7 +976,12 @@ function main() {
     }
 
     const safe = rows.filter((r) => r.safe);
-    const finished = rows.filter((r) => !r.safe && FINISHED.has(r.c.state));
+    // `clean`, not `safe`: a clean row outside the live workspace has nothing
+    // to lose, so it must not reach BLOCKED with a null risk beside it.
+    const finished = rows.filter((r) => !r.clean && FINISHED.has(r.c.state));
+    const cleanRows = rows.filter((r) => r.clean);
+    const orphanedWs = cleanRows.filter((r) => !r.safe && r.standing === 'orphaned').length;
+    const otherWs = cleanRows.filter((r) => !r.safe && r.standing === 'other').length;
 
     // Two very different things were sharing one list, and the permanent one drowns
     // the urgent one. `blocked` means WORK EXISTS IN EXACTLY ONE PLACE — act on it.
@@ -962,7 +1007,10 @@ function main() {
         console.log(`  - ${r.s.title} — #${p.prNumber} ${p.state}${p.url ? ' ' + p.url : ''}  (${r.s.sessionId})${where}`);
       }
     }
-    console.log(`\nSAFE TO ARCHIVE: ${safe.length}`);
+    console.log(`\nSAFE TO ARCHIVE: ${safe.length} of ${cleanRows.length} finished and clean`);
+    console.log(`  orphaned-ws: ${orphanedWs} (no account uses that workspace: re-run with --archive-orphaned)`);
+    console.log(`  other-ws: ${otherWs} (another account's warm workspace: archive them from that account)`);
+    console.log('  archive_session cannot see orphaned-ws or other-ws rows: it resolves the live workspace only.');
     console.log(`BLOCKED — work exists in exactly one place, act on these: ${blocked.length}`);
     for (const b of blocked) {
       console.log(`  - ${b.s.title} — ${b.risk}`);
