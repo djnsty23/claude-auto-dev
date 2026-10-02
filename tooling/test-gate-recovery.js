@@ -26,6 +26,9 @@
  *   P20  a runner never told to go runs anyway             -> R14 goes red
  *   P21  lingering chain processes do not keep the lane    -> R15 goes red
  *   P22  a first lease overwrites another live run's lease -> R16 goes red
+ *   P23  the suite runner's step is judged as one step    -> R17 goes red
+ *   P24  one failed suite's cause excuses every failed one -> R19 goes red
+ *   P25  a receipt from before the attempt counts          -> R20 goes red
  *
  * Commit headroom comes from AUTODEV_GATE_HEADROOM_FIXTURE in every case, so
  * the memory scenarios clear the same way on every platform.
@@ -377,12 +380,106 @@ async function r16LeaseHeld(subject) {
 }
 
 // ---------------------------------------------------------------------------
+// The suite runner's step: every suite runs inside one npm step (`test`), so
+// evidence counts only per failed suite, read through the coverage receipt.
+// ---------------------------------------------------------------------------
+
+/** A stand-in for tooling/test-all.js: suites.json lists { label, state, print }; it echoes each, writes each log and publishes a receipt. */
+const RUNNER = `'use strict';
+const fs = require('fs');
+const path = require('path');
+const spec = JSON.parse(fs.readFileSync('suites.json', 'utf8'));
+const store = process.env.AUTODEV_COVERAGE_STORE;
+const runDir = path.join(store, 'runs', 'run-' + process.pid);
+fs.mkdirSync(path.join(runDir, 'logs'), { recursive: true });
+const startedAt = new Date().toISOString();
+const outcomes = [];
+for (const s of spec.suites) {
+    console.log('=== ' + s.label + ' ===');
+    if (s.print) console.error(s.print);
+    const log = 'logs/' + s.label + '.log';
+    fs.writeFileSync(path.join(runDir, log), (s.print || 'no output') + String.fromCharCode(10));
+    outcomes.push({ label: s.label, state: s.state, reason: null, status: s.state === 'pass' ? 0 : 1, signal: null, ms: 1, log });
+}
+const failed = outcomes.some((o) => o.state === 'fail');
+if (spec.publish) {
+    fs.writeFileSync(path.join(store, 'receipt.json'), JSON.stringify({ schema: 1, runId: 'run-' + process.pid, root: spec.root, runDir,
+        startedAt, finishedAt: new Date().toISOString(), outcomes, treeInert: { state: 'pass' }, verdict: failed ? 'fail' : 'pass' }));
+}
+process.exitCode = failed ? 1 : 0;
+`;
+const receiptsLib = require(path.join(ROOT, 'tooling', 'coverage-receipt.js'));
+const ENOSPC_LINE = "Error: ENOSPC: no space left on device, write 'out.bin'";
+
+/** A tree whose gate:chain is `npm test`, and `test` runs the stand-in runner. The disk floor is out of reach, so ENOSPC is always confirmable. */
+function runnerFixture(suites, { publish = true, stale = null } = {}) {
+    const fx = fixture([{ exit: 0 }], { config: { ...CONFIG, diskFloorBytes: 1e18 },
+        scripts: { gate: 'node gate-lock.js', 'gate:chain': 'npm test', test: 'node tooling/test-all.js' } });
+    fs.mkdirSync(path.join(fx.dir, 'tooling'), { recursive: true });
+    fs.writeFileSync(path.join(fx.dir, 'tooling', 'test-all.js'), RUNNER);
+    fx.store = mkTemp('grec-cov-');
+    const root = receiptsLib.canonicalRoot(fx.dir);
+    fs.writeFileSync(path.join(fx.dir, 'suites.json'), JSON.stringify({ suites, publish, root }));
+    if (stale) {
+        // A receipt an earlier run left: its one failed suite did print ENOSPC.
+        const runDir = path.join(fx.store, 'runs', 'stale');
+        fs.mkdirSync(path.join(runDir, 'logs'), { recursive: true });
+        fs.writeFileSync(path.join(runDir, 'logs', `${stale}.log`), `${ENOSPC_LINE}\n`);
+        fs.writeFileSync(path.join(fx.store, 'receipt.json'), JSON.stringify({ schema: 1, runId: 'stale', root, runDir, startedAt: hourAgo(), finishedAt: hourAgo(),
+            outcomes: [{ label: stale, state: 'fail', log: `logs/${stale}.log` }], treeInert: { state: 'pass' }, verdict: 'fail' }));
+    }
+    return fx;
+}
+const runRunner = (subject, fx) => runGate(subject, fx, { AUTODEV_COVERAGE_STORE: fx.store });
+
+/** R17: a passing suite that prints ENOSPC does not excuse another suite's failure in the same step. */
+async function r17RunnerPassingNoise(subject) {
+    const fx = runnerFixture([{ label: 'test-noisy', state: 'pass', print: ENOSPC_LINE }, { label: 'test-red', state: 'fail', print: 'FAIL  an assertion' }]);
+    const r = await runRunner(subject, fx);
+    return [['R17: a passing suite printed ENOSPC and another suite failed on its own: exit 1, a FAIL',
+        r.code === 1 && /verdict FAIL/.test(r.out) && /ENOSPC/.test(r.out) && /\(test-red\) do not all carry one confirmed machine cause/.test(r.out), `exit=${r.code}\n${r.out}`]];
+}
+
+/** R18: the one failed suite printed ENOSPC in its own log, under the floor: INDETERMINATE. */
+async function r18RunnerOwnLog(subject) {
+    const fx = runnerFixture([{ label: 'test-ok', state: 'pass' }, { label: 'test-full', state: 'fail', print: ENOSPC_LINE }]);
+    const r = await runRunner(subject, fx);
+    return [['R18: the only failed suite printed ENOSPC itself: exit 2, naming it',
+        r.code === 2 && /ENOSPC in every failed suite \(test-full\)/.test(r.out), `exit=${r.code}\n${r.out}`]];
+}
+
+/** R19: two failed suites, only one with ENOSPC: the other one's failure stands. */
+async function r19RunnerMixed(subject) {
+    const fx = runnerFixture([{ label: 'test-full', state: 'fail', print: ENOSPC_LINE }, { label: 'test-red', state: 'fail', print: 'FAIL  an assertion' }]);
+    const r = await runRunner(subject, fx);
+    return [['R19: one failed suite printed ENOSPC, another failed on its own: exit 1, a FAIL',
+        r.code === 1 && /verdict FAIL/.test(r.out) && /\(test-full, test-red\) do not all carry/.test(r.out), `exit=${r.code}\n${r.out}`]];
+}
+
+/** R20: this attempt published no receipt, and an earlier run's receipt is not evidence. */
+async function r20RunnerStale(subject) {
+    const fx = runnerFixture([{ label: 'test-noisy', state: 'pass', print: ENOSPC_LINE }, { label: 'test-red', state: 'fail', print: 'FAIL  an assertion' }],
+        { publish: false, stale: 'test-red' });
+    const r = await runRunner(subject, fx);
+    return [['R20: an earlier run\'s receipt naming ENOSPC leaves this attempt\'s exit 1 a FAIL',
+        r.code === 1 && /verdict FAIL/.test(r.out) && /not published inside this attempt/.test(r.out), `exit=${r.code}\n${r.out}`]];
+}
+
+/** R21: the real gate's first step is the one the per-suite rule guards. */
+function r21RealRunnerStep() {
+    const pkg = JSON.parse(fs.readFileSync(path.join(ROOT, 'package.json'), 'utf8'));
+    const first = String(pkg.scripts['gate:chain'] || '').split('&&')[0].trim();
+    return [['R21: the real gate:chain starts with `npm test`, and its `test` step is recognised as the suite runner',
+        first === 'npm test' && recovery.runsSuiteRunner(ROOT, 'test') === true, `first=${first} runner=${recovery.runsSuiteRunner(ROOT, 'test')}`]];
+}
+
+// ---------------------------------------------------------------------------
 // Plants: a copy of the subject tree with one anchor replaced.
 // ---------------------------------------------------------------------------
 
 function mutant(id, rel, edits) {
     const root = mkTemp(`grec-${id}-`);
-    const files = ['tooling/gate-lock.js', 'tooling/gate-recovery.js',
+    const files = ['tooling/gate-lock.js', 'tooling/gate-recovery.js', 'tooling/coverage-receipt.js',
         'plugins/autodev-core/scripts/full-gate-queue.js', 'plugins/autodev-core/scripts/gate-identity.js', 'plugins/autodev-core/scripts/gate-records.js'];
     for (const f of files) {
         fs.mkdirSync(path.dirname(path.join(root, f)), { recursive: true });
@@ -412,7 +509,8 @@ async function main() {
     const real = { R1: r1CrashNoEvent, R2: r2CrashWithEvent, R3: r3EventOutside, R4: r4DiskPersistent,
                    R5: r5PortPersistent, R6: r6Limit, R7: r7KeepsArrival, R8: r8NoConfig, R9: r9OtherStep,
                    R10: r10TwoInARow, R11: r11EventAfter, R12: r12ConfigNull, R13: r13CounterSurvivesPrune, R14: r14NoGo,
-                   R15: r15Lingering, R16: r16LeaseHeld };
+                   R15: r15Lingering, R16: r16LeaseHeld, R17: r17RunnerPassingNoise, R18: r18RunnerOwnLog, R19: r19RunnerMixed,
+                   R20: r20RunnerStale, R21: async () => r21RealRunnerStep() };
     for (const [id, fn] of Object.entries(real)) if (want(id)) for (const [n, ok, d] of await fn(SUBJECT)) check(n, ok, d);
 
     const plants = [
@@ -452,6 +550,13 @@ async function main() {
             [['        if (lingering.length) keepLane = lingering;\n', '']], (s) => r15Lingering(s), ['R15']],
         ['P22', 'a first lease overwrites another live run\'s lease', 'plugins/autodev-core/scripts/gate-records.js',
             [['            if (live !== false) {', '            if (false) {']], (s) => r16LeaseHeld(s), ['R16']],
+        ['P23', 'the suite runner\'s step is judged as one step', 'tooling/gate-recovery.js',
+            [["return typeof s === 'string' && /\\btest-all\\.js\\b/.test(s);", 'return false;']], (s) => r17RunnerPassingNoise(s), ['R17']],
+        ['P24', 'one failed suite\'s cause excuses every failed one', 'tooling/gate-recovery.js',
+            [["const enospc = rows.every((r) => r.hits.some((h) => h.kind === 'ENOSPC'));", "const enospc = rows.some((r) => r.hits.some((h) => h.kind === 'ENOSPC'));"]],
+            (s) => r19RunnerMixed(s), ['R19']],
+        ['P25', 'a receipt from before the attempt counts', 'tooling/gate-recovery.js',
+            [[' || started < from || finished > to) {', ') {']], (s) => r20RunnerStale(s), ['R20']],
     ];
     for (const [id, what, rel, edits, scenario, covers] of plants) {
         if (!want(id) && !covers.some(want)) continue;

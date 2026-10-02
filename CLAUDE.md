@@ -38,17 +38,20 @@ When the first step fails, run the remaining twelve yourself.
 The chain's exit status is a verdict on one step, not on thirteen.
 
 - **`npm run gate` waits its turn** in the machine-wide `full-gate-queue.js` queue
-  (`tooling/gate-lock.js`), as a harness gate behind every product gate, then runs `scripts["gate:chain"]` and passes its exit code through.
+  (`tooling/gate-lock.js`), as a harness gate behind every product gate, then runs `scripts["gate:chain"]`
+  and passes its exit code through unless the machine explains a red (next bullet).
   A waiter stopped by hand leaves its ticket: `full-gate-queue.js leave --pid <pid>` removes it.
-- **Exit 2 is INDETERMINATE**, never a pass or a fail: a chain the lock did not see finish, or a
-  conflict. Read the conflict line before re-running.
+- **Exit 2 is INDETERMINATE**, never a pass or a fail: a chain the lock did not see finish, a
+  conflict, or a red with machine evidence from `tooling/gate-recovery.js` (ENOSPC under the disk
+  floor, a port still taken, a crash exit with event 2004). Inside `npm test` that evidence must sit
+  in every failed suite's own log. Read the conflict line before re-running.
 - **One full gate per merge, on the frozen candidate.** Iterate with `npm test`. Then rebase onto
   `origin/main`, commit, and run the gate once on that clean tree: `check:suites` grades HEAD in a
   private worktree and refuses a dirty tree. Merge with `plugins/autodev-core/scripts/merge-lock.js`,
   which takes the per-repo merge lock, refuses a base that moved, and reads the merged tree back.
 - **Do not touch the tree while it runs.** `test-all.js` fails `tree-inert` when a suite changes
-  `git status` under a stable HEAD, and reads a moved HEAD as INDETERMINATE (exit 2). Draft in a
-  scratchpad. `check:coverage` grades the receipt that `npm test` left and refuses (exit 2) one
+  `git status` under a stable HEAD. A moved HEAD makes that row INDETERMINATE, so the run exits 2,
+  or 1 when a suite also failed on its own. Draft in a scratchpad. `check:coverage` grades the receipt that `npm test` left and refuses (exit 2) one
   that is missing, stale, partial or red; `find-untested-functions.js --fresh` measures anew.
 - **`gate:fast` does not satisfy the merge bar.** The bar is the full gate on the rebased candidate.
 - **The gate is not what CI runs.** `check:hook-parse` is CI's `node --check` loop over

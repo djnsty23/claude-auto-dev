@@ -21,10 +21,15 @@
  *   2. Takes the per-repo lock `<home>/.claude/autodev/locks/merge-<owner>__<name>.lock`
  *      through autodev-core's full-gate-queue.js: an atomic `wx` create, a
  *      first-come ticket queue beside it, and a dead holder's lock moved aside
- *      only when BOTH tasklist and ps fail to find its pid on Windows, because
- *      an MSYS pid is invisible to tasklist while alive. Line 1 of the lock is
- *      this process's pid, line 2 says repo, PR, head and start time (UTC). A
- *      waiter prints who holds it and gives up after --wait-timeout-ms.
+ *      only on the queue's evidence. The lock's meta line names the holder's
+ *      native pid with its creation time and boot, so a reused pid or a lock
+ *      from an earlier boot reads correctly, and an answer no probe can give
+ *      counts as alive. A lock with no meta line falls back to pid probes,
+ *      where BOTH tasklist and ps must fail to find it on Windows, because an
+ *      MSYS pid is invisible to tasklist while alive. Line 1 of the lock is
+ *      this process's pid, line 2 says repo, PR, head and start time (UTC),
+ *      and the last is the queue's meta line. A waiter prints who holds it and
+ *      gives up after --wait-timeout-ms.
  *   3. `gh pr view`: refuses unless the PR is OPEN and its head is --head.
  *   4. Reads the base branch head, then `gh api repos/R/compare/<base>...<head>`:
  *      refuses unless behind_by is 0, so the candidate already contains the base.
