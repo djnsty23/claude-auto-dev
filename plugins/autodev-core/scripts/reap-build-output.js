@@ -191,9 +191,30 @@ function leaseCovers(base, wt, judge) {
     if (l.state !== 'ok') return `its lease ${key} cannot be read (${l.error})`;
     const v = l.value;
     if (v.state === 'released') return null;
+    const fault = leaseFault(v);
+    if (fault) return `its lease ${key} cannot be judged (${fault})`;
     const alive = judge(v);
     if (alive === false) return null;
     return `run ${v.runId} holds a lease on it (${v.state}, ${alive === true ? 'running' : 'not provably finished'})`;
+}
+
+const ISO7 = /^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d\.\d{7}Z$/;
+
+/**
+ * Why a lease's fields cannot be judged, or null. A creation time or boot id
+ * of the wrong shape would otherwise read as "an earlier boot" or "a reused
+ * pid", and a live owner would be judged finished.
+ */
+function leaseFault(v) {
+    if (typeof v.state !== 'string') return 'its state is not a string';
+    if (v.runId !== undefined && v.runId !== null && typeof v.runId !== 'string') return 'its run id is not a string';
+    const o = v.owner;
+    if (!o || typeof o !== 'object' || Array.isArray(o)) return 'it names no owner';
+    if (!Number.isInteger(o.pid) || o.pid <= 0) return 'its owner pid is not a pid';
+    if (o.startUtc !== null && o.startUtc !== undefined && !(typeof o.startUtc === 'string' && ISO7.test(o.startUtc))) return 'its owner creation time is malformed';
+    if (o.bootId !== null && o.bootId !== undefined && !(typeof o.bootId === 'string' && /^[^|]+\|\d{4}-\d\d-\d\dT\S+Z$/.test(o.bootId))) return 'its owner boot id is malformed';
+    for (const k of ['msysPid', 'msysWinpid']) if (o[k] !== undefined && o[k] !== null && !(Number.isInteger(o[k]) && o[k] > 0)) return `its owner ${k} is not a pid`;
+    return null;
 }
 
 /** A lease judge that takes a process snapshot only when a lease needs one. */
@@ -262,16 +283,45 @@ function readProcesses(env = process.env) {
     }
 }
 
-/** The reaper and every process above it: their command lines carry the --repo paths. */
-function selfAndAncestors(procs) {
+const LAUNCHER_RE = /(?:^|[\s"'\\/])reap-build-output\.js(?:$|[\s"'])/i;
+
+/**
+ * The reaper, and the processes directly above it that are only launching it
+ * (a shell running this script): their command lines carry the --repo paths.
+ * The walk stops at the first ancestor that is anything else, so a dev server
+ * that starts the reaper still protects its worktree.
+ */
+function selfAndLaunchers(procs) {
     const byPid = new Map(procs.map((p) => [p.pid, p]));
     const out = new Set([process.pid]);
-    let cur = byPid.get(process.pid);
-    while (cur && Number.isInteger(cur.ppid) && cur.ppid > 0 && !out.has(cur.ppid)) {
-        out.add(cur.ppid);
-        cur = byPid.get(cur.ppid);
+    let pid = process.ppid;
+    while (Number.isInteger(pid) && pid > 0 && !out.has(pid)) {
+        const p = byPid.get(pid);
+        if (!p || !LAUNCHER_RE.test(p.text)) break;
+        out.add(pid);
+        pid = p.ppid;
     }
     return out;
+}
+
+/**
+ * A command line can name a path by its 8.3 alias (C:\PROGRA~1\...), which no
+ * spelling of the canonical path contains. Each path-like token holding `~N`
+ * is cut back to its longest existing prefix and expanded; the expansions are
+ * appended to the text that is searched.
+ */
+function expandShortPaths(text) {
+    const out = [];
+    for (const m of text.match(/[a-z]:[\\/][^"'\s]*~\d[^"'\s]*/gi) || []) {
+        let p = m;
+        for (;;) {
+            if (fs.existsSync(p)) { out.push(ident.canonicalPath(p)); break; }
+            const up = path.dirname(p);
+            if (up === p) break;
+            p = up;
+        }
+    }
+    return out.length ? `${text}\n${out.join('\n')}` : text;
 }
 
 /** The spellings a command line may use for a canonical path, lower-cased on Windows. */
@@ -291,7 +341,8 @@ function processUses(procs, wt) {
     const spellings = pathSpellings(wt.canonical);
     for (const p of procs.procs) {
         if (procs.exclude && procs.exclude.has(p.pid)) continue;
-        const hay = WIN ? p.text.toLowerCase() : p.text;
+        if (WIN && p.hay === undefined) p.hay = (p.text.includes('~') ? expandShortPaths(p.text) : p.text).toLowerCase();
+        const hay = WIN ? p.hay : p.text;
         if (spellings.some((s) => hay.includes(s))) return `pid ${p.pid} runs with this worktree's path in its command line`;
     }
     return null;
@@ -339,9 +390,12 @@ function shapeFault(wt, target, name) {
     try { st = fs.lstatSync(target); } catch (e) { return e.code === 'ENOENT' ? 'it is gone' : `it cannot be read (${e.code})`; }
     if (st.isSymbolicLink()) return 'it is a junction or symlink, not a directory of this worktree';
     if (!st.isDirectory()) return 'it is not a directory';
+    // Compared with the worktree's canonical path taken when git listed it, not
+    // with a second resolution of the same path: a worktree directory swapped
+    // for a junction since then resolves both sides to the same elsewhere.
     let real;
     try { real = ident.canonicalPath(fs.realpathSync.native(target)); } catch (e) { return `its real path cannot be read (${e.code})`; }
-    if (real !== ident.canonicalPath(path.join(wt.dir, name))) return `it resolves outside the worktree (${real})`;
+    if (real !== path.join(wt.canonical, WIN ? name.toLowerCase() : name)) return `it resolves outside the worktree (${real})`;
     const tracked = git(wt.dir, ['ls-files', '-z', '--', name]);
     if (!tracked.ok) return `git cannot say whether it is tracked (${tracked.why})`;
     if (tracked.out.length) return 'git tracks files under it';
@@ -379,14 +433,17 @@ function candidatesIn(wt) {
     try { names = fs.readdirSync(wt.dir); } catch { return out; }
     for (const name of OUTPUT_DIRS) {
         if (names.includes(name)) out.push({ kind: 'output', name, path: path.join(wt.dir, name) });
-        for (const n of names) if (n.startsWith(`${name}${ASIDE_PREFIX}`)) out.push({ kind: 'leftover', name: n, path: path.join(wt.dir, n) });
+        // Only the exact name renameAside writes counts as left by this script:
+        // a `.next.reaped-backup` someone made by hand is not ours to delete.
+        const ours = new RegExp(`^${name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}${ASIDE_PREFIX}\\d{8}T\\d{9}Z-\\d+-[a-z0-9]{1,6}$`);
+        for (const n of names) if (ours.test(n)) out.push({ kind: 'leftover', name: n, path: path.join(wt.dir, n) });
     }
     return out;
 }
 
 function context(base, minAgeHours, env, fresh) {
     const procs = readProcesses(env);
-    if (procs.ok) procs.exclude = selfAndAncestors(procs.procs);
+    if (procs.ok) procs.exclude = selfAndLaunchers(procs.procs);
     return { base, claims: gateClaims(base), judge: leaseJudge(base, fresh), procs, nowMs: Date.now(), minAgeMs: minAgeHours * 3600000, minAgeHours };
 }
 
@@ -457,7 +514,18 @@ function renameAside(base, cand, env, minAgeHours) {
 function deleteAside(aside, env) {
     const before = measure(aside).bytes;
     try {
-        if (env.AUTODEV_REAP_TEST_FAIL_DELETE) throw Object.assign(new Error('a planted delete failure'), { code: 'EPLANTED' });
+        if (env.AUTODEV_REAP_TEST_FAIL_DELETE) {
+            // The test seam: a delete that removes one file, then fails.
+            const stack = [aside];
+            while (stack.length) {
+                const d = stack.pop();
+                const ents = fs.readdirSync(d, { withFileTypes: true }).sort((x, y) => (x.name < y.name ? -1 : 1));
+                const file = ents.find((e) => !e.isDirectory());
+                if (file) { fs.unlinkSync(path.join(d, file.name)); break; }
+                for (const e of ents) stack.push(path.join(d, e.name));
+            }
+            throw Object.assign(new Error('a planted delete failure'), { code: 'EPLANTED' });
+        }
         fs.rmSync(aside, { recursive: true, force: true, maxRetries: 3, retryDelay: 200 });
         return { removedBytes: before, why: null };
     } catch (e) {
@@ -557,7 +625,7 @@ function main(argv = process.argv.slice(2), env = process.env) {
 
 module.exports = {
     parseArgs, parsePorcelain, listWorktrees, gateClaims, leaseCovers, readProcesses, processUses, pathSpellings,
-    newestShallow, shapeFault, measure, assess, apply, main,
+    newestShallow, shapeFault, measure, assess, apply, main, leaseFault, expandShortPaths,
 };
 
 if (require.main === module) {
