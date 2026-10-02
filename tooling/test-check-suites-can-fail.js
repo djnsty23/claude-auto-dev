@@ -22,6 +22,7 @@
 //   · CONTROL: everything green. The sweep must exit 0 and print NONE of the
 //     planted output, including the red a stubbed subject provokes, because a
 //     stub-killed run is the expected red and is not evidence of anything.
+//     A planted pool module beside the suite must get no row at all.
 //   · RED: a validate.js and a suite that both fail at baseline. The rows and the
 //     exit code must be exactly what they were before this evidence existed, and
 //     the children's own last lines must reach the sweep's output, bounded.
@@ -83,6 +84,16 @@ const RED_SUITE = [
     "console.log('R-OUT-050.' + 'x'.repeat(20000));",
     "console.error('R-ERR-1.'); console.error('R-ERR-2.'); console.error('R-ERR-3.');",
     'process.exit(3);',
+    '',
+].join('\n');
+
+// The optional pool test-all.js loads matches test-*.js but is a module, not a
+// suite. Like the real tooling/test-all-pool.js it names a subject it never
+// touches on a run with no arguments, so a sweep that took it for a suite
+// would print a row for it, and the control's two-row summary would move.
+const POOL_MODULE = [
+    "function load() { return require(require('path').join(__dirname, '..', 'plugins', 'demo', 'subject.js')); }",
+    'module.exports = { load };',
     '',
 ].join('\n');
 
@@ -223,6 +234,7 @@ try {
         'tooling/validate.js': GREEN_VALIDATE,
         'plugins/demo/subject.js': SUBJECT,
         'tooling/test-planted-green.js': GREEN_SUITE,
+        'tooling/test-all-pool.js': POOL_MODULE,
     });
     dirs.push(control);
     const c = runSweep(control, false);
@@ -236,6 +248,8 @@ try {
         check('control: the summary counts both rows as verified',
             /2 suite\(s\) · 2 verified able to fail · 0 NOT verified/.test(c.all), c.all.slice(-400));
         check('control: the sweep exits 0', c.code === 0, 'exit ' + c.code);
+        check('control: the optional pool module test-all-pool.js gets no row, being no suite',
+            !/test-all-pool\.js/.test(c.all), c.all.slice(-600));
         const leaked = ['G-PASS.', 'G-FAIL.', 'V-BASELINE.', 'V-CANARY-FIRED.'].filter((s) => c.all.includes(s));
         check('control: no child output is printed, not even the red a stubbed subject provokes',
             leaked.length === 0, 'printed: ' + leaked.join(', '));
