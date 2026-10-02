@@ -242,6 +242,16 @@ let unitRepo;
     r = run([['read', path.join(path.dirname(repo), 'outside-' + process.pid + '.txt')]], { urls: [inRepo] });
     check('evidence: a read outside the repository and the temp root is uncacheable',
         !r.ev.cacheable && r.ev.reasons.some((x) => /reads outside the repository/.test(x)), JSON.stringify(r.ev.reasons));
+    const outside = path.join(path.dirname(repo), 'outside-written-' + process.pid + '.txt');
+    r = run([['read', outside], ['write', outside, '-']], { urls: [inRepo] });
+    check('evidence: a read outside the repository stays a reason when the run also wrote that path',
+        !r.ev.cacheable && r.ev.reasons.some((x) => /reads outside the repository/.test(x)), JSON.stringify(r.ev.reasons));
+    r = run([], { urls: [] });
+    check('evidence: coverage that names no script is not coverage of the process',
+        !r.ev.cacheable && r.ev.reasons.includes('coverage names no script'), JSON.stringify(r.ev.reasons));
+    r = run([['resolve', './dep', inRepo]], { urls: [inRepo] });
+    check('evidence: a require() from a repository file becomes a resolve dependency',
+        r.ev.cacheable && r.ev.deps.has('resolve\0plugins/demo/s.js\n./dep'), JSON.stringify([...r.ev.deps.keys()]) + ' ' + r.ev.reasons);
     // A script run from the private temp root: attributed by its text.
     const sText = fs.readFileSync(inRepo, 'utf8');
     const copyPath = (rr) => path.join(rr.tmpRoot, 'copy.js');
@@ -268,6 +278,21 @@ let unitRepo;
         e.cacheable && e.deps.size === 0, JSON.stringify(e.reasons));
     e = mk(() => [], (cp) => [cp]);
     check('evidence: a temp script loaded with no recorded text is uncacheable', !e.cacheable, JSON.stringify(e.reasons));
+
+    // States: what a lookup compares.
+    const rs = () => pc.fileState(repo, 'resolve', 'plugins/demo/s.js\n./dep');
+    const none = rs();
+    fs.mkdirSync(path.join(repo, 'plugins/demo/dep'), { recursive: true });
+    fs.writeFileSync(path.join(repo, 'plugins/demo/dep/index.js'), 'module.exports = 1;\n');
+    const viaDir = rs();
+    fs.writeFileSync(path.join(repo, 'plugins/demo/dep.js'), 'module.exports = 2;\n');
+    const viaFile = rs();
+    check('state: a require that starts resolving, then resolves to a new file beside it, changes state each time',
+        none === 'unresolved' && viaDir === 'path:plugins/demo/dep/index.js' && viaFile === 'path:plugins/demo/dep.js',
+        JSON.stringify([none, viaDir, viaFile]));
+    const st0 = pc.fileState(repo, 'stat', 'plugins/demo/other.txt');
+    fs.appendFileSync(path.join(repo, 'plugins/demo/other.txt'), 'longer\n');
+    check('state: a stat dependency changes with the file size', pc.fileState(repo, 'stat', 'plugins/demo/other.txt') !== st0, st0);
 }
 
 // --- the tracer itself, preloaded into real processes ---------------------------
@@ -278,6 +303,10 @@ let unitRepo;
     fs.mkdirSync(traceDir);
     fs.mkdirSync(covDir);
     fs.writeFileSync(path.join(d, 'data.txt'), 'x');
+    fs.writeFileSync(path.join(d, 'rw.txt'), 'x');
+    fs.writeFileSync(path.join(d, 'late.txt'), 'x');
+    fs.mkdirSync(path.join(d, 'lib'));
+    fs.writeFileSync(path.join(d, 'lib', 'index.js'), 'module.exports = 1;\n');
     const script = path.join(d, 'probe.js');
     fs.writeFileSync(script, [
         "const fs = require('fs'); const path = require('path'); const cp = require('child_process');",
@@ -285,9 +314,15 @@ let unitRepo;
         "fs.readdirSync(__dirname);",
         "fs.existsSync(path.join(__dirname, 'nope'));",
         "fs.writeFileSync(path.join(__dirname, 'out.txt'), 'w');",
+        "try { fs.writeFileSync(path.join(__dirname, 'no-such-dir', 'failed.txt'), 'w'); } catch { /* expected */ }",
+        "fs.closeSync(fs.openSync(path.join(__dirname, 'rw.txt'), 'r+'));",
+        "if (typeof fs.realpathSync.native !== 'function') throw new Error('realpathSync.native lost');",
+        "fs.realpathSync.native(__dirname);",
+        "require('./lib');",
         "cp.spawnSync('git', ['--version']);",
         "cp.spawnSync(process.execPath, ['-e', '1'], { env: { PATH: process.env.PATH } });",
         "cp.spawnSync(process.execPath, ['-e', '1']);",
+        "process.on('exit', () => { fs.readFileSync(path.join(__dirname, 'late.txt')); });",
         "process.stdout.write('probe-done');",
     ].join('\n'));
     const env = Object.assign({}, process.env, {
@@ -308,6 +343,14 @@ let unitRepo;
     check('tracer: a Node child started with a replaced environment is recorded as untraced', has('untraced'));
     check('tracer: the script it compiled is recorded with its text digest',
         t.records.some((x) => x[0] === 'compile' && x[1] === script && x[2] === tr.textDigest(fs.readFileSync(script))));
+    check('tracer: a write that threw is not recorded as a write', !has('write', 'failed.txt'));
+    check('tracer: a file opened r+ is recorded as read', has('read', 'rw.txt'));
+    check('tracer: a read in an exit listener registered after the preload is recorded', has('read', 'late.txt'));
+    check('tracer: a require() is recorded with its request and parent',
+        t.records.some((x) => x[0] === 'resolve' && x[1] === './lib' && x[2] === script));
+    check('tracer: fork() with a non-Node execPath is a native child',
+        JSON.stringify(tr.classifyChild('fork', ['x.js', [], { execPath: 'C:/tools/native-reader.exe', env: {} }], {}))
+        === JSON.stringify(['native', 'native-reader']));
 
     // Killed mid-run: a start and no end.
     const t2 = path.join(d, 't2');
@@ -375,12 +418,19 @@ const FILES = {
     // k: a traced child it kills, so the run's evidence is incomplete.
     'plugins/demo/k.js': sub('k'),
     'tooling/test-k.js': suite('k', "cp.spawnSync(process.execPath, ['-e', 'setTimeout(() => {}, 20000)'], { timeout: 1500 });"),
+    // r: only the STUB run requires '../plugins/demo/rdep', which resolves to
+    // rdep/index.js until the second commit adds rdep.js beside it. Nothing
+    // that run loaded or read changes, so only re-resolving the request can
+    // see that the same require() would now load a different file.
+    'plugins/demo/r.js': sub('r'),
+    'plugins/demo/rdep/index.js': 'module.exports = { v: 42 };\n',
+    'tooling/test-r.js': suite('r', '', "require('../plugins/demo/rdep');"),
     // x: reads a file outside the repository.
     'plugins/demo/x.js': sub('x'),
     'tooling/test-x.js': suite('x', 'fs.readFileSync(process.env.PAIR_FIXTURE_EXTERNAL);'),
 };
-const SUITES = ['a', 'b', 'd', 'e', 'f', 'g', 'k', 'n', 'x'];
-const CACHEABLE = ['a', 'b', 'd', 'e', 'f', 'g'];
+const SUITES = ['a', 'b', 'd', 'e', 'f', 'g', 'k', 'n', 'r', 'x'];
+const CACHEABLE = ['a', 'b', 'd', 'e', 'f', 'g', 'r'];
 
 function runSweep(repo, cacheDir, label, flags, envExtra) {
     const report = path.join(cacheDir, '..', path.basename(cacheDir) + '-' + label + '.json');
@@ -409,7 +459,7 @@ function runSweep(repo, cacheDir, label, flags, envExtra) {
 const tail = (s) => (s ? s.all.slice(-1500) : '');
 
 {
-    const repo = makeRepo('e2e', FILES);
+    const repo = makeRepo('e2e space', FILES);
     const cacheRoot = tmp('e2e-cache');
     const cacheDir = path.join(cacheRoot, 'c');
 
@@ -430,7 +480,7 @@ const tail = (s) => (s ? s.all.slice(-1500) : '');
         check('R1 shadow: a read outside the repository makes its pair uncacheable', r1.p.x && !r1.p.x.stored
             && /reads outside the repository/.test(why('x')), why('x'));
         check('R1 shadow: the summary prints the hit, miss and uncacheable populations',
-            /\[pair-cache\] mode shadow \(default\) · 9 pair\(s\): 0 hit · 6 miss · 3 uncacheable/.test(r1.all), tail(r1));
+            /\[pair-cache\] mode shadow \(default\) · 10 pair\(s\): 0 hit · 7 miss · 3 uncacheable/.test(r1.all), tail(r1));
     }
 
     // R2: shadow again on the same tree. Every stored pair is a hit and agrees.
@@ -450,7 +500,7 @@ const tail = (s) => (s ? s.all.slice(-1500) : '');
         check('R3 --cache: every valid pair is skipped', notSkipped.length === 0, notSkipped.join(','));
         check('R3 --cache: the uncacheable pairs still ran', ['k', 'n', 'x'].every((s) => r3.p[s] && r3.p[s].fresh === 'killed'));
         check('R3 --cache: the verdict rows and exit code are the uncached run\'s', r3.rows === r1.rows && r3.code === 0, tail(r3));
-        check('R3 --cache: the summary counts the skipped pairs', /6 hit · 0 miss · 3 uncacheable · 6 skipped/.test(r3.all), tail(r3));
+        check('R3 --cache: the summary counts the skipped pairs', /7 hit · 0 miss · 3 uncacheable · 7 skipped/.test(r3.all), tail(r3));
     }
 
     // Commit 2: one edit per scenario, plus an unrelated one, plus two entries
@@ -463,6 +513,7 @@ const tail = (s) => (s ? s.all.slice(-1500) : '');
             'plugins/demo/inputs/two.txt': '2\n',
             'plugins/demo/conf.txt': 'conf two\n',
             'unrelated.txt': 'two\n',
+            'plugins/demo/rdep.js': 'module.exports = { v: 42 };  // now wins the lookup\n',
         });
         check('commit 2 lands', commitAll(repo, 'edits'));
     }
@@ -480,6 +531,8 @@ const tail = (s) => (s ? s.all.slice(-1500) : '');
     if (r4) {
         const p = r4.p;
         const desc = (s) => JSON.stringify(p[s] && [p[s].lookup, p[s].lookupReason]);
+        check('R4: a file added beside a requirer that now wins its require() reruns the pair', p.r && p.r.lookup === 'miss'
+            && /^dependency changed: resolve tooling\/test-r\.js\n\.\.\/plugins\/demo\/rdep$/.test(p.r.lookupReason), desc('r'));
         check('R4: an edited subject reruns its pair', p.b && p.b.lookup === 'miss', desc('b'));
         check('R4: an edited helper the baseline loads reruns its pair', p.a && p.a.lookup === 'miss'
             && /baseline/.test(p.a.lookupReason), desc('a'));
