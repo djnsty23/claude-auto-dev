@@ -432,9 +432,23 @@ const FILES = {
 const SUITES = ['a', 'b', 'd', 'e', 'f', 'g', 'k', 'n', 'r', 'x'];
 const CACHEABLE = ['a', 'b', 'd', 'e', 'f', 'g', 'r'];
 
+// The fixture sweeps start as a top-level check:suites does: with no tracer.
+// Under the real check:suites this suite is itself a traced pair, so its own
+// environment carries that sweep's tracer preload in NODE_OPTIONS, its trace
+// directory and its coverage directory. Inherited, the outer preload loads in
+// every fixture process from outside the fixture repository, the cache rightly
+// calls every pair uncacheable, and R1 to R4 fail on the harness, not on the
+// cache. `[measured 2026-10-02]` the gate's check:suites read exactly that red.
+function untracedEnv() {
+    const drop = new Set(['NODE_OPTIONS', tr.TRACE_DIR_ENV.toUpperCase(), tr.COVERAGE_ENV.toUpperCase()]);
+    const env = {};
+    for (const [k, v] of Object.entries(process.env)) if (!drop.has(k.toUpperCase())) env[k] = v;
+    return env;
+}
+
 function runSweep(repo, cacheDir, label, flags, envExtra) {
     const report = path.join(cacheDir, '..', path.basename(cacheDir) + '-' + label + '.json');
-    const env = Object.assign({}, process.env, {
+    const env = Object.assign(untracedEnv(), {
         AUTODEV_SUITE_CACHE_DIR: cacheDir, AUTODEV_SUITE_CACHE_REPORT: report, AUTODEV_SUITE_CACHE: '',
         PAIR_FIXTURE_EXTERNAL: externalFile,
     }, envExtra || {});
