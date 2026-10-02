@@ -1,0 +1,941 @@
+{
+  "schema": 1,
+  "note": "Which tooling/test-*.js suites test-all-pool.js may overlap. A suite runs in parallel only when it is \"parallel\" here AND its bytes still hash to sha256; anything else runs alone. Evidence: node tooling/test-all-pool.js --audit.",
+  "suites": {
+    "test-agent-browser-cleanup.js": {
+      "isolation": "parallel",
+      "reason": "reviewed 2026-10-02: writes only under its own mkdtemp fixtures; any profile, config or HOME it touches is pointed into them; no git outside temp repos; no fixed port",
+      "sha256": "beee9f45e8d3fec1eab6aba600cf34ebc569a58488e26bd85c0614fe42979f87"
+    },
+    "test-archive-keeplist-prose.js": {
+      "isolation": "parallel",
+      "reason": "reviewed 2026-10-02: writes only under its own mkdtemp fixtures; any profile, config or HOME it touches is pointed into them; no git outside temp repos; no fixed port",
+      "sha256": "5ea1c3b8a085abada4fe03b2180f65e3fb037dc14058d97bea03095562139181"
+    },
+    "test-archive-path-durability.js": {
+      "isolation": "serial",
+      "reason": "audit 2026-10-02: git-write: git init, add (a fixture repo is initialised; every call must target it); profile: runs plugin code without overriding HOME, USERPROFILE or CLAUDE_CONFIG_DIR. Ambiguous or shared side effects run alone",
+      "sha256": "36d34aa64c94285541253d213329e9e0ad4bcec7ce75e56854f3aca9fa4d9169"
+    },
+    "test-archive-prd.js": {
+      "isolation": "serial",
+      "reason": "audit 2026-10-02: profile: loads plugin code in-process without overriding the profile. Ambiguous or shared side effects run alone",
+      "sha256": "efa49f4d7714837fd71dae37d5d1c53d4bcbe42e0fe62aa2a42c3559498fff5b"
+    },
+    "test-argv-injection.js": {
+      "isolation": "serial",
+      "reason": "audit 2026-10-02: git-write: git init, branch, update-ref (a fixture repo is initialised; every call must target it); profile: runs plugin code without overriding HOME, USERPROFILE or CLAUDE_CONFIG_DIR. Ambiguous or shared side effects run alone",
+      "sha256": "60cb6f15178e3ac9a5ff1e17efc5f7d87c30250b368b1d58029745114e92118d"
+    },
+    "test-artifact-write-guard.js": {
+      "isolation": "serial",
+      "reason": "audit 2026-10-02: profile: runs plugin code without overriding HOME, USERPROFILE or CLAUDE_CONFIG_DIR. Ambiguous or shared side effects run alone",
+      "sha256": "2065bb4fc811b04ab57b750bcf2d311b41139b2cc3550e67e8c8c8135ffc09de"
+    },
+    "test-assertion-targets.js": {
+      "isolation": "serial",
+      "reason": "audit 2026-10-02: repo-write: writeFileSync on a path built from the repo root; git-write: git init, add (a fixture repo is initialised; every call must target it). Ambiguous or shared side effects run alone",
+      "sha256": "7064882fcc3ba06e69a71aa6342a4578a739bd0596ae2c00d8ff219b488e876d"
+    },
+    "test-auth-matrix.js": {
+      "isolation": "serial",
+      "reason": "audit 2026-10-02: repo-write: writeFileSync on a path built from the repo root; profile: runs plugin code without overriding HOME, USERPROFILE or CLAUDE_CONFIG_DIR. Ambiguous or shared side effects run alone",
+      "sha256": "2f07453df9e1b79ba9c12380ab494f1733315184bca56caf1591a3ace7956f25"
+    },
+    "test-auto-brain-survey.js": {
+      "isolation": "serial",
+      "reason": "audit 2026-10-02: git-write: git clone, init (a fixture repo is initialised; every call must target it); profile: runs plugin code without overriding HOME, USERPROFILE or CLAUDE_CONFIG_DIR. Ambiguous or shared side effects run alone",
+      "sha256": "ef4ee85b600df55b7f58c6e93a143ff3cb400b8bc939e839b846dbf2e79b05ee"
+    },
+    "test-away-state.js": {
+      "isolation": "parallel",
+      "reason": "reviewed 2026-10-02: writes only under its own mkdtemp fixtures; any profile, config or HOME it touches is pointed into them; no git outside temp repos; no fixed port",
+      "sha256": "78261bac942fef54d2fce7229cc27a2e7afaf6294903e08007100514c8483135"
+    },
+    "test-brain-brief.js": {
+      "isolation": "serial",
+      "reason": "audit 2026-10-02: repo-write: copyFileSync, writeFileSync on a path built from the repo root. Ambiguous or shared side effects run alone",
+      "sha256": "938ce7335719ff9742a4fafa8fb8be5880516d322ed2b97bb2a180441c9af01f"
+    },
+    "test-brain-judge.js": {
+      "isolation": "serial",
+      "reason": "audit 2026-10-02: repo-write: writeFileSync, mkdirSync, appendFileSync, unlinkSync on a path built from the repo root. Ambiguous or shared side effects run alone",
+      "sha256": "909431d5d1810f3126b21da01103719bb38b22869b6b03b9d176ca8c60600faf"
+    },
+    "test-brain-panels.js": {
+      "isolation": "serial",
+      "reason": "audit 2026-10-02: repo-write: copyFileSync on a path built from the repo root. Ambiguous or shared side effects run alone",
+      "sha256": "47790d176a2843a38d3190aa4464ea487c0f6b44c5335b1f6582278d3f4d7003"
+    },
+    "test-check-assignment.js": {
+      "isolation": "serial",
+      "reason": "audit 2026-10-02: profile: runs plugin code without overriding HOME, USERPROFILE or CLAUDE_CONFIG_DIR. Ambiguous or shared side effects run alone",
+      "sha256": "f75f00101aed40f5f0cfeac96298741fec3437e6c404f0a38b0e4ce9123b0aa9"
+    },
+    "test-check-brain-role.js": {
+      "isolation": "serial",
+      "reason": "audit 2026-10-02: profile: runs plugin code without overriding HOME, USERPROFILE or CLAUDE_CONFIG_DIR. Ambiguous or shared side effects run alone",
+      "sha256": "251fdfd53b3e9c247604a31786d9989d55fecffa3a4be03d8504322dfd209b5f"
+    },
+    "test-check-branch-landed.js": {
+      "isolation": "serial",
+      "reason": "audit 2026-10-02: profile: runs plugin code without overriding HOME, USERPROFILE or CLAUDE_CONFIG_DIR. Ambiguous or shared side effects run alone",
+      "sha256": "bbfc5040a73b3c5d403731dcd78ec2c435843c65712adc72d87579ec2ceec3e3"
+    },
+    "test-check-ci-freshness.js": {
+      "isolation": "serial",
+      "reason": "audit 2026-10-02: profile: runs plugin code without overriding HOME, USERPROFILE or CLAUDE_CONFIG_DIR. Ambiguous or shared side effects run alone",
+      "sha256": "46f7fb8a2c75bd6c6aafa3996c02d4c1153bd10ccd0a3472f96daa8983f7b410"
+    },
+    "test-check-claude-md.js": {
+      "isolation": "serial",
+      "reason": "audit 2026-10-02: repo-write: copyFileSync, cpSync on a path built from the repo root; profile: runs plugin code without overriding HOME, USERPROFILE or CLAUDE_CONFIG_DIR. Ambiguous or shared side effects run alone",
+      "sha256": "465566fe907c04d3857179eeb88c405a602a19a77ca506aaca65581050af0ac0"
+    },
+    "test-check-conflict-markers.js": {
+      "isolation": "serial",
+      "reason": "audit 2026-10-02: repo-write: rmSync, mkdirSync on a path built from the repo root; git-write: git init, add (a fixture repo is initialised; every call must target it); profile: runs plugin code without overriding HOME, USERPROFILE or CLAUDE_CONFIG_DIR. Ambiguous or shared side effects run alone",
+      "sha256": "65a563f0dcc68b2fc06f4c0fba40a3fb5b82dcfb9665fd04c77e05625ec90b6e"
+    },
+    "test-check-coverage.js": {
+      "isolation": "serial",
+      "reason": "audit 2026-10-02: profile: runs plugin code without overriding HOME, USERPROFILE or CLAUDE_CONFIG_DIR; nested-runner: drives find-untested-functions, test-all.js. Ambiguous or shared side effects run alone",
+      "sha256": "14408e50148001ffc8fe33912a3e1990275754226dd5431a1f447d6ec92f44fc"
+    },
+    "test-check-deploy-target.js": {
+      "isolation": "serial",
+      "reason": "audit 2026-10-02: profile: runs plugin code without overriding HOME, USERPROFILE or CLAUDE_CONFIG_DIR. Ambiguous or shared side effects run alone",
+      "sha256": "55394686a7f3dec79547e457c236eeb0f64ef6409878ff12aad07b6581e7f99e"
+    },
+    "test-check-doc-staleness.js": {
+      "isolation": "serial",
+      "reason": "audit 2026-10-02: profile: runs plugin code without overriding HOME, USERPROFILE or CLAUDE_CONFIG_DIR. Ambiguous or shared side effects run alone",
+      "sha256": "bf027efcbaba0eee5a5d1146bf329a2ef991cdb4a19e5d31da92509b16b21d4f"
+    },
+    "test-check-hook-parse.js": {
+      "isolation": "serial",
+      "reason": "audit 2026-10-02: profile: runs plugin code without overriding HOME, USERPROFILE or CLAUDE_CONFIG_DIR. Ambiguous or shared side effects run alone",
+      "sha256": "0713613646d3471af54af541e32c15de28524fe9eee10b61766191a165cae376"
+    },
+    "test-check-pr-ready.js": {
+      "isolation": "serial",
+      "reason": "audit 2026-10-02: profile: runs plugin code without overriding HOME, USERPROFILE or CLAUDE_CONFIG_DIR. Ambiguous or shared side effects run alone",
+      "sha256": "774c9e6c8488b5d192f86b9213c1b931727c203f65705aec323fac6ab1587fc9"
+    },
+    "test-check-queue-freshness.js": {
+      "isolation": "serial",
+      "reason": "audit 2026-10-02: git-write: git init (a fixture repo is initialised; every call must target it); profile: runs plugin code without overriding HOME, USERPROFILE or CLAUDE_CONFIG_DIR. Ambiguous or shared side effects run alone",
+      "sha256": "2742df2a52d9dcb9c07dbb477e3ab7e1a8b8ca16391fa4fd38acb3af5c8cf124"
+    },
+    "test-check-release-lag.js": {
+      "isolation": "serial",
+      "reason": "audit 2026-10-02: repo-write: mkdirSync, writeFileSync, appendFileSync on a path built from the repo root; profile: runs plugin code without overriding HOME, USERPROFILE or CLAUDE_CONFIG_DIR. Ambiguous or shared side effects run alone",
+      "sha256": "4ccf4aac38c47ba174101ecedd8deb8864bad24fabddaf68c2c16ff1d4d2be93"
+    },
+    "test-check-spec-output.js": {
+      "isolation": "serial",
+      "reason": "audit 2026-10-02: profile: runs plugin code without overriding HOME, USERPROFILE or CLAUDE_CONFIG_DIR. Ambiguous or shared side effects run alone",
+      "sha256": "38459509f13128ff1351acfc441dbe99912410be5f152390090392a15cf6462d"
+    },
+    "test-check-suites-can-fail.js": {
+      "isolation": "serial",
+      "reason": "audit 2026-10-02: repo-write: copyFileSync on a path built from the repo root; git-write: git worktree; profile: runs plugin code without overriding HOME, USERPROFILE or CLAUDE_CONFIG_DIR; nested-runner: drives check-suites-can-fail. Ambiguous or shared side effects run alone",
+      "sha256": "7254cdc6f3430bd6d2dc7942cce68407b4c3402782c609fb61ff4f6794d250bb"
+    },
+    "test-claude-paths.js": {
+      "isolation": "parallel",
+      "reason": "reviewed 2026-10-02: writes only under its own mkdtemp fixtures; any profile, config or HOME it touches is pointed into them; no git outside temp repos; no fixed port",
+      "sha256": "48fb8328752c136a33eeae0c4f20e2b7cfe18ec3c7a4cbd75eb1c709399de6d6"
+    },
+    "test-claudemd-audit.js": {
+      "isolation": "serial",
+      "reason": "audit 2026-10-02: profile: runs plugin code without overriding HOME, USERPROFILE or CLAUDE_CONFIG_DIR. Ambiguous or shared side effects run alone",
+      "sha256": "dec0a5f60756775c45acbf3ee808dcf3fbf2a11e1a3301640a491dd0ddbb4140"
+    },
+    "test-compact-hooks.js": {
+      "isolation": "serial",
+      "reason": "audit 2026-10-02: profile: runs plugin code without overriding HOME, USERPROFILE or CLAUDE_CONFIG_DIR. Ambiguous or shared side effects run alone",
+      "sha256": "080c5ffebd4c111c355b745d5cdf4b3e7094c3ca6a3e14f47ae99bcec2d12574"
+    },
+    "test-config-dir-isolation.js": {
+      "isolation": "parallel",
+      "reason": "reviewed 2026-10-02: git commit and worktree add run only in a repo under its mkdtemp root, with a fixture config dir; no repo write, no fixed port",
+      "sha256": "21d632408caf459da571d3c1f0697f346c82da68ab9c04ffb3607007b2335b2c"
+    },
+    "test-context-depth-nudge.js": {
+      "isolation": "parallel",
+      "reason": "reviewed 2026-10-02: writes only under its own mkdtemp fixtures; any profile, config or HOME it touches is pointed into them; no git outside temp repos; no fixed port",
+      "sha256": "72e6313ebfc5501fa23ea72c774bdc7d5f88dfc7a131b74c7c884c23e537d18c"
+    },
+    "test-coordinator-write-guard.js": {
+      "isolation": "serial",
+      "reason": "audit 2026-10-02: git-write: git init, commit, push, fetch, worktree, merge, rebase, cherry-pick, checkout, am (a fixture repo is initialised; every call must target it); npm: spawns npm. Ambiguous or shared side effects run alone",
+      "sha256": "2075ca8b71b93d4209b5d313c57bf3dfa57ff46b1995a1cb4913f6f7fb4ff443"
+    },
+    "test-cpu-telemetry.js": {
+      "isolation": "parallel",
+      "reason": "reviewed 2026-10-02: writes only under its own mkdtemp fixtures; any profile, config or HOME it touches is pointed into them; no git outside temp repos; no fixed port",
+      "sha256": "cbbb397e015ff720ef1d6f932aae9c9b0f8bf53b09b1c51772d1aa0e1ee56666"
+    },
+    "test-deploy-ledger.js": {
+      "isolation": "serial",
+      "reason": "audit 2026-10-02: repo-write: mkdirSync, writeFileSync on a path built from the repo root; git-write: git checkout; profile: runs plugin code without overriding HOME, USERPROFILE or CLAUDE_CONFIG_DIR; npm: spawns npm. Ambiguous or shared side effects run alone",
+      "sha256": "b0c4179c7e065c83618a4f3d5d38e3bac9ad13971597523699e2c1e4c1f5730b"
+    },
+    "test-dispatch-readiness.js": {
+      "isolation": "serial",
+      "reason": "audit 2026-10-02: git-write: git init, clone (a fixture repo is initialised; every call must target it); profile: runs plugin code without overriding HOME, USERPROFILE or CLAUDE_CONFIG_DIR. Ambiguous or shared side effects run alone",
+      "sha256": "e787efe61d97d339c9f3da4773aafe07f217a5ee132754d3400e9d94929e45f3"
+    },
+    "test-draft-skip-guard.js": {
+      "isolation": "serial",
+      "reason": "audit 2026-10-02: repo-write: mkdirSync, writeFileSync on a path built from the repo root. Ambiguous or shared side effects run alone",
+      "sha256": "1b0aff97822f407c457b2a0f2dddae35dbbeefd6722f309aed342b9186bbe1ef"
+    },
+    "test-drift-audit-config.js": {
+      "isolation": "parallel",
+      "reason": "reviewed 2026-10-02: writes only under its own mkdtemp fixtures; any profile, config or HOME it touches is pointed into them; no git outside temp repos; no fixed port",
+      "sha256": "f83f7e2d7b3a641134737711c5468d1682bf3e58f86e581240dc8e4d9af3a94b"
+    },
+    "test-drift-audit.js": {
+      "isolation": "parallel",
+      "reason": "reviewed 2026-10-02: writes only under its own mkdtemp fixtures; any profile, config or HOME it touches is pointed into them; no git outside temp repos; no fixed port",
+      "sha256": "99fc055b61d754bd177b9fbc3d2cd69032c33ae4c7aba19bd00d90120386b6a4"
+    },
+    "test-entrypoints.js": {
+      "isolation": "parallel",
+      "reason": "reviewed 2026-10-02: writes only under its own mkdtemp fixtures; any profile, config or HOME it touches is pointed into them; no git outside temp repos; no fixed port",
+      "sha256": "5a41beb5e1ca00cc9580e05086c3afbc8af61c91b22c9fbc30fba3842fd33c91"
+    },
+    "test-find-shared-rmw.js": {
+      "isolation": "serial",
+      "reason": "audit 2026-10-02: repo-write: unlinkSync on a path built from the repo root; profile: reads the home directory without overriding HOME or USERPROFILE; profile: runs plugin code without overriding HOME, USERPROFILE or CLAUDE_CONFIG_DIR. Ambiguous or shared side effects run alone",
+      "sha256": "5f756ac89c1c0fe8bf17e393ab1bfba91de65997af0df76a48fec0b0b253f6b8"
+    },
+    "test-fleet-board-entrypoints.js": {
+      "isolation": "parallel",
+      "reason": "reviewed 2026-10-02: writes only under its own mkdtemp fixtures; any profile, config or HOME it touches is pointed into them; no git outside temp repos; no fixed port",
+      "sha256": "5f35cd059786dcb48017ca7bd7f2406b5c1ac6171e18642fd0392030475afe8b"
+    },
+    "test-fleet-board.js": {
+      "isolation": "serial",
+      "reason": "audit 2026-10-02: repo-write: copyFileSync on a path built from the repo root. Ambiguous or shared side effects run alone",
+      "sha256": "b231cdda61f4c9f65aadccbc486a383491a67bf22decf5e8fd9cdf4c5b5e0837"
+    },
+    "test-fleet-brief.js": {
+      "isolation": "parallel",
+      "reason": "reviewed 2026-10-02: writes only under its own mkdtemp fixtures; any profile, config or HOME it touches is pointed into them; no git outside temp repos; no fixed port",
+      "sha256": "403f404cd5bcd343edb5a74d6f2df725d33691cb5871b329c527a8e5f7136fcd"
+    },
+    "test-fleet-decisions.js": {
+      "isolation": "parallel",
+      "reason": "reviewed 2026-10-02: writes only under its own mkdtemp fixtures; any profile, config or HOME it touches is pointed into them; no git outside temp repos; no fixed port",
+      "sha256": "20d008a88476ac46b302238bd5fcdd2a8202ff6c8cccb959bc70fd7423f16ddf"
+    },
+    "test-fleet-heartbeat.js": {
+      "isolation": "serial",
+      "reason": "audit 2026-10-02: repo-write: writeFileSync on a path built from the repo root. Ambiguous or shared side effects run alone",
+      "sha256": "522c1ed4e819c3cc006a1b36b3a2a093d17ddb6c5f1538e9c1c7b8c14bdf59a8"
+    },
+    "test-fleet-intent.js": {
+      "isolation": "serial",
+      "reason": "audit 2026-10-02: repo-write: writeFileSync, rmSync on a path built from the repo root; profile: runs plugin code without overriding HOME, USERPROFILE or CLAUDE_CONFIG_DIR; npm: spawns npm. Ambiguous or shared side effects run alone",
+      "sha256": "1c8c40b999dc0a1365a67345030ed2e02abcb0030ac1db23ff7f8bcad6de550e"
+    },
+    "test-fleet-notify.js": {
+      "isolation": "serial",
+      "reason": "audit 2026-10-02: repo-write: appendFileSync on a path built from the repo root. Ambiguous or shared side effects run alone",
+      "sha256": "b43c508e7dd14465bb7aabf30e50b41bc247fa37051ea140d58a766a7675d12c"
+    },
+    "test-fleet-overlap.js": {
+      "isolation": "serial",
+      "reason": "audit 2026-10-02: repo-write: copyFileSync on a path built from the repo root. Ambiguous or shared side effects run alone",
+      "sha256": "40d7552f60c53219036be8e673378eb70bba7c43b1e36e16ba7bbb88b04aef3b"
+    },
+    "test-fleet-publish.js": {
+      "isolation": "parallel",
+      "reason": "reviewed 2026-10-02: writes only under its own mkdtemp fixtures; any profile, config or HOME it touches is pointed into them; no git outside temp repos; no fixed port",
+      "sha256": "1b6648861a27c39f1a26c5b7a73e5e9dd980ec24a60f5acdf09d625f99cd230b"
+    },
+    "test-fleet-redispatch.js": {
+      "isolation": "serial",
+      "reason": "audit 2026-10-02: repo-write: writeFileSync on a path built from the repo root. Ambiguous or shared side effects run alone",
+      "sha256": "fe09b0d9d8611a36976588579fd297b069f37da0b9ecab6b5e1885739020ab8e"
+    },
+    "test-fleet-registry.js": {
+      "isolation": "serial",
+      "reason": "audit 2026-10-02: profile: runs plugin code without overriding HOME, USERPROFILE or CLAUDE_CONFIG_DIR. Ambiguous or shared side effects run alone",
+      "sha256": "2a17b04cdadb8f0f34f626107eb00bee43a74480cdf1b702f5bbe3c2617aef86"
+    },
+    "test-fleet-snapshot.js": {
+      "isolation": "parallel",
+      "reason": "reviewed 2026-10-02: writes only under its own mkdtemp fixtures; any profile, config or HOME it touches is pointed into them; no git outside temp repos; no fixed port",
+      "sha256": "0d30fb864bf9a454b5ad0b0f053b836c09051c6dd27e410ba95e42cdfe8b54cf"
+    },
+    "test-fleet-status.js": {
+      "isolation": "parallel",
+      "reason": "reviewed 2026-10-02: writes only under its own mkdtemp fixtures; any profile, config or HOME it touches is pointed into them; no git outside temp repos; no fixed port",
+      "sha256": "a6a72ba1ad55b49db2f897b84ce9f2d4a944f99ed243dcaedbf6e69bc17d124f"
+    },
+    "test-fleet-stop-watch.js": {
+      "isolation": "parallel",
+      "reason": "reviewed 2026-10-02: writes only under its own mkdtemp fixtures; any profile, config or HOME it touches is pointed into them; no git outside temp repos; no fixed port",
+      "sha256": "0e76677323d6df1d31ec8a62088161a135749ed910be26a469adea7e93c4c113"
+    },
+    "test-fleet-view.js": {
+      "isolation": "parallel",
+      "reason": "reviewed 2026-10-02: writes only under its own mkdtemp fixtures; any profile, config or HOME it touches is pointed into them; no git outside temp repos; no fixed port",
+      "sha256": "a154a85addee2ce1bf7f86004b18d5395703a7284b2900dcac326a76cc82f70f"
+    },
+    "test-flow-evidence.js": {
+      "isolation": "serial",
+      "reason": "audit 2026-10-02: profile: runs plugin code without overriding HOME, USERPROFILE or CLAUDE_CONFIG_DIR. Ambiguous or shared side effects run alone",
+      "sha256": "f746e4bcf00a4acf24329b04869334930fabaa2586947122b327a164a4b88364"
+    },
+    "test-framework-radar-guidance.js": {
+      "isolation": "parallel",
+      "reason": "reviewed 2026-10-02: writes only under its own mkdtemp fixtures; any profile, config or HOME it touches is pointed into them; no git outside temp repos; no fixed port",
+      "sha256": "a780ac2aee599ad239846f476b3a4ec3e329c883a1a73b6742aad3c303372aa1"
+    },
+    "test-framework-radar.js": {
+      "isolation": "serial",
+      "reason": "audit 2026-10-02: repo-write: mkdirSync on a path built from the repo root; profile: runs plugin code without overriding HOME, USERPROFILE or CLAUDE_CONFIG_DIR. Ambiguous or shared side effects run alone",
+      "sha256": "23c5d9bd275c40ecf0b33cbe5881fb3e2bedb4762f5c5bb2ca3d110757db3913"
+    },
+    "test-frontier.js": {
+      "isolation": "serial",
+      "reason": "audit 2026-10-02: repo-write: copyFileSync on a path built from the repo root; nested-runner: drives test-all.js, find-untested-functions; npm: spawns npm. Ambiguous or shared side effects run alone",
+      "sha256": "c5868a11d247940f7979346ada0e1d5e05347c6cf948dff20f7bf8e0bb107c41"
+    },
+    "test-full-gate-queue.js": {
+      "isolation": "serial",
+      "reason": "audit 2026-10-02: repo-write: writeFileSync, utimesSync on a path built from the repo root; nested-runner: drives full-gate-queue. Ambiguous or shared side effects run alone",
+      "sha256": "d6e810977ac2b2e823c3b5e1d53982ce162ab0e1d349f8fd60bb037f99a59fd1"
+    },
+    "test-function-json-exit.js": {
+      "isolation": "serial",
+      "reason": "audit 2026-10-02: repo-write: cpSync on a path built from the repo root; nested-runner: drives test-all.js, find-untested-functions. Ambiguous or shared side effects run alone",
+      "sha256": "96b26e49332ae4dd8b002b135389c97f25483e98fbb16ed7715d82baa00d9da8"
+    },
+    "test-gate-fast.js": {
+      "isolation": "serial",
+      "reason": "audit 2026-10-02: nested-runner: drives gate-fast; npm: spawns npm. Ambiguous or shared side effects run alone",
+      "sha256": "6830996138da3160b3f5c570a8edea940a1fd2e9ad0c3071873acad7eef21105"
+    },
+    "test-gate-lock.js": {
+      "isolation": "serial",
+      "reason": "audit 2026-10-02: repo-write: rmSync on a path built from the repo root; nested-runner: drives gate-lock. Ambiguous or shared side effects run alone",
+      "sha256": "53956a0d0c669d60c1ffa443eed0a38bbcacc75d9a73d403ec75773f2a7415de"
+    },
+    "test-generate-agents-md.js": {
+      "isolation": "serial",
+      "reason": "audit 2026-10-02: repo-write: writeFileSync on a path built from the repo root; profile: runs plugin code without overriding HOME, USERPROFILE or CLAUDE_CONFIG_DIR. Ambiguous or shared side effects run alone",
+      "sha256": "48b08bba7d60b09c2b169c6fbf716d85b379adf8dd95ea2361d68584f20dfbbb"
+    },
+    "test-generate-decisions.js": {
+      "isolation": "serial",
+      "reason": "audit 2026-10-02: repo-write: writeFileSync, rmSync on a path built from the repo root. Ambiguous or shared side effects run alone",
+      "sha256": "19f7fd52af18873aae9b5c5fdf64bdfd9a84a95cbd63f7ad498ecccd9e599561"
+    },
+    "test-githooks.js": {
+      "isolation": "parallel",
+      "reason": "reviewed 2026-10-02: git init only in temp sentinel repos; reads the checker and runs the commit-msg hook on temp files; no repo write",
+      "sha256": "eeb9450ec1fc522c69999782040b699dd1225142dae64af1f63e64932fd358f5"
+    },
+    "test-handoff-cohesion.js": {
+      "isolation": "serial",
+      "reason": "audit 2026-10-02: git-write: git add; profile: runs plugin code without overriding HOME, USERPROFILE or CLAUDE_CONFIG_DIR. Ambiguous or shared side effects run alone",
+      "sha256": "99dec78c4f9f9b16dd712ed429829c820849870ac2cff4cd150fce4d0ab7e353"
+    },
+    "test-headless-guard.js": {
+      "isolation": "serial",
+      "reason": "audit 2026-10-02: npm: spawns npm. Ambiguous or shared side effects run alone",
+      "sha256": "3a744af2b05e7a5017bffb6684cf0c4860d34780916acb787aea9feb731524c6"
+    },
+    "test-headless-worker.js": {
+      "isolation": "serial",
+      "reason": "audit 2026-10-02: repo-write: copyFileSync on a path built from the repo root. Ambiguous or shared side effects run alone",
+      "sha256": "774e4e0b164285fa9f97e88e3acffb2b1a62999b26d39f3a67eb2259aedfccf4"
+    },
+    "test-hook-budget.js": {
+      "isolation": "parallel",
+      "reason": "reviewed 2026-10-02: git init, add and commit in a temp project; HOME, USERPROFILE, CLAUDE_CONFIG_DIR and APPDATA point into a temp dir; budgets are CPU time since 2.1",
+      "sha256": "cfb14bc5dc99f65f2c6ff89606e6f10b183490dffadf21999e646d773f6c1791"
+    },
+    "test-hook-execution-evidence.js": {
+      "isolation": "serial",
+      "reason": "audit 2026-10-02: repo-write: cpSync on a path built from the repo root. Ambiguous or shared side effects run alone",
+      "sha256": "b23e9a8b0f0c116e9103ed13d8361d7cab7ba3b5507d7e9f46a83963eb0e969b"
+    },
+    "test-hooks-module.js": {
+      "isolation": "serial",
+      "reason": "audit 2026-10-02: git-write: git commit, add, worktree; profile: runs plugin code without overriding HOME, USERPROFILE or CLAUDE_CONFIG_DIR. Ambiguous or shared side effects run alone",
+      "sha256": "6ac2284da0d321dac2d7d0d22c17ab945789883fdca2d42c26a71873ca592362"
+    },
+    "test-hooks-profile.js": {
+      "isolation": "serial",
+      "reason": "audit 2026-10-02: profile: runs plugin code without overriding HOME, USERPROFILE or CLAUDE_CONFIG_DIR. Ambiguous or shared side effects run alone",
+      "sha256": "ab5128644d8689f9bd94f794ee388e2d1c380078f7308fe35ace3ac64f606cc4"
+    },
+    "test-idle-with-queue.js": {
+      "isolation": "parallel",
+      "reason": "reviewed 2026-10-02: writes only under its own mkdtemp fixtures; any profile, config or HOME it touches is pointed into them; no git outside temp repos; no fixed port",
+      "sha256": "7fb94f4d0d071820dede162eb53e4b42091dd4863abf26955c59f2cabf511d36"
+    },
+    "test-image-scan-hook.js": {
+      "isolation": "serial",
+      "reason": "audit 2026-10-02: profile: runs plugin code without overriding HOME, USERPROFILE or CLAUDE_CONFIG_DIR. Ambiguous or shared side effects run alone",
+      "sha256": "0359e769ad0235e4eaa93cc31b9f78a391747e8a37ee4b542dcaee5e4f9a7a4d"
+    },
+    "test-inbox.js": {
+      "isolation": "serial",
+      "reason": "audit 2026-10-02: profile: runs plugin code without overriding HOME, USERPROFILE or CLAUDE_CONFIG_DIR. Ambiguous or shared side effects run alone",
+      "sha256": "e99e774a7cbc3f560b38e74a6e1d6b2edce46b86142914d9700ad0cc24ec2e0d"
+    },
+    "test-instructions-loaded.js": {
+      "isolation": "parallel",
+      "reason": "reviewed 2026-10-02: writes only under its own mkdtemp fixtures; any profile, config or HOME it touches is pointed into them; no git outside temp repos; no fixed port",
+      "sha256": "eb6ca415ae013004a293c972365bfaf2f87dc9284e9b86bf71efc5f7df5b5f0d"
+    },
+    "test-knowledge-injection.js": {
+      "isolation": "serial",
+      "reason": "audit 2026-10-02: repo-write: cpSync on a path built from the repo root; npm: spawns npm. Ambiguous or shared side effects run alone",
+      "sha256": "9ba78f700535839e1cc534c8df5b61ba8696b750ac2a393239d4a154812cf6cb"
+    },
+    "test-knowledge.js": {
+      "isolation": "parallel",
+      "reason": "reviewed 2026-10-02: writes only under its own mkdtemp fixtures; any profile, config or HOME it touches is pointed into them; no git outside temp repos; no fixed port",
+      "sha256": "3a33d5b4f0d52a09eff49259599f08b252e98508ca79c1ef95864f8cf9f5d972"
+    },
+    "test-marketing-radar.js": {
+      "isolation": "serial",
+      "reason": "audit 2026-10-02: profile: runs plugin code without overriding HOME, USERPROFILE or CLAUDE_CONFIG_DIR. Ambiguous or shared side effects run alone",
+      "sha256": "e1a81a92b5df975ccf1dfa8a8bbf03b734751d32c353f0380d51ebc0942efc03"
+    },
+    "test-mem-dashboard.js": {
+      "isolation": "parallel",
+      "reason": "reviewed 2026-10-02: writes only under its own mkdtemp fixtures; any profile, config or HOME it touches is pointed into them; no git outside temp repos; no fixed port",
+      "sha256": "1d0f7dc74c78af525f88cac98f80fe2cb68a992472f56d95d43e7589c232780a"
+    },
+    "test-memory-audit.js": {
+      "isolation": "parallel",
+      "reason": "reviewed 2026-10-02: writes only under its own mkdtemp fixtures; any profile, config or HOME it touches is pointed into them; no git outside temp repos; no fixed port",
+      "sha256": "9252e35afda27f8e859e80e779c824efcd1922c80285dfc41b755cb86b1f3e03"
+    },
+    "test-memory-db-cli.js": {
+      "isolation": "parallel",
+      "reason": "reviewed 2026-10-02: writes only under its own mkdtemp fixtures; any profile, config or HOME it touches is pointed into them; no git outside temp repos; no fixed port",
+      "sha256": "ac053e42a6cd14ed65b683c52187f6950590a663cf9b5c5f8d25e3f1a17649a5"
+    },
+    "test-memory-db-contention.js": {
+      "isolation": "parallel",
+      "reason": "reviewed 2026-10-02: writes only under its own mkdtemp fixtures; any profile, config or HOME it touches is pointed into them; no git outside temp repos; no fixed port",
+      "sha256": "7458553236015accd0982d369e1e7c23ff4e88c83b77837e04d6e87b9ce2cc61"
+    },
+    "test-memory-knowledge-conflicts.js": {
+      "isolation": "parallel",
+      "reason": "reviewed 2026-10-02: writes only under its own mkdtemp fixtures; any profile, config or HOME it touches is pointed into them; no git outside temp repos; no fixed port",
+      "sha256": "027844b2bb30df9a073fd9d4de3c93f462aa81f8c2dbfcea8283c653596c7086"
+    },
+    "test-memory-read-health.js": {
+      "isolation": "parallel",
+      "reason": "reviewed 2026-10-02: writes only under its own mkdtemp fixtures; any profile, config or HOME it touches is pointed into them; no git outside temp repos; no fixed port",
+      "sha256": "e23ee55ff7275590b81d149b315f2badf7ad00a2d2716d1dda6380e5b48083d8"
+    },
+    "test-memory-session-end.js": {
+      "isolation": "serial",
+      "reason": "audit 2026-10-02: repo-write: mkdirSync, writeFileSync on a path built from the repo root. Ambiguous or shared side effects run alone",
+      "sha256": "b47a8014f6951330f51f290f549a895544e3d11c4b40e7d7c92bdcb4b8ef3129"
+    },
+    "test-mine-fixes.js": {
+      "isolation": "serial",
+      "reason": "audit 2026-10-02: profile: runs plugin code without overriding HOME, USERPROFILE or CLAUDE_CONFIG_DIR. Ambiguous or shared side effects run alone",
+      "sha256": "5a8f4a5620dbd50364ba1e5e30a3ad2972d61899008f707d39db54e546b506e1"
+    },
+    "test-mission-contract.js": {
+      "isolation": "serial",
+      "reason": "audit 2026-10-02: profile: runs plugin code without overriding HOME, USERPROFILE or CLAUDE_CONFIG_DIR. Ambiguous or shared side effects run alone",
+      "sha256": "155036d8c5426ea8384f4f4491e3346ca50addce33ce377d1f7905c00dfbadda"
+    },
+    "test-mission-deliver.js": {
+      "isolation": "serial",
+      "reason": "audit 2026-10-02: profile: runs plugin code without overriding HOME, USERPROFILE or CLAUDE_CONFIG_DIR. Ambiguous or shared side effects run alone",
+      "sha256": "dfe02206fe5b2ab2b9ec575708686821e565a811022638989120ad97cae43ac3"
+    },
+    "test-mission-dispatch.js": {
+      "isolation": "serial",
+      "reason": "audit 2026-10-02: profile: runs plugin code without overriding HOME, USERPROFILE or CLAUDE_CONFIG_DIR. Ambiguous or shared side effects run alone",
+      "sha256": "a5c50e1ae9600fc66158d9904b72260d35686e14e659ec841f59aafb5cfea098"
+    },
+    "test-mission-hardening.js": {
+      "isolation": "serial",
+      "reason": "audit 2026-10-02: profile: runs plugin code without overriding HOME, USERPROFILE or CLAUDE_CONFIG_DIR. Ambiguous or shared side effects run alone",
+      "sha256": "7842765cb78fa2989ce922ebf35150c8371f0eb14e3662507a3e0be4d1326995"
+    },
+    "test-mission-runtime-boundaries.js": {
+      "isolation": "serial",
+      "reason": "audit 2026-10-02: profile: runs plugin code without overriding HOME, USERPROFILE or CLAUDE_CONFIG_DIR. Ambiguous or shared side effects run alone",
+      "sha256": "7d6ff05da9f5d95f0084ec72166d43e90095864effc39a68140d25676678943d"
+    },
+    "test-mission-runtime-crashes.js": {
+      "isolation": "serial",
+      "reason": "audit 2026-10-02: profile: runs plugin code without overriding HOME, USERPROFILE or CLAUDE_CONFIG_DIR. Ambiguous or shared side effects run alone",
+      "sha256": "34120cda207540c1e44ba7ef48a221ee99a0a825b22f871f99cd8a7f08460891"
+    },
+    "test-mission-runtime.js": {
+      "isolation": "serial",
+      "reason": "audit 2026-10-02: profile: runs plugin code without overriding HOME, USERPROFILE or CLAUDE_CONFIG_DIR. Ambiguous or shared side effects run alone",
+      "sha256": "fc2fac648b021ee0d3ba027d33e070c91fb57af4aee0adf97c9d45a3f9352d00"
+    },
+    "test-mission-store.js": {
+      "isolation": "serial",
+      "reason": "audit 2026-10-02: repo-write: writeFileSync, symlinkSync, mkdirSync on a path built from the repo root; profile: runs plugin code without overriding HOME, USERPROFILE or CLAUDE_CONFIG_DIR. Ambiguous or shared side effects run alone",
+      "sha256": "629da4a228d6dcc8a5993b836eb784acf1772231c8bc295d5bc053a604785cf2"
+    },
+    "test-mission-supervisor.js": {
+      "isolation": "serial",
+      "reason": "audit 2026-10-02: profile: runs plugin code without overriding HOME, USERPROFILE or CLAUDE_CONFIG_DIR. Ambiguous or shared side effects run alone",
+      "sha256": "383558c43ccee0db2eff184c91250825dfa838598eb21e32bfc3c5e5ab25609e"
+    },
+    "test-mission-write-boundaries.js": {
+      "isolation": "serial",
+      "reason": "audit 2026-10-02: profile: runs plugin code without overriding HOME, USERPROFILE or CLAUDE_CONFIG_DIR. Ambiguous or shared side effects run alone",
+      "sha256": "cb661dff598fc063d506ef01f608dfcad4e7bf5b9ac81b858b488c43c0d85189"
+    },
+    "test-mistake-recurrence.js": {
+      "isolation": "parallel",
+      "reason": "reviewed 2026-10-02: writes only under its own mkdtemp fixtures; any profile, config or HOME it touches is pointed into them; no git outside temp repos; no fixed port",
+      "sha256": "2c1782b22d837a24688277f545d138c13c9620afcfb57d55301d3404cbc990c8"
+    },
+    "test-nested-sprints.js": {
+      "isolation": "serial",
+      "reason": "audit 2026-10-02: profile: runs plugin code without overriding HOME, USERPROFILE or CLAUDE_CONFIG_DIR. Ambiguous or shared side effects run alone",
+      "sha256": "bb5d8d36fc6c426e262cada95f9089f61d7bbf7b86556e04b942fc56afb63767"
+    },
+    "test-no-home-paths.js": {
+      "isolation": "parallel",
+      "reason": "reviewed 2026-10-02: writes only under its own mkdtemp fixtures; any profile, config or HOME it touches is pointed into them; no git outside temp repos; no fixed port",
+      "sha256": "2fe71e7385975dc1384982d3c6cd2f12728a1ce2db3906a99ae4620278ac5dd1"
+    },
+    "test-no-private-names.js": {
+      "isolation": "serial",
+      "reason": "serial seed: writes an untracked probe file at the repo root and runs the gate over the whole tree",
+      "sha256": "29ab8575ed44426f754aabc7c86a2564c352cf3cd54de583c42f27f95f65c725"
+    },
+    "test-observation-classifier.js": {
+      "isolation": "serial",
+      "reason": "audit 2026-10-02: git-write: git commit; profile: loads plugin code in-process without overriding the profile; npm: spawns npm. Ambiguous or shared side effects run alone",
+      "sha256": "86510fe1d6465e1596859ba3c3500f46e0b144680236283ac7724c89e9894372"
+    },
+    "test-orphan-checks.js": {
+      "isolation": "serial",
+      "reason": "audit 2026-10-02: repo-write: mkdirSync, writeFileSync on a path built from the repo root. Ambiguous or shared side effects run alone",
+      "sha256": "8e238812bbc25ce6ce958bc11480ef4978e216a751e0ce6974a19d7419f8dc95"
+    },
+    "test-panel-recommendation.js": {
+      "isolation": "serial",
+      "reason": "audit 2026-10-02: profile: runs plugin code without overriding HOME, USERPROFILE or CLAUDE_CONFIG_DIR. Ambiguous or shared side effects run alone",
+      "sha256": "81aa948db5d5b55263109c87b4a0730dbbc94dbe810eb955be961e39a7b4ae00"
+    },
+    "test-parity-capture.js": {
+      "isolation": "serial",
+      "reason": "audit 2026-10-02: repo-write: writeFileSync on a path built from the repo root; profile: runs plugin code without overriding HOME, USERPROFILE or CLAUDE_CONFIG_DIR. Ambiguous or shared side effects run alone",
+      "sha256": "3077927fe1a08d5b0f473f54acca2f97b3492041ac0556e3c7b0340bd1b3f861"
+    },
+    "test-path-filter-deadlock.js": {
+      "isolation": "serial",
+      "reason": "audit 2026-10-02: repo-write: mkdirSync, writeFileSync on a path built from the repo root. Ambiguous or shared side effects run alone",
+      "sha256": "808b7dd49ccb86ff8b473809d5a5d789dfd9d371e0c5eec5b0cf6bad75b1463b"
+    },
+    "test-peer-message-budget.js": {
+      "isolation": "serial",
+      "reason": "audit 2026-10-02: profile: runs plugin code without overriding HOME, USERPROFILE or CLAUDE_CONFIG_DIR. Ambiguous or shared side effects run alone",
+      "sha256": "1e6eaec79e73e3c7aaa552dece72e7491ae8bd16a4c9f6db5b28407bc476a032"
+    },
+    "test-peer-queue-check.js": {
+      "isolation": "parallel",
+      "reason": "reviewed 2026-10-02: writes only under its own mkdtemp fixtures; any profile, config or HOME it touches is pointed into them; no git outside temp repos; no fixed port",
+      "sha256": "c7d292735754b49ae3d5ff826bb6398750ed97f66efbed1b64c350c55ddf2655"
+    },
+    "test-peer-send-ledger.js": {
+      "isolation": "serial",
+      "reason": "audit 2026-10-02: profile: runs plugin code without overriding HOME, USERPROFILE or CLAUDE_CONFIG_DIR. Ambiguous or shared side effects run alone",
+      "sha256": "1ba71587cee63b56a7c16747648ef2a1dff5815a1199c4c529d8ce72e5c74e87"
+    },
+    "test-plugin-drift.js": {
+      "isolation": "parallel",
+      "reason": "reviewed 2026-10-02: git clone and commits only in its own temp marketplace clone and cache; no repo write, no fixed port",
+      "sha256": "74e831f434a4ed43856986346e5f4f69a4e501f75baf4fe427e8ff5eaf5753a0"
+    },
+    "test-population-reporting.js": {
+      "isolation": "parallel",
+      "reason": "reviewed 2026-10-02: writes only under its own mkdtemp fixtures; any profile, config or HOME it touches is pointed into them; no git outside temp repos; no fixed port",
+      "sha256": "07e5021da52ce78de332bb0939046f2d1700e65e19f25a9b28bc477280ca838c"
+    },
+    "test-post-tool-typecheck.js": {
+      "isolation": "serial",
+      "reason": "audit 2026-10-02: profile: runs plugin code without overriding HOME, USERPROFILE or CLAUDE_CONFIG_DIR. Ambiguous or shared side effects run alone",
+      "sha256": "892c028f1ba68c5d195f91a859961da30306acf195a5f4807cb993a2b63f0ff6"
+    },
+    "test-pr-path-filters.js": {
+      "isolation": "serial",
+      "reason": "audit 2026-10-02: repo-write: writeFileSync on a path built from the repo root; profile: runs plugin code without overriding HOME, USERPROFILE or CLAUDE_CONFIG_DIR. Ambiguous or shared side effects run alone",
+      "sha256": "eb6d41c76585246cea6e9cc847be130088a744241cf4af64c8c3038700841fd7"
+    },
+    "test-prd-container-class.js": {
+      "isolation": "parallel",
+      "reason": "reviewed 2026-10-02: writes only under its own mkdtemp fixtures; any profile, config or HOME it touches is pointed into them; no git outside temp repos; no fixed port",
+      "sha256": "226214a9d1ea644c9172024be8d54d4687631275304edc2bba90db1b59b0a419"
+    },
+    "test-prd-mark-needs-setup.js": {
+      "isolation": "serial",
+      "reason": "audit 2026-10-02: profile: runs plugin code without overriding HOME, USERPROFILE or CLAUDE_CONFIG_DIR. Ambiguous or shared side effects run alone",
+      "sha256": "84ecd075c6356e9176797d8fffde315ad78f851501bc4348d92ca7e11a8ab778"
+    },
+    "test-prd-states.js": {
+      "isolation": "serial",
+      "reason": "audit 2026-10-02: profile: loads plugin code in-process without overriding the profile. Ambiguous or shared side effects run alone",
+      "sha256": "c3efdf068b282324bbe1d77485253b8808aa3bf3439e6963949f85c97d19ec45"
+    },
+    "test-pre-tool-filter.js": {
+      "isolation": "serial",
+      "reason": "audit 2026-10-02: git-write: git checkout, push; profile: runs plugin code without overriding HOME, USERPROFILE or CLAUDE_CONFIG_DIR. Ambiguous or shared side effects run alone",
+      "sha256": "9862ef5f1c3ac5264cf5bac82c6ca24ee1c5883f582d83e2888f976cf66f4b45"
+    },
+    "test-preflight-template.js": {
+      "isolation": "serial",
+      "reason": "audit 2026-10-02: profile: runs plugin code without overriding HOME, USERPROFILE or CLAUDE_CONFIG_DIR. Ambiguous or shared side effects run alone",
+      "sha256": "61a0dd05678dac901510d0a24ba1c40ff115c897022da657f9e0285f451209f6"
+    },
+    "test-production-signals.js": {
+      "isolation": "serial",
+      "reason": "audit 2026-10-02: repo-write: writeFileSync, mkdirSync, rmSync on a path built from the repo root; git-write: git init, add (a fixture repo is initialised; every call must target it); profile: runs plugin code without overriding HOME, USERPROFILE or CLAUDE_CONFIG_DIR. Ambiguous or shared side effects run alone",
+      "sha256": "1a1c6e568bdbca226562f6913eea63addb871f75bf4482145c85e286a33d09bd"
+    },
+    "test-push-authorisation.js": {
+      "isolation": "serial",
+      "reason": "audit 2026-10-02: git-write: git push; profile: runs plugin code without overriding HOME, USERPROFILE or CLAUDE_CONFIG_DIR. Ambiguous or shared side effects run alone",
+      "sha256": "f5c7361545dd8b7c3bc27841078ad4841aa05127d992c3b7e649812a2b494603"
+    },
+    "test-queue-drained.js": {
+      "isolation": "serial",
+      "reason": "audit 2026-10-02: git-write: git commit, add; profile: runs plugin code without overriding HOME, USERPROFILE or CLAUDE_CONFIG_DIR; npm: spawns npm. Ambiguous or shared side effects run alone",
+      "sha256": "6b75b0cd1470a3898f9f7a23bb2c7717e12e99e07290ba6dfdb25afb685791fd"
+    },
+    "test-quota-burn.js": {
+      "isolation": "parallel",
+      "reason": "reviewed 2026-10-02: writes only under its own mkdtemp fixtures; any profile, config or HOME it touches is pointed into them; no git outside temp repos; no fixed port",
+      "sha256": "977571278cc9ae81de4416acd7a6211b2f120d8fcb67c9887c53ed2797fab542"
+    },
+    "test-quota-tripwire.js": {
+      "isolation": "parallel",
+      "reason": "reviewed 2026-10-02: writes only under its own mkdtemp fixtures; any profile, config or HOME it touches is pointed into them; no git outside temp repos; no fixed port",
+      "sha256": "74bb4b90ed16995b546a625f30a4ac0eb3a68ccbc8cef4a1410ed7b97f48546b"
+    },
+    "test-radar-learning.js": {
+      "isolation": "serial",
+      "reason": "audit 2026-10-02: profile: runs plugin code without overriding HOME, USERPROFILE or CLAUDE_CONFIG_DIR. Ambiguous or shared side effects run alone",
+      "sha256": "8721979aa84abc164c38244fcfcd99ae19950f6c99b3135fab6f0d2513287aee"
+    },
+    "test-reachable-entrypoints.js": {
+      "isolation": "serial",
+      "reason": "audit 2026-10-02: npm: spawns npm. Ambiguous or shared side effects run alone",
+      "sha256": "dbb6815a322c0da9c0d1e8249d8105c52fa5fda7f01d876ca3b124e7f9ccea93"
+    },
+    "test-reachable-repo-scope.js": {
+      "isolation": "parallel",
+      "reason": "reviewed 2026-10-02: writes only under its own mkdtemp fixtures; any profile, config or HOME it touches is pointed into them; no git outside temp repos; no fixed port",
+      "sha256": "e9d52dddeb4ae95594194f60526d135bf21dc54f483c8922318884cb912ba5ad"
+    },
+    "test-recommendation-quality.js": {
+      "isolation": "serial",
+      "reason": "audit 2026-10-02: profile: runs plugin code without overriding HOME, USERPROFILE or CLAUDE_CONFIG_DIR. Ambiguous or shared side effects run alone",
+      "sha256": "80e7b0b707538ca5fcf285f2874108fa6064e872465d55123c08e2b8712f62e6"
+    },
+    "test-record-drift.js": {
+      "isolation": "parallel",
+      "reason": "reviewed 2026-10-02: writes only under its own mkdtemp fixtures; any profile, config or HOME it touches is pointed into them; no git outside temp repos; no fixed port",
+      "sha256": "99a6e1e2d2f22be3ab75a758123b5e247fe818616b60dd20f9799435ca632eb4"
+    },
+    "test-rendered-layout-gate.js": {
+      "isolation": "serial",
+      "reason": "audit 2026-10-02: profile: runs plugin code without overriding HOME, USERPROFILE or CLAUDE_CONFIG_DIR. Ambiguous or shared side effects run alone",
+      "sha256": "3c763a4451f82e54b86633fa00798221515d07e31de5cac17d7c739e0e013f51"
+    },
+    "test-runner-evidence.js": {
+      "isolation": "serial",
+      "reason": "audit 2026-10-02: repo-write: mkdirSync, copyFileSync, writeFileSync, appendFileSync, unlinkSync on a path built from the repo root; git-write: git commit; profile: runs plugin code without overriding HOME, USERPROFILE or CLAUDE_CONFIG_DIR; nested-runner: drives test-all.js, coverage-receipt, find-untested-functions. Ambiguous or shared side effects run alone",
+      "sha256": "956a2ac17c8832336fb627bd4c52df2de47ba218698dd41ae873bde5082e5777"
+    },
+    "test-runner-guard.js": {
+      "isolation": "serial",
+      "reason": "serial seed: writes .vacuity-backup fixtures into tooling/ and drives test-all.js",
+      "sha256": "96b8413df75afb3b2858209c06fec367a8f5732a6c03b61e9ced8d9739115d44"
+    },
+    "test-runtime-authority.js": {
+      "isolation": "parallel",
+      "reason": "reviewed 2026-10-02: writes only under its own mkdtemp fixtures; any profile, config or HOME it touches is pointed into them; no git outside temp repos; no fixed port",
+      "sha256": "c38eb1af6476adaef622ca98246f6c7db002e578d1275a47aa949e77e7eb599c"
+    },
+    "test-scheduled-verdicts.js": {
+      "isolation": "serial",
+      "reason": "audit 2026-10-02: profile: runs plugin code without overriding HOME, USERPROFILE or CLAUDE_CONFIG_DIR. Ambiguous or shared side effects run alone",
+      "sha256": "0c934c0956c824b7aedea0fb8623b543efc550fc243d435b7042687ecb45e546"
+    },
+    "test-security-gate.js": {
+      "isolation": "serial",
+      "reason": "audit 2026-10-02: git-write: git init (a fixture repo is initialised; every call must target it); profile: runs plugin code without overriding HOME, USERPROFILE or CLAUDE_CONFIG_DIR. Ambiguous or shared side effects run alone",
+      "sha256": "36dbaee822a9cdb446fbe9496bf4689be9c4827bba559735fc3b8841e642a0c5"
+    },
+    "test-semantic-search.js": {
+      "isolation": "parallel",
+      "reason": "reviewed 2026-10-02: writes only under its own mkdtemp fixtures; any profile, config or HOME it touches is pointed into them; no git outside temp repos; no fixed port",
+      "sha256": "a34a6e70daf30a2e6a4f0e41e9280e9fdeafe67223cd1e2a9762ef0f844a5d26"
+    },
+    "test-session-carrier.js": {
+      "isolation": "serial",
+      "reason": "audit 2026-10-02: repo-write: writeFileSync on a path built from the repo root. Ambiguous or shared side effects run alone",
+      "sha256": "76b3d465364e54a2323057715f44ec6f0a53a4df6c6f1ef900d322759680cbe9"
+    },
+    "test-session-env-dedupe.js": {
+      "isolation": "serial",
+      "reason": "audit 2026-10-02: repo-write: mkdirSync, writeFileSync, appendFileSync on a path built from the repo root. Ambiguous or shared side effects run alone",
+      "sha256": "a3c31134c997dd41663207591b59ba29ca7b5f01568a3134a40939c88cd3b41c"
+    },
+    "test-session-exit.js": {
+      "isolation": "serial",
+      "reason": "audit 2026-10-02: repo-write: mkdirSync, writeFileSync on a path built from the repo root; git-write: git init (a fixture repo is initialised; every call must target it); profile: runs plugin code without overriding HOME, USERPROFILE or CLAUDE_CONFIG_DIR; npm: spawns npm. Ambiguous or shared side effects run alone",
+      "sha256": "a0c36a47a56e3137b43bf2e86864c8327c878dcdffefa2aef6a94da5412efb36"
+    },
+    "test-session-patterns.js": {
+      "isolation": "serial",
+      "reason": "audit 2026-10-02: profile: runs plugin code without overriding HOME, USERPROFILE or CLAUDE_CONFIG_DIR. Ambiguous or shared side effects run alone",
+      "sha256": "f439b92107f86e064b5986056d1be5fd11c74a5aa19537903e827462df4f29ad"
+    },
+    "test-session-register.js": {
+      "isolation": "parallel",
+      "reason": "reviewed 2026-10-02: writes only under its own mkdtemp fixtures; any profile, config or HOME it touches is pointed into them; no git outside temp repos; no fixed port",
+      "sha256": "c9c69a3b4657efad391e3e4f2ee23a79ca9f7439293b32ead7ead47444f4e5d7"
+    },
+    "test-session-start-compact.js": {
+      "isolation": "parallel",
+      "reason": "reviewed 2026-10-02: writes only under its own mkdtemp fixtures; any profile, config or HOME it touches is pointed into them; no git outside temp repos; no fixed port",
+      "sha256": "3693ad1d7046f510146c36a6fcd82a35d6358f8583c4ab42dae085318f67ea1b"
+    },
+    "test-session-start-hook.js": {
+      "isolation": "parallel",
+      "reason": "reviewed 2026-10-02: writes only under its own mkdtemp fixtures; any profile, config or HOME it touches is pointed into them; no git outside temp repos; no fixed port",
+      "sha256": "dc78aeef869c7ea7a2835e762ec67061945fc4202861d500966c7cf76c7f7d8a"
+    },
+    "test-session-sweep.js": {
+      "isolation": "serial",
+      "reason": "audit 2026-10-02: repo-write: mkdirSync, writeFileSync, utimesSync on a path built from the repo root; git-write: git init, clone, config, add, commit, push, worktree, update-ref (a fixture repo is initialised; every call must target it). Ambiguous or shared side effects run alone",
+      "sha256": "78fc342922c93cd649b15602642cca85b2ac8fc2fc20e55559ef5b196fc804da"
+    },
+    "test-skill-census.js": {
+      "isolation": "serial",
+      "reason": "audit 2026-10-02: repo-write: writeFileSync, rmSync, mkdirSync on a path built from the repo root; profile: runs plugin code without overriding HOME, USERPROFILE or CLAUDE_CONFIG_DIR. Ambiguous or shared side effects run alone",
+      "sha256": "01e1ebfdf33e92729af7cae76912610bae4fa01c2244b2fc0c9ed6d800903a64"
+    },
+    "test-skill-collisions.js": {
+      "isolation": "serial",
+      "reason": "audit 2026-10-02: repo-write: writeFileSync, rmSync on a path built from the repo root. Ambiguous or shared side effects run alone",
+      "sha256": "95ec819bfdf8999d8409248da3c5100385d1d5853b9096f1ba223e8b82c8893c"
+    },
+    "test-skill-invocations.js": {
+      "isolation": "serial",
+      "reason": "audit 2026-10-02: repo-write: copyFileSync on a path built from the repo root; profile: runs plugin code without overriding HOME, USERPROFILE or CLAUDE_CONFIG_DIR. Ambiguous or shared side effects run alone",
+      "sha256": "da76cbd945785d869393abba9606f83b6da7851da9e2d1a502ebe8a11a5ed20b"
+    },
+    "test-skill-plugin-root.js": {
+      "isolation": "serial",
+      "reason": "audit 2026-10-02: profile: runs plugin code without overriding HOME, USERPROFILE or CLAUDE_CONFIG_DIR. Ambiguous or shared side effects run alone",
+      "sha256": "15b7a2b1a9fde142f6b3ab73c607f6ed53406b181c4d5ce478d8a78dd876f4e2"
+    },
+    "test-skill-prd-commands-selftest.js": {
+      "isolation": "serial",
+      "reason": "audit 2026-10-02: profile: runs plugin code without overriding HOME, USERPROFILE or CLAUDE_CONFIG_DIR. Ambiguous or shared side effects run alone",
+      "sha256": "55dc29eea5971637231744c802445af9966f39e798d817de4fc9b0e309c5e46f"
+    },
+    "test-skill-prd-commands.js": {
+      "isolation": "serial",
+      "reason": "audit 2026-10-02: profile: runs plugin code without overriding HOME, USERPROFILE or CLAUDE_CONFIG_DIR. Ambiguous or shared side effects run alone",
+      "sha256": "5c212df9e0401472bd8281e04c913313cd96960c88c70e2e80178751bad83651"
+    },
+    "test-skill-tool-declarations.js": {
+      "isolation": "serial",
+      "reason": "audit 2026-10-02: profile: runs plugin code without overriding HOME, USERPROFILE or CLAUDE_CONFIG_DIR. Ambiguous or shared side effects run alone",
+      "sha256": "b6f8a60bdf08b6cb56bd2af7a02c5977cba4b03ac2c1b478aa101ea2845e4606"
+    },
+    "test-spawn-budget.js": {
+      "isolation": "serial",
+      "reason": "audit 2026-10-02: nested-runner: drives test-all.js, check-suites-can-fail. Ambiguous or shared side effects run alone",
+      "sha256": "330054f852c8bf3afa327568441437059b685e3f1790f91e7d235682001569a1"
+    },
+    "test-standing-order-wake.js": {
+      "isolation": "parallel",
+      "reason": "reviewed 2026-10-02: writes only under its own mkdtemp fixtures; any profile, config or HOME it touches is pointed into them; no git outside temp repos; no fixed port",
+      "sha256": "68fc72c1b8d196098cddbb4b88566d3205bf7b1f2d87654454600847b6de23d7"
+    },
+    "test-standing-orders.js": {
+      "isolation": "serial",
+      "reason": "audit 2026-10-02: npm: spawns npm. Ambiguous or shared side effects run alone",
+      "sha256": "f6e5dd20c1527cdb73f6a33db55b5136e6bc1ecc0d096fb1c380e754e27d5a3b"
+    },
+    "test-steer-log.js": {
+      "isolation": "parallel",
+      "reason": "reviewed 2026-10-02: writes only under its own mkdtemp fixtures; any profile, config or HOME it touches is pointed into them; no git outside temp repos; no fixed port",
+      "sha256": "3098da417ad08938cba885b8d8879b8a8877599b20c606a7675a6f3b33cc615d"
+    },
+    "test-stop-auto-check.js": {
+      "isolation": "parallel",
+      "reason": "reviewed 2026-10-02: writes only under its own mkdtemp fixtures; any profile, config or HOME it touches is pointed into them; no git outside temp repos; no fixed port",
+      "sha256": "f929992d040f78d2192f5d2611dfeb0e4542f5f29aca6da0ecab8aa32b9a7b52"
+    },
+    "test-stop-brain-report.js": {
+      "isolation": "serial",
+      "reason": "audit 2026-10-02: git-write: git init, push, fetch (a fixture repo is initialised; every call must target it); profile: runs plugin code without overriding HOME, USERPROFILE or CLAUDE_CONFIG_DIR. Ambiguous or shared side effects run alone",
+      "sha256": "7f8f7bbb294fc71b0326fa0ec150d832802896625e8f650152bb1d0c14766bfc"
+    },
+    "test-stop-failure-note.js": {
+      "isolation": "serial",
+      "reason": "audit 2026-10-02: profile: runs plugin code without overriding HOME, USERPROFILE or CLAUDE_CONFIG_DIR. Ambiguous or shared side effects run alone",
+      "sha256": "aba8fa7e4cb5f606ae1a9e82333ffbba81f39d5a21467225efb4d661a0c23339"
+    },
+    "test-stop-intent-record.js": {
+      "isolation": "serial",
+      "reason": "audit 2026-10-02: repo-write: writeFileSync, mkdirSync, rmSync on a path built from the repo root; profile: runs plugin code without overriding HOME, USERPROFILE or CLAUDE_CONFIG_DIR; npm: spawns npm. Ambiguous or shared side effects run alone",
+      "sha256": "3681066ac20384c56692394843520c1caa80d6985f34fcc39bd162b6cf0dafc7"
+    },
+    "test-stop-ledger-race.js": {
+      "isolation": "serial",
+      "reason": "audit 2026-10-02: profile: runs plugin code without overriding HOME, USERPROFILE or CLAUDE_CONFIG_DIR. Ambiguous or shared side effects run alone",
+      "sha256": "2d6ab162c4cd07f066cfc6a9a1133b00afbaafbeb2f48a75f183211da7f544fd"
+    },
+    "test-stop-typecheck.js": {
+      "isolation": "serial",
+      "reason": "audit 2026-10-02: profile: runs plugin code without overriding HOME, USERPROFILE or CLAUDE_CONFIG_DIR. Ambiguous or shared side effects run alone",
+      "sha256": "42778b43fb97a31e2f5e67c897425700d78f5b232b7512a9df07b67dec015de9"
+    },
+    "test-stop-workflow-wall-note.js": {
+      "isolation": "serial",
+      "reason": "audit 2026-10-02: profile: runs plugin code without overriding HOME, USERPROFILE or CLAUDE_CONFIG_DIR. Ambiguous or shared side effects run alone",
+      "sha256": "c85ded362de0d4849d929591e2f602b7c6f0682d7f73bccaf3cc88bd6a969b8f"
+    },
+    "test-subject-evidence.js": {
+      "isolation": "serial",
+      "reason": "audit 2026-10-02: nested-runner: drives check-suites-can-fail. Ambiguous or shared side effects run alone",
+      "sha256": "40238f3ea1bc801d5006d815d9e36f9ea3ab4dd852d7bc5d2e1555d79081d772"
+    },
+    "test-suite-pool.js": {
+      "isolation": "serial",
+      "reason": "serial by choice: its end-to-end case runs a whole test-all.js with a pool of 4 inside it. The audit signals it carries come from code samples inside its strings, not its own behaviour",
+      "sha256": "f8944f83f325c695870c4ca351790ef2fe83bd0271bb54df187792c3adb43f73"
+    },
+    "test-suite-tmp.js": {
+      "isolation": "serial",
+      "reason": "audit 2026-10-02: repo-write: copyFileSync, rmSync on a path built from the repo root; nested-runner: drives test-all.js, coverage-receipt, check-suites-can-fail, find-untested-functions, find-vacuous-assertions. Ambiguous or shared side effects run alone",
+      "sha256": "a689b23039c980bd1136a1660eda4cef0dadcb09daa097d85d55d0a32ec23d35"
+    },
+    "test-suite-verdict-summary.js": {
+      "isolation": "serial",
+      "reason": "audit 2026-10-02: repo-write: copyFileSync on a path built from the repo root; nested-runner: drives check-suites-can-fail. Ambiguous or shared side effects run alone",
+      "sha256": "dbf2b4ddec1d0c4fc7b1972dfb99e158b7f4e2d66f29ed1b01d93e7bf573d938"
+    },
+    "test-superseded.js": {
+      "isolation": "serial",
+      "reason": "audit 2026-10-02: profile: runs plugin code without overriding HOME, USERPROFILE or CLAUDE_CONFIG_DIR; npm: spawns npm. Ambiguous or shared side effects run alone",
+      "sha256": "538539e527989b5b9d18c8870e2ac296bc375cabcf01b2d1e09e51e43a330687"
+    },
+    "test-telemetry-hook.js": {
+      "isolation": "serial",
+      "reason": "audit 2026-10-02: git-write: git push, commit; profile: loads plugin code in-process without overriding the profile. Ambiguous or shared side effects run alone",
+      "sha256": "94b817771f22714de83c0fcff38628a3b9ce75490c85abeb9775dd43fcabe661"
+    },
+    "test-telemetry-report.js": {
+      "isolation": "serial",
+      "reason": "audit 2026-10-02: profile: runs plugin code without overriding HOME, USERPROFILE or CLAUDE_CONFIG_DIR. Ambiguous or shared side effects run alone",
+      "sha256": "002136891d7b6f9cd7a774a321bfdf6d1ac0505f73187bce77d5c35ec6bf80c1"
+    },
+    "test-text-hygiene.js": {
+      "isolation": "serial",
+      "reason": "audit 2026-10-02: profile: runs plugin code without overriding HOME, USERPROFILE or CLAUDE_CONFIG_DIR. Ambiguous or shared side effects run alone",
+      "sha256": "f96f78a0d38ff9dde395f4297dd68b382c7b0432387f1b078f3d535eaa76fe4b"
+    },
+    "test-tracking-parity.js": {
+      "isolation": "serial",
+      "reason": "audit 2026-10-02: repo-write: mkdirSync, writeFileSync on a path built from the repo root; profile: runs plugin code without overriding HOME, USERPROFILE or CLAUDE_CONFIG_DIR. Ambiguous or shared side effects run alone",
+      "sha256": "599aee83cf0ca3321d39fd8609051900e88e1c5929d4d990ebc807f75df3d962"
+    },
+    "test-unattended-queue.js": {
+      "isolation": "parallel",
+      "reason": "reviewed 2026-10-02: writes only under its own mkdtemp fixtures; any profile, config or HOME it touches is pointed into them; no git outside temp repos; no fixed port",
+      "sha256": "fb3e1edc3aff4e215394af7a131e9a8153212ae5ffb5ab13be968a91f4f40209"
+    },
+    "test-unattended-worker-version.js": {
+      "isolation": "serial",
+      "reason": "audit 2026-10-02: repo-write: copyFileSync on a path built from the repo root. Ambiguous or shared side effects run alone",
+      "sha256": "ee9f05b053333ba569670854bd36c19c16a01a7d15d3849662c673bf203c9608"
+    },
+    "test-unattended-worker.js": {
+      "isolation": "parallel",
+      "reason": "reviewed 2026-10-02: writes only under its own mkdtemp fixtures; any profile, config or HOME it touches is pointed into them; no git outside temp repos; no fixed port",
+      "sha256": "b84a54fa3997b1f794baa93cff9375aef545fa734f9b953bd5569f113d336890"
+    },
+    "test-untrusted-fence.js": {
+      "isolation": "serial",
+      "reason": "audit 2026-10-02: profile: runs plugin code without overriding HOME, USERPROFILE or CLAUDE_CONFIG_DIR. Ambiguous or shared side effects run alone",
+      "sha256": "0bd83fec0b0050c496616a9fb24c19a2d2c808682135005727b03e866429cca1"
+    },
+    "test-vacuity-exit.js": {
+      "isolation": "serial",
+      "reason": "audit 2026-10-02: nested-runner: drives find-vacuous-assertions. Ambiguous or shared side effects run alone",
+      "sha256": "ad75c398a222fc98644d9b8094350b4341d68542cbc6e036a6d39d5cc6b82dc3"
+    },
+    "test-validate-host-scan.js": {
+      "isolation": "parallel",
+      "reason": "reviewed 2026-10-02: writes only under its own mkdtemp fixtures; any profile, config or HOME it touches is pointed into them; no git outside temp repos; no fixed port",
+      "sha256": "54b667b31920f4d08fcd1dbe2f25f1efb6f48ba67513fddde170db45c21eed91"
+    },
+    "test-validate.js": {
+      "isolation": "serial",
+      "reason": "serial seed: writes a .vacuity-backup marker and fixtures into the repo, which validate and other tree readers would see",
+      "sha256": "2ae7f1652818f5954d63d9cfe0d5deea2990450b9c5f823535e17d92e3178366"
+    },
+    "test-version-drift.js": {
+      "isolation": "parallel",
+      "reason": "reviewed 2026-10-02: writes only under its own mkdtemp fixtures; any profile, config or HOME it touches is pointed into them; no git outside temp repos; no fixed port",
+      "sha256": "320a490c21f8695920117d529c90beab5735e0fe41dac8bb71bca6bb766bf93a"
+    },
+    "test-watch-panels.js": {
+      "isolation": "parallel",
+      "reason": "reviewed 2026-10-02: writes only under its own mkdtemp fixtures; any profile, config or HOME it touches is pointed into them; no git outside temp repos; no fixed port",
+      "sha256": "644f073d09363bbaf0ddcaabe542ed1d97dcc77007659c7c045323175bf56b73"
+    },
+    "test-work-cost.js": {
+      "isolation": "serial",
+      "reason": "audit 2026-10-02: repo-write: appendFileSync on a path built from the repo root; git-write: git commit, add. Ambiguous or shared side effects run alone",
+      "sha256": "47ed71900a01c090e55d96307f0aadd5844788dd409a82be28b67501d83aca0c"
+    },
+    "test-workflow-isolation.js": {
+      "isolation": "parallel",
+      "reason": "reviewed 2026-10-02: writes only under its own mkdtemp fixtures; any profile, config or HOME it touches is pointed into them; no git outside temp repos; no fixed port",
+      "sha256": "1c1c52f8ae2dd3b6ba2d950a714673a9e78c5876dfa14d764c1b28a9ebf341c7"
+    },
+    "test-workflow-liveness.js": {
+      "isolation": "serial",
+      "reason": "audit 2026-10-02: profile: runs plugin code without overriding HOME, USERPROFILE or CLAUDE_CONFIG_DIR. Ambiguous or shared side effects run alone",
+      "sha256": "f8086a57fe6e8a768ed6b990231e1d8e1112ed26201159113305de361fdad9b0"
+    },
+    "test-workflow-run-triage.js": {
+      "isolation": "serial",
+      "reason": "audit 2026-10-02: profile: runs plugin code without overriding HOME, USERPROFILE or CLAUDE_CONFIG_DIR. Ambiguous or shared side effects run alone",
+      "sha256": "9e90089c0a76f5a18c48f29c4cd9d16e12998a88912b387ceb2a35c6031e55bc"
+    },
+    "test-worktree-placement.js": {
+      "isolation": "serial",
+      "reason": "audit 2026-10-02: profile: runs plugin code without overriding HOME, USERPROFILE or CLAUDE_CONFIG_DIR. Ambiguous or shared side effects run alone",
+      "sha256": "dd023c52f67ff2d26969ce3c5033e8d1e10d52b695777fbe9131cd8d0537f956"
+    }
+  }
+}
