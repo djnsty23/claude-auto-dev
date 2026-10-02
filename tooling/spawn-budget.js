@@ -616,9 +616,19 @@ function runVerdict(command, args, opts) {
 // runs, a ~215x margin against the per-suite budget. It is left alone
 // deliberately — widening a budget that is already 215x its subject buys nothing
 // and would make this change look like the blanket raise it is not.
+//
+// The rule above, applied again when the measurement moved:
+//
+//   `[measured 2026-10-02]` test-all.js 2115s and 2177s, two serial runs,
+//                           196/196 suites passed
+//
+// The suite count grew from 129 to 196 and the runtime with it, so 2700s was
+// 1.24x the worst measured runtime, and a gate's canary run under a concurrent
+// gate timed out (ETIMEDOUT, an indeterminate sweep). 3x 2177s is 6531s,
+// rounded up to 6600s as 2670s was to 2700s. The per-suite budget is unchanged.
 const SWEEP_SUITE_BUDGET_MS = 900000;
-const SWEEP_MEASURED_RUNNER_MS = 890000;
-const SWEEP_RUNNER_BUDGET_MS = 2700000;
+const SWEEP_MEASURED_RUNNER_MS = 2177000;
+const SWEEP_RUNNER_BUDGET_MS = 6600000;
 
 // Keyed on the suite being spawned, so the decision lives with the numbers rather
 // than at the call site, and can be asserted by RUNNING it rather than by
