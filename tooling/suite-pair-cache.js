@@ -33,8 +33,8 @@
 //
 // THE DEPENDENCIES. What the runs touched is checked, not keyed: each entry
 // carries the repository files the baseline and the stub run loaded, read,
-// stat-ed and listed (from V8 coverage plus suite-pair-trace.js), each with
-// the state it had. A lookup is a hit only when every one still has that state
+// stat-ed and listed, and every require() a repository file made (from V8
+// coverage plus suite-pair-trace.js), each with the state it had. A lookup is a hit only when every one still has that state
 // and the fresh baseline touched exactly what the recorded one did.
 //
 // UNCACHEABLE, never guessed. A pair is not stored when a run did not complete,
@@ -73,8 +73,9 @@ const CHECKER_FILES = [
 ];
 const PACKAGE_FILES = ['package.json', 'package-lock.json'];
 const OUTCOMES = ['killed', 'green'];
-const KINDS = ['script', 'read', 'stat', 'list'];
+const KINDS = ['script', 'read', 'stat', 'list', 'resolve'];
 const WIN = process.platform === 'win32';
+const ROOT_TOKEN = '<root>/';
 
 const sha256 = (data) => crypto.createHash('sha256').update(data).digest('hex');
 const fold = (p) => (WIN ? p.toLowerCase() : p);
@@ -167,10 +168,19 @@ function relUnder(p, variants) {
 // The state of one dependency, as a string that is equal exactly when the
 // dependency is unchanged for that kind of use.
 function fileState(root, kind, rel) {
+    if (kind === 'resolve') return resolveState(root, rel);
     const full = rel === '.' ? root : path.join(root, rel);
     let st;
     try { st = fs.statSync(full); } catch { return 'absent'; }
-    if (kind === 'stat') return st.isDirectory() ? 'dir' : st.isFile() ? 'file' : 'other';
+    if (kind === 'stat') {
+        // Type, link-ness, size and permission bits: what a stat-based check
+        // can branch on. Times are left out on purpose: a checkout rewrites
+        // them, and a verdict that depends on one is not reproducible anyway.
+        let link = '';
+        try { if (fs.lstatSync(full).isSymbolicLink()) link = 'link:'; } catch { /* stat succeeded */ }
+        const type = st.isDirectory() ? 'dir' : st.isFile() ? 'file' : 'other';
+        return link + type + (st.isFile() ? ':' + st.size : '') + ':' + (st.mode & 0o777).toString(8);
+    }
     if (kind === 'list') {
         if (!st.isDirectory()) return st.isFile() ? 'file' : 'other';
         try {
@@ -181,6 +191,31 @@ function fileState(root, kind, rel) {
     }
     if (st.isDirectory()) return 'dir';
     try { return 'sha256:' + sha256(fs.readFileSync(full)); } catch (e) { return 'unreadable:' + (e.code || 'error'); }
+}
+
+// What `require(request)` from parentRel resolves to now, relative to root:
+// 'path:<rel>', 'outside:<digest>' or 'unresolved'. rel is parentRel, a
+// newline, then the request; an absolute request inside the repository is
+// stored as ROOT_TOKEN plus its relative path, because every sweep runs in a
+// fresh private worktree. Re-resolving through Node's own resolver is what
+// catches a file added beside a requirer that would now win the lookup.
+function resolveState(root, rel) {
+    const i = rel.indexOf('\n');
+    if (i < 0) return 'malformed';
+    const Mod = require('module');
+    const parentFile = path.join(root, rel.slice(0, i));
+    const parent = { id: parentFile, filename: parentFile, paths: Mod._nodeModulePaths(path.dirname(parentFile)) };
+    let request = rel.slice(i + 1);
+    if (request.startsWith(ROOT_TOKEN)) request = path.join(root, request.slice(ROOT_TOKEN.length));
+    // Node caches resolutions per process; this answer must be about the tree now.
+    const savedCache = Mod._pathCache;
+    let out;
+    try {
+        Mod._pathCache = Object.create(null);
+        out = Mod._resolveFilename(request, parent, false);
+    } catch { return 'unresolved'; } finally { Mod._pathCache = savedCache; }
+    const r = relUnder(out, rootVariants(root));
+    return r !== null ? 'path:' + r : 'outside:' + sha256(fold(path.resolve(out))).slice(0, 16);
 }
 
 // The environment a suite runs with, minus what the sweep sets per run, and
@@ -261,7 +296,7 @@ function attribute(digest, index) {
 
 // Read V8 coverage: the script URLs and the pids that wrote a file.
 function readCoverage(dir) {
-    const out = { urls: new Set(), pids: new Set(), unreadable: 0 };
+    const out = { urls: new Set(), pids: new Set(), unreadable: 0, empty: 0 };
     let names = [];
     try { names = fs.readdirSync(dir); } catch { return out; }
     for (const name of names) {
@@ -270,7 +305,14 @@ function readCoverage(dir) {
         out.pids.add(Number(m[1]));
         try {
             const doc = JSON.parse(fs.readFileSync(path.join(dir, name), 'utf8'));
-            for (const s of doc.result || []) if (s && typeof s.url === 'string') out.urls.add(s.url);
+            if (!doc || !Array.isArray(doc.result)) { out.unreadable++; continue; }
+            // A process that ran anything compiled at least its own file, so
+            // coverage naming no file is not coverage of that process.
+            let files = 0;
+            for (const s of doc.result) {
+                if (s && typeof s.url === 'string') { out.urls.add(s.url); if (s.url.startsWith('file:')) files++; }
+            }
+            if (!files) out.empty++;
         } catch { out.unreadable++; }
     }
     return out;
@@ -287,6 +329,7 @@ function collectEvidence(run, ctx) {
     if (!t.processes.length) reasons.push('no traced process');
     if (t.malformed) reasons.push('trace unreadable');
     if (cov.unreadable) reasons.push('coverage unreadable');
+    if (cov.empty) reasons.push('coverage names no script');
     if (t.processes.some((p) => !p.complete)) reasons.push('a traced process did not finish');
     const tracedPids = new Set(t.processes.map((p) => p.pid));
     for (const pid of tracedPids) if (!cov.pids.has(pid)) { reasons.push('coverage missing for a traced process'); break; }
@@ -341,9 +384,25 @@ function collectEvidence(run, ctx) {
         const p = rec[1];
         const rel = relUnder(p, repo);
         if (rel !== null) { addDep(rec[0], rel, p); continue; }
+        // Outside the repository and the run's private roots, a read is a
+        // reason even when the run wrote that path: the read may have come
+        // first, and what it saw is not recorded.
         if (relUnder(p, ignored) !== null) continue;
-        if (written.has(fold(path.resolve(p)))) continue;
         reasons.push('reads outside the repository: ' + p);
+    }
+    // Every require() from a repository file, re-resolved at lookup. One from
+    // a script outside the repository is covered by what that script loads.
+    for (const rec of t.records) {
+        if (rec[0] !== 'resolve') continue;
+        const parentRel = relUnder(rec[2], repo);
+        if (parentRel === null) continue;
+        let request = String(rec[1]);
+        if (path.isAbsolute(request)) {
+            const inRepo = relUnder(request, repo);
+            if (inRepo !== null) request = ROOT_TOKEN + inRepo;
+            else if (relUnder(request, ignored) !== null) continue;   // a file this run made: its load is graded above
+        }
+        addDep('resolve', parentRel + '\n' + request, rec[2]);
     }
     return { cacheable: reasons.length === 0, reasons: [...new Set(reasons)], deps, natives };
 }

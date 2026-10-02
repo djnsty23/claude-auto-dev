@@ -29,7 +29,9 @@
 //
 // WHAT IT CANNOT SEE: a native child's reads (it records that a native child
 // ran, which makes the pair uncacheable unless the suite declares it), reads
-// through internal bindings, and anything a process does after it is killed.
+// through internal bindings (module resolution is recorded per request
+// instead), reads on a descriptor (recorded at open by its flags), and
+// anything a process does after it is killed.
 //
 //   node tooling/suite-pair-trace.js --help
 
@@ -106,8 +108,9 @@ function classifyChild(kind, args, ctx) {
     let options;
     let shell = false;
     if (kind === 'fork') {
-        cmd = process.execPath;
         options = Array.isArray(args[1]) ? args[2] : args[1];
+        // fork() runs options.execPath when given, and that need not be Node.
+        cmd = options && typeof options === 'object' && options.execPath ? String(options.execPath) : process.execPath;
     } else if (kind === 'exec' || kind === 'execSync') {
         shell = true;
         cmd = args[0];
@@ -153,12 +156,18 @@ function install() {
     const file = path.join(traceDir, `t-${process.pid}-${threadId}-${crypto.randomBytes(4).toString('hex')}.jsonl`);
     const seen = new Set();
     const records = [];
+    // Records are buffered until this process's exit listener, which writes
+    // them and the `end` line. Exit listeners registered after this preload
+    // run later, so from then on every new record is appended at once: a
+    // read in a suite's own exit handler still reaches the evidence.
+    let final = false;
     const add = (rec) => {
         try {
             const k = JSON.stringify(rec);
             if (seen.has(k)) return;
             seen.add(k);
-            records.push(k);
+            if (final) orig.appendFileSync(file, k + '\n');
+            else records.push(k);
         } catch { /* never let recording change the call */ }
     };
     try {
@@ -170,55 +179,86 @@ function install() {
         try {
             records.push(JSON.stringify(['end']));
             orig.appendFileSync(file, records.join('\n') + '\n');
+            final = true;
         } catch { /* the missing end line marks the evidence incomplete */ }
     });
 
-    const wrap = (obj, name, record) => {
+    // `before` records from the arguments before the call. `after` records only
+    // once the call returned without throwing: a write that failed made nothing.
+    // Function properties (fs.realpathSync.native) are carried over.
+    const wrap = (obj, name, record, when) => {
         const fn = obj && obj[name];
         if (typeof fn !== 'function') return;
         const wrapped = function (...args) {
+            if (when !== 'after') {
+                try { record(args); } catch { /* recording never changes the call */ }
+                return fn.apply(this, args);
+            }
+            const out = fn.apply(this, args);
             try { record(args); } catch { /* recording never changes the call */ }
-            return fn.apply(this, args);
+            return out;
         };
         try {
+            for (const k of Object.keys(fn)) wrapped[k] = fn[k];
             Object.defineProperty(wrapped, 'name', { value: fn.name });
             obj[name] = wrapped;
         } catch { /* left unwrapped */ }
     };
     const one = (kind) => (args) => { const p = asPath(args[0]); if (p) add([kind, p]); };
+    // Writes are evidence only that the run made a file itself, so only a
+    // synchronous write that returned is recorded. An asynchronous one is not,
+    // which can only make a pair uncacheable, never wrongly cached.
     const written = (args) => {
         const p = asPath(args[0]);
         if (!p) return;
         const d = args[1];
         add(['write', p, (typeof d === 'string' || Buffer.isBuffer(d)) ? textDigest(d) : '-']);
     };
-    const copied = (args) => {
-        const a = asPath(args[0]);
-        const b = asPath(args[1]);
-        if (a) add(['read', a]);
-        if (b) add(['write', b, '-']);
+    const copySource = (args) => { const a = asPath(args[0]); if (a) add(['read', a]); };
+    const copyDest = (args) => { const b = asPath(args[1]); if (b) add(['write', b, '-']); };
+    const flagsOf = (flags) => {
+        if (typeof flags === 'number') {
+            const acc = flags & (fs.constants.O_WRONLY | fs.constants.O_RDWR);
+            return { reads: acc !== fs.constants.O_WRONLY, writes: acc !== 0 };
+        }
+        const f = typeof flags === 'string' ? flags : 'r';
+        return { reads: /r|\+/.test(f), writes: /[wax+]/.test(f) };
     };
-    const renamed = (args) => { const b = asPath(args[1]); if (b) add(['write', b, '-']); };
-    const opened = (args) => {
-        const p = asPath(args[0]);
-        if (!p) return;
-        const flags = args[1];
-        const writes = typeof flags === 'string' ? /[wa+]/.test(flags)
-            : (typeof flags === 'number' ? (flags & (fs.constants.O_WRONLY | fs.constants.O_RDWR)) !== 0 : false);
-        add(writes ? ['write', p, '-'] : ['read', p]);
-    };
+    const openRead = (args) => { const p = asPath(args[0]); if (p && flagsOf(args[1]).reads) add(['read', p]); };
+    const openWrite = (args) => { const p = asPath(args[0]); if (p && flagsOf(args[1]).writes) add(['write', p, '-']); };
 
     for (const target of [fs, fs.promises]) {
         for (const n of ['readFileSync', 'readFile', 'createReadStream']) wrap(target, n, one('read'));
         for (const n of ['existsSync', 'statSync', 'lstatSync', 'accessSync', 'realpathSync',
             'stat', 'lstat', 'access', 'exists', 'realpath']) wrap(target, n, one('stat'));
         for (const n of ['readdirSync', 'readdir', 'opendirSync', 'opendir']) wrap(target, n, one('list'));
-        for (const n of ['writeFileSync', 'writeFile', 'appendFileSync', 'appendFile']) wrap(target, n, written);
-        for (const n of ['copyFileSync', 'copyFile', 'cpSync', 'cp']) wrap(target, n, copied);
-        for (const n of ['renameSync', 'rename', 'linkSync', 'link']) wrap(target, n, renamed);
-        for (const n of ['openSync', 'open']) wrap(target, n, opened);
-        wrap(target, 'createWriteStream', (args) => { const p = asPath(args[0]); if (p) add(['write', p, '-']); });
+        for (const n of ['writeFileSync', 'appendFileSync']) wrap(target, n, written, 'after');
+        for (const n of ['copyFileSync', 'cpSync', 'copyFile', 'cp']) wrap(target, n, copySource);
+        for (const n of ['copyFileSync', 'cpSync', 'renameSync', 'linkSync']) wrap(target, n, copyDest, 'after');
+        for (const n of ['openSync', 'open']) wrap(target, n, openRead);
+        wrap(target, 'openSync', openWrite, 'after');
     }
+    for (const fn of [fs.realpathSync, fs.realpath]) wrap(fn, 'native', one('stat'));
+
+    // Module resolution probes candidates through internal bindings these
+    // wrappers never see, so a file added beside a requirer could change what
+    // `require('./x')` loads with no recorded dependency moving. Each request
+    // is recorded with its parent instead, and the cache re-resolves it.
+    try {
+        const Mod = require('module');
+        const resolve = Mod._resolveFilename;
+        if (typeof resolve === 'function') {
+            Mod._resolveFilename = function (request, parent, ...rest) {
+                try {
+                    if (typeof request === 'string' && parent && typeof parent.filename === 'string'
+                        && !(Mod.isBuiltin && Mod.isBuiltin(request))) {
+                        add(['resolve', request, path.resolve(parent.filename)]);
+                    }
+                } catch { /* recording never changes the call */ }
+                return resolve.call(this, request, parent, ...rest);
+            };
+        }
+    } catch { /* left unwrapped */ }
 
     const cp = require('child_process');
     for (const n of ['spawn', 'spawnSync', 'exec', 'execSync', 'execFile', 'execFileSync', 'fork']) {
