@@ -43,6 +43,7 @@ const sv = require('./suite-verdict-summary.js');
 // suite-tmp.js for the leak that made this necessary.
 const { spawnSuiteSync } = require('./suite-tmp.js');
 const pairCacheLib = require('./suite-pair-cache.js');
+const receipts = require('./coverage-receipt.js');
 
 const ROOT = path.resolve(__dirname, '..');
 
@@ -536,8 +537,14 @@ process.on('uncaughtException', (e) => {
     process.exit(2);
 });
 
-const suites = fs.readdirSync(SWEEP_TOOLING)
-    .filter((f) => /^test-.*\.js$/.test(f))
+// The runner's own population (coverage-receipt.js discoverSuites, the one
+// definition test-all.js and check:coverage read) plus the runner, which
+// checkRunner canaries. That population leaves out the optional pool,
+// test-all-pool.js: it matches test-*.js, but test-all.js loads it as a module
+// and never runs it as a suite. `[measured 2026-10-02]` swept as a suite, its
+// no-argument usage exited 0 with its subject stubbed, and the gate read VACUOUS.
+const suites = receipts.discoverSuites(SWEEP_TOOLING)
+    .concat(fs.existsSync(path.join(SWEEP_TOOLING, 'test-all.js')) ? ['test-all.js'] : [])
     .sort();
 
 // 15 minutes, not 5. A timeout KILLS the child, and a killed suite that
