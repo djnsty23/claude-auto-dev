@@ -29,6 +29,12 @@
  *   P15o an unreadable creation time is a reuse    -> a live owner reads dead (S12)
  *   P16o the fencing counter passes 2^53 - 1       -> two admissions share a token (S12)
  *   P17o a pre-boot mutex is held by its pid        -> every admission times out after a reboot (S12)
+ *   P18o admission's default calls a holder dead    -> a live admission's mutex is broken under it (S13)
+ *   P19o the worktree mutex's default does the same -> a lease writer's mutex is broken under it (S13)
+ *   P20o a lease's default calls every run finished -> a second gate overwrites a running lease (S13)
+ *   P21o any lock naming the pid is the caller's    -> a reused pid inherits a dead run's lane (S13)
+ *   P22o iso7 formats an unparseable time           -> an odd creation time throws in the judgement (S13)
+ *   P23o the POSIX probes answer with a fixed boot  -> a boot identity that no reboot changes (S13)
  *
  * The machine's real lock is never touched: every spawn sets
  * AUTODEV_GATE_LOCK_PATH to a temp directory.
@@ -527,6 +533,103 @@ function s12Library(subject) {
     return rows;
 }
 
+const attempt = (fn) => { try { return fn(); } catch (e) { return `threw ${e.code || e.message}`; } };
+
+/** A pid whose process has already exited. */
+function exitedPid() { return spawnSync(process.execPath, ['-e', ''], { windowsHide: true }).pid; }
+
+/**
+ * S13a: the defaults a caller gets by leaving an option out. Without `isDead`
+ * a mutex written this boot is never judged dead, so it times out and is kept
+ * rather than broken. Without `isLive` another run's active lease is not
+ * provably finished, so a first publication is refused.
+ */
+function s13Records(subject) {
+    const rec = require(path.join(path.dirname(subject), 'gate-records.js'));
+    const rows = [];
+    const fx = fixture(1);
+    const body = `${exitedPid()}\n${new Date().toISOString()}\n`;
+    const admission = rec.admissionPath(fx.lock);
+    fs.writeFileSync(admission, body);
+    const a = attempt(() => rec.withAdmission(fx.lock, () => 'entered', { timeoutMs: 400 }));
+    rows.push(['S13 admission: without isDead, a mutex held this boot times out (EADMISSION) and is kept',
+        a === 'threw EADMISSION' && attempt(() => fs.readFileSync(admission, 'utf8')) === body, String(a)]);
+    const key = '0123456789abcdef';
+    const mutex = path.join(rec.leasesDir(fx.lock), `${key}.mutex`);
+    fs.mkdirSync(path.dirname(mutex), { recursive: true });
+    fs.writeFileSync(mutex, body);
+    const m = attempt(() => rec.withWorktreeMutex(fx.lock, key, () => 'entered', { timeoutMs: 400 }));
+    rows.push(['S13 worktree mutex: without isDead, a mutex held this boot times out (ELEASEMUTEX) and is kept',
+        m === 'threw ELEASEMUTEX' && attempt(() => fs.readFileSync(mutex, 'utf8')) === body, String(m)]);
+    const leaseKey = 'fedcba9876543210';
+    rec.writeJsonAtomic(rec.leasePath(fx.lock, leaseKey), { schema: rec.SCHEMA, runId: 'run-s13-a', token: 1, state: 'running' });
+    const w = attempt(() => rec.writeLease(fx.lock, leaseKey, { runId: 'run-s13-b', token: 2, state: 'admitted' }));
+    const kept = rec.readLease(fx.lock, leaseKey).value || {};
+    rows.push(['S13 lease: without isLive, another run\'s running lease is not provably finished and is kept',
+        Boolean(w) && w.written === false && /not provably finished/.test(w.why || '') && kept.runId === 'run-s13-a', JSON.stringify(w)]);
+    return rows;
+}
+
+/**
+ * S13b: a lock naming the caller's pid under another run id is the caller's
+ * only when its recorded creation time is the caller's own. With another
+ * creation time the pid was reused, so the lock is taken over as dead, never
+ * handed over.
+ */
+function s13Handover(subject) {
+    const rows = [];
+    const h = sleeper();
+    const me = ident.identityOf(h, { snap: freshSnap() });
+    if (!me || !me.startUtc) return [['S13 hand-over: the sleeper\'s creation time can be read', false, JSON.stringify(me)]];
+    const fx = fixture(1);
+    const other = metaLock(fx, { pid: h, startUtc: OLD_START, bootId }, { runId: 'run-s13-old' });
+    const t1 = run(subject, fx, ['take', '--pid', String(h), '--run-id', 'run-s13-new']);
+    const after1 = readLockFile(fx.lock);
+    rows.push(['S13 hand-over: another creation time is not handed over; the lock is taken anew under the new run id',
+        t1.code === 0 && Boolean(after1) && after1.text !== other.text && Boolean(after1.meta) && after1.meta.runId === 'run-s13-new',
+        `${t1.out}\n${after1 ? after1.text : '(no lock)'}`]);
+    const fx2 = fixture(1);
+    const own = metaLock(fx2, { pid: h, startUtc: me.startUtc, bootId }, { runId: 'run-s13-old' });
+    const t2 = run(subject, fx2, ['take', '--pid', String(h), '--run-id', 'run-s13-new']);
+    const after2 = readLockFile(fx2.lock);
+    rows.push(['S13 hand-over: its own creation time is handed over; the lock keeps the earlier run',
+        t2.code === 0 && Boolean(after2) && after2.text === own.text && /run run-s13-old/.test(t2.out),
+        `${t2.out}\n${after2 ? after2.text : '(no lock)'}`]);
+    return rows;
+}
+
+/**
+ * S13c: creation times in any shape compare as seven-digit ISO strings, an
+ * unparseable one is null rather than a throw, and the POSIX probes answer
+ * for the platform they run on: no boot source on Windows, a host|time boot
+ * identity and a listing holding this process elsewhere.
+ */
+function s13Identity(subject) {
+    const id = require(path.join(path.dirname(subject), 'gate-identity.js'));
+    const rows = [];
+    const rfc = attempt(() => id.normaliseTime('Thu, 01 Jan 2026 00:00:00 GMT'));
+    rows.push(['S13 time: a creation time in another shape is normalised to seven fractional digits',
+        rfc === '2026-01-01T00:00:00.0000000Z', String(rfc)]);
+    const bad = attempt(() => id.normaliseTime('not a time'));
+    const nan = attempt(() => id.iso7(NaN));
+    rows.push(['S13 time: an unparseable creation time is null, not a throw', bad === null && nan === null, `normaliseTime=${bad} iso7(NaN)=${nan}`]);
+    const boot = attempt(() => id.posixBoot());
+    const snap = attempt(() => id.posixSnapshot());
+    const shown = JSON.stringify({ boot, snap: snap && typeof snap === 'object' ? { ok: snap.ok, why: snap.why, boot: snap.boot } : snap });
+    if (WIN) {
+        rows.push(['S13 posix: on Windows no POSIX boot source answers, and the POSIX snapshot says so',
+            boot === null && Boolean(snap) && snap.ok === false && snap.why === 'no boot time source answered', shown]);
+    } else {
+        rows.push(['S13 posix: the boot identity is host|time with seven fractional digits, from a named source',
+            Boolean(boot) && typeof boot === 'object' && /\|\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d\.\d{7}Z$/.test(boot.id) && typeof boot.source === 'string', shown]);
+        rows.push(['S13 posix: the snapshot carries that boot and lists this process',
+            Boolean(snap) && snap.ok === true && Boolean(boot) && snap.boot.id === boot.id && snap.procs.has(process.pid), shown]);
+    }
+    return rows;
+}
+
+const s13Defaults = (subject) => [...s13Records(subject), ...s13Handover(subject), ...s13Identity(subject)];
+
 /**
  * S11: the readers the reaper imports see what admission wrote: lane locks with
  * their meta, tickets, and leases; a lease renewal from another run is refused.
@@ -613,6 +716,7 @@ async function main() {
         S4: () => s4ArrivalSurvives(SUBJECT), S5: () => s5PreBoot(SUBJECT), S6: () => s6ReusedPid(SUBJECT),
         S7: () => s7Msys(SUBJECT, msys), S8: () => s8Descendants(SUBJECT, orphan), S9: () => s9Fence(SUBJECT),
         S10: () => s10Malformed(SUBJECT), S10b: () => s10bSemantic(SUBJECT), S11: () => s11Readers(SUBJECT), S12: () => s12Library(SUBJECT),
+        S13: () => s13Defaults(SUBJECT),
     };
     for (const [id, fn] of Object.entries(real)) if (want(id)) report(id, await fn());
 
@@ -661,6 +765,24 @@ async function main() {
             [['    if (!Number.isSafeInteger(next)) {', '    if (false) {']], (s) => s12Library(s).slice(1, 2), ['S12']],
         ['P17o', 'a mutex from an earlier boot is held by its reused pid', 'gate-records.js',
             [['        return Number.isFinite(bootMs) && fs.statSync(file).mtimeMs < bootMs - 60000;', '        return false;']], (s) => s12Library(s).slice(2), ['S12']],
+        ['P18o', 'the admission mutex\'s default calls every holder dead', 'gate-records.js',
+            [['function withAdmission(base, fn, { timeoutMs = 30000, isDead = () => false } = {}) {', 'function withAdmission(base, fn, { timeoutMs = 30000, isDead = () => true } = {}) {']],
+            (s) => s13Records(s).filter(([n]) => n.startsWith('S13 admission')), ['S13']],
+        ['P19o', 'the worktree mutex\'s default calls every holder dead', 'gate-records.js',
+            [['function withWorktreeMutex(base, key, fn, { timeoutMs = 30000, isDead = () => false } = {}) {', 'function withWorktreeMutex(base, key, fn, { timeoutMs = 30000, isDead = () => true } = {}) {']],
+            (s) => s13Records(s).filter(([n]) => n.startsWith('S13 worktree mutex')), ['S13']],
+        ['P20o', 'a lease\'s default calls every other run finished', 'gate-records.js',
+            [['isLive = () => null } = {}) {', 'isLive = () => false } = {}) {']],
+            (s) => s13Records(s).filter(([n]) => n.startsWith('S13 lease')), ['S13']],
+        ['P21o', 'any lock naming the pid belongs to the caller', 'full-gate-queue.js',
+            [['    return !me || !me.startUtc || me.startUtc === start;', '    return true;']], (s) => s13Handover(s), ['S13']],
+        ['P22o', 'iso7 formats an unparseable time', 'gate-identity.js',
+            [['    if (!Number.isFinite(ms)) return null;\n', '']], (s) => s13Identity(s).filter(([n]) => n.startsWith('S13 time')), ['S13']],
+        ['P23o', 'the POSIX probes answer with a fixed boot', 'gate-identity.js',
+            [["source: '/proc/stat btime' };", "source: '/proc/stat btime', id: 'planted' };"],
+                ["source: 'sysctl kern.boottime' };", "source: 'sysctl kern.boottime', id: 'planted' };"],
+                ['    return null;\n}\n\nfunction posixSnapshot() {', "    return { id: 'planted', source: 'planted' };\n}\n\nfunction posixSnapshot() {"]],
+            (s) => s13Identity(s).filter(([n]) => n.startsWith('S13 posix')), ['S13']],
     ];
     for (const [id, what, file, edits, scenario, covers] of plants) {
         if (!want(id) && !covers.some(want)) continue;
