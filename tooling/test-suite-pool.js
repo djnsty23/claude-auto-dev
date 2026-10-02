@@ -185,7 +185,34 @@ async function main() {
             { env: { AUTODEV_TEST_POOL: '2' }, manifest, dir, out: sink(), err, noLogs: false, runDir: LOGS });
         check('lost log: said by name', /test-a: its log could not be read/.test(err.text()), err.text());
         check('lost log: suites started after it run with their output live', events.slice(2).every((e) => e.echo), events);
-        check('lost log: every suite still ran once', got.length === 5, got.map((r) => r.label));
+        const own = got.filter((r) => r.label !== 'test-all-pool');
+        check('lost log: every suite still ran once', own.length === 5 && new Set(own.map((r) => r.label)).size === 5, got.map((r) => r.label));
+        const row = got.find((r) => r.label === 'test-all-pool');
+        check('lost log: the pool returns a failed row of its own, so the run cannot pass', got.length === 6 && !!row && row.state === 'fail' && /test-a/.test(row.reason), got);
+        check('lost log: the delivered verdicts are kept unchanged', own.every((r) => r.state === 'pass'), own);
+    }
+
+    // ---- a lost log through aggregation: a cut write fails the run ------------
+    {
+        const dir = fs.mkdtempSync(path.join(TMP, 'cutwrite-'));
+        const manifest = fixtureManifest(dir, { 'test-a': 'parallel', 'test-b': 'parallel' });
+        const rec = recorder();
+        const cutOut = (c) => (Buffer.isBuffer(c) ? Math.max(0, c.length - 1) : Buffer.byteLength(String(c)));
+        const got = await pool.runSuites([{ label: 'test-a' }, { label: 'test-b' }], rec.runOne,
+            { env: { AUTODEV_TEST_POOL: '2' }, manifest, dir, out: cutOut, err: sink(), noLogs: false, runDir: LOGS });
+        check('aggregation: a log printed short makes the pool return a failed row', got.some((r) => r.label === 'test-all-pool' && r.state === 'fail'), got);
+    }
+
+    // ---- no run directory: serial before any suite starts silent -------------
+    {
+        const dir = fs.mkdtempSync(path.join(TMP, 'norundir-'));
+        const manifest = fixtureManifest(dir, { 'test-a': 'parallel', 'test-b': 'parallel', 'test-c': 'parallel' });
+        const rec = recorder();
+        const err = sink();
+        await pool.runSuites(['test-a', 'test-b', 'test-c'].map((label) => ({ label })), rec.runOne,
+            { env: { AUTODEV_TEST_POOL: '4' }, manifest, dir, out: sink(), err, noLogs: false, runDir: null });
+        check('no run directory (the coverage store failed): every suite runs serial with its output live',
+            rec.max === 1 && rec.events.filter((e) => e.t === 'start').every((e) => e.echo) && /keeps no suite logs/.test(err.text()), { max: rec.max, err: err.text() });
     }
 
     // ---- manifest decides, and only an unchanged reviewed suite runs parallel --
@@ -210,6 +237,30 @@ async function main() {
         const partial = path.join(dir, 'partial.json');
         fs.writeFileSync(partial, JSON.stringify({ schema: 1, suites: { 'test-a.js': { isolation: 'parallel', reason: '', sha256: pool.hashFile(path.join(dir, 'test-a.js')) } } }));
         check('manifest: an entry without a reason is not trusted', pool.loadManifest(partial).suites.size === 0);
+        const mixed = path.join(dir, 'mixed.json');
+        fs.writeFileSync(mixed, JSON.stringify({ schema: 1, suites: {
+            'test-a.js': { isolation: 'parallel', reason: 'fixture', sha256: pool.hashFile(path.join(dir, 'test-a.js')) },
+            'test-c.js': { isolation: 'sideways', reason: 'fixture', sha256: 'x' },
+        } }));
+        const ml = pool.loadManifest(mixed);
+        check('manifest: one malformed entry beside a valid one empties the whole manifest', ml.suites.size === 0 && /malformed/.test(ml.error || ''), ml.error);
+        const badAccepted = path.join(dir, 'bad-accepted.json');
+        fs.writeFileSync(badAccepted, JSON.stringify({ schema: 1, suites: {
+            'test-a.js': { isolation: 'parallel', reason: 'fixture', accepted: 'git-write', sha256: pool.hashFile(path.join(dir, 'test-a.js')) } } }));
+        check('manifest: an "accepted" that is not a list of strings is malformed', pool.loadManifest(badAccepted).suites.size === 0);
+
+        // The hash is of the bytes on disk: checked against an independent
+        // sha256, and a CRLF rewrite of the same text must read as changed.
+        const crlfDir = fs.mkdtempSync(path.join(TMP, 'crlf-'));
+        const crlfFile = path.join(crlfDir, 'test-crlf.js');
+        const lf = Buffer.from('// line one\n// line two\n');
+        fs.writeFileSync(crlfFile, lf);
+        const oracle = require('crypto').createHash('sha256').update(lf).digest('hex');
+        check('hash: equals an independent sha256 of the raw bytes', pool.hashFile(crlfFile) === oracle, { got: pool.hashFile(crlfFile), oracle });
+        const crlfManifest = fixtureManifest(crlfDir, { 'test-crlf': 'parallel' });
+        fs.writeFileSync(crlfFile, Buffer.from(lf.toString('utf8').replace(/\n/g, '\r\n')));
+        const cp = pool.classify([{ label: 'test-crlf' }], pool.loadManifest(crlfManifest).suites, crlfDir)[0];
+        check('hash: the same suite rewritten with CRLF line ends reads as changed and runs serial', cp.mode === 'serial' && cp.why === 'changed', cp);
         const rec = recorder();
         await pool.runSuites(['test-a', 'test-u'].map((label) => ({ label })), rec.runOne,
             { env: { AUTODEV_TEST_POOL: '4' }, manifest: path.join(dir, 'bad-missing.json'), dir, out: sink(), err: sink(), noLogs: false, runDir: LOGS });
@@ -234,18 +285,34 @@ async function main() {
         const n = (pred) => plan.filter(pred).length;
         console.log(`      population: ${plan.length} suites, ${n((p) => p.mode === 'parallel')} parallel, ${n((p) => p.mode === 'serial')} serial, `
             + `${n((p) => p.why === 'unknown')} not in the manifest, ${n((p) => p.why === 'changed')} changed since review`);
-        // Every parallel entry was reviewed against the audit: one that now carries a
-        // repo-write, fixed-port or nested-runner signal is a review that is wrong.
-        const hard = [];
-        for (const [name, e] of loaded.suites) {
-            if (e.isolation !== 'parallel') continue;
-            let src;
-            try { src = fs.readFileSync(path.join(TOOLING, name), 'utf8'); } catch { continue; }
-            if (pool.hashFile(path.join(TOOLING, name)) !== e.sha256) continue;
-            const sig = pool.auditSource(src).filter((s) => /^(repo-write|fixed-port|nested-runner|npm)/.test(s));
-            if (sig.length) hard.push(`${name}: ${sig.join('; ')}`);
-        }
-        check('tree manifest: no parallel suite writes the repo, binds a fixed port, nests a runner or spawns npm', hard.length === 0, hard);
+        // Every parallel entry was reviewed against the audit. A signal the review
+        // did not list in "accepted" (read by hand) is a review that is wrong.
+        const unreviewed = (manifestSuites, dir) => {
+            const bad = [];
+            for (const [name, e] of manifestSuites) {
+                if (e.isolation !== 'parallel') continue;
+                let src;
+                try { src = fs.readFileSync(path.join(dir, name), 'utf8'); } catch { continue; }
+                if (pool.hashFile(path.join(dir, name)) !== e.sha256) continue;
+                const acc = new Set(e.accepted || []);
+                const sig = pool.auditSource(src).filter((s) => !acc.has(s));
+                if (sig.length) bad.push(`${name}: ${sig.join('; ')}`);
+            }
+            return bad;
+        };
+        const hard = unreviewed(loaded.suites, TOOLING);
+        check('tree manifest: every audit signal of a parallel suite was accepted by hand', hard.length === 0, hard);
+        // The guard itself: a parallel suite re-hashed after gaining a global git
+        // config write, or a child given the real profile, must trip it.
+        const gdir = fs.mkdtempSync(path.join(TMP, 'guard-'));
+        for (const [label, body] of [
+            ['test-gglobal', "spawnSync('git', ['config', '--global', 'user.name', 'x']);\n"],
+            ['test-profile', "const HOME = fixture;\nspawnSync(process.execPath, ['plugins/x.js'], { env: process.env });\n"],
+        ]) fs.writeFileSync(path.join(gdir, label + '.js'), body);
+        const gm = pool.loadManifest(fixtureManifest(gdir, { 'test-gglobal': 'parallel', 'test-profile': 'parallel' })).suites;
+        const caught = unreviewed(gm, gdir);
+        check('tree manifest guard: a re-hashed parallel suite writing global git config is caught', caught.some((l) => /test-gglobal.*git-global/.test(l)), caught);
+        check('tree manifest guard: a child handed process.env is caught despite a HOME override elsewhere', caught.some((l) => /test-profile.*process\.env unchanged/.test(l)), caught);
     }
 
     // ---- the auditor reads source, not filenames ----------------------------
@@ -262,6 +329,19 @@ async function main() {
             a("const G = 'plugins/*/hooks';\nconst ROOT = path.resolve(__dirname, '..');\nfs.writeFileSync(path.join(ROOT, 'y'), '');").some((s) => s.startsWith('repo-write')));
         check('audit: a commented-out write is not a signal',
             !a("const ROOT = path.resolve(__dirname, '..');\n// fs.writeFileSync(path.join(ROOT, 'y'), '');").some((s) => s.startsWith('repo-write')));
+        check('audit: copying a temp file INTO the repo is a repo write (the destination is read)',
+            a("const ROOT = path.resolve(__dirname, '..');\nconst T = fs.mkdtempSync(path.join(os.tmpdir(), 'x-'));\nfs.copyFileSync(path.join(T, 'a'), path.join(ROOT, 'b'));").some((s) => s.startsWith('repo-write')));
+        check('audit: renaming a temp file into the repo is a repo write',
+            a("const ROOT = path.resolve(__dirname, '..');\nfs.renameSync(tmpFile, path.join(ROOT, 'b'));").some((s) => s.startsWith('repo-write')));
+        check('audit: copying a repo file out to a temp dir is still read as touching the repo',
+            a("const ROOT = path.resolve(__dirname, '..');\nfs.copyFileSync(path.join(ROOT, 'a'), path.join(T, 'b'));").some((s) => s.startsWith('repo-write')));
+        check('audit: copying between two temp paths is not a repo write',
+            !a("const T = fs.mkdtempSync(path.join(os.tmpdir(), 'x-'));\nfs.copyFileSync(path.join(T, 'a'), path.join(T, 'b'));").some((s) => s.startsWith('repo-write')));
+        check('audit: git config --global is a git-global signal', a("spawnSync('git', ['config', '--global', 'user.name', 'x']);").some((s) => s.startsWith('git-global')));
+        check('audit: a child given process.env unchanged is a profile signal, whatever else overrides HOME',
+            a("const env = { HOME: dir };\nspawn(process.execPath, [f], { env: process.env });").some((s) => /process\.env unchanged/.test(s)));
+        check('audit: a child given a copy with overrides is not',
+            !a("spawn(process.execPath, [f], { env: { ...process.env, HOME: dir } });").some((s) => /process\.env unchanged/.test(s)));
         check('audit: driving test-all.js is a nested runner', a("spawnSync(process.execPath, [path.join(__dirname, 'test-all.js')]);").some((s) => s.startsWith('nested-runner')));
     }
 
@@ -277,9 +357,10 @@ async function main() {
             const s = require('net').createServer();
             s.listen(0, '127.0.0.1', () => { const p = s.address().port; s.close(() => resolve(p)); });
         });
+        // Exclusive create: of two overlapping writers exactly one gets EEXIST.
         const writer = `const fs=require('fs'),p=require('path').join(${JSON.stringify(shared)},'fixture.md');
-if(fs.existsSync(p)){console.log('another writer is mid-run');process.exitCode=1;}
-else{fs.writeFileSync(p,'x');setTimeout(()=>{fs.rmSync(p,{force:true});},400);}`;
+try{fs.writeFileSync(p,'x',{flag:'wx'});setTimeout(()=>{fs.rmSync(p,{force:true});},400);}
+catch(e){console.log('another writer is mid-run: '+e.code);process.exitCode=1;}`;
         const binder = `const s=require('net').createServer();s.on('error',(e)=>{console.log(e.code);process.exitCode=1;});
 s.listen(${port},'127.0.0.1',()=>setTimeout(()=>s.close(),400));`;
         const bodies = { 'test-w1': writer, 'test-w2': writer, 'test-b1': binder, 'test-b2': binder };
@@ -291,17 +372,31 @@ s.listen(${port},'127.0.0.1',()=>setTimeout(()=>s.close(),400));`;
                 resolve({ label: item.label, state: code === 0 ? 'pass' : 'fail', status: code, log: 'logs/' + item.label + '.log' });
             });
         });
-        const items = Object.keys(bodies).map((label) => ({ label }));
-        const run = async (mode) => pool.runSuites(items, runOne, {
+        // modes: label -> parallel or serial; only the named labels run.
+        const run = async (modes) => pool.runSuites(Object.keys(modes).map((label) => ({ label })), runOne, {
             env: { AUTODEV_TEST_POOL: '4' }, dir, out: sink(), err: sink(), noLogs: false, runDir: LOGS,
-            manifest: fixtureManifest(dir, Object.fromEntries(Object.keys(bodies).map((l) => [l, mode]))),
+            manifest: fixtureManifest(dir, modes),
         });
-        const serial = await run('serial');
+        const verdicts = (rs) => rs.map((r) => r.label + ':' + r.state);
+        const serial = await run({ 'test-w1': 'serial', 'test-w2': 'serial', 'test-b1': 'serial', 'test-b2': 'serial' });
         check('real processes, serial: two repo writers and two fixed-port binders all pass',
-            serial.length === 4 && serial.every((r) => r.state === 'pass'), serial.map((r) => r.label + ':' + r.state));
-        const control = await run('parallel');
-        check('control: the same four overlapping really do collide (so the serial pass above means something)',
-            control.some((r) => r.state === 'fail'), control.map((r) => r.label + ':' + r.state));
+            serial.length === 4 && serial.every((r) => r.state === 'pass'), verdicts(serial));
+        // Each resource across a parallel-to-serial barrier: the serial one must
+        // wait for the parallel one still holding the file or the port.
+        const wBarrier = await run({ 'test-w1': 'parallel', 'test-w2': 'serial' });
+        check('real processes, barrier: a serial writer after a parallel writer waits for it and both pass',
+            wBarrier.length === 2 && wBarrier.every((r) => r.state === 'pass'), verdicts(wBarrier));
+        const bBarrier = await run({ 'test-b1': 'parallel', 'test-b2': 'serial' });
+        check('real processes, barrier: a serial binder after a parallel binder waits for it and both pass',
+            bBarrier.length === 2 && bBarrier.every((r) => r.state === 'pass'), verdicts(bBarrier));
+        // Separate controls, so a port collision cannot stand in for a writer
+        // collision: each pair alone, overlapping, must fail.
+        const wControl = await run({ 'test-w1': 'parallel', 'test-w2': 'parallel' });
+        check('control: two writers overlapping really do collide (the writer fixture can fail)',
+            wControl.some((r) => r.state === 'fail'), verdicts(wControl));
+        const bControl = await run({ 'test-b1': 'parallel', 'test-b2': 'parallel' });
+        check('control: two binders overlapping really do collide (the binder fixture can fail)',
+            bControl.some((r) => r.state === 'fail'), verdicts(bControl));
     }
 
     // ---- end to end through the real test-all.js -----------------------------
@@ -314,14 +409,27 @@ s.listen(${port},'127.0.0.1',()=>setTimeout(()=>s.close(),400));`;
         for (const f of fs.readdirSync(TOOLING)) {
             if (/^(test-all\.js|test-all-pool\.js|coverage-receipt\.js|suite-tmp\.js|cpu-.*\.js)$/.test(f)) fs.copyFileSync(path.join(TOOLING, f), path.join(tdir, f));
         }
-        fs.writeFileSync(path.join(tdir, 'validate.js'), "console.log('validate ran');\n");
+        // Each suite holds a marker file from its first line until 300 ms AFTER its
+        // output, so a validator that starts while any suite still runs sees one
+        // and fails: this measures completion, not the order of printed headers.
+        const markers = path.join(root, 'running');
+        fs.mkdirSync(markers);
+        // The stub validator watches for 600 ms, so it sees a suite that starts
+        // or still runs at any point while it does, not only at its first line.
+        fs.writeFileSync(path.join(tdir, 'validate.js'),
+            `const fs=require('fs'),D=${JSON.stringify(markers)};const seen=new Set();\n`
+            + "const look=()=>{for(const f of fs.readdirSync(D))seen.add(f);};look();\n"
+            + "const t=setInterval(look,10);setTimeout(()=>{clearInterval(t);look();\n"
+            + "if(seen.size){console.log('validate started while running: '+[...seen].join(','));process.exitCode=1;}else console.log('validate ran');},600);\n");
         const BIG = 200 * 1024;
+        const hold = (label) => `const M=require('path').join(${JSON.stringify(markers)},'${label}');require('fs').writeFileSync(M,'');`
+            + "const done=()=>setTimeout(()=>require('fs').rmSync(M,{force:true}),300);";
         const suites = {
-            'test-e1': "setTimeout(()=>console.log('e1 done'),150);",
-            'test-e2': "setTimeout(()=>console.log('e2 done'),150);",
-            'test-e3': "setTimeout(()=>{console.log('e3 failing on purpose');process.exitCode=1;},150);",
-            'test-e4': `process.stdout.write('x'.repeat(${BIG})+'\\nE4-END-OF-LOG\\n');`,
-            'test-e5': "setTimeout(()=>console.log('e5 done'),150);",
+            'test-e1': hold('e1') + "setTimeout(()=>{console.log('e1 done');done();},150);",
+            'test-e2': hold('e2') + "setTimeout(()=>{console.log('e2 done');done();},150);",
+            'test-e3': hold('e3') + "setTimeout(()=>{console.log('e3 failing on purpose');process.exitCode=1;done();},150);",
+            'test-e4': hold('e4') + `process.stdout.write('x'.repeat(${BIG})+'\\nE4-END-OF-LOG\\n');done();`,
+            'test-e5': hold('e5') + "setTimeout(()=>{console.log('e5 done');done();},150);",
         };
         for (const [l, b] of Object.entries(suites)) fs.writeFileSync(path.join(tdir, l + '.js'), b + '\n');
         fixtureManifest(tdir, { 'test-e1': 'parallel', 'test-e2': 'parallel', 'test-e3': 'parallel', 'test-e4': 'parallel', 'test-e5': 'serial' });
@@ -341,6 +449,7 @@ s.listen(${port},'127.0.0.1',()=>setTimeout(()=>s.close(),400));`;
         check('full log: a failing suite\'s own output is printed', /=== test-e3 ===\s*\ne3 failing on purpose/.test(outText), outText.slice(0, 400));
         const vIdx = outText.indexOf('=== validate ===');
         check('e2e: validate starts after every suite\'s output', vIdx > 0 && ['test-e1', 'test-e2', 'test-e3', 'test-e4', 'test-e5'].every((l) => outText.indexOf(`=== ${l} ===`) >= 0 && outText.indexOf(`=== ${l} ===`) < vIdx), vIdx);
+        check('e2e: validate found no suite still running when it started', /validate ran/.test(outText) && !/validate started while running/.test(outText), (outText.match(/validate[^\n]*/g) || []).slice(-3));
         const headers = (outText.match(/^=== (test-e\d) ===$/gm) || []);
         check('e2e: each suite\'s header appears exactly once', headers.length === 5 && new Set(headers).size === 5, headers);
     }
