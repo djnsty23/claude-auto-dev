@@ -89,10 +89,12 @@ try {
     // =======================================================================
     // 1. enqueue: a queued record with the brief copied beside its report.
     // =======================================================================
-    const q1 = cli(['enqueue', '--slug', 'guide-a', ...base]);
+    const q1 = cli(['enqueue', '--slug', 'guide-a', '--pin', 'README.md', ...base]);
     const r1 = val(q1) && val(q1).record;
     check('enqueue accepts a free slug', q1.status === 0 && r1 && r1.state === 'queued', q1.stdout.slice(0, 200));
     check('enqueue marks the record for the headless channel', r1 && r1.channel === 'headless');
+    const readmeAtEnqueue = g(repo, 'rev-parse', 'origin/main:README.md');
+    check('enqueue --pin stores the pinned blob at the base', r1 && r1.pins && r1.pins[0].blob === readmeAtEnqueue, JSON.stringify(r1 && r1.pins));
     check('enqueue defaults the worker to bypassPermissions, the mode the fleet ran headless', r1 && r1.launch.permissionMode === 'bypassPermissions');
     const briefCopy = r1 && r1.briefFile;
     check('enqueue copies the brief beside the report, so a later edit of the source cannot change a queued task',
@@ -167,8 +169,18 @@ try {
     // =======================================================================
     // 5. launch: a real supervisor, a fake claude, a report and an exit line.
     // =======================================================================
+    // The base moves between enqueue and launch, and so does the pinned file on it.
+    fs.writeFileSync(path.join(repo, 'README.md'), 'y\n');
+    g(repo, 'commit', '-q', '-am', 'move the base');
+    g(repo, 'push', '-q', 'origin', 'main');
+    const movedBase = g(repo, 'rev-parse', 'HEAD');
+    const movedBlob = g(repo, 'rev-parse', 'HEAD:README.md');
     const live = cli(['launch', '--task-id', 'worker-guide-a', '--dev', '--claude-bin', fakeWorker, '--ledger', ledger]);
     const lr = val(live) && val(live).record;
+    check('launch re-pins at the base the worker starts from, not the one enqueue saw',
+        lr && lr.pinBase === movedBase && lr.pins[0].blob === movedBlob && movedBlob !== readmeAtEnqueue, JSON.stringify(lr && { pinBase: lr.pinBase, pins: lr.pins }));
+    const livePrompt = lr ? fs.readFileSync(path.join(path.dirname(lr.report), 'PROMPT.md'), 'utf8') : '';
+    check('  and the launched prompt names the pinned test', livePrompt.includes('PINNED ACCEPTANCE TESTS: README.md'));
     check('control: with the branch gone, launch starts the worker', live.status === 0 && lr && lr.state === 'started', live.stdout.slice(0, 300));
     check('a launched record names its headless run and clears the launch error', lr && lr.headless && lr.headless.code === 'guide-a' && Number.isInteger(lr.headless.pid) && !lr.lastLaunchError);
     check('launch stamps launchedAt, which the per-hour cap counts', lr && typeof lr.launchedAt === 'string');
@@ -204,6 +216,12 @@ try {
     check('a judge verdict is written when none stands', v1 && v1.verdict.applied === true && recOf('worker-guide-a').verdict.decision === 'follow-up');
     const blockedNow = val(cli(['ready', '--ledger', ledger])).blocked.find((b) => b.taskId === 'worker-guide-b');
     check('a follow-up verdict blocks the dependent task for a person', blockedNow && /verdict follow-up/.test(blockedNow.reason), JSON.stringify(blockedNow));
+    // guide-a pins README.md, and the fake worker made no branch, so an accept reads
+    // could-not-check and is refused. That is the pin check working.
+    check('an accept on a pinned record with no result branch is refused as pin-unchecked',
+        code(cli(['verdict', '--task-id', 'worker-guide-a', '--decision', 'accept', '--reason', 'fine', '--by', 'brain', '--ledger', ledger])) === 'pin-unchecked');
+    // The branch a real worker would have pushed, with the pinned file untouched.
+    g(repo, 'branch', 'claude/guide-a', 'main');
     const v2 = val(cli(['verdict', '--task-id', 'worker-guide-a', '--decision', 'accept', '--reason', 'fine', '--by', 'judge', '--ledger', ledger]));
     check('a second judge verdict never replaces the first', v2 && v2.verdict.applied === false && recOf('worker-guide-a').verdict.decision === 'follow-up');
     const v3 = val(cli(['verdict', '--task-id', 'worker-guide-a', '--decision', 'accept', '--reason', 'read it myself', '--ledger', ledger]));

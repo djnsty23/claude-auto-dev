@@ -49,6 +49,11 @@
  * JUDGE_FAIL_STREAK tick judge runs in a row that errored stop judging until the
  * newest is JUDGE_COOLDOWN_MS old. An unreadable state file stops them too.
  *
+ * PINNED TESTS. A judge accept is written through unattended-worker verdict, so a
+ * record with pinned acceptance tests meets the same check a Brain accept does.
+ * When it refuses (a pin changed, or no result head could be read), the judge
+ * read only the report, so the verdict is written as escalate for a person.
+ *
  * WHAT IT IS NOT. It never merges, deploys, messages or deletes. A verdict is a
  * ledger field; what follows it is a queued task someone enqueued, or a Brain
  * turn. `compare` reads the Brain's decisions from what it did next (a same-stem
@@ -447,12 +452,26 @@ function judgeStep(ctx) {
     }
 }
 
-/** Write a verdict through unattended-worker verdict. Never throws: a refusal is the note. */
+// The pin check refuses an accept with these codes. The judge read only the
+// report, so a changed or unreadable pinned test goes to a person as escalate.
+const PIN_REFUSALS = ['pin-changed', 'pin-unchecked'];
+
+/**
+ * Write a verdict through unattended-worker verdict, so a judge accept meets the
+ * same pinned-test check a Brain accept does. Never throws: a refusal is the note.
+ */
 function writeVerdict(p, taskId, decision, reason) {
-    try {
-        const v = uw.run(['verdict', '--task-id', taskId, '--decision', decision, '--reason', reason, '--by', 'judge', '--ledger', p.ledger]);
+    const write = (d, r) => {
+        const v = uw.run(['verdict', '--task-id', taskId, '--decision', d, '--reason', r, '--by', 'judge', '--ledger', p.ledger]);
         return { applied: v.verdict.applied, note: v.verdict.applied ? null : v.verdict.reason };
-    } catch (e) { return { applied: false, note: `${e.publicCode || 'internal'}: ${e.message}` }; }
+    };
+    try { return write(decision, reason); } catch (e) {
+        const note = `${e.publicCode || 'internal'}: ${e.message}`;
+        if (decision !== 'accept' || !PIN_REFUSALS.includes(e.publicCode)) return { applied: false, note };
+        try { return { ...write('escalate', `the judge would accept, but ${e.message}`), decision: 'escalate', note }; } catch (e2) {
+            return { applied: false, note: `${note}; escalate also refused: ${e2.publicCode || 'internal'}: ${e2.message}` };
+        }
+    }
 }
 
 function logJudgement(ctx, rec, row) {
@@ -472,7 +491,8 @@ function applyLogged(ctx, latest) {
         if (!j || j.applied || !uw.DECISIONS.includes(j.decision) || !uw.FINISHED.includes(rec.state) || rec.verdict) continue;
         if (ctx.sinceMs !== null && !(ms(rec.settledAt) !== null && ms(rec.settledAt) >= ctx.sinceMs)) continue;
         const w = writeVerdict(ctx.p, rec.taskId, j.decision, j.reason);
-        logJudgement(ctx, rec, { at: new Date().toISOString(), mode: 'live', decision: j.decision, reason: j.reason, evidence: j.evidence || [],
+        // The pin check can turn an accept into escalate: log what was written, and what was judged.
+        logJudgement(ctx, rec, { at: new Date().toISOString(), mode: 'live', decision: w.decision || j.decision, ...(w.decision ? { judged: j.decision } : {}), reason: j.reason, evidence: j.evidence || [],
             costUsd: 0, model: j.model || null, from: `logged ${j.mode} ${j.at}`, applied: w.applied, note: w.note });
         if (w.applied) applied++;
     }
@@ -501,7 +521,7 @@ function judgeAndLog(rec, mode, ctx, source) {
         return j;
     }
     const w = mode === 'live' ? writeVerdict(p, rec.taskId, j.decision, j.reason) : { applied: false, note: null };
-    logJudgement(ctx, rec, { at, mode, decision: j.decision, reason: j.reason, evidence: j.evidence, costUsd: j.costUsd, turns: j.turns, model: j.model, applied: w.applied, note: w.note });
+    logJudgement(ctx, rec, { at, mode, decision: w.decision || j.decision, ...(w.decision ? { judged: j.decision } : {}), reason: j.reason, evidence: j.evidence, costUsd: j.costUsd, turns: j.turns, model: j.model, applied: w.applied, note: w.note });
     return j;
 }
 
@@ -740,6 +760,6 @@ if (require.main === module) {
 
 module.exports = {
     parseArgs, readSwitch, effectiveMode, reportPathOf, breaker, takeLock, headlessRunOf, runStatusOfHeadless, buildJudgePrompt, judgeArgv,
-    parseJudgeOutput, judgeCandidates, revealedDecision, stem, readJsonl, run, pruneReported, tickRuns, VERDICT_SCHEMA, RUBRIC,
+    parseJudgeOutput, judgeCandidates, revealedDecision, stem, readJsonl, run, pruneReported, tickRuns, writeVerdict, VERDICT_SCHEMA, RUBRIC,
     JUDGE_PER_TICK, JUDGE_PER_HOUR, JUDGE_FAILS_PER_RECORD, START_MAX_CONCURRENT, START_MAX_PER_HOUR,
 };
