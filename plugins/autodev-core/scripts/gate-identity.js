@@ -465,7 +465,7 @@ function pathKey(canonical) {
 module.exports = {
     runPowerShell, snapshot, forgetSnapshot, bootIdentity, parsePsW, msysTable, forgetMsys, identityOf,
     liveDescendants, recordLive, recordUnreadable, judgeExecution, canonicalPath, repoIdentity, normaliseOrigin, pathKey,
-    normaliseTime, iso7,
+    normaliseTime, iso7, posixBoot, posixSnapshot,
 };
 
 if (require.main === module) {

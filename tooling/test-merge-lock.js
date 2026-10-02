@@ -221,6 +221,24 @@ async function main() {
             && keptByHolder && lockGone() && /INDETERMINATE: stopped by SIGTERM/.test(said[said.length - 1]),
             `exits [${exits}], ticket left ${fs.existsSync(ticket)}, holder kept the lock ${keptByHolder}, waiter released it ${lockGone()}`);
         fs.rmSync(qdir, { recursive: true, force: true });
+
+        // main() passes no exit or err, so the real run uses the defaults: a
+        // stderr line and process.exit(2). Called directly in a child, since
+        // the default exit ends the process that runs it.
+        const otherLock = path.join(root, 'defaults', 'other.lock');
+        fs.mkdirSync(path.dirname(otherLock), { recursive: true });
+        const probe = [
+            `const ml = require(${JSON.stringify(SUBJECT)});`,
+            `ml.signalHandler({ lockPath: ${JSON.stringify(otherLock)}, state: { stopped: null, held: false } })('SIGINT');`,
+            "console.log('NOT-REACHED');",
+        ].join('\n');
+        const d = spawnSync(process.execPath, ['-e', probe], {
+            encoding: 'utf8', timeout: 30000, windowsHide: true, env: { ...process.env, HOME, USERPROFILE: HOME },
+        });
+        check('A5b. with the defaults main() uses, a waiter\'s handler says INDETERMINATE on stderr and exits the process 2',
+            d.status === 2 && /INDETERMINATE: stopped by SIGINT while waiting; lock NOT taken/.test(d.stderr || '')
+            && !/NOT-REACHED/.test(d.stdout || ''),
+            `exit ${d.status}, stderr ${JSON.stringify(String(d.stderr || '').slice(0, 200))}, stdout ${JSON.stringify(String(d.stdout || '').slice(0, 80))}`);
     }
 
     {

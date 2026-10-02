@@ -494,6 +494,38 @@ async function adapterTests() {
     check('capture: a screenshot is capped at 6000px tall', calls.some((c) => c[0] === 'shot' && c[1] === 6000 && c[2] === true), calls);
     check('capture: an axe run that returns nothing usable reads null, not 0', r.axe === null);
     check('capture: no response reads a null status', r.status === null);
+
+    // signIn: Playwright hands waitForURL's predicate a URL object. A redirect
+    // off the login path is signed in; a page that stays on it times out.
+    const loginPage = (landing) => {
+        const seen = [];
+        return {
+            seen,
+            goto: async (u) => { seen.push(['goto', u]); return null; },
+            waitForLoadState: async () => {},
+            waitForTimeout: async () => {},
+            locator: (sel) => ({ first: () => ({
+                fill: async (v) => { seen.push(['fill', /password/.test(sel) ? 'secret box' : 'user box', v]); },
+                press: async (k) => { seen.push(['press', k]); },
+            }) }),
+            waitForURL: async (pred, o) => {
+                seen.push(['wait', o && o.timeout]);
+                if (pred(new URL(landing))) return;
+                const e = new Error('waitForURL: Timeout exceeded');
+                e.name = 'TimeoutError';
+                throw e;
+            },
+        };
+    };
+    const away = loginPage('http://localhost:1/dashboard');
+    const signedIn = await SWEEP.signIn(away, 'http://localhost:1', '/login', 'qa@example.test', 'fixture-value');
+    check('signIn: a redirect off the login path reads signed in, after filling both boxes and pressing Enter',
+        signedIn === true && away.seen.some((c) => c[0] === 'goto' && c[1] === 'http://localhost:1/login')
+        && away.seen.some((c) => c[0] === 'fill' && c[1] === 'user box') && away.seen.some((c) => c[0] === 'fill' && c[1] === 'secret box')
+        && away.seen.some((c) => c[0] === 'press' && c[1] === 'Enter'), away.seen);
+    const stay = loginPage('http://localhost:1/login?error=1');
+    const refused = await SWEEP.signIn(stay, 'http://localhost:1', '/login', 'qa@example.test', 'fixture-value');
+    check('signIn: a page that stays on the login path reads not signed in', refused === false, stay.seen);
 }
 
 // ------------------------------------------------------------ the CLI
@@ -515,6 +547,15 @@ async function adapterTests() {
     check('report on a directory with no sweep exits 2', nofind.status === 2);
     const probeHelp = spawnSync(process.execPath, [path.join(SCRIPTS, 'layout-probe.js'), '--component-sha'], { encoding: 'utf8' });
     check('layout-probe --component-sha prints the hash', probeHelp.stdout.trim() === PROBE.componentSha());
+    const optsOf = (out) => { const m = /\)\((\{[^()]*\})\)\s*$/.exec(out || ''); try { return m ? JSON.parse(m[1]) : null; } catch { return null; } };
+    const flagged = spawnSync(process.execPath, [path.join(SCRIPTS, 'layout-probe.js'), '--width', '390', '--scroll-steps', '5', '--label', 'probe-x'], { encoding: 'utf8' });
+    const fo = optsOf(flagged.stdout);
+    check('layout-probe carries --width, --scroll-steps and --label into the printed expression',
+        flagged.status === 0 && Boolean(fo) && fo.requestedWidth === 390 && fo.scrollSteps === 5 && fo.label === 'probe-x', String(flagged.stdout).slice(-300));
+    const plain = spawnSync(process.execPath, [path.join(SCRIPTS, 'layout-probe.js')], { encoding: 'utf8' });
+    const po = optsOf(plain.stdout);
+    check('and without them it asks for no width, three scroll passes and no label',
+        plain.status === 0 && Boolean(po) && po.requestedWidth === null && po.scrollSteps === 3 && po.label === null, String(plain.stdout).slice(-300));
     const gate = spawnSync(process.execPath, [GATE, path.join(SNAPS, 'header-mess-390.json')], { encoding: 'utf8' });
     check('rendered-layout-gate reports the component rules on a component snapshot', gate.status === 0 && /GLUED-CONTROLS/.test(gate.stdout) && /component rules/.test(gate.stdout), gate.stdout.slice(0, 1500));
     const gateOld = spawnSync(process.execPath, [GATE, path.join(OLD_SNAPS, 'clean-390.json')], { encoding: 'utf8' });
