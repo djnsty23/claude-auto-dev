@@ -601,13 +601,14 @@ const killedAfterWriting = (script, tag) => {
     check('the whole-runner child gets a bigger budget than a single-suite child',
         runner > perSuite, `runner=${runner} perSuite=${perSuite}`);
 
-    // Provenance independent of the module: 890000 and 900000 are written here by
+    // Provenance independent of the module: 2177000 and 900000 are written here by
     // hand. Deriving the floor from SWEEP_MEASURED_RUNNER_MS alone would let a
     // future edit lower the measurement and this assertion in one motion.
-    check('  and it clears the worst MEASURED runner runtime with real headroom, not 1.1%',
-        runner >= 2 * 890000, `runner=${runner} vs 2x890000=${2 * 890000}`);
+    // `[measured 2026-10-02]` 2177000 replaced 890000 when the runner outgrew it.
+    check('  and it clears the worst MEASURED runner runtime with real headroom, not 1.24x',
+        runner >= 2 * 2177000, `runner=${runner} vs 2x2177000=${2 * 2177000}`);
     check('  and the recorded measurement still matches the one that sized it',
-        sb.SWEEP_MEASURED_RUNNER_MS === 890000, String(sb.SWEEP_MEASURED_RUNNER_MS));
+        sb.SWEEP_MEASURED_RUNNER_MS === 2177000, String(sb.SWEEP_MEASURED_RUNNER_MS));
 
     // CONTROL: this must not become a blanket raise. The per-suite budget is the
     // number CLAUDE.md argues at length must NOT go up, and it has not.
