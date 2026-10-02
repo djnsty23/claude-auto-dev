@@ -53,6 +53,7 @@ const SCHEMA = 1;
 const RECEIPT = 'receipt.json';
 const POOL_FILE = 'test-all-pool.js';
 const RUNNER_FILE = 'test-all.js';
+const OWNER_FILE = 'owner';
 
 const sha256 = (buf) => crypto.createHash('sha256').update(buf).digest('hex');
 const posix = (p) => p.split(path.sep).join('/');
@@ -123,12 +124,13 @@ function walkPlugins(root, onFile) {
 function sourceHashes(root) {
     const files = [];
     walkPlugins(root, (f) => files.push(f));
+    // Every top-level tooling script, not only the suites: the runner, its
+    // helpers (suite-tmp.js, this file, the CPU telemetry), the optional pool
+    // and validate.js all shape what a run measured.
     const tooling = path.join(root, 'tooling');
-    for (const f of discoverSuites(tooling)) files.push(path.join(tooling, f));
-    for (const f of [RUNNER_FILE, 'validate.js']) {
-        const p = path.join(tooling, f);
-        if (fs.existsSync(p)) files.push(p);
-    }
+    let names = [];
+    try { names = fs.readdirSync(tooling); } catch { /* no tooling dir: nothing to add */ }
+    for (const f of names) if (/\.(js|mjs|cjs)$/.test(f)) files.push(path.join(tooling, f));
     const map = {};
     for (const f of files.sort()) {
         try { map[posix(path.relative(root, f))] = sha256(fs.readFileSync(f)); } catch { map[posix(path.relative(root, f))] = '(unreadable)'; }
@@ -239,6 +241,10 @@ function beginRun(root, env) {
     const runId = new Date().toISOString().replace(/[-:.]/g, '').replace('T', '-').slice(0, 15) + '-' + process.pid + '-' + crypto.randomBytes(3).toString('hex');
     const runDir = path.join(store, 'runs', runId);
     for (const d of ['raw', 'dumps', 'logs']) fs.mkdirSync(path.join(runDir, d), { recursive: true });
+    // The latest runner to start owns the store. An earlier one still going
+    // finds itself superseded at publish and leaves the receipt alone, so a
+    // run that started after it can never be vouched for by its receipt.
+    writeAtomic(path.join(store, OWNER_FILE), runId);
     return {
         store, runId, runDir, receiptPath,
         root: canonicalRoot(root),
@@ -262,7 +268,36 @@ function reduceSuite(run, label) {
 
 // Publish once everything has settled, red or green: the receipt records what
 // happened, and the reader refuses anything but a clean pass.
+function writeAtomic(p, text) {
+    const tmp = p + '.' + process.pid + '.' + crypto.randomBytes(3).toString('hex') + '.tmp';
+    fs.writeFileSync(tmp, text);
+    renameRetry(tmp, p);
+}
+const readOwner = (store) => { try { return fs.readFileSync(path.join(store, OWNER_FILE), 'utf8').trim(); } catch { return null; } };
+
+// Dumps a detached grandchild wrote after its suite was reduced: fold them into
+// that suite's reduced file before publishing, so the receipt census sees what
+// a shared coverage directory would have seen by the end of the run.
+function refoldLate(run, entry) {
+    const raw = path.join(run.runDir, 'raw', entry.label);
+    const late = foldDir(raw, run.attr);
+    if (!late.dumps && !late.unreadable) return entry;
+    const p = path.join(run.runDir, entry.file);
+    const prev = JSON.parse(fs.readFileSync(p, 'utf8'));
+    mergeReduced(prev, late);
+    prev.rawDumps = (prev.rawDumps || 0) + late.dumps;
+    prev.unreadable = (prev.unreadable || 0) + late.unreadable;
+    const body = JSON.stringify(prev);
+    fs.writeFileSync(p, body);
+    rmrf(raw);
+    return Object.assign({}, entry, { sha256: sha256(Buffer.from(body)), rawDumps: prev.rawDumps, unreadable: prev.unreadable, scripts: Object.keys(prev.files || {}).length, lateDumps: late.dumps });
+}
+
 function publish(run, body) {
+    const owner = readOwner(run.store);
+    if (owner !== run.runId) {
+        throw new Error(`another runner (${owner || 'unknown'}) started on this store after this one, so it owns the receipt`);
+    }
     const receipt = Object.assign({
         schema: SCHEMA, runId: run.runId, root: run.root, runDir: run.runDir,
         startedAt: run.startedAt, finishedAt: new Date().toISOString(),
@@ -272,12 +307,23 @@ function publish(run, body) {
     fs.writeFileSync(tmp, JSON.stringify(receipt, null, 1));
     renameRetry(tmp, run.receiptPath);
     fs.writeFileSync(path.join(run.runDir, 'settled'), run.runId);
+    // A runner that started between the owner read and the rename has already
+    // unlinked the receipt once; take this one back so it cannot vouch for it.
+    const after = readOwner(run.store);
+    if (after !== run.runId) {
+        try {
+            const now = JSON.parse(fs.readFileSync(run.receiptPath, 'utf8'));
+            if (now && now.runId === run.runId) fs.unlinkSync(run.receiptPath);
+        } catch { /* gone already, or not ours */ }
+        throw new Error(`another runner (${after || 'unknown'}) started while this one was publishing, so it owns the receipt`);
+    }
     // Older runs go once they have settled. An unsettled one may belong to a
     // runner still going; it is left unless it is a day old (a killed runner).
     let others = [];
     try { others = fs.readdirSync(path.join(run.store, 'runs')); } catch { /* nothing to prune */ }
     for (const id of others) {
-        if (id === run.runId) continue;
+        // Never the current owner's run, which may still be going.
+        if (id === run.runId || id === readOwner(run.store)) continue;
         const d = path.join(run.store, 'runs', id);
         let old = false;
         try { old = Date.now() - fs.statSync(d).mtimeMs > 24 * 3600 * 1000; } catch { continue; }
@@ -317,6 +363,12 @@ function check(root, env) {
         if (r.treeInert && r.treeInert.state !== 'pass') bad.push(`tree-inert ${r.treeInert.state.toUpperCase()}`);
         return fail(`the run the receipt records did not pass (${r.verdict}): ${bad.join(', ') || 'no outcome named'}. Coverage of a run that did not pass says nothing`, r);
     }
+    // The summary field is one claim; every outcome and the tree verdict are
+    // the evidence for it, and each must be a pass on its own.
+    const notPassed = (r.outcomes || []).filter((o) => !o || o.state !== 'pass');
+    if (notPassed.length) return fail(`the receipt says pass but ${notPassed.length} outcome(s) are not (${notPassed.slice(0, 5).map((o) => (o && o.label) + ' ' + (o && o.state)).join(', ')})`, r);
+    if (r.treeInert && r.treeInert.state !== 'pass') return fail(`the receipt says pass but tree-inert is ${r.treeInert.state}`, r);
+
     // Stale: the tree or any source changed since it was graded.
     const tree = treeIdentity(root);
     if (tree && r.tree && r.tree.after) {
@@ -352,6 +404,7 @@ function check(root, env) {
         const d = manifest.get(label);
         if (!d) return fail(`missing dump: the manifest has no coverage entry for ${label}`, r);
         if (!(d.rawDumps > 0)) return fail(`missing dump: ${label} left ${d.rawDumps} coverage dump(s), so its coverage was never collected`, r);
+        if (d.unreadable) return fail(`unreadable dump: ${label} left ${d.unreadable} coverage dump(s) that did not parse, so part of its coverage is missing`, r);
         const p = path.join(r.runDir || '', d.file);
         let buf;
         try { buf = fs.readFileSync(p); } catch { return fail(`missing dump: ${p} is gone`, r); }
@@ -367,7 +420,7 @@ function check(root, env) {
 module.exports = {
     SCHEMA, RECEIPT, POOL_FILE, sha256, canonicalRoot, storeDir, nodeIdentity, treeIdentity,
     discoverSuites, expectedLabels, sourceHashes, attribution, foldDump, foldDir, mergeReduced,
-    renameRetry, beginRun, reduceSuite, publish, abandon, check,
+    renameRetry, beginRun, reduceSuite, refoldLate, publish, abandon, check, OWNER_FILE,
 };
 
 if (require.main === module) {

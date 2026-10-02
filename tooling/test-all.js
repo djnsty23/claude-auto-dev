@@ -171,8 +171,32 @@ function classify(res) {
 //                              prints each suite's log whole when it ends
 //   =>    { label, state, reason, status, signal, error, ms, log, dump,
 //           tmpRemoved, stdioHeld }
+// Every result runOne produced, by identity. The pool hands results back, and
+// only these objects count: a pool that builds its own { label, state: 'pass' }
+// for a suite it never ran is a broken pool, not a passing suite.
+const produced = new WeakSet();
+// Every result in the order produced, so a runner that dies after a suite
+// failed still exits 1 for that failure, never 2.
+const ledger = [];
+
 function makeRunOne(run) {
   return async function runOne(item, opt) {
+    let out;
+    try {
+      out = await runOneUnguarded(run, item, opt);
+    } catch (e) {
+      // The runner could not run it (its log could not be opened, say): no
+      // verdict on the suite, said by name, and the run goes on.
+      out = { label: item && item.label, state: 'indet', reason: 'the runner could not run it: ' + (e && e.message), status: null, signal: null, error: e && e.code || null, ms: null, log: null, dump: null };
+      console.error(`\n[${out.label}] ${out.reason}`);
+    }
+    produced.add(out);
+    ledger.push(out);
+    return out;
+  };
+}
+
+async function runOneUnguarded(run, item, opt) {
     const echo = !opt || opt.echo !== false;
     const env = suiteEnv();
     let logFd = null;
@@ -207,7 +231,6 @@ function makeRunOne(run) {
       ms, log: logRel ? logRel.split(path.sep).join('/') : null, dump,
       tmpRemoved: res.tmpRemoved, stdioHeld: res.stdioHeld,
     };
-  };
 }
 
 // THE OPTIONAL POOL. tooling/test-all-pool.js, when present and --serial is
@@ -283,7 +306,8 @@ async function main() {
     const byLabel = new Map();
     const strays = [];
     for (const r of Array.isArray(got) ? got : []) {
-      if (!r || !items.some((i) => i.label === r.label) || byLabel.has(r.label)) strays.push(r && r.label);
+      if (!r || !produced.has(r)) strays.push(r && r.label ? r.label + ' (not a result runOne produced)' : String(r));
+      else if (!items.some((i) => i.label === r.label) || byLabel.has(r.label)) strays.push(r.label);
       else byLabel.set(r.label, r);
     }
     if (!Array.isArray(got) || strays.length) {
@@ -320,9 +344,12 @@ async function main() {
   let indeterminate = 0;
   const indetLabels = [];
   for (const r of rows) {
-    console.log(`${r.state === 'pass' ? 'PASS ' : r.state === 'fail' ? 'FAIL ' : 'INDET'}  ${r.label}`);
-    if (r.state === 'fail') failed++;
-    else if (r.state === 'indet') { indeterminate++; indetLabels.push(r.label); }
+    // Anything but pass or indet counts as a failure: an unknown state is not
+    // a verdict this runner can vouch for.
+    const state = r.state === 'pass' || r.state === 'indet' ? r.state : 'fail';
+    console.log(`${state === 'pass' ? 'PASS ' : state === 'fail' ? 'FAIL ' : 'INDET'}  ${r.label}`);
+    if (state === 'fail') failed++;
+    else if (state === 'indet') { indeterminate++; indetLabels.push(r.label); }
   }
   console.log(
     `\n${rows.length - failed - indeterminate}/${rows.length} suites passed` +
@@ -346,6 +373,7 @@ async function main() {
   if (run) {
     try {
       const sourcesEnd = receipts.sourceHashes(repoRoot);
+      for (const r of results) if (r.dump && !r.dump.error) r.dump = receipts.refoldLate(run, r.dump);
       const executed = results.filter((r) => expected.includes(r.label)).map((r) => r.label);
       const published = receipts.publish(run, {
         tree: { before: treeBefore && strip(treeBefore), after: treeAfter && strip(treeAfter) },
@@ -376,5 +404,9 @@ const strip = (t) => ({ head: t.head, tree: t.tree, statusHash: t.statusHash });
 // test-runner-evidence.js also refuses any exit() call in this file by reading it.
 main().then((code) => { process.exitCode = code; }, (e) => {
   console.error('[test-all] the runner itself failed: ' + (e && e.stack || e));
-  process.exitCode = 2;
+  // A suite that had already failed is still a failure: the crash afterwards
+  // cannot turn a red into "no verdict".
+  const failedBefore = ledger.filter((r) => r.state !== 'pass' && r.state !== 'indet').map((r) => r.label);
+  if (failedBefore.length) console.error('[test-all] before that, these failed: ' + failedBefore.join(', '));
+  process.exitCode = failedBefore.length ? 1 : 2;
 });

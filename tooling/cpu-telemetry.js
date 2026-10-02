@@ -110,8 +110,12 @@ function measure(fn, rootPidOf) {
             if (v === undefined) delete process.env[k]; else process.env[k] = v;
         }
     };
+    // Without rootPidOf, a value carrying a pid (a spawnSync result, or a
+    // wrapper that passes one through) names the subject, so a killed subject
+    // whose descendants left records still reads null, never their partial sum.
+    const pidOf = rootPidOf || ((v) => (v && Number.isInteger(v.pid) && v.pid > 0 ? v.pid : undefined));
     const finish = (value) => {
-        const pid = rootPidOf ? rootPidOf(value) : undefined;
+        const pid = pidOf(value);
         const cpu = collect(dir, pid);
         cleanup(dir);
         return { value, cpu };
