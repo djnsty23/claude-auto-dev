@@ -110,6 +110,17 @@ try {
         check('5. and restores NODE_OPTIONS', process.env.NODE_OPTIONS === before && process.env[cpu.ENV_DIR] === undefined, process.env.NODE_OPTIONS);
     }
     {
+        // A subject that starts a Node child, lets it finish, then dies by
+        // signal: only the child's record exists. measure() with no rootPidOf
+        // takes the pid off the spawnSync result, so this is null, not the
+        // child's few ms minus the floor, which reads as 0.
+        const parentThenKilled = script('child-then-killed.js',
+            `require('child_process').spawnSync(process.execPath, ['-e', ''], { stdio: 'ignore' });\nprocess.kill(process.pid, 'SIGKILL');\nsetTimeout(() => {}, 5000);\n`);
+        const { value, cpu: c } = cpu.measure(() => require('child_process').spawnSync(process.execPath, [parentThenKilled], { stdio: 'ignore' }));
+        check('5. measure() with no rootPidOf: a killed subject whose child left a record reads null, not zero',
+            value.status !== 0 && c.processes >= 1 && c.cpuMs === null && cpu.ownCpuMs(c).ms === null, c);
+    }
+    {
         let threw = false;
         try { cpu.measure(() => { throw new Error('boom'); }); } catch { threw = true; }
         check('5. a throwing callback rethrows and still restores the environment', threw && process.env[cpu.ENV_DIR] === undefined);
