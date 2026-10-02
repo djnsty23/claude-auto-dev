@@ -61,7 +61,8 @@ const st = JSON.parse(fs.readFileSync(stateFile, 'utf8'));
 log(args.join(' '));
 if (st.down) { process.stderr.write('error connecting to api.github.com\\n'); process.exitCode = 1; return; }
 const out = (o) => process.stdout.write(JSON.stringify(o));
-if (args[0] === 'pr' && args[1] === 'view') { out(st.pr); return; }
+const prOf = (n) => (st.prs && st.prs[n]) || st.pr;
+if (args[0] === 'pr' && args[1] === 'view') { out(prOf(args[2])); return; }
 if (args[0] === 'api') {
     const p = args[1];
     let m;
@@ -70,16 +71,31 @@ if (args[0] === 'api') {
         out({ name: m[1], commit: { sha: b.sha, commit: { tree: { sha: b.tree } } } });
         return;
     }
-    if (/\\/compare\\//.test(p)) { out({ behind_by: st.behindBy, ahead_by: 1 }); return; }
+    if ((m = /\\/compare\\/([0-9a-f]{40})\\.\\.\\.([0-9a-f]{40})$/.exec(p))) {
+        const behind = st.contains ? (st.contains[m[2]] === m[1] ? 0 : 1) : st.behindBy;
+        out({ behind_by: behind, ahead_by: 1 });
+        return;
+    }
     if ((m = /\\/commits\\/([0-9a-f]{40})$/.exec(p))) { out({ sha: m[1], commit: { tree: { sha: st.trees[m[1]] } } }); return; }
 }
 if (args[0] === 'pr' && args[1] === 'merge') {
     log('merge-start');
     if (st.mergeDelayMs) Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, st.mergeDelayMs);
-    if (st.mergeExit) { process.stderr.write('GraphQL: Head branch was modified\\n'); process.exitCode = st.mergeExit; return; }
-    st.branches[st.pr.baseRefName] = st.afterMerge;
+    const pr = prOf(args[2]);
+    if (st.mergeExit) {
+        if (st.baseMovesAnyway) { st.branches[pr.baseRefName] = st.baseMovesAnyway; fs.writeFileSync(stateFile, JSON.stringify(st)); }
+        process.stderr.write('GraphQL: Head branch was modified\\n');
+        process.exitCode = st.mergeExit;
+        return;
+    }
+    const lands = pr.afterMerge || st.afterMerge;
+    st.branches[pr.baseRefName] = st.otherWriter || lands;
+    st.trees[lands.sha] = lands.tree;
+    pr.state = 'MERGED';
+    pr.mergeCommit = { oid: lands.sha };
     fs.writeFileSync(stateFile, JSON.stringify(st));
     log('merge-end');
+    if (st.exitAfterLanding) { process.stderr.write('Post "https://api.github.com/graphql": net/http: timeout\\n'); process.exitCode = st.exitAfterLanding; }
     return;
 }
 process.stderr.write('stub: unhandled ' + args.join(' ') + '\\n');
@@ -168,6 +184,16 @@ async function main() {
             f('r-red.log', `${HEAD}\ngate-lock: verdict PASS (exit 0)\ngate-lock: verdict FAIL (exit 1)\n`), HEAD) || '');
         const unfinished = /no "gate-lock: verdict" line/.test(ml.receiptProblem(f('r-none.log', `${HEAD}\nnpm test\n`), HEAD) || '');
         const missing = /no --gate-receipt/.test(ml.receiptProblem(null, HEAD) || '');
+        const OLD = sha('8');
+        const laterUnfinished = /goes on after its last verdict/.test(ml.receiptProblem(f('r-cat1.log',
+            `${OLD}\ngate-lock: verdict PASS (exit 0)\n${HEAD}\ngate-lock: lock taken\n`), HEAD) || '');
+        const earlierRun = /only outside the run that printed the last PASS/.test(ml.receiptProblem(f('r-cat2.log',
+            `${HEAD}\ngate-lock: verdict FAIL (exit 1)\n${OLD}\ngate-lock: verdict PASS (exit 0)\n`), HEAD) || '');
+        const retryPassed = ml.receiptProblem(f('r-cat3.log',
+            `${OLD}\ngate-lock: verdict FAIL (exit 1)\n${HEAD}\ngate-lock: verdict PASS (exit 0)\n`), HEAD) === null;
+        check('A4b. in a log of several runs the PASS counts only for the head of the run it ended',
+            laterUnfinished && earlierRun && retryPassed,
+            `later unfinished run refused ${laterUnfinished}, head only in an earlier run refused ${earlierRun}, retry that passed accepted ${retryPassed}`);
         check('A3. the receipt passes on the PASS line in UTF-8, CRLF and UTF-16LE', pass1 && crlf && u16, `utf8 ${pass1}, crlf ${crlf}, utf16 ${u16}`);
         check('A4. the receipt refuses another head, a last verdict that is not PASS, no verdict and no file',
             wrongHead && red && unfinished && missing, `head ${wrongHead}, red ${red}, unfinished ${unfinished}, missing ${missing}`);
@@ -182,15 +208,32 @@ async function main() {
         fs.writeFileSync(ticket, `${process.pid}\nwaiting\n`);
         const exits = [];
         const said = [];
-        const waiting = { stopped: null, held: false };
-        ml.signalHandler({ lockPath: LOCK, state: waiting, exit: (c) => exits.push(c), err: (l) => said.push(l) })('SIGTERM');
+        // A lock that names this process, as a handover in the instant before
+        // the signal would leave it.
+        fs.writeFileSync(LOCK, `${process.pid}\nhanded over by the queue\n`);
         const holding = { stopped: null, held: true };
         ml.signalHandler({ lockPath: LOCK, state: holding, exit: (c) => exits.push(c), err: (l) => said.push(l) })('SIGINT');
-        check('A5. a stop signal makes a waiter leave its ticket and exit 2, and lets a holder finish its merge',
+        const keptByHolder = fs.existsSync(LOCK);
+        const waiting = { stopped: null, held: false };
+        ml.signalHandler({ lockPath: LOCK, state: waiting, exit: (c) => exits.push(c), err: (l) => said.push(l) })('SIGTERM');
+        check('A5. the signal handler: a waiter leaves its ticket, releases a lock handed to it and exits 2; a holder only records the signal',
             exits.join(',') === '2' && !fs.existsSync(ticket) && waiting.stopped === 'SIGTERM' && holding.stopped === 'SIGINT'
-            && said.length === 1 && /INDETERMINATE: stopped by SIGTERM/.test(said[0]),
-            `exits [${exits}], ticket left ${fs.existsSync(ticket)}, said ${said.length}`);
+            && keptByHolder && lockGone() && /INDETERMINATE: stopped by SIGTERM/.test(said[said.length - 1]),
+            `exits [${exits}], ticket left ${fs.existsSync(ticket)}, holder kept the lock ${keptByHolder}, waiter released it ${lockGone()}`);
         fs.rmSync(qdir, { recursive: true, force: true });
+    }
+
+    {
+        // A timeout in the instant a holder hands the lock over: takeTurn said
+        // "queued", and by the time this waiter leaves, the lock names it.
+        fs.writeFileSync(LOCK, `${process.pid}\nhanded over by the queue\n`);
+        const fake = { ...require(path.resolve(__dirname, '..', 'plugins', 'autodev-core', 'scripts', 'full-gate-queue.js')),
+            takeTurn: () => ({ acquired: false, position: 1, of: 1, holder: null }) };
+        const lines = [];
+        const got = await ml.acquire({ lockPath: LOCK, what: 'test', timeoutMs: 0, pollMs: 10, log: (l) => lines.push(l), isStopped: () => false, q: fake });
+        check('A6. a waiter that times out as the lock is handed to it releases that lock, not leaves it naming itself',
+            got === false && lockGone() && lines.some((l) => /handed over while leaving; released it/.test(l)),
+            `acquired ${got}, lock present ${!lockGone()}`);
     }
 
     // -----------------------------------------------------------------------
@@ -231,6 +274,21 @@ async function main() {
         check('B7. GitHub refusing the merge, base unmoved, is a refusal (exit 1)', r.exit === 1 && /GitHub refused the merge/.test(r.err), detail(r));
     }
     {
+        const r = runSync(writeState({ exitAfterLanding: 1 }), 'landed');
+        check('B10. gh failing after GitHub accepted the merge is judged by the PR: MERGED with the proved tree exits 0',
+            r.exit === 0 && /exited 1, but Acme\/Widget#7 is MERGED/.test(r.out) && /matches the proved tree/.test(r.out) && lockGone(), detail(r));
+    }
+    {
+        const r = runSync(writeState({ otherWriter: { sha: sha('5'), tree: sha('4') } }), 'other');
+        check('B11. another writer moving the base after this merge is reported, not read as this merge\'s tree',
+            r.exit === 0 && new RegExp(`merged ${REPO}#7 as ${MERGED}`).test(r.out) && /has since moved to 5{40}/.test(r.out), detail(r));
+    }
+    {
+        const r = runSync(writeState({ mergeExit: 1, baseMovesAnyway: { sha: sha('5'), tree: TREE } }), 'notours');
+        check('B12. a refused merge is a refusal even when the base moves to the proved tree by another hand',
+            r.exit === 1 && /GitHub refused the merge/.test(r.err) && /is OPEN/.test(r.err), detail(r));
+    }
+    {
         const r = runSync(writeState({ pr: { headRefOid: HEAD, baseRefName: 'main', state: 'MERGED' } }), 'closed');
         check('B8. a PR that is not OPEN is refused', r.exit === 1 && /not OPEN/.test(r.err), detail(r));
     }
@@ -267,6 +325,39 @@ async function main() {
             a.exit === 0 && b.exit === 0 && waited && aEnd !== undefined && bFirst !== undefined && bFirst >= aEnd,
             `A exit ${a.exit}, B exit ${b.exit}, B printed the holder ${waited}, B's first gh call ${bFirst - aEnd} ms after A's merge ended`);
         check('C2. both locks were released', lockGone(), `lock present ${!lockGone()}`);
+    }
+
+    {
+        // One shared remote: A's merge moves main, so B's candidate, gated on
+        // the old main, is now behind and must be refused.
+        const HEAD2 = sha('3');
+        const R2 = path.join(root, 'receipt2.log');
+        fs.writeFileSync(R2, `${HEAD2}\ngate-lock: verdict PASS (exit 0)\n`);
+        const shared = writeState({
+            mergeDelayMs: 1500,
+            prs: {
+                7: { headRefOid: HEAD, baseRefName: 'main', state: 'OPEN', afterMerge: { sha: MERGED, tree: TREE } },
+                8: { headRefOid: HEAD2, baseRefName: 'main', state: 'OPEN', afterMerge: { sha: sha('2'), tree: sha('1') } },
+            },
+            contains: { [HEAD]: BASE0, [HEAD2]: BASE0 },
+            trees: { [HEAD]: TREE, [HEAD2]: sha('1') },
+        });
+        const go = (who, args) => {
+            const c = spawn(process.execPath, args, { env: env(shared, who), windowsHide: true });
+            const o = { out: '', err: '', exit: null };
+            c.stdout.on('data', (d) => { o.out += d; });
+            c.stderr.on('data', (d) => { o.err += d; });
+            o.done = new Promise((res) => c.on('close', (code) => { o.exit = code; res(); }));
+            return o;
+        };
+        const a = go('S7', mergeArgs());
+        for (let i = 0; i < 200 && !/lock taken/.test(a.out); i++) await sleep(50);
+        const b = go('S8', [SUBJECT, 'merge', '--repo', REPO, '--pr', '8', '--head', HEAD2, '--gate-receipt', R2]);
+        await Promise.all([a.done, b.done]);
+        const bMerged = calls('S8').some((c) => c.what.startsWith('pr merge'));
+        check('C3. two PRs on one base: after the first merges, the second, gated on the old base, is refused as behind',
+            a.exit === 0 && b.exit === 1 && !bMerged && new RegExp(`behind main at ${MERGED}`).test(b.err) && lockGone(),
+            `A exit ${a.exit}, B exit ${b.exit}, B merged ${bMerged}; ${b.err.trim().slice(0, 120)}`);
     }
 
     // -----------------------------------------------------------------------
