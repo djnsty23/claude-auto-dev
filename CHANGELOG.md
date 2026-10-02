@@ -1,5 +1,52 @@
 # Changelog
 
+## [8.181.0]
+
+### One full gate per merge, under a per-repo merge lock
+
+- merge-lock.js merges a PR only on a passing gate log for its exact head,
+  queues mergers per repo through full-gate-queue.js, refuses a head behind
+  its base, and reads the merged tree back.
+- coordinator-write-guard gains an opt-in rule: with
+  `merge-lock.enforce` present it blocks `gh pr merge` and the merge API
+  call, naming merge-lock.js.
+
+### Full-gate lanes: product gates first, owned by a run
+
+- full-gate-queue.js serves product gates before harness gates and keeps one
+  lane open to product gates.
+- A lane is owned by a run: an admission mutex, fencing tokens, and an owner
+  identity (pid creation time, boot, MSYS pid) in gate-records.js and
+  gate-identity.js.
+- reap-build-output.js reclaims unused `.next` build output across
+  registered worktrees, and deletes only what it can show nothing uses.
+
+### unslop
+
+- A one-word sweep skill. unslop-sweep.js drives every route of a running
+  product at 390, 414 and 1280, with a scorecard, compare and blind pairs.
+  ship sweeps the candidate locally on a UI change.
+- layout-probe.js harvests component facts, and layout-checks.js adds twelve
+  measured component rules with thresholds.
+
+### Hooks and scripts
+
+- session-sweep marks a row SAFE only when it sits in the workspace
+  archive_session reaches.
+
+### Repo machinery (does not ship)
+
+- test-all.js keeps a failure red when HEAD also moved, and publishes a
+  coverage receipt that check:coverage grades, so the gate runs every suite
+  once. Budget suites measure CPU, not wall clock.
+- An opt-in pool runs up to eight suites at once (`AUTODEV_TEST_POOL`), with
+  reviewed serial barriers.
+- check:suites gains a pair cache for stub runs, shadow by default.
+- gate-lock.js reads a red attempt as the machine's only on evidence: a
+  crash exit with event 2004, ENOSPC under the disk floor, or a port still
+  taken. Inside
+  `npm test` the evidence must sit in every failed suite's own log.
+
 ## [8.180.0]
 
 ### Quota cost is priced once per API response, and the tripwire runs on every pass (#342, #345)
