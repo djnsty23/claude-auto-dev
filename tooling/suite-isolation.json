@@ -1,6 +1,6 @@
 {
   "schema": 1,
-  "note": "Which tooling/test-*.js suites test-all-pool.js may overlap. A suite runs in parallel only when it is \"parallel\" here AND its bytes still hash to sha256; anything else runs alone. Evidence: node tooling/test-all-pool.js --audit.",
+  "note": "Which tooling/test-*.js suites test-all-pool.js may overlap. A suite runs in parallel only when it is \"parallel\" here AND its bytes still hash to sha256; anything else runs alone. Evidence: node tooling/test-all-pool.js --audit. A parallel suite carries no audit signal except the ones listed in \"accepted\", each read by hand; test-suite-pool.js enforces that.",
   "suites": {
     "test-agent-browser-cleanup.js": {
       "isolation": "parallel",
@@ -160,6 +160,9 @@
     "test-config-dir-isolation.js": {
       "isolation": "parallel",
       "reason": "reviewed 2026-10-02: git commit and worktree add run only in a repo under its mkdtemp root, with a fixture config dir; no repo write, no fixed port",
+      "accepted": [
+        "git-write: git commit"
+      ],
       "sha256": "21d632408caf459da571d3c1f0697f346c82da68ab9c04ffb3607007b2335b2c"
     },
     "test-context-depth-nudge.js": {
@@ -324,7 +327,7 @@
     },
     "test-gate-lock.js": {
       "isolation": "serial",
-      "reason": "audit 2026-10-02: repo-write: rmSync on a path built from the repo root; nested-runner: drives gate-lock. Ambiguous or shared side effects run alone",
+      "reason": "audit 2026-10-02: repo-write: renameSync, rmSync on a path built from the repo root; nested-runner: drives gate-lock. Ambiguous or shared side effects run alone",
       "sha256": "53956a0d0c669d60c1ffa443eed0a38bbcacc75d9a73d403ec75773f2a7415de"
     },
     "test-generate-agents-md.js": {
@@ -340,6 +343,9 @@
     "test-githooks.js": {
       "isolation": "parallel",
       "reason": "reviewed 2026-10-02: git init only in temp sentinel repos; reads the checker and runs the commit-msg hook on temp files; no repo write",
+      "accepted": [
+        "git-write: git init (a fixture repo is initialised; every call must target it)"
+      ],
       "sha256": "eeb9450ec1fc522c69999782040b699dd1225142dae64af1f63e64932fd358f5"
     },
     "test-handoff-cohesion.js": {
@@ -360,6 +366,9 @@
     "test-hook-budget.js": {
       "isolation": "parallel",
       "reason": "reviewed 2026-10-02: git init, add and commit in a temp project; HOME, USERPROFILE, CLAUDE_CONFIG_DIR and APPDATA point into a temp dir; budgets are CPU time since 2.1",
+      "accepted": [
+        "git-write: git init, add, commit (a fixture repo is initialised; every call must target it)"
+      ],
       "sha256": "cfb14bc5dc99f65f2c6ff89606e6f10b183490dffadf21999e646d773f6c1791"
     },
     "test-hook-execution-evidence.js": {
@@ -565,6 +574,9 @@
     "test-plugin-drift.js": {
       "isolation": "parallel",
       "reason": "reviewed 2026-10-02: git clone and commits only in its own temp marketplace clone and cache; no repo write, no fixed port",
+      "accepted": [
+        "git-write: git clone"
+      ],
       "sha256": "74e831f434a4ed43856986346e5f4f69a4e501f75baf4fe427e8ff5eaf5753a0"
     },
     "test-population-reporting.js": {
@@ -830,7 +842,7 @@
     "test-suite-pool.js": {
       "isolation": "serial",
       "reason": "serial by choice: its end-to-end case runs a whole test-all.js with a pool of 4 inside it. The audit signals it carries come from code samples inside its strings, not its own behaviour",
-      "sha256": "f8944f83f325c695870c4ca351790ef2fe83bd0271bb54df187792c3adb43f73"
+      "sha256": "0c536619a4d204451029730745caf2400e3512ee03c149c1d3fad14b5d3c5e26"
     },
     "test-suite-tmp.js": {
       "isolation": "serial",
