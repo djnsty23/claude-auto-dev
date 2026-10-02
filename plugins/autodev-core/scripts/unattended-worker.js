@@ -69,13 +69,25 @@
  *   settle  on a headless record ends in `closed`: no scheduled task exists, so
  *           there is nothing for `deleted` to record.
  *
+ * PINS. `brief` and `enqueue` take `--pin <path>[,<path>...]`, repo-relative
+ * acceptance tests the worker must not change. The record stores each path with
+ * its blob sha at the base (`pins`, `pinBase`), `launch` re-reads them at the
+ * base the worker starts from, and the prompt names them. `verdict --decision
+ * accept` then compares those blobs against the result head: `--head <sha>` when
+ * given, else the local branch and its origin copy. Any pin edited or deleted
+ * refuses with pin-changed; no head to read refuses with pin-unchecked, never a
+ * pass. `--allow-pin-change "<reason>"` overrides and the reason is stored on
+ * the verdict beside the pinCheck it overrode. follow-up and escalate are never
+ * refused. brain-judge.js writes through this command, so a judge accept meets
+ * the same check.
+ *
  * WHAT IT IS NOT. Only `launch` starts anything. It deletes nothing and
  * verifies no result. A `started` record means a session id or a supervisor
  * pid was returned, not that step 0 passed.
  *
  * Usage:
  *   node unattended-worker.js brief --repo <dir> --slug <topic> --brief-file <md> --return <address>
- *        [--report <file>]   (default ~/.claude/autodev/reports/<task id>/REPORT.md)
+ *        [--pin <path>[,<path>]] [--report <file>]   (default ~/.claude/autodev/reports/<task id>/REPORT.md)
  *        [--base origin/main] [--task-id <id>] [--title <text>] [--ledger <file>]
  *   node unattended-worker.js record --task-id <id> --session <local_uuid> [--ledger <file>]
  *   node unattended-worker.js settle --task-id <id> --run-status running|succeeded|failed [--report-read] [--ledger <file>]
@@ -83,11 +95,12 @@
  *   node unattended-worker.js retire --task-id <id> [--reason <text>] [--ledger <file>]
  *   node unattended-worker.js status [--task-id <id>] [--ledger <file>]
  *   node unattended-worker.js enqueue --repo <dir> --slug <topic> --brief-file <md> --return <address>
- *        [--after <task id>[,<task id>]] [--base origin/main] [--task-id <id>] [--title <text>]
+ *        [--after <task id>[,<task id>]] [--pin <path>[,<path>]] [--base origin/main] [--task-id <id>] [--title <text>]
  *        [--model <id>] [--effort <level>] [--permission-mode <mode>] [--config-dir <dir>] [--ledger <file>]
  *   node unattended-worker.js ready [--max-concurrent 2] [--max-per-hour 2] [--ledger <file>]
  *   node unattended-worker.js launch --task-id <id> [--dry-run] [--headless-worker <file>] [--claude-bin <path>] [--dev] [--ledger <file>]
- *   node unattended-worker.js verdict --task-id <id> --decision accept|follow-up|escalate --reason <text> [--by judge|brain|operator] [--ledger <file>]
+ *   node unattended-worker.js verdict --task-id <id> --decision accept|follow-up|escalate --reason <text> [--by judge|brain|operator]
+ *        [--head <sha>] [--allow-pin-change <reason>] [--ledger <file>]
  * Output: {"ok":true,"value":{...}} exit 0; {"ok":false,"error":{"code","message"}} exit 1.
  */
 const fs = require('node:fs');
@@ -103,7 +116,7 @@ const { spawnSync } = require('node:child_process');
 const SHARED_INSTALL = path.join(__dirname, 'shared-install.js');
 
 const USAGE = [
-    'Usage: node unattended-worker.js brief --repo <dir> --slug <topic> --brief-file <md> --return <address> [--report <file>] [--base origin/main] [--task-id <id>] [--title <text>] [--ledger <file>]',
+    'Usage: node unattended-worker.js brief --repo <dir> --slug <topic> --brief-file <md> --return <address> [--pin <path>[,<path>]] [--report <file>] [--base origin/main] [--task-id <id>] [--title <text>] [--ledger <file>]',
     '       node unattended-worker.js record --task-id <id> --session <local_uuid> [--ledger <file>]',
     '       node unattended-worker.js settle --task-id <id> --run-status running|succeeded|failed [--report-read] [--ledger <file>]',
     '       node unattended-worker.js deleted --task-id <id> [--ledger <file>]',
@@ -113,16 +126,21 @@ const USAGE = [
     '       then print create_scheduled_task arguments whose prompt opens with git worktree add.',
     'settle: delete_scheduled_task archives the run session, so it is safe only once the run has ended',
     '       AND its result was read (--report-read).',
-    '       node unattended-worker.js enqueue --repo <dir> --slug <topic> --brief-file <md> --return <address> [--after <id>[,<id>]]',
+    '       node unattended-worker.js enqueue --repo <dir> --slug <topic> --brief-file <md> --return <address> [--after <id>[,<id>]] [--pin <path>[,<path>]]',
     '            [--base origin/main] [--task-id <id>] [--title <text>] [--model <id>] [--effort <level>] [--permission-mode <mode>] [--config-dir <dir>] [--ledger <file>]',
     '       node unattended-worker.js ready [--max-concurrent 2] [--max-per-hour 2] [--ledger <file>]',
     '       node unattended-worker.js launch --task-id <id> [--dry-run] [--headless-worker <file>] [--claude-bin <path>] [--dev] [--ledger <file>]',
-    '       node unattended-worker.js verdict --task-id <id> --decision accept|follow-up|escalate --reason <text> [--by judge|brain|operator] [--ledger <file>]',
+    '       node unattended-worker.js verdict --task-id <id> --decision accept|follow-up|escalate --reason <text> [--by judge|brain|operator]',
+    '            [--head <sha>] [--allow-pin-change <reason>] [--ledger <file>]',
     'retire: close a composed or queued record whose task never ran, freeing its slug and task id.',
     'enqueue: queue a brief for the headless channel. The slug is at most 24 characters: it becomes the headless code.',
     'ready: queued tasks whose dependencies were accepted, within the concurrency and per-hour caps.',
     'launch: the only command that starts anything. It re-runs the brief checks and calls headless-worker.js start.',
     'verdict: a judge verdict never replaces an existing one; --by brain or operator does.',
+    '--pin: repo-relative acceptance tests stored with their blob at the base. accept is refused (pin-changed) when one',
+    '       differs or is gone at the result head (--head, else the branch locally or on origin), and refused',
+    '       (pin-unchecked) when no head can be read. --allow-pin-change "<reason>" overrides and stores the reason.',
+    '       follow-up and escalate are never refused.',
     'The scheduled-task path starts nothing and deletes nothing: the coordinator makes those MCP calls.',
     `Default ledger: ${path.join('~', '.claude', 'autodev', 'unattended-workers.json')}`,
 ].join('\n') + '\n';
@@ -157,7 +175,8 @@ function parseArgs(argv) {
     const out = { _: [] };
     const flags = ['help', 'report-read', 'dry-run', 'dev'];
     const known = ['_', ...flags, 'repo', 'slug', 'brief-file', 'return', 'report', 'base', 'task-id', 'title', 'ledger', 'session', 'run-status', 'reason',
-        'after', 'model', 'effort', 'permission-mode', 'config-dir', 'headless-worker', 'claude-bin', 'decision', 'by', 'max-concurrent', 'max-per-hour'];
+        'after', 'model', 'effort', 'permission-mode', 'config-dir', 'headless-worker', 'claude-bin', 'decision', 'by', 'max-concurrent', 'max-per-hour',
+        'pin', 'allow-pin-change', 'head'];
     for (let i = 0; i < argv.length; i++) {
         const a = argv[i];
         if (a === '--help' || a === '-h' || a === 'help') { out.help = true; continue; }
@@ -257,7 +276,7 @@ function findRecord(ledger, taskId) {
  * starts with `cd "<worktree>" && `, and the worker re-reads the toplevel in the
  * same command before a commit, push or merge.
  */
-function composePrompt({ repo, worktree, branch, base, taskId, returnTo, report, slug, body, scratch, channel }) {
+function composePrompt({ repo, worktree, branch, base, taskId, returnTo, report, slug, body, scratch, channel, pins }) {
     const r = slashes(repo), w = slashes(worktree);
     const rep = slashes(report || path.join(scratch || os.tmpdir(), 'REPORT.md'));
     const code = slug || taskId;
@@ -275,6 +294,7 @@ function composePrompt({ repo, worktree, branch, base, taskId, returnTo, report,
         `Every later shell command starts with \`cd "${w}" && \`: the shell's working directory is reset to the checkout this session opened in between commands, so a bare command after STEP 0 runs in the shared checkout. Before any commit, push or merge, print \`git rev-parse --show-toplevel\` in the same command and check it says ${w}.`,
         `If STEP 0 fails, do no other work: write the failing command and its output to ${rep}, then stop. An unattended run cannot use SendMessage.`,
         `Any further worktree goes at ${r}/.claude/worktrees/<name>, never beside the repo.${scratch ? ` Logs, diffs, exit files and other scratch output go under ${slashes(scratch)}, never in the directory that holds the checkouts.` : ''}`,
+        ...(pins && pins.length ? [`PINNED ACCEPTANCE TESTS: ${pins.map((p) => p.path).join(', ')}. Do not edit, rename or delete them: an accept verdict is refused when any of them differs on ${branch} from ${base}. If one is wrong, say so in the report instead of changing it.`] : []),
         '',
         body.trim(),
         '',
@@ -322,6 +342,93 @@ function readBrief(file) {
 }
 
 /**
+ * PINNED ACCEPTANCE TESTS. A brief names the test files that decide whether the
+ * work is done, and the record keeps each one's blob sha at the base. A worker
+ * that edits the test to get green still reports green, and a judge reading the
+ * report accepts it, so `verdict --decision accept` compares those blobs against
+ * the worker's result head and refuses on any difference or deletion.
+ */
+function resolvePins(raw, repo, base) {
+    if (raw === undefined) return {};
+    const paths = String(raw).split(',').map((s) => slashes(s.trim())).filter(Boolean);
+    if (!paths.length) fault('bad-pin', '--pin needs at least one repo-relative path');
+    const baseSha = git(repo, ['rev-parse', '--verify', '--quiet', `${base}^{commit}`]);
+    if (baseSha.status !== 0) fault('base-unresolved', `${base} does not resolve in ${repo}, so the pinned tests cannot be read there; fetch first`);
+    const pins = [];
+    for (const p of [...new Set(paths)]) {
+        if (path.isAbsolute(p) || /^[A-Za-z]:/.test(p) || p.split('/').some((seg) => seg === '..' || seg === '.')) {
+            fault('bad-pin', `pin ${p} must be a plain repo-relative path`);
+        }
+        const blob = git(repo, ['rev-parse', '--verify', '--quiet', `${baseSha.stdout}:${p}`]);
+        const type = blob.status === 0 ? git(repo, ['cat-file', '-t', blob.stdout]).stdout : '';
+        if (type !== 'blob') fault('pin-missing', `pin ${p} is not a file at ${base} (${baseSha.stdout.slice(0, 12)})`);
+        pins.push({ path: p, blob: blob.stdout });
+    }
+    return { pins, pinBase: baseSha.stdout };
+}
+
+/**
+ * The commits that can stand for the worker's result: a --head the caller names,
+ * else the local branch and its origin copy. The branch can be gone locally and
+ * still pushed, so an origin branch git has not fetched yet is fetched once.
+ */
+function resultHeads(rec, explicit) {
+    const commit = (ref) => { const r = git(rec.repo, ['rev-parse', '--verify', '--quiet', `${ref}^{commit}`]); return r.status === 0 ? r.stdout : null; };
+    if (explicit) {
+        const sha = commit(explicit);
+        if (!sha) fault('bad-head', `--head ${explicit} is not a commit in ${rec.repo}`);
+        return [{ sha, source: 'flag' }];
+    }
+    const local = () => [
+        { sha: commit(`refs/heads/${rec.branch}`), source: 'local branch' },
+        { sha: commit(`refs/remotes/origin/${rec.branch}`), source: 'origin branch' },
+    ].filter((h) => h.sha);
+    let heads = local();
+    if (!heads.length) {
+        git(rec.repo, ['fetch', '--quiet', 'origin', `+refs/heads/${rec.branch}:refs/remotes/origin/${rec.branch}`], FETCH_TIMEOUT_MS);
+        heads = local();
+    }
+    return heads;
+}
+
+/** unchanged, changed (with each path and why) or unchecked (no head to read). */
+function checkPins(rec, explicitHead) {
+    const pins = rec.pins || [];
+    let heads;
+    try { heads = resultHeads(rec, explicitHead); } catch (e) { if (e.publicCode === 'bad-head') throw e; heads = []; }
+    if (!heads.length) {
+        return { state: 'unchecked', base: rec.pinBase || null, head: null, headSource: null, changed: [],
+            why: `could not check the pinned tests: no result head for ${rec.branch} locally or on origin` };
+    }
+    const changed = [];
+    for (const h of heads) {
+        for (const p of pins) {
+            const now = git(rec.repo, ['rev-parse', '--verify', '--quiet', `${h.sha}:${p.path}`]);
+            const blob = now.status === 0 ? now.stdout : null;
+            if (blob !== p.blob && !changed.some((c) => c.path === p.path)) changed.push({ path: p.path, head: h.sha, how: blob ? 'edited' : 'deleted' });
+        }
+    }
+    return { state: changed.length ? 'changed' : 'unchanged', base: rec.pinBase || null, head: heads[0].sha, headSource: heads[0].source,
+        heads: heads.map((h) => ({ sha: h.sha, source: h.source })), checked: pins.length, changed };
+}
+
+/**
+ * Run before an accept is written. follow-up and escalate never reach it. Returns
+ * what to store on the verdict, or faults pin-changed / pin-unchecked unless the
+ * caller gave --allow-pin-change with a reason.
+ */
+function gatePins(rec, { decision, allow, head }) {
+    if (allow !== undefined && decision !== 'accept') fault('usage', '--allow-pin-change applies only to --decision accept');
+    if (decision !== 'accept' || !Array.isArray(rec.pins) || !rec.pins.length) return null;
+    const pc = checkPins(rec, head);
+    if (pc.state === 'unchanged' || allow !== undefined) return { pinCheck: pc, ...(allow !== undefined ? { allowPinChange: String(allow).slice(0, 2000) } : {}) };
+    const override = 'pass --allow-pin-change "<reason>" to accept anyway';
+    if (pc.state === 'unchecked') fault('pin-unchecked', `${pc.why}; name it with --head <sha> or ${override}`);
+    const list = pc.changed.map((c) => `${c.path} (${c.how})`).join(', ');
+    fault('pin-changed', `pinned test(s) changed between base ${String(pc.base).slice(0, 12)} and head ${pc.changed[0].head.slice(0, 12)}: ${list}; ${override}`);
+}
+
+/**
  * Nothing already claims the slug: not the worktree path, the local branch, the
  * origin branch, nor another active ledger record. `self` is the task being
  * launched, whose own queued record is not a claim against itself.
@@ -358,6 +465,7 @@ function brief(opts) {
     const repo = resolveRepo(opts.repo);
     if (git(repo, ['rev-parse', '--verify', '--quiet', `${base}^{commit}`]).status !== 0) fault('base-unresolved', `${base} does not resolve in ${repo}; fetch first`);
     const body = readBrief(opts['brief-file']);
+    const pinned = resolvePins(opts.pin, repo, base);
 
     const ledgerFile = opts.ledger || defaultLedger();
     return withLock(ledgerFile, () => {
@@ -368,9 +476,9 @@ function brief(opts) {
         // put both in the directory holding the checkouts. Name the scratch home.
         const scratch = scratchFor(taskId);
         const report = opts.report ? path.resolve(opts.report) : path.join(scratch, 'REPORT.md');
-        const prompt = composePrompt({ repo, worktree, branch, base, taskId, returnTo, report, slug: opts.slug, body, scratch });
+        const prompt = composePrompt({ repo, worktree, branch, base, taskId, returnTo, report, slug: opts.slug, body, scratch, pins: pinned.pins });
         const record = {
-            taskId, repo, slug: opts.slug, branch, worktree, base, returnTo, report, state: 'composed',
+            taskId, repo, slug: opts.slug, branch, worktree, base, returnTo, report, state: 'composed', ...pinned,
             composedAt: new Date().toISOString(), ...stamp('composed'),
             promptSha256: crypto.createHash('sha256').update(prompt).digest('hex'),
         };
@@ -400,6 +508,8 @@ function enqueue(opts) {
     const base = checkBase(opts.base || 'origin/main');
     const repo = resolveRepo(opts.repo);
     const body = readBrief(opts['brief-file']);
+    // Read now so a bad pin is refused at enqueue, and again at launch against the base the worker starts from.
+    const pinned = resolvePins(opts.pin, repo, base);
     const after = opts.after ? opts.after.split(',').map((s) => s.trim()).filter(Boolean) : [];
     if (after.includes(taskId)) fault('bad-dependency', `task ${taskId} cannot wait on itself`);
     const launchOpts = {
@@ -421,7 +531,7 @@ function enqueue(opts) {
             taskId, repo, slug: opts.slug, branch: `claude/${opts.slug}`, worktree: path.join(repo, '.claude', 'worktrees', opts.slug), base,
             returnTo: opts.return, report: path.join(scratch, 'REPORT.md'), state: 'queued', channel: 'headless',
             title: opts.title || `Worker: ${opts.slug}`, queuedAt: new Date().toISOString(), after, briefFile,
-            briefSha256: crypto.createHash('sha256').update(body).digest('hex'), launch: launchOpts,
+            briefSha256: crypto.createHash('sha256').update(body).digest('hex'), launch: launchOpts, ...pinned,
         };
         ledger.records = ledger.records.filter((r) => r.taskId !== taskId).concat(record);
         writeLedger(ledgerFile, ledger);
@@ -567,8 +677,10 @@ function launch(opts) {
             }
             const body = readBrief(rec.briefFile);
             const scratch = path.dirname(rec.briefFile);
+            // The base can have moved since enqueue: pin the blobs the worker's worktree will start from.
+            const pinned = rec.pins && rec.pins.length ? resolvePins(rec.pins.map((p) => p.path).join(','), rec.repo, rec.base) : {};
             const prompt = composePrompt({ repo: rec.repo, worktree, branch, base: rec.base, taskId: rec.taskId, returnTo: rec.returnTo,
-                report: rec.report, slug: rec.slug, body, scratch, channel: 'headless' });
+                report: rec.report, slug: rec.slug, body, scratch, channel: 'headless', pins: pinned.pins });
             const files = { prompt: path.join(scratch, 'PROMPT.md'), pointer: path.join(scratch, 'POINTER.md'), log: path.join(scratch, 'worker.log') };
             fs.writeFileSync(files.prompt, prompt);
             fs.writeFileSync(files.pointer, pointerPrompt(files.prompt));
@@ -580,7 +692,7 @@ function launch(opts) {
             if (!h.ok) fault(h.code, `headless-worker start refused: ${h.message}`);
             if (dry) return { ledger: ledgerFile, dryRun: true, taskId: rec.taskId, files, headless: h.value };
             const at = new Date().toISOString();
-            Object.assign(rec, {
+            Object.assign(rec, pinned, {
                 state: 'started', startedAt: at, launchedAt: at,
                 promptSha256: crypto.createHash('sha256').update(prompt).digest('hex'),
                 headless: { code: rec.slug, pid: h.value.supervisorPid || null, log: files.log, ledger: h.value.ledger || null,
@@ -614,14 +726,14 @@ function mutate(opts, fn) {
 }
 
 /** Record a verdict. A judge never replaces a standing verdict; the Brain or the operator can. */
-function applyVerdict(rec, { decision, reason, by = 'brain', at = new Date().toISOString() }) {
+function applyVerdict(rec, { decision, reason, by = 'brain', at = new Date().toISOString(), pins = null }) {
     if (!DECISIONS.includes(decision)) fault('usage', `--decision must be one of ${DECISIONS.join(', ')}`);
     if (!VERDICT_BY.includes(by)) fault('usage', `--by must be one of ${VERDICT_BY.join(', ')}`);
     if (!reason || !String(reason).trim()) fault('usage', '--reason is required');
     if (!FINISHED.includes(rec.state)) fault('bad-state', `task ${rec.taskId} is ${rec.state}; a verdict needs a finished run`);
     if (rec.verdict && by === 'judge') return { applied: false, reason: `a ${rec.verdict.by} verdict (${rec.verdict.decision}) stands, and a judge never replaces one` };
     const previous = rec.verdict || null;
-    rec.verdict = { decision, reason: String(reason).slice(0, 2000), by, at };
+    rec.verdict = { decision, reason: String(reason).slice(0, 2000), by, at, ...(pins || {}) };
     return { applied: true, previous };
 }
 
@@ -671,7 +783,15 @@ function run(argv) {
         });
     }
     if (cmd === 'verdict') {
-        return mutate(opts, (rec) => ({ verdict: applyVerdict(rec, { decision: opts.decision, reason: opts.reason, by: opts.by || 'brain' }) }));
+        return mutate(opts, (rec) => {
+            // Shape errors first, so a malformed call never spends a fetch on the pin check.
+            if (!DECISIONS.includes(opts.decision)) fault('usage', `--decision must be one of ${DECISIONS.join(', ')}`);
+            if (!VERDICT_BY.includes(opts.by || 'brain')) fault('usage', `--by must be one of ${VERDICT_BY.join(', ')}`);
+            if (!opts.reason || !String(opts.reason).trim()) fault('usage', '--reason is required');
+            if (!FINISHED.includes(rec.state)) fault('bad-state', `task ${rec.taskId} is ${rec.state}; a verdict needs a finished run`);
+            const pins = gatePins(rec, { decision: opts.decision, allow: opts['allow-pin-change'], head: opts.head });
+            return { verdict: applyVerdict(rec, { decision: opts.decision, reason: opts.reason, by: opts.by || 'brain', pins }) };
+        });
     }
     if (cmd === 'ready') {
         const ledgerFile = opts.ledger || defaultLedger();
@@ -705,4 +825,4 @@ if (require.main === module) {
     }
 }
 
-module.exports = { composePrompt, decideSettle, parseArgs, run, planStarts, dependencyState, applyVerdict, pointerPrompt, headlessArgs, parseHeadless, recoverTimedOutStart, withLock, FINISHED, DECISIONS, TRANSIENT_LAUNCH_CODES };
+module.exports = { resolvePins, checkPins, gatePins, composePrompt, decideSettle, parseArgs, run, planStarts, dependencyState, applyVerdict, pointerPrompt, headlessArgs, parseHeadless, recoverTimedOutStart, withLock, FINISHED, DECISIONS, TRANSIENT_LAUNCH_CODES };
