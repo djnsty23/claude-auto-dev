@@ -73,8 +73,10 @@
 // reasoning excludes `fetch`. Both are asserted as allowed in the suite, so
 // removing the exemption is a visible decision rather than a drift.
 //
-// `gh pr merge` is out of scope too: this parses `git`, and a GitHub-side merge
-// is the transcript ledger's to catch. Every one of these exclusions has a
+// `gh pr merge` is out of scope for THIS ban: it parses `git`, and a GitHub-side
+// merge is the transcript ledger's to catch. A separate, opt-in rule further
+// down blocks raw `gh pr merge` for every session once the merge-lock marker
+// exists (THE THIRD GUARD). Every one of these exclusions has a
 // passing test case, because the failure mode of a blocking hook is silent
 // growth — that is how the 2026-08-17 denylist became something that had to be
 // deleted rather than trimmed.
@@ -384,6 +386,40 @@ function isInside(root, child) {
 }
 
 // ===========================================================================
+// THE THIRD GUARD IN THIS FILE: raw merges, opt-in. Added 2026-10-02.
+//
+// The merge bar is one full gate on the frozen candidate, merged by
+// scripts/merge-lock.js under a per-repo lock that refuses a moved base and
+// reads the merged tree back. A raw `gh pr merge` skips all of that. This rule
+// is INERT unless <home>/.claude/autodev/merge-lock.enforce exists, and the
+// marker is read only when the command text holds both `gh` and `merge`, so
+// the quiet path costs two regex tests. Armed, it blocks (exit 2) a segment that
+// runs `gh pr merge`, or `gh api` with a PUT to a `pulls/<n>/merge` path.
+// merge-lock.js spawns gh itself, with no shell, so this hook never sees it.
+// ===========================================================================
+
+const MERGE_MARKER_PARTS = ['.claude', 'autodev', 'merge-lock.enforce'];
+
+/** The first segment that merges a PR through gh, as a short label, or null. */
+function rawMergeSegment(segments) {
+    for (const seg of segments) {
+        const toks = seg.split(/\s+/).filter(Boolean).map(unwrap);
+        let i = 0;
+        while (i < toks.length && (/^[A-Za-z_][A-Za-z0-9_]*=/.test(toks[i]) || toks[i] === 'command' || toks[i] === 'exec')) i++;
+        const bin = path.basename(String(toks[i] || '').replace(/\\/g, '/')).toLowerCase().replace(/\.exe$/, '');
+        if (bin !== 'gh') continue;
+        const rest = toks.slice(i + 1);
+        if (rest[0] === 'pr' && rest[1] === 'merge') return 'gh pr merge';
+        if (rest[0] !== 'api') continue;
+        const put = rest.some((t, k) => /^(?:-X|--method)$/.test(t) && /^put$/i.test(rest[k + 1] || ''))
+            || rest.some((t) => /^(?:-XPUT|--method=PUT)$/i.test(t));
+        const toMerge = rest.some((t) => /(?:^|\/)pulls\/[^/\s]+\/merge\/?$/.test(t));
+        if (put && toMerge) return 'gh api -X PUT .../pulls/<n>/merge';
+    }
+    return null;
+}
+
+// ===========================================================================
 // THE SECOND GUARD IN THIS FILE: `--no-verify` ASKS. Added 2026-09-08.
 //
 // WHY IT LIVES HERE. `[measured 2026-09-08]` on this machine under load 38,
@@ -422,6 +458,25 @@ try {
     if (!command) process.exit(0);
 
     const cwd = path.resolve(data.cwd || process.cwd());
+
+    // The third guard, first: a block beats the ask and the role check.
+    if (/\bgh\b/.test(command) && /merge/.test(command)) {
+        const marker = path.join(os.homedir(), ...MERGE_MARKER_PARTS);
+        if (fs.existsSync(marker)) {
+            // gh expands {owner}, {repo} and {branch} itself; the splitter reads braces as groups.
+            const hit = rawMergeSegment(commandSegments(stripNonCommandText(command.replace(/\{(owner|repo|branch)\}/g, '$1'))));
+            if (hit) {
+                const tool = path.join(__dirname, '..', 'scripts', 'merge-lock.js');
+                process.stderr.write(`Blocked: merge-lock enforcement is on (${marker}), and \`${hit}\` merges a PR `
+                    + 'outside the per-repo merge lock.\n'
+                    + `Merge with: node "${tool}" merge --repo OWNER/NAME --pr N --head SHA --gate-receipt FILE\n`
+                    + 'It refuses a head that is not the gated one or a base that moved, merges with '
+                    + '--match-head-commit, and reads the merged tree back.\n'
+                    + `To turn enforcement off, remove ${marker}.\n`);
+                process.exit(2);
+            }
+        }
+    }
 
     // The ask is decided up front and DELIVERED at every allow below, so a
     // block (exit 2) still wins when both apply, and a session with no role

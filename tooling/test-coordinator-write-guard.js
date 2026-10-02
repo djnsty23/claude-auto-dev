@@ -255,7 +255,7 @@ expectSilentAllow('`git pull` is excluded: updating a clone to read it is the jo
 expectSilentAllow('`git pull` with an explicit merge is still excluded',
     run({ payload: bash('git pull --no-rebase origin main') }));
 expectSilentAllow('`gh pr merge` is out of scope: this parses git, not gh',
-    run({ payload: bash('gh pr merge 12 --squash') }));
+    run({ payload: bash('gh pr merge 12 --squash'), env: { HOME: fixture, USERPROFILE: fixture } }));
 expectSilentAllow('`git cherry-pick` was not added and is not blocked',
     run({ payload: bash('git cherry-pick abc1234') }));
 
@@ -1020,6 +1020,62 @@ expectAsk('role held + push INSIDE the home repo with --no-verify still asks',
         + `${without.stdout.length}B out ${without.stderr.length}B err`);
 }
 
+// ---------------------------------------------------------------------------
+// K. MERGE-LOCK ENFORCEMENT, opt-in. Inert without the marker
+//    <home>/.claude/autodev/merge-lock.enforce; with it, a raw PR merge through
+//    gh is blocked and the message names merge-lock.js. HOME and USERPROFILE
+//    point at a scratch home, so the real marker is never read. No role file,
+//    so the coordinator ban cannot be what blocks.
+// ---------------------------------------------------------------------------
+{
+    const mhome = path.join(fixture, 'mhome');
+    const marker = path.join(mhome, '.claude', 'autodev', 'merge-lock.enforce');
+    fs.mkdirSync(path.dirname(marker), { recursive: true });
+    const inHome = (command) => run({ roleFile: ABSENT, payload: bash(command), env: { HOME: mhome, USERPROFILE: mhome } });
+    const expectMergeBlock = (label, res) => check(label,
+        res.exit === 2 && /^Blocked: merge-lock enforcement is on/.test(res.stderr)
+        && /merge-lock\.js" merge --repo OWNER\/NAME --pr N --head SHA --gate-receipt FILE/.test(res.stderr)
+        && res.stdout.length === 0,
+        `exit ${res.exit}, stderr ${JSON.stringify(res.stderr.slice(0, 90))}`);
+
+    const RAW = [
+        'gh pr merge 12 --rebase',
+        'gh pr merge 12 --repo acme/widget --squash --delete-branch',
+        'cd /tmp && gh pr merge 12',
+        'GH_TOKEN=x gh pr merge 12',
+        'gh api -X PUT repos/acme/widget/pulls/12/merge -f merge_method=rebase',
+        'gh api --method PUT /repos/acme/widget/pulls/12/merge',
+        'gh api repos/{owner}/{repo}/pulls/12/merge --method=PUT',
+    ];
+    const QUIET = [
+        'gh pr view 12 --json state',
+        'gh pr list --state merged',
+        'git merge --ff-only origin/main',
+        'echo "gh pr merge 12"',
+        'gh api repos/acme/widget/pulls/12/merge',
+        'gh api -X GET repos/acme/widget/pulls/12/merge',
+        'gh api -X PUT repos/acme/widget/pulls/12/requested_reviewers',
+        `node "${path.join('plugins', 'autodev-core', 'scripts', 'merge-lock.js')}" merge --repo acme/widget --pr 12 --head ${'a'.repeat(40)} --gate-receipt r.log`,
+    ];
+
+    // Without the marker: every raw merge is silent.
+    try { fs.unlinkSync(marker); } catch { /* absent */ }
+    for (const c of RAW) expectSilentAllow(`K. merge-lock: no marker, \`${c}\` is silent`, inHome(c));
+
+    // With the marker: every raw merge blocks, everything else stays silent.
+    fs.writeFileSync(marker, '');
+    for (const c of RAW) expectMergeBlock(`K. merge-lock: marker on, \`${c}\` is blocked and names merge-lock.js`, inHome(c));
+    for (const c of QUIET) expectSilentAllow(`K. merge-lock: marker on, \`${c}\` is silent`, inHome(c));
+
+    // THE CONTROL: the same bytes, the marker removed and nothing else changed.
+    const armed = inHome(RAW[0]);
+    fs.unlinkSync(marker);
+    const disarmed = inHome(RAW[0]);
+    check('K. MUTATION: removing the marker, and nothing else, removes the merge block',
+        armed.exit === 2 && disarmed.exit === 0 && disarmed.stdout.length === 0 && disarmed.stderr.length === 0,
+        `armed exit ${armed.exit}; disarmed exit ${disarmed.exit} ${disarmed.stdout.length}B out ${disarmed.stderr.length}B err`);
+}
+
 fs.rmSync(fixture, { recursive: true, force: true });
 
 // The population, not a bare verdict: what was driven, and how. Without it a
@@ -1028,7 +1084,7 @@ console.log(`\n${tally(pass, fail, infra)}`);
 console.log(`subject: ${path.relative(path.resolve(__dirname, '..'), HOOK)}, `
     + `driven as a subprocess ${pass + fail} times over `
     + `${['inert-without-role', 'the ban', 'mention-is-not-execution', 'cwd escapes',
-        'role ownership', 'dead claim', 'fail-open', 'home-prefix expansion', 'no-verify ask', 'mutation'].length} case groups; `
+        'role ownership', 'dead claim', 'fail-open', 'home-prefix expansion', 'no-verify ask', 'merge-lock', 'mutation'].length} case groups; `
     + `every allow asserted zero bytes on BOTH stdout and stderr.`);
 if (fail) console.log(`failed: ${failures.join(' | ')}`);
 if (infra) console.log(`indeterminate: ${indeterminate.join(' | ')}`);
