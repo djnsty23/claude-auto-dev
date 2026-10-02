@@ -328,6 +328,17 @@ function recordLive(rec, snap) {
 }
 
 /**
+ * True when `rec`'s pid is in the snapshot but the probe could not read that
+ * process's creation time (an elevated or protected process): it may be the
+ * recorded process, so nothing about it is proven.
+ */
+function recordUnreadable(rec, snap) {
+    if (!rec || !Number.isInteger(rec.pid)) return false;
+    const p = snap.procs.get(rec.pid);
+    return Boolean(p && !p.startUtc);
+}
+
+/**
  * Is the execution `owner` started (with `execution`, a run journal's
  * { chainRoot, descendants }) still running? { alive: true|false|null, why }.
  * `legacyAlive(pid)` answers when the snapshot is unavailable.
@@ -345,6 +356,7 @@ function judgeExecution({ owner, execution = null, journalUnreadable = false, sn
     let unknown = null;
     if (owner.startUtc) {
         if (recordLive(owner, snap)) return { alive: true, why: `pid ${owner.pid} is running, created ${owner.startUtc}` };
+        if (recordUnreadable(owner, snap)) unknown = `pid ${owner.pid} is running, but its creation time could not be read`;
     } else if (snap.procs.has(owner.pid)) {
         unknown = `pid ${owner.pid} is running, but the record has no creation time to compare`;
     }
@@ -360,6 +372,7 @@ function judgeExecution({ owner, execution = null, journalUnreadable = false, sn
     if (execution && Array.isArray(execution.descendants)) recorded.push(...execution.descendants);
     for (const r of recorded.slice(1)) {
         if (recordLive(r, snap)) return { alive: true, why: `pid ${r.pid} of its execution is running` };
+        if (!unknown && recordUnreadable(r, snap)) unknown = `pid ${r.pid} of its execution is running with a creation time that could not be read`;
     }
     const live = liveDescendants(recorded, snap);
     if (live.length) return { alive: true, why: `pid ${live[0].pid}, a descendant of its execution, is running` };
@@ -426,6 +439,12 @@ function repoIdentity(dir) {
                  why: 'git cannot name the repository of this directory' };
     }
     const common = gitIn(dir, ['rev-parse', '--git-common-dir']);
+    if (!common) {
+        // git named the top level but not the repository behind it: a partial
+        // answer is not an identity, so it is the conservative class.
+        return { resolved: false, worktree: canonicalPath(top), commonDir: null, origin: null, packageName: null, harness: true,
+                 why: 'git named the checkout but not its repository (git-common-dir failed)' };
+    }
     const origin = normaliseOrigin(gitIn(dir, ['config', '--get', 'remote.origin.url']));
     let packageName = null;
     try { packageName = JSON.parse(fs.readFileSync(path.join(top, 'package.json'), 'utf8')).name || null; } catch { /* none */ }
@@ -445,7 +464,7 @@ function pathKey(canonical) {
 
 module.exports = {
     runPowerShell, snapshot, forgetSnapshot, bootIdentity, parsePsW, msysTable, forgetMsys, identityOf,
-    liveDescendants, recordLive, judgeExecution, canonicalPath, repoIdentity, normaliseOrigin, pathKey,
+    liveDescendants, recordLive, recordUnreadable, judgeExecution, canonicalPath, repoIdentity, normaliseOrigin, pathKey,
     normaliseTime, iso7,
 };
 

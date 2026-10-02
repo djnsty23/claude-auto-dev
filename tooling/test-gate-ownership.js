@@ -22,6 +22,13 @@
  *   P9  a malformed meta line reads as legacy      -> an unreadable record is taken over (S10)
  *   P10o a lane-lock reader drops the meta line    -> the reaper cannot tell whose run holds a lane (S11)
  *   P10l a lease renewal ignores run and token     -> a late writer overwrites a newer lease (S11)
+ *   P11o --repo vouches for the caller             -> a harness checkout naming a product queues as product (S3)
+ *   P12o a ticket-identity owner skips its journal -> its live chain is taken over (S8)
+ *   P13o a run id alone does not fence a release   -> a late release of an earlier run frees a later one (S9)
+ *   P14o a meta line that parses is trusted        -> a nonsense creation time reads as a reused pid (S10b)
+ *   P15o an unreadable creation time is a reuse    -> a live owner reads dead (S12)
+ *   P16o the fencing counter passes 2^53 - 1       -> two admissions share a token (S12)
+ *   P17o a pre-boot mutex is held by its pid        -> every admission times out after a reboot (S12)
  *
  * The machine's real lock is never touched: every spawn sets
  * AUTODEV_GATE_LOCK_PATH to a temp directory.
@@ -65,6 +72,34 @@ function sleeper() {
     const c = spawn(process.execPath, ['-e', 'setTimeout(() => {}, 600000)'], { stdio: 'ignore', windowsHide: true });
     kids.push(c);
     return c.pid;
+}
+
+/**
+ * A sleeper that starts a child of its own and waits for it, on every
+ * platform: the reused pid in S6 must have a child created after it, or a
+ * defect that adopts a reused pid's children has nothing to adopt (on POSIX a
+ * plain sleeper has none; on Windows only a console host). Resolves
+ * { pid, child }, or { pid: null, why }.
+ */
+async function sleeperWithChild() {
+    const out = path.join(mkTemp('gown-kid-'), 'child');
+    const code = [
+        "const { spawn } = require('child_process'); const fs = require('fs');",
+        "const c = spawn(process.execPath, ['-e', 'setTimeout(() => {}, 600000)'], { stdio: 'ignore', windowsHide: true });",
+        `fs.writeFileSync(${JSON.stringify(out)}, c.pid + '\\n');`,
+        'setTimeout(() => {}, 600000);',
+    ].join('\n');
+    const p = spawn(process.execPath, ['-e', code], { stdio: 'ignore', windowsHide: true });
+    trees.push(p);
+    let text = '';
+    for (let i = 0; i < 200 && !/\n/.test(text); i++) {
+        await sleep(100);
+        try { text = fs.readFileSync(out, 'utf8'); } catch { /* not yet */ }
+    }
+    const child = Number(text.trim());
+    if (!child) return { pid: null, why: 'the sleeper did not start its child within 20 s' };
+    detached.push(child);
+    return { pid: p.pid, child };
 }
 
 function deadPid() {
@@ -320,6 +355,13 @@ function s3DerivedClass(subject) {
         rows.push([`S3: ${label} with --class product takes the lane as ${want}`,
             r.code === 0 && Boolean(l) && l.cls === want && (!l.meta || l.meta.cls === want), `${add.status === 0 ? '' : `worktree add failed: ${add.stderr}\n`}${r.out}\n${l ? l.text : '(no lock)'}`]);
     }
+    // --repo names a product checkout, but the caller runs from the harness.
+    const fx = fixture(1);
+    const w = sleeper();
+    const r = run(subject, fx, ['take', '--pid', String(w), '--what', 'class probe', '--class', 'product', '--repo', repoDir()], { cwd: marked });
+    const l = readLockFile(fx.lock);
+    rows.push(['S3: a harness checkout naming a product with --repo still takes the lane as harness',
+        r.code === 0 && Boolean(l) && l.cls === 'harness' && Boolean(l.meta) && l.meta.cls === 'harness', `${r.out}\n${l ? l.text : '(no lock)'}`]);
     return rows;
 }
 
@@ -356,13 +398,17 @@ function s5PreBoot(subject) {
 }
 
 /** S6: a reused pid (same number, later creation time) does not keep a dead owner's lock. */
-function s6ReusedPid(subject) {
+async function s6ReusedPid(subject) {
+    const reused = await sleeperWithChild();
+    if (!reused.pid) return [['S6: a reused pid with a child of its own', false, reused.why]];
     const s = freshSnap();
     if (!s.ok) return [['S6: a process snapshot is available', false, s.why]];
-    const pid = sleeper();
+    const kid = s.procs.get(reused.child);
+    const rows = [['S6: the reused pid\'s own child is running, its parent is the reused pid', Boolean(kid) && kid.ppid === reused.pid,
+        JSON.stringify(kid || null)]];
     const fx = fixture(1);
-    metaLock(fx, { pid, startUtc: OLD_START, bootId });
-    return takeRows(subject, fx, 'S6 (pid reused by a later process)', false);
+    metaLock(fx, { pid: reused.pid, startUtc: OLD_START, bootId });
+    return [...rows, ...takeRows(subject, fx, 'S6 (pid reused by a later process with a child)', false)];
 }
 
 /** S7: an owner recorded by its MSYS pid alone is alive while Git Bash still lists it. */
@@ -388,6 +434,14 @@ async function s8Descendants(subject, orphan) {
     fx = fixture(1);
     metaLock(fx, orphan.owner);
     rows.push(...takeRows(subject, fx, 'S8 (dead owner, live detached grandchild)', true));
+    // An owner recorded from a ticket (no creation time) that died while the
+    // chain root its journal names runs on.
+    fx = fixture(1);
+    const chain2 = sleeper();
+    const root2 = ident.identityOf(chain2, { snap: freshSnap() });
+    const t = metaLock(fx, { pid: deadPid(), startUtc: null, bootId });
+    records.updateRun(fx.lock, t.runId, (v) => ({ ...v, chainRoot: root2 }));
+    rows.push(...takeRows(subject, fx, 'S8 (dead ticket-identity owner, live chain root)', true));
     return rows;
 }
 
@@ -403,7 +457,18 @@ function s9Fence(subject) {
     const tok2 = tokenOf(t2.out);
     const late = run(subject, fx, ['release', '--pid', String(h), '--run-id', runId, '--token', String(tok1)]);
     const l = readLockFile(fx.lock);
+    // A late release that names only an earlier run (no token) of the same pid.
+    const fx2 = fixture(1);
+    const h2 = sleeper();
+    const a1 = run(subject, fx2, ['take', '--pid', String(h2), '--run-id', 'run-s9-a']);
+    const a2 = run(subject, fx2, ['release', '--pid', String(h2), '--run-id', 'run-s9-a']);
+    const b1 = run(subject, fx2, ['take', '--pid', String(h2), '--run-id', 'run-s9-b']);
+    const lateRun = run(subject, fx2, ['release', '--pid', String(h2), '--run-id', 'run-s9-a']);
+    const l2 = readLockFile(fx2.lock);
     return [
+        ['S9: a late release naming only an earlier run exits 1 and run b keeps the lane', a1.code === 0 && a2.code === 0 && b1.code === 0 &&
+            lateRun.code === 1 && /not released/.test(lateRun.out) && Boolean(l2) && Boolean(l2.meta) && l2.meta.runId === 'run-s9-b',
+            `${a1.out}\n${a2.out}\n${b1.out}\n${lateRun.out}\n${l2 ? l2.text : '(no lock)'}`],
         ['S9: the first admission and its release succeed', t1.code === 0 && tok1 !== null && r1.code === 0, `${t1.out}\n${r1.out}`],
         ['S9: the re-admission gets a later token', t2.code === 0 && tok2 !== null && tok2 > tok1, `${t2.out}`],
         ['S9: the late release with the first token exits 1 and says why', late.code === 1 && /not released/.test(late.out), late.out],
@@ -417,6 +482,49 @@ function s10Malformed(subject) {
     fs.mkdirSync(fx.dir, { recursive: true });
     fs.writeFileSync(fx.lock, `${deadPid()}\ngate with a torn record\nclass product\nmeta {"runId": "torn\n`);
     return takeRows(subject, fx, 'S10 (malformed meta, dead pid)', true);
+}
+
+/**
+ * S10b: a meta line that parses but cannot be trusted (a creation time that is
+ * not one, on a live pid) is never judged against the process table.
+ */
+function s10bSemantic(subject) {
+    const fx = fixture(1);
+    metaLock(fx, { pid: sleeper(), startUtc: 'not-a-time', bootId });
+    return takeRows(subject, fx, 'S10b (meta with a nonsense creation time, live pid)', true);
+}
+
+/**
+ * S12: the library answers for inputs a live machine rarely produces: a
+ * snapshot that holds the owner's pid without a readable creation time, a
+ * fencing counter at the end of the safe integers, and an admission mutex
+ * left by an earlier boot whose pid now names a live process.
+ */
+function s12Library(subject) {
+    const dir = path.dirname(subject);
+    const id = require(path.join(dir, 'gate-identity.js'));
+    const rec = require(path.join(dir, 'gate-records.js'));
+    const rows = [];
+    const procs = new Map([[4242, { pid: 4242, ppid: 1, startUtc: null }]]);
+    const snap = { ok: true, boot: { id: 'host|2026-01-01T00:00:00.0000000Z' }, procs, children: new Map([[1, [procs.get(4242)]]]) };
+    const j = id.judgeExecution({ owner: { pid: 4242, startUtc: '2026-01-01T00:00:01.0000000Z', bootId: snap.boot.id }, snap, boot: snap.boot, msys: { ok: true, byMsys: new Map(), ambiguous: new Set() } });
+    rows.push(['S12: an owner pid whose creation time cannot be read is unknown, not dead', j.alive === null, JSON.stringify(j)]);
+    const fx = fixture(1);
+    fs.writeFileSync(rec.fencePath(fx.lock), `${Number.MAX_SAFE_INTEGER}\n`);
+    let minted = null;
+    let err = null;
+    try { minted = rec.mintToken(fx.lock); } catch (e) { err = e.code; }
+    rows.push(['S12: a fencing counter at 2^53 - 1 refuses to mint (EFENCE), never repeats a token', minted === null && err === 'EFENCE', `minted=${minted} err=${err}`]);
+    const fx2 = fixture(1);
+    const live = sleeper();
+    const mutex = rec.admissionPath(fx2.lock);
+    fs.writeFileSync(mutex, `${live}\n2020-01-01T00:00:00.000Z\n`);
+    const old = new Date('2020-01-01T00:00:00Z');
+    fs.utimesSync(mutex, old, old);
+    let got = null;
+    try { got = rec.withAdmission(fx2.lock, () => 'entered', { timeoutMs: 1500, isDead: () => false }); } catch (e) { got = e.code || e.message; }
+    rows.push(['S12: an admission mutex written before this boot is broken although its pid is live', got === 'entered', String(got)]);
+    return rows;
 }
 
 /**
@@ -504,7 +612,7 @@ async function main() {
         S1: () => s1HarnessRace(SUBJECT), S2: () => s2ConcurrentRelease(SUBJECT), S3: () => s3DerivedClass(SUBJECT),
         S4: () => s4ArrivalSurvives(SUBJECT), S5: () => s5PreBoot(SUBJECT), S6: () => s6ReusedPid(SUBJECT),
         S7: () => s7Msys(SUBJECT, msys), S8: () => s8Descendants(SUBJECT, orphan), S9: () => s9Fence(SUBJECT),
-        S10: () => s10Malformed(SUBJECT), S11: () => s11Readers(SUBJECT),
+        S10: () => s10Malformed(SUBJECT), S10b: () => s10bSemantic(SUBJECT), S11: () => s11Readers(SUBJECT), S12: () => s12Library(SUBJECT),
     };
     for (const [id, fn] of Object.entries(real)) if (want(id)) report(id, await fn());
 
@@ -538,6 +646,21 @@ async function main() {
             [["what: (lines[1] || '').trim(), cls, ...parseMeta(lines) };", "what: (lines[1] || '').trim(), cls };"]], (s) => s11Readers(s), ['S11']],
         ['P10l', 'a lease renewal ignores the run and token', 'gate-records.js',
             [['if (cur.value.runId !== expect.runId || cur.value.token !== expect.token) {', 'if (false) {']], (s) => s11Readers(s), ['S11']],
+        ['P11o', '--repo vouches for the caller', 'full-gate-queue.js',
+            [['    if (args.repo && !repo.harness) {', '    if (false) {']], (s) => s3DerivedClass(s).slice(-1), ['S3']],
+        ['P12o', 'a ticket-identity owner skips its journal', 'full-gate-queue.js',
+            [['        if (!recordsExecution) return { alive: a,', '        return { alive: a,']], async (s) => (await s8Descendants(s, orphan)).slice(-2), ['S8']],
+        ['P13o', 'a release fenced by run id alone is not fenced', 'full-gate-queue.js',
+            [['    const runOff = Boolean(runId) && Boolean(held.meta.runId) && held.meta.runId !== runId;', '    const runOff = false;']], (s) => s9Fence(s), ['S9']],
+        ['P14o', 'a meta line that parses is trusted', 'gate-records.js',
+            [['        const fault = metaFault(m);', '        const fault = null;']], (s) => s10bSemantic(s), ['S10b']],
+        ['P15o', 'an unreadable creation time reads as a reused pid', 'gate-identity.js',
+            [['        if (recordUnreadable(owner, snap)) unknown = `pid ${owner.pid} is running, but its creation time could not be read`;\n', '']],
+            (s) => s12Library(s).slice(0, 1), ['S12']],
+        ['P16o', 'the fencing counter mints past the safe integers', 'gate-records.js',
+            [['    if (!Number.isSafeInteger(next)) {', '    if (false) {']], (s) => s12Library(s).slice(1, 2), ['S12']],
+        ['P17o', 'a mutex from an earlier boot is held by its reused pid', 'gate-records.js',
+            [['        return Number.isFinite(bootMs) && fs.statSync(file).mtimeMs < bootMs - 60000;', '        return false;']], (s) => s12Library(s).slice(2), ['S12']],
     ];
     for (const [id, what, file, edits, scenario, covers] of plants) {
         if (!want(id) && !covers.some(want)) continue;

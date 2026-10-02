@@ -62,17 +62,48 @@ const sleepMs = (ms) => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0
 // The meta line.
 // ---------------------------------------------------------------------------
 
-/** { meta, malformed }: meta is the parsed object or null; malformed when a meta line did not parse. */
+const ISO7 = /^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d\.\d{7}Z$/;
+
+/** Why an identity ({ pid, startUtc, bootId, msysPid?, msysWinpid? }) cannot be judged, or null. */
+function identityFault(id, label) {
+    if (id === null || id === undefined) return null;
+    if (typeof id !== 'object' || Array.isArray(id)) return `${label} is not an object`;
+    if (!Number.isInteger(id.pid) || id.pid <= 0) return `${label}.pid is not a pid`;
+    if (id.startUtc !== null && id.startUtc !== undefined && !(typeof id.startUtc === 'string' && ISO7.test(id.startUtc))) return `${label}.startUtc is not a creation time`;
+    if (id.bootId !== null && id.bootId !== undefined && !(typeof id.bootId === 'string' && /^[^|]+\|\S+$/.test(id.bootId))) return `${label}.bootId is not a boot identity`;
+    for (const k of ['msysPid', 'msysWinpid']) if (id[k] !== undefined && id[k] !== null && !(Number.isInteger(id[k]) && id[k] > 0)) return `${label}.${k} is not a pid`;
+    return null;
+}
+
+/**
+ * Why a parsed meta object cannot be trusted, or null. A record of another
+ * schema, a token that is not a safe integer, or an identity with a field of
+ * the wrong shape would otherwise be judged against the live process table as
+ * if it were sound, and a nonsense creation time reads as "a reused pid".
+ */
+function metaFault(m) {
+    if (m.schema !== undefined && m.schema !== SCHEMA) return `schema ${JSON.stringify(m.schema)} is not ${SCHEMA}`;
+    if (m.token !== undefined && m.token !== null && !(Number.isSafeInteger(m.token) && m.token > 0)) return 'token is not a positive safe integer';
+    if (m.runId !== undefined && m.runId !== null && typeof m.runId !== 'string') return 'runId is not a string';
+    return identityFault(m.owner, 'owner');
+}
+
+/**
+ * { meta, malformed, fault }: meta is the parsed object or null; malformed
+ * when a meta line did not parse or did not validate (`fault` says why).
+ */
 function parseMeta(lines) {
-    for (const line of lines) {
+    for (const raw of lines) {
+        const line = raw.replace(/\r$/, '');
         if (!line.startsWith(META_PREFIX)) continue;
-        try {
-            const m = JSON.parse(line.slice(META_PREFIX.length));
-            if (m && typeof m === 'object' && !Array.isArray(m)) return { meta: m, malformed: false };
-        } catch { /* fall through */ }
-        return { meta: null, malformed: true };
+        let m;
+        try { m = JSON.parse(line.slice(META_PREFIX.length)); } catch { return { meta: null, malformed: true, fault: 'the meta line is not JSON' }; }
+        if (!m || typeof m !== 'object' || Array.isArray(m)) return { meta: null, malformed: true, fault: 'the meta line is not an object' };
+        const fault = metaFault(m);
+        if (fault) return { meta: null, malformed: true, fault };
+        return { meta: m, malformed: false, fault: null };
     }
-    return { meta: null, malformed: false };
+    return { meta: null, malformed: false, fault: null };
 }
 
 function metaLine(obj) { return `${META_PREFIX}${JSON.stringify({ schema: SCHEMA, ...obj })}`; }
@@ -149,8 +180,7 @@ function withAdmission(base, fn, { timeoutMs = 30000, isDead = () => false } = {
         if (tryCreate(file, body)) break;
         let text = null;
         try { text = fs.readFileSync(file, 'utf8'); } catch { /* released between the two calls */ }
-        const pid = text === null ? null : Number((text.split(/\r?\n/)[0] || '').trim());
-        if (text !== null && Number.isInteger(pid) && pid > 0 && isDead(pid)) breakAdmission(file, text);
+        if (text !== null && holderGone(file, text, isDead)) breakAdmission(file, text);
         if (Date.now() > until) {
             const e = new Error(`the admission mutex ${path.basename(file)} stayed held for ${timeoutMs} ms`);
             e.code = 'EADMISSION';
@@ -166,6 +196,21 @@ function withAdmission(base, fn, { timeoutMs = 30000, isDead = () => false } = {
             if (now === body) fs.unlinkSync(file);
         } catch { /* already gone */ }
     }
+}
+
+/**
+ * Is the holder of mutex `file` (body `text`) provably gone? Its pid is dead,
+ * or the file was last written before this boot began: after a reboot the pid
+ * may name an unrelated live process, and a mutex is held for milliseconds,
+ * never across a restart. An mtime or uptime that cannot be read proves nothing.
+ */
+function holderGone(file, text, isDead) {
+    const pid = Number((text.split(/\r?\n/)[0] || '').trim());
+    if (Number.isInteger(pid) && pid > 0 && isDead(pid)) return true;
+    try {
+        const bootMs = Date.now() - os.uptime() * 1000;
+        return Number.isFinite(bootMs) && fs.statSync(file).mtimeMs < bootMs - 60000;
+    } catch { return false; }
 }
 
 function breakAdmission(file, judged) {
@@ -184,6 +229,8 @@ function breakAdmission(file, judged) {
     }
 }
 
+function text0(file) { try { return fs.readFileSync(file, 'utf8').trim().slice(0, 40); } catch { return 'unreadable'; } }
+
 /** The next fencing token. Call only inside withAdmission. A malformed counter throws: it is never reset to zero. */
 function mintToken(base) {
     const file = fencePath(base);
@@ -194,6 +241,9 @@ function mintToken(base) {
         last = Number(text);
     } catch (e) { if (e.code !== 'ENOENT') throw e; }
     const next = last + 1;
+    // Past 2^53 - 1 a Number cannot hold the successor, so two admissions would
+    // share a token. Refuse, never wrap or repeat.
+    if (!Number.isSafeInteger(next)) { const e = new Error(`${path.basename(file)} is exhausted (${text0(file)})`); e.code = 'EFENCE'; throw e; }
     const tmp = `${file}.${process.pid}.tmp`;
     fs.writeFileSync(tmp, `${next}\n`);
     renameRetry(tmp, file);
@@ -283,12 +333,17 @@ function mergeDescendants(list, observed, nowIso, cap = 500) {
     return out;
 }
 
-/** Removes run journals older than `maxAgeMs`. Best effort. */
+/**
+ * Removes run journals older than `maxAgeMs`. Best effort. A re-admission
+ * counter (`readmit-*.json`, tooling/gate-recovery.js) shares the directory
+ * and is never pruned: deleting it would hand an old head a fresh budget.
+ */
 function pruneRuns(base, maxAgeMs = 14 * 86400000) {
     let names = [];
     try { names = fs.readdirSync(runsDir(base)); } catch { return 0; }
     let n = 0;
     for (const name of names) {
+        if (name.startsWith('readmit-')) continue;
         const f = path.join(runsDir(base), name);
         try { if (Date.now() - fs.statSync(f).mtimeMs > maxAgeMs) { fs.unlinkSync(f); n++; } } catch { /* in use or gone */ }
     }
@@ -316,8 +371,7 @@ function withWorktreeMutex(base, key, fn, { timeoutMs = 30000, isDead = () => fa
         if (tryCreate(file, body)) break;
         let text = null;
         try { text = fs.readFileSync(file, 'utf8'); } catch { /* released */ }
-        const pid = text === null ? null : Number((text.split(/\r?\n/)[0] || '').trim());
-        if (text !== null && Number.isInteger(pid) && pid > 0 && isDead(pid)) breakAdmission(file, text);
+        if (text !== null && holderGone(file, text, isDead)) breakAdmission(file, text);
         if (Date.now() > until) {
             const e = new Error(`the worktree mutex ${path.basename(file)} stayed held for ${timeoutMs} ms`);
             e.code = 'ELEASEMUTEX';
@@ -347,15 +401,28 @@ function readLeases(base) {
  * Writes a lease inside the worktree mutex. With `expect` ({ runId, token }),
  * the lease on disk must carry the same run id and token, or the write is
  * refused: a renewal or settlement from an earlier admission never overwrites
- * a newer one. Returns { written, why, value }.
+ * a newer one. Without `expect` (a first publication) the write is refused
+ * while the lease on disk is unreadable, or is another run's active lease and
+ * `isLive(lease)` does not answer false: one worktree runs one gate at a time.
+ * Returns { written, why, value }.
  */
-function writeLease(base, key, value, { expect = null, isDead } = {}) {
+const ACTIVE_LEASE = new Set(['admitted', 'running', 'awaiting-clearance', 'requeued', 'lingering']);
+
+function writeLease(base, key, value, { expect = null, isDead, isLive = () => null } = {}) {
     return withWorktreeMutex(base, key, () => {
         const cur = readLease(base, key);
         if (expect) {
             if (cur.state !== 'ok') return { written: false, why: `no readable lease to renew (${cur.state})`, value: cur.value };
             if (cur.value.runId !== expect.runId || cur.value.token !== expect.token) {
                 return { written: false, why: `the lease belongs to run ${cur.value.runId} token ${cur.value.token}`, value: cur.value };
+            }
+        } else if (cur.state === 'malformed') {
+            return { written: false, why: `the lease ${leasePath(base, key)} is unreadable (${cur.error}); it is kept, not overwritten`, value: null };
+        } else if (cur.state === 'ok' && cur.value.runId !== value.runId && ACTIVE_LEASE.has(cur.value.state)) {
+            let live = null;
+            try { live = isLive(cur.value); } catch { live = null; }
+            if (live !== false) {
+                return { written: false, why: `run ${cur.value.runId} holds this worktree (lease ${cur.value.state}, ${live === true ? 'running' : 'not provably finished'})`, value: cur.value };
             }
         }
         const next = { schema: SCHEMA, ...value };
@@ -365,7 +432,7 @@ function writeLease(base, key, value, { expect = null, isDead } = {}) {
 }
 
 module.exports = {
-    SCHEMA, parseMeta, metaLine, admissionPath, fencePath, bootCachePath, runsDir, leasesDir, leasePath,
+    SCHEMA, ACTIVE_LEASE, parseMeta, metaLine, admissionPath, fencePath, bootCachePath, runsDir, leasesDir, leasePath,
     withAdmission, mintToken, readLaneLock, readLaneLocks, readTicketRecords, readRun, updateRun, mergeDescendants,
     pruneRuns, withWorktreeMutex, readLease, readLeases, writeLease, writeJsonAtomic, readJson, renameRetry, tryCreate,
 };
