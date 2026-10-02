@@ -16,13 +16,22 @@
  *   P6  command lines are not matched             -> a dev server's .next is deleted (S6)
  *   P6b an unreadable process listing is empty    -> .next is deleted blind (S6)
  *   P7  the mtime scan stops one level early      -> a .next written an hour ago is deleted (S7)
- *   P8  links are followed, containment unchecked -> a junction is renamed and removed (S8)
+ *   P8  links are followed                        -> a junction is renamed and removed (S8)
+ *   P8c containment compares the target to itself -> a redirected worktree's .next passes (S8c)
  *   P9  tracked output is not refused             -> a committed .next is deleted (S9)
  *   P10 a failed rename deletes in place          -> an open .next is deleted under its user (S10)
  *   P11 no recheck inside the mutex               -> a lease published after assessment is ignored (S11)
  *   P11b no worktree mutex                        -> a runner holding the mutex is ignored (S11)
  *   P12 a failed delete counts as completed       -> the failure is not reported, exit 0 (S12)
  *   P13 only the first registered worktree is read -> linked worktrees are never assessed (S13)
+ *   P14 any .next.reaped-* is a leftover          -> a hand-made .next.reaped-backup is deleted (S12)
+ *   P15 8.3 aliases are not expanded              -> a process naming C:\...\REAP-S~1 is missed (S6s)
+ *   P16 lease identities are not validated        -> a malformed owner reads as finished (S3)
+ *   P17 every ancestor is excluded                -> a dev server that starts the reaper loses its .next (S6l)
+ *   P18 the reaper's own command line is matched  -> the --repo it names is never eligible (S6r)
+ *
+ * A scenario that cannot run on this machine (S6s with no 8.3 aliases, S10
+ * as root) prints SKIP and returns null, and its plant is skipped, not passed.
  *
  * The machine's real lock and repositories are never touched: every spawn sets
  * AUTODEV_GATE_LOCK_PATH to a temp directory and names only fixture repos.
@@ -128,7 +137,8 @@ function fixture(id, names = ['wt-a']) {
 const keyOf = (dir) => ident.pathKey(ident.canonicalPath(dir));
 const nextOf = (dir) => path.join(dir, '.next');
 const exists = (p) => fs.existsSync(p);
-const asides = (dir) => fs.readdirSync(dir).filter((n) => n.startsWith('.next.reaped-'));
+const ASIDE_RE = /^\.next\.reaped-\d{8}T\d{9}Z-\d+-[a-z0-9]{1,6}$/;
+const asides = (dir) => fs.readdirSync(dir).filter((n) => ASIDE_RE.test(n));
 const fileCount = (dir) => { let n = 0; const w = (p) => { for (const e of fs.readdirSync(p, { withFileTypes: true })) { if (e.isDirectory()) w(path.join(p, e.name)); else n++; } }; try { w(dir); } catch { return -1; } return n; };
 
 function writeLease(fx, dir, value) {
@@ -204,13 +214,18 @@ function s2Apply(subject) {
 }
 
 function s3Lease(subject, owner) {
-    const fx = fixture('s3', ['wt-live', 'wt-dead', 'wt-done']);
+    const fx = fixture('s3', ['wt-live', 'wt-dead', 'wt-done', 'wt-bad']);
     writeLease(fx, fx.wts['wt-live'], { owner, state: 'running' });
     writeLease(fx, fx.wts['wt-dead'], { owner: DEAD_OWNER, state: 'running' });
     writeLease(fx, fx.wts['wt-done'], { owner, state: 'released' });
+    // The live owner's pid with an identity of the wrong shape: unjudgeable, so it blocks.
+    writeLease(fx, fx.wts['wt-bad'], { owner: { pid: owner.pid, startUtc: 'garbage', bootId: 'x' }, state: 'running' });
     const res = run(subject, fx, ['--repo', fx.repo, '--apply', '--json']);
     const live = cand(res, fx.wts['wt-live']);
+    const bad = cand(res, fx.wts['wt-bad']);
     return [
+        ['S3: a lease whose owner identity is malformed keeps its .next, and says it cannot be judged',
+            fileCount(nextOf(fx.wts['wt-bad'])) === 3 && Boolean(bad && bad.reasons.some((r) => /cannot be judged/.test(r))), JSON.stringify(bad)],
         ['S3: a live lease keeps its .next, with the lease as the reason', Boolean(live && !live.eligible && live.reasons.some((r) => /holds a lease/.test(r))) && fileCount(nextOf(fx.wts['wt-live'])) === 3, JSON.stringify(live)],
         ['S3: a lease from an earlier boot covers nothing', !exists(nextOf(fx.wts['wt-dead'])), JSON.stringify(cand(res, fx.wts['wt-dead']))],
         ['S3: a released lease covers nothing', !exists(nextOf(fx.wts['wt-done'])), JSON.stringify(cand(res, fx.wts['wt-done']))],
@@ -274,14 +289,66 @@ function s6Processes(subject) {
 async function s6RealProbe(subject) {
     const fx = fixture('s6r');
     const a = fx.wts['wt-a'];
+    addOutput(fx.repo);
     const pid = sleeper([ident.canonicalPath(a)]);
     await sleep(500);
     const env = { ...fx.env };
     delete env.AUTODEV_REAP_TEST_PROCS;
     const res = run(subject, { ...fx, env }, ['--repo', fx.repo, '--json']);
     const c = cand(res, a);
+    const main = cand(res, fx.repo);
     return [
         ['S6r: the real process probe finds a live process whose arguments name the worktree', Boolean(c && !c.eligible && c.reasons.some((r) => r.includes(`pid ${pid} `))), JSON.stringify(c)],
+        ['S6r: the reaper\'s own command line, which names the repo, does not block the repo\'s .next', Boolean(main && main.eligible), JSON.stringify(main)],
+    ];
+}
+
+/** The 8.3 alias of a directory, or null when the volume keeps none. */
+function shortPathOf(dir) {
+    if (!WIN) return null;
+    const r = spawnSync('cmd.exe', ['/d', '/s', '/c', `"for %I in ("${dir}") do @echo %~sI"`], { encoding: 'utf8', windowsVerbatimArguments: true, windowsHide: true });
+    const s = (r.stdout || '').trim();
+    return s && s.includes('~') && s.toLowerCase() !== dir.toLowerCase() ? s : null;
+}
+
+/** A live process that names the worktree only by its 8.3 alias. */
+async function s6ShortPath(subject) {
+    const fx = fixture('s6s-longname');
+    const a = fx.wts['wt-a'];
+    const short = shortPathOf(a);
+    if (!short) { console.log('SKIP  S6s: no 8.3 alias on this volume'); return null; }
+    const pid = sleeper([short]);
+    await sleep(500);
+    const env = { ...fx.env };
+    delete env.AUTODEV_REAP_TEST_PROCS;
+    const res = run(subject, { ...fx, env }, ['--repo', fx.repo, '--json']);
+    const c = cand(res, a);
+    return [
+        ['S6s: a process naming the worktree by its 8.3 alias keeps the .next', Boolean(c && !c.eligible && c.reasons.some((r) => r.includes(`pid ${pid} `))), `${short}\n${JSON.stringify(c)}`],
+    ];
+}
+
+/** Ancestors of the reaper: only one that is launching the reaper is excluded. */
+function s6Launchers(subject) {
+    const fx = fixture('s6l');
+    const a = fx.wts['wt-a'];
+    const fwd = ident.canonicalPath(a).split('\\').join('/');
+    // The reaper's parent is this suite's process.
+    fs.writeFileSync(fx.procsFile, JSON.stringify([
+        { pid: 4, ppid: 0, commandLine: 'System', executablePath: null },
+        { pid: process.pid, ppid: 4, commandLine: `node dev-server.js --root ${fwd}`, executablePath: process.execPath },
+    ]));
+    const first = run(subject, fx, ['--repo', fx.repo, '--apply', '--json']);
+    const fx2 = fixture('s6l2');
+    const b = fx2.wts['wt-a'];
+    fs.writeFileSync(fx2.procsFile, JSON.stringify([
+        { pid: 4, ppid: 0, commandLine: 'System', executablePath: null },
+        { pid: process.pid, ppid: 4, commandLine: `node scripts/reap-build-output.js --repo ${ident.canonicalPath(b)} --apply`, executablePath: process.execPath },
+    ]));
+    const second = run(subject, fx2, ['--repo', fx2.repo, '--apply', '--json']);
+    return [
+        ['S6l: a parent that names the worktree and is not launching the reaper keeps the .next', fileCount(nextOf(a)) === 3, JSON.stringify(cand(first, a))],
+        ['S6l: a parent that is only launching the reaper does not block', !exists(nextOf(b)), JSON.stringify(cand(second, b))],
     ];
 }
 
@@ -322,6 +389,25 @@ function s8Junction(subject) {
     ];
 }
 
+/**
+ * Containment alone: a worktree directory that now redirects to another
+ * worktree. The .next under it is a real directory, so only the comparison
+ * with the canonical path git listed can refuse it.
+ */
+function s8Containment(subject) {
+    const fx = fixture('s8c', ['wt-a', 'wt-b']);
+    const a = fx.wts['wt-a'];
+    const link = path.join(fx.root, 'wt-redirect');
+    fs.symlinkSync(fx.wts['wt-b'], link, WIN ? 'junction' : 'dir');
+    const mod = require(subject);
+    const redirected = mod.shapeFault({ dir: link, canonical: ident.canonicalPath(a) }, nextOf(link), '.next');
+    const own = mod.shapeFault({ dir: a, canonical: ident.canonicalPath(a) }, nextOf(a), '.next');
+    return [
+        ['S8c: a .next reached through a redirected worktree directory resolves outside the worktree', typeof redirected === 'string' && /outside the worktree/.test(redirected), String(redirected)],
+        ['S8c: the worktree\'s own .next passes the shape checks', own === null, String(own)],
+    ];
+}
+
 function s9Tracked(subject) {
     const fx = fixture('s9');
     const a = fx.wts['wt-a'];
@@ -339,7 +425,7 @@ function s10LockedRename(subject) {
     const fx = fixture('s10');
     const a = fx.wts['wt-a'];
     const root = process.getuid && process.getuid() === 0;
-    if (root) return [['S10: a rename that fails (skipped: root ignores directory permissions)', true, '']];
+    if (root) { console.log('SKIP  S10: root ignores directory permissions, so no rename can be made to fail'); return null; }
     let fd = null;
     if (WIN) fd = fs.openSync(path.join(a, '.next', 'server', 'page.js'), 'r');
     else fs.chmodSync(a, 0o555);
@@ -374,7 +460,8 @@ async function s11Mutex(subject, owner) {
     const until = Date.now() + 60000;
     while (!exists(path.join(hand, 'assessed')) && Date.now() < until) await sleep(50);
     const assessed = exists(path.join(hand, 'assessed'));
-    writeLease(fx2, b, { owner, state: 'admitted' });
+    // Through the lease writer itself, which takes the same worktree mutex.
+    const wrote = records.writeLease(fx2.base, keyOf(b), { runId: 'r-late', token: 1, worktree: ident.canonicalPath(b), owner, state: 'admitted' }, { isDead: () => false });
     fs.writeFileSync(path.join(hand, 'go'), '');
     const late = await pending;
     const ls = late.json ? late.json.summary : {};
@@ -382,7 +469,7 @@ async function s11Mutex(subject, owner) {
     return [
         ['S11: a held worktree mutex keeps the .next', fileCount(nextOf(a)) === 3 && asides(a).length === 0, fs.readdirSync(a).join(', ')],
         ['S11: the skip names the mutex', (hs.skippedAtApply || []).some((x) => /mutex/.test(x.why)), JSON.stringify(hs)],
-        ['S11: the reaper assessed the worktree as eligible before the lease appeared', assessed && Boolean(lc && lc.eligible), JSON.stringify(lc)],
+        ['S11: the reaper assessed the worktree as eligible before the lease appeared', assessed && wrote.written && Boolean(lc && lc.eligible), `${JSON.stringify(wrote)}\n${JSON.stringify(lc)}`],
         ['S11: a lease published after assessment keeps the .next', fileCount(nextOf(b)) === 3, why(late)],
         ['S11: the skip says the worktree is no longer eligible', (ls.skippedAtApply || []).some((x) => /no longer eligible/.test(x.why) && /lease/.test(x.why)), JSON.stringify(ls)],
     ];
@@ -391,16 +478,27 @@ async function s11Mutex(subject, owner) {
 function s12DeleteFailure(subject) {
     const fx = fixture('s12');
     const a = fx.wts['wt-a'];
+    // A directory someone made by hand, with a name close to the reaper's.
+    const backup = path.join(a, '.next.reaped-backup');
+    fs.mkdirSync(backup);
+    fs.writeFileSync(path.join(backup, 'keep.txt'), 'k'.repeat(30));
+    ageTree(backup, 72 * HOUR);
     const first = run(subject, fx, ['--repo', fx.repo, '--apply', '--json'], { AUTODEV_REAP_TEST_FAIL_DELETE: '1' });
     const s = first.json ? first.json.summary : {};
     const left = asides(a);
+    const remaining = left.length === 1 ? fileCount(path.join(a, left[0])) : -1;
     const second = run(subject, fx, ['--repo', fx.repo, '--apply', '--json']);
     const s2 = second.json ? second.json.summary : {};
+    const f = (s.failures || [])[0] || {};
+    // The seam removes BUILD_ID (10 bytes), then fails: 1100 bytes stay behind.
     return [
         ['S12: a failed delete exits 1', first.code === 1, why(first)],
-        ['S12: the failure is reported apart from completed deletions', s.completed === 0 && (s.failures || []).length === 1 && s.removedBytes === 0, JSON.stringify(s)],
-        ['S12: the renamed sibling is left behind, not the .next', !exists(nextOf(a)) && left.length === 1, fs.readdirSync(a).join(', ')],
-        ['S12: the next --apply deletes the left-behind sibling', second.code === 0 && s2.completed === 1 && s2.removedBytes === NEXT_BYTES && asides(a).length === 0, why(second)],
+        ['S12: a partial delete reports the bytes it removed and the bytes that remain, apart from completed deletions',
+            s.completed === 0 && (s.failures || []).length === 1 && s.removedBytes === 10 && f.removedBytes === 10 && /1100 bytes remain/.test(f.why || ''), JSON.stringify(s)],
+        ['S12: the renamed sibling is left behind with the rest of its files, not the .next', !exists(nextOf(a)) && left.length === 1 && remaining === 2, fs.readdirSync(a).join(', ')],
+        ['S12: the next --apply deletes the left-behind sibling and counts only what was left', second.code === 0 && s2.completed === 1 && s2.removedBytes === NEXT_BYTES - 10 && asides(a).length === 0, why(second)],
+        ['S12: a hand-made .next.reaped-backup is never a candidate and survives both runs',
+            fileCount(backup) === 1 && ![...((first.json || {}).candidates || []), ...((second.json || {}).candidates || [])].some((c) => c.name === '.next.reaped-backup'), fs.readdirSync(a).join(', ')],
     ];
 }
 
@@ -469,11 +567,11 @@ async function main() {
 
     const real = {
         S1: () => s1DryRun(SUBJECT), S2: () => s2Apply(SUBJECT), S3: () => s3Lease(SUBJECT, owner), S4: () => s4MalformedLease(SUBJECT),
-        S5: () => s5Locks(SUBJECT), S6: () => s6Processes(SUBJECT), S6r: () => s6RealProbe(SUBJECT), S7: () => s7Mtime(SUBJECT),
-        S8: () => s8Junction(SUBJECT), S9: () => s9Tracked(SUBJECT), S10: () => s10LockedRename(SUBJECT), S11: () => s11Mutex(SUBJECT, owner),
+        S5: () => s5Locks(SUBJECT), S6: () => s6Processes(SUBJECT), S6r: () => s6RealProbe(SUBJECT), S6s: () => s6ShortPath(SUBJECT), S6l: () => s6Launchers(SUBJECT), S7: () => s7Mtime(SUBJECT),
+        S8: () => s8Junction(SUBJECT), S8c: () => s8Containment(SUBJECT), S9: () => s9Tracked(SUBJECT), S10: () => s10LockedRename(SUBJECT), S11: () => s11Mutex(SUBJECT, owner),
         S12: () => s12DeleteFailure(SUBJECT), S13: () => s13Enumeration(SUBJECT), S14: () => s14Cli(SUBJECT),
     };
-    for (const [id, fn] of Object.entries(real)) if (want(id)) for (const [name, ok, detail] of await fn()) check(name, ok, detail);
+    for (const [id, fn] of Object.entries(real)) if (want(id)) for (const [name, ok, detail] of (await fn()) || []) check(name, ok, detail);
 
     const plants = [
         ['P1', 'a dry run deletes', [['const result = args.apply ? apply(report,', 'const result = true ? apply(report,']], (s) => s1DryRun(s), ['S1']],
@@ -486,8 +584,18 @@ async function main() {
         ['P6b', 'an unreadable process listing reads as empty', [['    if (!procs.ok) return `running processes cannot be listed', '    if (!procs.ok) return null; if (0) return `running processes cannot be listed']],
             (s) => s6Processes(s).slice(2), ['S6']],
         ['P7', 'the mtime scan stops one level early', [['        if (depth >= 2 || !st.isDirectory()) return;', '        if (depth >= 1 || !st.isDirectory()) return;']], (s) => s7Mtime(s), ['S7']],
-        ['P8', 'links are followed and containment is unchecked', [['    try { st = fs.lstatSync(target); }', '    try { st = fs.statSync(target); }'],
-            ['    if (real !== ident.canonicalPath(path.join(wt.dir, name))) return', '    if (false) return']], (s) => s8Junction(s), ['S8']],
+        ['P8', 'links are followed', [['    try { st = fs.lstatSync(target); }', '    try { st = fs.statSync(target); }']], (s) => s8Junction(s), ['S8']],
+        ['P8c', 'containment compares the target with a second resolution of itself',
+            [['    if (real !== path.join(wt.canonical, WIN ? name.toLowerCase() : name)) return', '    if (real !== ident.canonicalPath(path.join(wt.dir, name))) return']], (s) => s8Containment(s), ['S8c']],
+        ['P14', 'any .next.reaped-* sibling is taken for a leftover', [['        for (const n of names) if (ours.test(n)) out.push(', '        for (const n of names) if (n.startsWith(`${name}${ASIDE_PREFIX}`)) out.push(']],
+            (s) => s12DeleteFailure(s), ['S12']],
+        ['P15', '8.3 aliases in command lines are not expanded', [["(p.text.includes('~') ? expandShortPaths(p.text) : p.text).toLowerCase()", 'p.text.toLowerCase()']],
+            (s) => s6ShortPath(s), ['S6s']],
+        ['P16', 'a lease identity is judged without validation', [['    if (fault) return `its lease ${key} cannot be judged', '    if (false) return `its lease ${key} cannot be judged']],
+            (s) => s3Lease(s, owner).slice(0, 1), ['S3']],
+        ['P17', 'every ancestor of the reaper is excluded', [['        if (!p || !LAUNCHER_RE.test(p.text)) break;', '        if (!p) break;']], (s) => s6Launchers(s), ['S6l']],
+        ['P18', 'the reaper\'s own command line is matched', [['    const out = new Set([process.pid]);', '    const out = new Set();']],
+            async (s) => (await s6RealProbe(s)).slice(1), ['S6r']],
         ['P9', 'tracked output is not refused', [["    if (tracked.out.length) return 'git tracks files under it';\n", '']], (s) => s9Tracked(s), ['S9']],
         ['P10', 'a failed rename deletes in place', [['            try { fs.renameSync(cand.path, aside); } catch (e) {\n', '            try { fs.renameSync(cand.path, aside); } catch (e) {\n                if (e) return { aside: cand.path, why: null };\n']],
             (s) => s10LockedRename(s), ['S10']],
@@ -503,6 +611,7 @@ async function main() {
         const m = mutant(id, edits);
         if (!m) continue;
         const rows = await scenario(m);
+        if (!rows) { console.log(`SKIP  ${id}: its scenario cannot run here`); continue; }
         if (process.env.REAP_DEBUG) for (const r of rows) console.log(`DEBUG ${id} ${r[0]}: ${r[2]}`);
         expectRed(id, what, rows);
     }
