@@ -78,6 +78,12 @@ miss renamed tasks and catch hand-started work that happens to be called
 Disposition is separate from verdict, and it is the one that decides:
 
 - `SAFE` — finished, own repo, worktree clean, branch pushed. Archivable.
+  It also requires the record to sit in the live workspace, the only one
+  `archive_session` can resolve.
+- `orphaned-ws`: clean, but in a workspace no account has used for two days.
+  `archive_session` answers "not found" for it. `--archive-orphaned` clears it.
+- `other-ws`: clean, but in another account's warm workspace. Archive it from
+  that account, never from this one.
 - `dirty(N)` / `unpushed(N)` / `branch-not-on-remote` / `stashed(N)` — finished
   but holds work that exists nowhere else. **Never archive.** Report it and let
   the user commit or push first.
@@ -123,13 +129,14 @@ were not. The directory decides.
 node "${CLAUDE_PLUGIN_ROOT}/scripts/session-sweep.js" --archive-orphaned
 ```
 
-This is the ONLY mode in which the script mutates anything. It marks SAFE records
-archived by string-replacing `"isArchived":false` in the store JSON, and **only**
-for orphaned workspaces. It still never touches a git worktree.
+This is the ONLY mode in which the script mutates anything. It marks `orphaned-ws`
+records archived by string-replacing `"isArchived":false` in the store JSON, and
+**only** for orphaned workspaces. It still never touches a git worktree.
 
 Why it is safe there and nowhere else: the app never loaded those records, so it
 holds nothing to overwrite them with. Records in the live workspace are skipped
-and still require `archive_session`. If two workspaces are both recently active,
+and still require `archive_session`, and `other-ws` records are skipped too. If
+two workspaces are both recently active,
 the script treats neither as orphaned — that is a shape it does not model, and
 the safe reading is to leave both alone.
 

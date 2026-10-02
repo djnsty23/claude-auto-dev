@@ -666,6 +666,113 @@ function checkPipeDeliversEveryByte() {
     Buffer.byteLength(tablePipe.stdout || '', 'utf8') === viaFileBytes([]), true);
 }
 
+// archive_session and get_session resolve a session id in the live workspace
+// only. [measured 2026-10-02] after an account switch every SAFE row of a real
+// sweep sat in the previous account's workspace, and get_session answered "not
+// found" for each one tried. So SAFE has to mean reachable as well as clean.
+//
+// Three workspaces, each holding one finished record with nothing on disk to
+// lose: the live one (newest activity), a warm one (active within two days, so
+// another account is using it) and a cold one (orphaned). Only the live record
+// may be SAFE. The other two stay `clean`, which is what --archive-orphaned
+// reads, and that flag must still write the orphaned record and only it.
+function checkWorkspaceReachability() {
+  const H = 60 * 60000;
+  const nowhere = path.join(ROOT, 'reach-nowhere');   // never created: no git, no transcript
+  const rec = (id, ageMs) => ({
+    sessionId: `local_${id}`, title: id, cwd: nowhere, originCwd: nowhere,
+    isArchived: false, lastActivityAt: Date.now() - ageMs, createdAt: Date.now() - 60 * 86400000,
+  });
+  const put = (store, ws, r) => {
+    const dir = ws ? path.join(store, ws, 'sub') : store;
+    fs.mkdirSync(dir, { recursive: true });
+    const file = path.join(dir, `${r.sessionId}.json`);
+    fs.writeFileSync(file, JSON.stringify(r), 'utf8');
+    return file;
+  };
+  const sweep = (store, args) => spawnSync(process.execPath, [SCRIPT, ...args], {
+    encoding: 'utf8',
+    env: { ...process.env, SESSION_SWEEP_STORE: store, SESSION_SWEEP_OWNER: '' },
+  });
+  const parse = (res, tag) => {
+    try { return JSON.parse(res.stdout); }
+    catch { failures.push(`${tag}: unparseable JSON\n${(res.stdout || res.stderr || '').slice(0, 400)}`); return []; }
+  };
+
+  const store = path.join(ROOT, 'store-reach');
+  const files = {
+    live: put(store, 'ws-live', rec('reach-live', 5 * H)),          // DONE, newest: the live workspace
+    warm: put(store, 'ws-warm', rec('reach-warm', 24 * H)),         // DONE, 19h behind: warm, not orphaned
+    cold: put(store, 'ws-cold', rec('reach-cold', 40 * 86400000)),  // STALE, 40d behind: orphaned
+  };
+  const rows = parse(sweep(store, ['--json']), 'reachability --json');
+  const by = (id) => rows.find((r) => r.sessionId === `local_${id}`) || {};
+  const live = by('reach-live');
+  const warm = by('reach-warm');
+  const cold = by('reach-cold');
+
+  check('reach: population read', rows.length, 3);
+  check('reach: every record is finished', [live.state, warm.state, cold.state].join(), 'DONE,DONE,STALE');
+  check('reach: every record is clean', [live.clean, warm.clean, cold.clean].join(), 'true,true,true');
+  check('reach: each row names its workspace', [live.workspace, warm.workspace, cold.workspace].join(), 'ws-live,ws-warm,ws-cold');
+  check('reach: the live record is reachable', live.reachable, true);
+  check('reach: the live record is SAFE', live.safe, true);
+  check('reach: the warm other-account record is not reachable', warm.reachable, false);
+  check('reach: the warm other-account record is not SAFE', warm.safe, false);
+  check('reach: the orphaned record is not reachable', cold.reachable, false);
+  check('reach: the orphaned record is not SAFE', cold.safe, false);
+
+  // The human table is what a reader hands to archive_session.
+  const table = sweep(store, []);
+  const out = table.stdout || '';
+  const lineOf = (title) => out.split('\n').find((l) => l.includes(title)) || '';
+  check('reach table: exits 0', table.status, 0);
+  check('reach table: the live row reads SAFE', /\bSAFE\b/.test(lineOf('reach-live')), true);
+  check('reach table: the warm row reads other-ws', /\bother-ws\b/.test(lineOf('reach-warm')), true);
+  check('reach table: the cold row reads orphaned-ws', /\borphaned-ws\b/.test(lineOf('reach-cold')), true);
+  check('reach table: SAFE counts the live row out of the three clean ones', /SAFE TO ARCHIVE: 1 of 3 finished and clean/.test(out), true);
+  check('reach table: counts orphaned-ws under SAFE', /^ {2}orphaned-ws: 1 \(/m.test(out), true);
+  check('reach table: counts other-ws under SAFE', /^ {2}other-ws: 1 \(/m.test(out), true);
+  check('reach table: says archive_session cannot see them', /archive_session cannot see orphaned-ws or other-ws rows/.test(out), true);
+  // A clean row outside the live workspace has nothing to lose, so it must not
+  // land under BLOCKED with a null risk beside it.
+  check('reach table: no clean row is listed as BLOCKED', /BLOCKED[^\n]*: 0\n/.test(out), true);
+
+  // --archive-orphaned: the cold record only, read back from disk.
+  const readArchived = (f) => {
+    try { return JSON.parse(fs.readFileSync(f, 'utf8')).isArchived; } catch { return 'unreadable'; }
+  };
+  const w = sweep(store, ['--archive-orphaned']);
+  check('reach archive-orphaned: exits 0', w.status, 0);
+  check('reach archive-orphaned: the orphaned record IS archived', readArchived(files.cold), true);
+  check('reach archive-orphaned: the live record is NOT archived', readArchived(files.live), false);
+  check('reach archive-orphaned: the warm other-account record is NOT archived', readArchived(files.warm), false);
+  check('reach archive-orphaned: the warm record is skipped with its route named',
+    /reach-warm: not the live workspace and not orphaned: archive it from the account that uses it/.test(w.stdout || ''), true);
+
+  // No workspace directory anywhere: the live workspace is undetermined, and a
+  // clean record stays SAFE exactly as it did before workspaces counted.
+  const flat = path.join(ROOT, 'store-reach-flat');
+  put(flat, null, rec('flat-only', 40 * 86400000));
+  const f = parse(sweep(flat, ['--json']), 'undetermined --json').find((r) => r.sessionId === 'local_flat-only') || {};
+  check('undetermined workspace: the clean record is still SAFE', f.safe, true);
+  check('undetermined workspace: and reads reachable', f.reachable, true);
+  check('undetermined workspace: names no workspace', f.workspace, null);
+
+  // A live workspace exists, and one record sits outside every workspace
+  // directory. Nothing says archive_session can resolve it, so it fails closed.
+  const mixed = path.join(ROOT, 'store-reach-mixed');
+  put(mixed, 'ws-live', rec('mixed-live', 5 * H));
+  put(mixed, null, rec('mixed-loose', 40 * 86400000));
+  const m = parse(sweep(mixed, ['--json']), 'unknown workspace --json');
+  const loose = m.find((r) => r.sessionId === 'local_mixed-loose') || {};
+  check('unknown workspace beside a live one: clean', loose.clean, true);
+  check('unknown workspace beside a live one: not reachable', loose.reachable, false);
+  check('unknown workspace beside a live one: not SAFE', loose.safe, false);
+  check('unknown workspace beside a live one: the live control is SAFE',
+    (m.find((r) => r.sessionId === 'local_mixed-live') || {}).safe, true);
+}
+
 function run() {
   setup();
   buildCases();
@@ -678,6 +785,7 @@ function run() {
   checkDoneUnboundAndSelf();
   checkPipeDeliversEveryByte();
   checkUnpushedLogDies();
+  checkWorkspaceReachability();
 
   // Two extra records for the ephemeral clock: same 5-day idle, differing only
   // by whether a schedule launched them. Derived from the same age so the pair
