@@ -441,16 +441,6 @@ function bootNow(base) {
 
 function judgeMeta(meta, base, maxAgeMs) {
     const owner = meta.owner;
-    if (!owner.startUtc && !owner.msysPid) {
-        // An identity recorded without a creation time (a hand-over to a
-        // waiter whose ticket had none): the boot and the pid probe decide.
-        const boot = bootNow(base);
-        if (owner.bootId && boot && owner.bootId !== boot.id) return { alive: false, why: 'it was written in an earlier boot' };
-        const a = isAlive(owner.pid);
-        return { alive: a, why: a === false ? `pid ${owner.pid} is not running` : `pid ${owner.pid} answers a liveness probe` };
-    }
-    const snap = ident.snapshot({ maxAgeMs });
-    const boot = snap.ok ? snap.boot : bootNow(base);
     let execution = null;
     let journalUnreadable = false;
     if (meta.runId) {
@@ -458,6 +448,21 @@ function judgeMeta(meta, base, maxAgeMs) {
         if (r.state === 'ok') execution = r.value;
         else if (r.state === 'malformed') journalUnreadable = true;
     }
+    const recordsExecution = Boolean(execution && (execution.chainRoot || (Array.isArray(execution.descendants) && execution.descendants.length)));
+    if (!owner.startUtc && !owner.msysPid) {
+        // An identity recorded without a creation time (a hand-over to a
+        // waiter whose ticket had none): the boot and the pid probe decide
+        // for the owner. A dead owner whose journal names processes is still
+        // judged by them below: it may have started a chain that runs on.
+        const boot = bootNow(base);
+        if (owner.bootId && boot && owner.bootId !== boot.id) return { alive: false, why: 'it was written in an earlier boot' };
+        const a = isAlive(owner.pid);
+        if (a === true) return { alive: true, why: `pid ${owner.pid} answers a liveness probe` };
+        if (journalUnreadable) return { alive: null, why: 'its execution journal cannot be read' };
+        if (!recordsExecution) return { alive: a, why: a === false ? `pid ${owner.pid} is not running` : `pid ${owner.pid} cannot be probed` };
+    }
+    const snap = ident.snapshot({ maxAgeMs });
+    const boot = snap.ok ? snap.boot : bootNow(base);
     return ident.judgeExecution({ owner, execution, journalUnreadable, snap, boot, msys: ident.msysTable(), legacyAlive: isAlive });
 }
 
@@ -662,8 +667,14 @@ function ownerIdentity(pid) {
  * it may. A lock with no meta line (an older writer) is matched by pid alone.
  */
 function fenceMismatch(held, runId, token) {
-    if (token === null || token === undefined || !held.meta) return null;
-    if (held.meta.token !== token || (runId && held.meta.runId !== runId)) {
+    const fenced = (token !== null && token !== undefined) || Boolean(runId);
+    if (held.malformed && fenced) return `the lock's meta line cannot be read (${held.fault || 'malformed'}), so run ${runId || '(any)'} token ${token === null || token === undefined ? '(none)' : token} cannot be matched; left untouched`;
+    if (!held.meta || !fenced) return null;
+    // A run id alone fences too: a late release from an earlier run of the
+    // same pid must not free a later run's admission.
+    const tokenOff = token !== null && token !== undefined && held.meta.token !== token;
+    const runOff = Boolean(runId) && Boolean(held.meta.runId) && held.meta.runId !== runId;
+    if (tokenOff || runOff) {
         return `the lock now belongs to run ${held.meta.runId} with token ${held.meta.token}, not run ${runId || '(any)'} token ${token}; left untouched`;
     }
     return null;
@@ -675,7 +686,7 @@ function fenceMismatch(held, runId, token) {
  * process; without that proof it is ours, as before ownership records.
  */
 function namesUs(held, pid, runId) {
-    if (!held || held.pid !== pid) return false;
+    if (!held || held.pid !== pid || held.malformed) return false;
     const m = held.meta;
     if (!m || !runId || !m.runId || m.runId === runId) return true;
     const start = m.owner && m.owner.startUtc;
@@ -1113,7 +1124,14 @@ async function main() {
     const what = args.what || describe();
     const declared = gateClass(env, args.cls);
     if (declared.note) log(`${TAG} note: ${declared.note}`);
-    const repo = ident.repoIdentity(path.resolve(args.repo || process.cwd()));
+    // --repo names the checkout the gate is for, but cannot vouch for the
+    // caller: a harness checkout that runs the CLI stays harness whatever
+    // product it names. The caller's own directory counts when git can name it.
+    let repo = ident.repoIdentity(path.resolve(args.repo || process.cwd()));
+    if (args.repo && !repo.harness) {
+        const caller = ident.repoIdentity(process.cwd());
+        if (caller.resolved && caller.harness) repo = { ...caller, why: `the caller's checkout is the harness (${caller.why}), whatever --repo names` };
+    }
     const cls = repo.harness ? HARNESS : declared.cls;
     if (repo.harness && declared.cls === PRODUCT) log(`${TAG} note: queued as harness, not product: ${repo.why}`);
     const repoMeta = { worktree: repo.worktree, commonDir: repo.commonDir, origin: repo.origin, derivedClass: repo.harness ? HARNESS : PRODUCT };
