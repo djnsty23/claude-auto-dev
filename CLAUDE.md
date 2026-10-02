@@ -41,11 +41,13 @@ The chain's exit status is a verdict on one step, not on thirteen.
   A waiter stopped by hand leaves its ticket: `full-gate-queue.js leave --pid <pid>` removes it.
 - **Exit 2 is INDETERMINATE**, never a pass or a fail: a chain the lock did not see finish, or a
   conflict. Read the conflict line before re-running.
-- **Run it on a clean tree, after committing and before pushing.** `check:suites` grades HEAD in a
-  private worktree and refuses a dirty tree. Iterate with `npm test`, then commit, gate and push.
+- **One full gate per merge, on the frozen candidate.** Iterate with `npm test`. Then rebase onto
+  `origin/main`, commit, and run the gate once on that clean tree: `check:suites` grades HEAD in a
+  private worktree and refuses a dirty tree. Merge with `plugins/autodev-core/scripts/merge-lock.js`,
+  which takes the per-repo merge lock, refuses a base that moved, and reads the merged tree back.
 - **Do not touch the tree while it runs.** `test-all.js` fails `tree-inert` on any `git status`
   change. Draft in a scratchpad.
-- **`gate:fast` does not satisfy the merge bar.** The bar is the full gate after any rebase.
+- **`gate:fast` does not satisfy the merge bar.** The bar is the full gate on the rebased candidate.
 - **The gate is not what CI runs.** `check:hook-parse` is CI's `node --check` loop over
   `plugins/*/hooks/*.js`, but seven of CI's steps are `if: matrix.os == 'ubuntu-latest'`.
 - **A conflict marker inside a string still parses**, so `check:conflict-markers` greps every tracked

@@ -3,6 +3,34 @@
 Non-obvious choices, and where the work that implements them actually landed.
 One entry per decision, newest first.
 
+## 2026-10-02: one full gate per merge, merged under a per-repo merge lock
+
+The merge bar was a full gate on the PR, then another on the merged tree after
+any rebase: about two full gates per merged PR. It is now one full gate on the
+frozen candidate, the PR branch rebased onto the base branch's current head.
+That proof holds only while the base stays where it was, so the merge itself
+goes through `plugins/autodev-core/scripts/merge-lock.js`.
+
+merge-lock.js takes a per-repo lock under `<home>/.claude/autodev/locks/`
+through `full-gate-queue.js`, so mergers queue first come first served and a
+dead holder is moved aside only when both tasklist and ps fail to find its pid.
+It refuses a PR head that is not the gated head and a head that is behind its
+base, merges with `gh pr merge --rebase --match-head-commit`, and reads the
+base back. A merged tree that differs from the gated tree exits 1 loudly. The
+merge stands, because undoing a pushed merge automatically is the worse failure.
+
+The gate writes no machine-readable verdict keyed by commit, so the proof is a
+captured gate log passed as `--gate-receipt`. It must name the full head sha
+and end with gate-lock's `verdict PASS (exit 0)` line. A hand-written receipt
+passes. It catches an honest slip, not a forgery, and a receipt the gate writes
+itself replaces it when one exists.
+
+Raw `gh pr merge`, and `gh api` with a PUT to a `pulls/<n>/merge` path, are
+blocked by `coordinator-write-guard.js` only when
+`<home>/.claude/autodev/merge-lock.enforce` exists. It ships off: a block on
+every installed session's merges is a decision for each operator, and the rule
+is silent without the marker.
+
 ## 2026-09-28: the clock starts queued work through headless workers, behind a judge and a switch
 
 `plugins/autodev-core/scripts/brain-judge.js` is one tick the Brain clock runs
