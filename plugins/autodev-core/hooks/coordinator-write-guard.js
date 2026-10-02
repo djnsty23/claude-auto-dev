@@ -400,21 +400,56 @@ function isInside(root, child) {
 
 const MERGE_MARKER_PARTS = ['.claude', 'autodev', 'merge-lock.enforce'];
 
+// gh options that take a value. A value is never the subcommand or the endpoint:
+// `gh api --input x/pulls/1/merge -X PUT repos/o/n/actions/permissions` is not a merge.
+const GH_VALUE_OPTS = new Set(['-R', '--repo', '--hostname']);
+const API_VALUE_OPTS = new Set(['-X', '--method', '-H', '--header', '-f', '--raw-field', '-F', '--field',
+    '--input', '-q', '--jq', '-t', '--template', '-p', '--preview', '--cache', '--hostname', '-R', '--repo']);
+
 /** The first segment that merges a PR through gh, as a short label, or null. */
 function rawMergeSegment(segments) {
     for (const seg of segments) {
-        const toks = seg.split(/\s+/).filter(Boolean).map(unwrap);
+        const toks = seg.split(/\s+/).filter(Boolean).map((t) => unwrap(t).replace(/["']/g, ''));
         let i = 0;
-        while (i < toks.length && (/^[A-Za-z_][A-Za-z0-9_]*=/.test(toks[i]) || toks[i] === 'command' || toks[i] === 'exec')) i++;
+        let viaEnv = false;
+        for (; i < toks.length; i++) {
+            const t = toks[i];
+            if (/^[A-Za-z_][A-Za-z0-9_]*=/.test(t) || t === 'command' || t === 'exec') continue;
+            if (path.basename(t.replace(/\\/g, '/')) === 'env') { viaEnv = true; continue; }
+            if (viaEnv && t.startsWith('-')) continue;
+            break;
+        }
         const bin = path.basename(String(toks[i] || '').replace(/\\/g, '/')).toLowerCase().replace(/\.exe$/, '');
         if (bin !== 'gh') continue;
         const rest = toks.slice(i + 1);
-        if (rest[0] === 'pr' && rest[1] === 'merge') return 'gh pr merge';
-        if (rest[0] !== 'api') continue;
-        const put = rest.some((t, k) => /^(?:-X|--method)$/.test(t) && /^put$/i.test(rest[k + 1] || ''))
-            || rest.some((t) => /^(?:-XPUT|--method=PUT)$/i.test(t));
-        const toMerge = rest.some((t) => /(?:^|\/)pulls\/[^/\s]+\/merge\/?$/.test(t));
-        if (put && toMerge) return 'gh api -X PUT .../pulls/<n>/merge';
+        // The subcommand words, skipping gh's own options and their values.
+        const words = [];
+        let k = 0;
+        for (; k < rest.length && words.length < 2; k++) {
+            if (GH_VALUE_OPTS.has(rest[k])) { k++; continue; }
+            if (rest[k].startsWith('-')) continue;
+            words.push(rest[k]);
+        }
+        if (words[0] === 'pr' && words[1] === 'merge') {
+            // Help and cancelling auto-merge do not merge anything.
+            if (rest.some((t) => t === '--help' || t === '-h' || t === '--disable-auto')) continue;
+            return 'gh pr merge';
+        }
+        if (words[0] !== 'api') continue;
+        let method = null;
+        let endpoint = null;
+        for (let j = rest.indexOf('api') + 1; j < rest.length; j++) {
+            const t = rest[j];
+            if (t === '-X' || t === '--method') { method = rest[j + 1] || ''; j++; continue; }
+            if (API_VALUE_OPTS.has(t)) { j++; continue; }
+            let m;
+            if ((m = /^(?:-X|--method=)(.+)$/.exec(t))) { method = m[1]; continue; }
+            if (t.startsWith('-')) continue;
+            if (endpoint === null) endpoint = t;
+        }
+        if (!method || !/^put$/i.test(method) || !endpoint) continue;
+        const ep = endpoint.replace(/^https?:\/\/[^/]+/i, '').replace(/[?#].*$/, '');
+        if (/(?:^|\/)pulls\/[^/]+\/merge\/?$/.test(ep)) return 'gh api -X PUT .../pulls/<n>/merge';
     }
     return null;
 }
@@ -460,7 +495,9 @@ try {
     const cwd = path.resolve(data.cwd || process.cwd());
 
     // The third guard, first: a block beats the ask and the role check.
-    if (/\bgh\b/.test(command) && /merge/.test(command)) {
+    // Quotes are removed first: the shell joins `"g""h"` into gh.
+    const unquoted = command.replace(/["']/g, '');
+    if (/\bgh\b/.test(unquoted) && /merge/.test(unquoted)) {
         const marker = path.join(os.homedir(), ...MERGE_MARKER_PARTS);
         if (fs.existsSync(marker)) {
             // gh expands {owner}, {repo} and {branch} itself; the splitter reads braces as groups.
