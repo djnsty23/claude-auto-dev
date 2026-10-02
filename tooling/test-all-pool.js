@@ -27,6 +27,9 @@
 // write, so suites never interleave. With --no-receipt test-all keeps no log,
 // so the pool runs everything serially rather than lose a suite's output.
 //
+// A suite whose log could not be printed whole adds one result of the pool's
+// own, a FAIL, so lost output fails the run without discarding any verdict.
+//
 // RESULTS come back in discovery order, exactly as runOne made them. Nothing
 // resolves before every started suite has settled, because the runner starts
 // validate as soon as this resolves. test-all.js refuses any result runOne did
@@ -85,15 +88,21 @@ function loadManifest(file) {
     if (!doc || doc.schema !== SCHEMA || !doc.suites || typeof doc.suites !== 'object' || Array.isArray(doc.suites)) {
         return { suites, error: `${path.basename(file)} is not schema ${SCHEMA} with a suites object; every suite runs serial` };
     }
+    // One malformed entry means the file was not written the way it was
+    // reviewed, so none of it is trusted: every suite runs serial.
     const bad = [];
     for (const [name, e] of Object.entries(doc.suites)) {
         const ok = e && (e.isolation === 'parallel' || e.isolation === 'serial')
             && typeof e.reason === 'string' && e.reason.trim() !== ''
-            && typeof e.sha256 === 'string' && /^[0-9a-f]{64}$/.test(e.sha256);
+            && typeof e.sha256 === 'string' && /^[0-9a-f]{64}$/.test(e.sha256)
+            && (e.accepted === undefined || (Array.isArray(e.accepted) && e.accepted.every((a) => typeof a === 'string')));
         if (ok) suites.set(name, e);
         else bad.push(name);
     }
-    return { suites, error: bad.length ? `${bad.length} malformed entr${bad.length === 1 ? 'y runs' : 'ies run'} serial: ${bad.slice(0, 5).join(', ')}` : null };
+    if (bad.length) {
+        return { suites: new Map(), error: `${bad.length} malformed entr${bad.length === 1 ? 'y' : 'ies'} (${bad.slice(0, 5).join(', ')}); every suite runs serial` };
+    }
+    return { suites, error: null };
 }
 
 function hashFile(file) {
@@ -169,7 +178,8 @@ const writer = (stream) => (chunk) => {
 //   opts.manifest  manifest path (tooling/suite-isolation.json)
 //   opts.dir       directory the suites live in (tooling/)
 //   opts.noLogs    true when the runner keeps no logs (--no-receipt)
-//   opts.runDir    the run directory holding logs (found from the pid)
+//   opts.runDir    the run directory holding logs (found from the pid); none
+//                  found means no logs are kept, so the run is serial
 //   opts.out/err   writers returning the byte count written, for tests
 async function runSuites(items, runOne, opts) {
     const o = opts || {};
@@ -196,6 +206,15 @@ async function runSuites(items, runOne, opts) {
         return serially();
     }
 
+    // The log directory must exist BEFORE any suite runs with echo off: a
+    // runner whose coverage store failed (beginRun threw) keeps no logs, and a
+    // batch started silent then would lose its output for good.
+    const runDir = o.runDir === undefined ? findRunDir(env, process.pid) : o.runDir;
+    if (!runDir) {
+        err(`[pool] ${ENV}=${size} ignored: this run keeps no suite logs to print whole, so suites run serially\n`);
+        return serially();
+    }
+
     const loaded = loadManifest(o.manifest || path.join(TOOLING, MANIFEST_FILE));
     if (loaded.error) err(`[pool] ${loaded.error}\n`);
     const planned = classify(list, loaded.suites, o.dir);
@@ -203,7 +222,6 @@ async function runSuites(items, runOne, opts) {
     err(`[pool] up to ${size} at once: ${count((p) => p.mode === 'parallel')} parallel, ${count((p) => p.mode === 'serial')} serial `
         + `(${count((p) => p.why === 'unknown')} not in the manifest, ${count((p) => p.why === 'changed')} changed since review)\n`);
 
-    let runDir = o.runDir;
     const byLabel = new Map();
     const store = (label, r) => {
         if (!byLabel.has(label)) byLabel.set(label, []);
@@ -212,6 +230,7 @@ async function runSuites(items, runOne, opts) {
     const failures = [];
     const active = new Set();
     let logsWork = true;
+    const lostLogs = [];
 
     const drain = async () => {
         while (active.size) await Promise.race(active);
@@ -234,8 +253,7 @@ async function runSuites(items, runOne, opts) {
             try {
                 const r = await runOne(p.item, { echo: false });
                 store(p.item.label, r);
-                if (runDir === undefined) runDir = findRunDir(env, process.pid);
-                if (!printLog(r, runDir, out, err)) logsWork = false;
+                if (!printLog(r, runDir, out, err)) { logsWork = false; lostLogs.push(p.item.label); }
             } catch (e) {
                 failures.push(`${p.item.label}: ${e && e.message}`);
             }
@@ -245,10 +263,18 @@ async function runSuites(items, runOne, opts) {
     }
     await drain();
 
-    if (!logsWork) err('[pool] a suite log could not be printed whole, so the suites after it ran serially\n');
     if (failures.length) err(`[pool] ${failures.length} suite(s) left no result: ${failures.slice(0, 5).join('; ')}\n`);
     const results = [];
     for (const item of list) for (const r of byLabel.get(item.label) || []) results.push(r);
+    // A suite whose output was lost graded the code, but nobody can read why.
+    // That is a pool failure: one extra result runOne never produced, which
+    // test-all.js reports as a FAIL row of the pool while keeping every
+    // delivered verdict (and rerunning nothing).
+    if (lostLogs.length) {
+        const reason = `the output of ${lostLogs.join(', ')} could not be printed whole, so the suites after it ran serially`;
+        err(`[pool] FAILED: ${reason}\n`);
+        results.push({ label: 'test-all-pool', state: 'fail', reason });
+    }
     return results;
 }
 
@@ -328,18 +354,24 @@ function callArgs(src, openIdx) {
     return src.slice(openIdx + 1);
 }
 
-// The first argument of a call, splitting on the first comma at depth 0.
-function firstArg(args) {
+// A call's arguments, split on the commas at depth 0.
+function splitArgs(args) {
+    const parts = [];
     let depth = 0;
+    let start = 0;
     for (let i = 0; i < args.length; i++) {
         const c = args[i];
         if (c === '(' || c === '[' || c === '{') depth++;
         else if (c === ')' || c === ']' || c === '}') depth--;
-        else if (c === ',' && depth === 0) return args.slice(0, i);
+        else if (c === ',' && depth === 0) { parts.push(args.slice(start, i)); start = i + 1; }
     }
-    return args;
+    parts.push(args.slice(start));
+    return parts;
 }
 
+// Calls that take two paths write the SECOND one (copy, rename, link
+// destinations; a symlink's own path), so both are read.
+const TWO_PATH = new Set(['renameSync', 'copyFileSync', 'cpSync', 'symlinkSync', 'linkSync', 'rename', 'copyFile']);
 const WRITE_CALL = /\b(writeFileSync|appendFileSync|mkdirSync|rmSync|rmdirSync|unlinkSync|renameSync|copyFileSync|cpSync|symlinkSync|linkSync|truncateSync|utimesSync|writeFile|appendFile|unlink|rename|copyFile)\s*\(/g;
 const NESTED = /(test-all\.js|check-suites-can-fail|find-vacuous-assertions|find-untested-functions|coverage-receipt|gate-lock|full-gate-queue|gate-fast)/g;
 const MUTATING_GIT = ['init', 'add', 'commit', 'worktree', 'config', 'checkout', 'switch', 'branch', 'stash', 'tag', 'update-ref', 'reset', 'push', 'fetch', 'merge', 'rebase', 'rm', 'mv', 'clone', 'notes', 'gc', 'apply', 'am', 'cherry-pick', 'revert'];
@@ -370,11 +402,15 @@ function auditSource(src) {
     let m;
     WRITE_CALL.lastIndex = 0;
     while ((m = WRITE_CALL.exec(code))) {
-        if (hitsAnchor(firstArg(callArgs(code, m.index + m[0].length - 1)))) writes.add(m[1]);
+        const parts = splitArgs(callArgs(code, m.index + m[0].length - 1));
+        const targets = TWO_PATH.has(m[1]) ? parts.slice(0, 2) : parts.slice(0, 1);
+        if (targets.some(hitsAnchor)) writes.add(m[1]);
     }
     if (writes.size) signals.push(`repo-write: ${[...writes].join(', ')} on a path built from the repo root`);
     const verbs = gitVerbs(code);
     const mutating = [...verbs].filter((v) => MUTATING_GIT.includes(v));
+    // --global or --system writes the operator's own git config, wherever the cwd is.
+    if (/['"`]--(global|system)['"`]|\bgit\s+config\s+--(global|system)\b/.test(code)) signals.push('git-global: writes or reads global or system git config');
     if (mutating.length) signals.push(`git-write: git ${mutating.join(', ')}${verbs.has('init') ? ' (a fixture repo is initialised; every call must target it)' : ''}`);
     if (/\.listen\(\s*[1-9]|\bport\s*[:=]\s*[1-9]\d{1,4}\b|(127\.0\.0\.1|localhost):[1-9]\d{1,4}/.test(code)) signals.push('fixed-port: a non-zero port literal');
     const overridesProfile = /\b(HOME|USERPROFILE|CLAUDE_CONFIG_DIR)\b\s*[:=][^=]|\[\s*['"](HOME|USERPROFILE|CLAUDE_CONFIG_DIR)['"]\s*\]\s*=[^=]/.test(code);
@@ -384,6 +420,9 @@ function auditSource(src) {
     } else if (/require\([^)]*plugins/.test(code) && !overridesProfile) {
         signals.push('profile: loads plugin code in-process without overriding the profile');
     }
+    // An override elsewhere in the file does not cover a child handed the
+    // runner's own environment as is.
+    if (/\benv\s*:\s*process\.env\b(?!\s*\.)/.test(code)) signals.push('profile: a child is given process.env unchanged');
     const nested = code.match(NESTED);
     if (nested) signals.push(`nested-runner: drives ${[...new Set(nested)].join(', ')}`);
     if (/\b(spawn\w*|exec\w*)\(\s*(['"`])npm(\.cmd)?\2|['"`]npm(\.cmd)?\s+(run|test|install|ci|exec)\b/.test(code)) signals.push('npm: spawns npm');
