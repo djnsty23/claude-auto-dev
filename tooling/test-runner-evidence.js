@@ -20,7 +20,11 @@
 //   6. A report far larger than a pipe buffer arrives whole, and the runner
 //      never calls process.exit().
 //   7. The runOne interface: a pool module drives it, a broken one fails
-//      visibly, --serial ignores it, and absence means serial.
+//      visibly, --serial ignores it, and absence means serial. A pool cannot
+//      forge a result, and a suite the runner could not start is INDET by
+//      name while an earlier failure still exits 1.
+//   8. One store, two runners: the one that started later owns the receipt,
+//      and a detached grandchild's late coverage still reaches the census.
 
 'use strict';
 
@@ -270,6 +274,25 @@ async function main() {
         const redC = checkReceipt(fx);
         reset();
         check('5. a red run is refused even though every dump is present', !redC.ok && /did not pass/.test(redC.problem), redC.problem);
+
+        // The summary field alone is not evidence: each outcome and the tree
+        // verdict must agree with it.
+        const lied = JSON.parse(base); lied.outcomes[0].state = 'fail'; lied.outcomes[0].status = 1;
+        fs.writeFileSync(path.join(fx.store, 'receipt.json'), JSON.stringify(lied));
+        const liedC = checkReceipt(fx);
+        reset();
+        check('5. verdict "pass" over an outcome that failed is refused', !liedC.ok && /outcome\(s\) are not/.test(liedC.problem), liedC.problem);
+        const treeLied = JSON.parse(base); treeLied.treeInert = { state: 'fail', why: 'tree-modified', evidence: {} };
+        fs.writeFileSync(path.join(fx.store, 'receipt.json'), JSON.stringify(treeLied));
+        const treeC = checkReceipt(fx);
+        reset();
+        check('5. verdict "pass" over a failed tree-inert is refused', !treeC.ok && /tree-inert is fail/.test(treeC.problem), treeC.problem);
+        const torn = JSON.parse(base); torn.dumps[0].unreadable = 1;
+        fs.writeFileSync(path.join(fx.store, 'receipt.json'), JSON.stringify(torn));
+        const tornC = checkReceipt(fx);
+        reset();
+        check('5. a suite with a coverage dump that did not parse is refused, not graded on the rest', !tornC.ok && /unreadable dump/.test(tornC.problem), tornC.problem);
+        check('5. control: the restored receipt is accepted once more', checkReceipt(fx).ok, checkReceipt(fx).problem);
     }
     {
         // An old receipt: a source edited after the run, on a file that was
@@ -281,14 +304,24 @@ async function main() {
         });
         const src = path.join(fx.root, 'plugins', 'fxr', 'scripts', 'fxr-stale.js');
         fs.appendFileSync(src, '// dirty before the run\n');
+        const helper = path.join(fx.tooling, 'suite-tmp.js');
+        fs.appendFileSync(helper, '// dirty before the run\n');
         const r = runAll(fx);
         if (finished(r, 'case 5 stale runner')) {
             const statusBefore = git(fx.root, ['status', '--porcelain']).stdout;
             check('5. control: the stale-case run passed and its receipt is accepted', r.status === 0 && checkReceipt(fx).ok, `exit ${r.status} ${checkReceipt(fx).problem}`);
+            const ranWith = fs.readFileSync(src);
             fs.appendFileSync(src, '// edited after the run\n');
             check('5. control: the porcelain status did not change', git(fx.root, ['status', '--porcelain']).stdout === statusBefore);
             const c = checkReceipt(fx);
             check('5. a source edited after the run makes the receipt stale, by its hash', !c.ok && /stale receipt: 1 source file/.test(c.problem), c.problem);
+            fs.writeFileSync(src, ranWith);
+            check('5. control: with the source restored the receipt is accepted again', checkReceipt(fx).ok, checkReceipt(fx).problem);
+            const helperWas = fs.readFileSync(helper);
+            fs.appendFileSync(helper, '// edited after the run\n');
+            const hc = checkReceipt(fx);
+            fs.writeFileSync(helper, helperWas);
+            check('5. the runner\'s own helper edited after the run makes it stale too', !hc.ok && /stale receipt: 1 source file.*suite-tmp\.js/.test(hc.problem), hc.problem);
             git(fx.root, ['commit', '--allow-empty', '-qm', 'later']);
             const h = checkReceipt(fx);
             check('5. a commit after the run makes it stale too', !h.ok && /stale receipt/.test(h.problem), h.problem);
@@ -340,8 +373,9 @@ async function main() {
             child.stderr.on('data', () => {});
             child.on('close', (code) => resolve({ code, text: Buffer.concat(chunks).toString('utf8') }));
         });
+        const N = 3 * 1024 * 1024;
         check('6. a 3 MiB suite report piped to a slow reader arrives whole, summary last',
-            r.code === 0 && r.text.includes('CHATTY-END') && /1\/1 suites passed|\d+\/\d+ suites passed/.test(r.text.slice(-4000)) && /receipt .* published/.test(r.text.slice(-2000)),
+            r.code === 0 && r.text.includes('z'.repeat(N) + '\nCHATTY-END') && !r.text.includes('z'.repeat(N + 1)) && /1\/1 suites passed|\d+\/\d+ suites passed/.test(r.text.slice(-4000)) && /receipt .* published/.test(r.text.slice(-2000)),
             `exit ${r.code}, ${r.text.length} bytes, tail ${JSON.stringify(r.text.slice(-300))}`);
         const rc = readReceipt(fx);
         const log = rc && path.join(rc.runDir, rc.outcomes[0].log || '');
@@ -392,6 +426,42 @@ async function main() {
             check('7. a pool that delivers fewer results than suites FAILS, and the rest run serially',
                 sh.status === 1 && row(sh, 'FAIL ', 'test-all-pool') && ['a', 'b', 'c'].every((x) => row(sh, 'PASS ', 'test-' + x + '-ok')), `exit ${sh.status}\n${out(sh).slice(-800)}`);
         }
+        const forged = fixture({
+            suites: { 'test-a-ok.js': PASSING, 'test-b-fails.js': FAILING },
+            pool: "exports.runSuites = async (items) => items.map((i) => ({ label: i.label, state: 'pass' }));\n",
+        });
+        const fr = runAll(forged);
+        if (finished(fr, 'case 7 forged pool')) {
+            check('7. a pool that returns results runOne never produced FAILS, and the suites run for real',
+                fr.status === 1 && row(fr, 'FAIL ', 'test-all-pool') && /not a result runOne produced/.test(out(fr))
+                    && row(fr, 'FAIL ', 'test-b-fails') && /=== test-a-ok ===/.test(out(fr)), `exit ${fr.status}\n${out(fr).slice(-900)}`);
+        }
+        const odd = fixture({
+            suites: { 'test-a-ok.js': PASSING },
+            pool: "exports.runSuites = async (items, runOne) => { const out = []; for (const i of items) { const r = await runOne(i); r.state = 'flaky'; out.push(r); } return out; };\n",
+        });
+        const or = runAll(odd);
+        if (finished(or, 'case 7 unknown state')) {
+            check('7. a state that is neither pass nor indet counts as a failure, never as nothing',
+                or.status === 1 && row(or, 'FAIL ', 'test-a-ok'), `exit ${or.status}\n${out(or).slice(-600)}`);
+        }
+        const SABOTAGE = "const fs = require('fs'); const path = require('path');\n"
+            + "exports.runSuites = async (items, runOne) => {\n"
+            + "  const store = process.env.AUTODEV_COVERAGE_STORE;\n"
+            + "  const id = fs.readFileSync(path.join(store, 'owner'), 'utf8').trim();\n"
+            + "  const out = [];\n"
+            + "  for (const i of items) {\n"
+            + "    if (i.label === 'test-b-ok') fs.mkdirSync(path.join(store, 'runs', id, 'logs', i.label + '.log'), { recursive: true });\n"
+            + "    out.push(await runOne(i));\n"
+            + "  }\n"
+            + "  return out;\n};\n";
+        const sab = fixture({ suites: { 'test-a-fails.js': FAILING, 'test-b-ok.js': PASSING }, pool: SABOTAGE });
+        const sr = runAll(sab);
+        if (finished(sr, 'case 7 sabotaged log')) {
+            check('7. a suite whose log cannot be opened is INDET by name, and the earlier failure still exits 1',
+                sr.status === 1 && row(sr, 'FAIL ', 'test-a-fails') && row(sr, 'INDET', 'test-b-ok') && /the runner could not run it/.test(out(sr)),
+                `exit ${sr.status}\n${out(sr).slice(-900)}`);
+        }
         const none = fixture({ suites });
         const nr = runAll(none);
         check('7. no pool module: serial, exit 0, no pool row', finished(nr, 'no pool') && nr.status === 0 && !/test-all-pool/.test(out(nr)), `exit ${nr.status}`);
@@ -400,7 +470,79 @@ async function main() {
     }
 }
 
-main().catch((e) => check('the suite ran to the end', false, e && e.stack)).then(() => {
+// --- 8. one store, two runners; late coverage --------------------------------
+function startRunner(fx, extraEnv) {
+    const child = spawn(process.execPath, [path.join(fx.tooling, 'test-all.js')], {
+        cwd: fx.root, stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true,
+        env: cleanEnv(Object.assign({ AUTODEV_COVERAGE_STORE: fx.store }, extraEnv)),
+    });
+    const st = { child, text: '', code: undefined };
+    child.stdout.on('data', (d) => { st.text += d; });
+    child.stderr.on('data', (d) => { st.text += d; });
+    st.closed = new Promise((resolve) => child.on('close', (code) => { st.code = code; resolve(code); }));
+    return st;
+}
+const waitFor = (st, re, ms) => new Promise((resolve) => {
+    const t0 = Date.now();
+    const iv = setInterval(() => {
+        if (re.test(st.text)) { clearInterval(iv); resolve(true); }
+        else if (Date.now() - t0 > ms || st.code !== undefined) { clearInterval(iv); resolve(re.test(st.text)); }
+    }, 100);
+});
+
+async function sharedStore() {
+    const SLOW = "const ms = Number(process.env.FX_SLOW_MS || 0);\n"
+        + "if (ms) { if (process.env.FX_PID) require('fs').writeFileSync(process.env.FX_PID, String(process.pid)); setTimeout(() => console.log('ok'), ms); } else console.log('ok');\n";
+    const fx = fixture({ suites: { 'test-a-slow.js': SLOW } });
+    const pidFile = path.join(WORK, 'shared-b.pid');
+    const a = startRunner(fx, { FX_SLOW_MS: '6000' });
+    const aIn = await waitFor(a, /=== test-a-slow ===/, 60000);
+    const b = startRunner(fx, { FX_SLOW_MS: '120000', FX_PID: pidFile });
+    const bIn = await waitFor(b, /=== test-a-slow ===/, 60000);
+    await a.closed;
+    if (!aIn || !bIn) {
+        infra++;
+        indeterminate.push('the shared-store case did not get both runners into their suites');
+    } else {
+        check('8. control: the earlier runner finished its own suites green', a.code === 0 && /PASS +test-a-slow/.test(a.text), a.text.slice(-600));
+        check('8. a runner superseded on its store does not publish, and says why',
+            /receipt was NOT published: another runner/.test(a.text), a.text.slice(-600));
+        const c = checkReceipt(fx);
+        check('8. so while the later runner is unfinished the gate has no receipt to accept', !c.ok && /no coverage receipt/.test(c.problem), c.problem);
+    }
+    b.child.kill('SIGKILL');
+    await b.closed;
+    try { process.kill(Number(fs.readFileSync(pidFile, 'utf8'))); } catch { /* already gone */ }
+    const c2 = checkReceipt(fx);
+    check('8. and once the later runner is killed there is still none', !c2.ok && /no coverage receipt/.test(c2.problem), c2.problem);
+    const done = runAll(fx);
+    check('8. control: a complete run on the same store publishes a receipt the gate accepts',
+        finished(done, 'shared-store control') && done.status === 0 && checkReceipt(fx).ok, checkReceipt(fx).problem);
+}
+
+async function lateCoverage() {
+    const fx = fixture({
+        plugins: { 'fxr-late.js': 'function enteredLate() { return 1; }\nmodule.exports = { enteredLate };\nif (require.main === module) setTimeout(() => enteredLate(), 1500);\n' },
+        suites: {
+            // Starts a detached grandchild that holds no pipe and enters its
+            // function after this suite has exited and been reduced.
+            'test-a-spawns-late.js': "const { spawn } = require('child_process'); const path = require('path');\n"
+                + "spawn(process.execPath, [path.join(__dirname, '..', 'plugins', 'fxr', 'scripts', 'fxr-late.js')], { detached: true, stdio: 'ignore', windowsHide: true }).unref();\n"
+                + "console.log('ok');\n",
+            'test-b-waits.js': "setTimeout(() => console.log('ok'), 5000);\n",
+        },
+    });
+    const r = runAll(fx);
+    if (!finished(r, 'late-coverage runner')) return;
+    const c = checkReceipt(fx);
+    const key = c.ok ? Object.keys(c.census.files).find((k) => /fxr-late\.js$/.test(k)) : null;
+    const entry = c.ok ? c.receipt.dumps.find((d) => d.label === 'test-a-spawns-late') : null;
+    check('8. a function a detached grandchild entered after its suite was reduced still reaches the receipt census',
+        r.status === 0 && c.ok && key && c.census.files[key].enteredLate > 0 && entry && entry.lateDumps >= 1,
+        { status: r.status, problem: c.problem, key, entry, tail: out(r).slice(-400) });
+}
+
+main().then(sharedStore).then(lateCoverage).catch((e) => check('the suite ran to the end', false, e && e.stack)).then(() => {
     console.log(`\n${pass} passed, ${fail} failed${infra ? `, ${infra} indeterminate` : ''}`);
     if (infra) console.log('indeterminate: ' + indeterminate.join(' | '));
     process.exitCode = fail ? 1 : infra ? 2 : 0;
