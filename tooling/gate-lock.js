@@ -185,10 +185,22 @@ function release(lockPaths, log, { quiet = false, runId = null, token = null } =
         else if (r.to) log(`${TAG} lock handed to queued pid ${r.to.pid} (${r.to.what}); record kept as ${path.basename(r.aside)}`);
         else log(`${TAG} lock released to ${path.basename(r.aside)}${r.reserved ? ` and not handed to harness pid ${r.waiting.pid}, because the lane is ${queue.reservedLine(r.reserved)}` : ''}`);
     }
-    if (done.length || quiet) return;
-    const held = queue.readLock(lockPaths[0]);
-    if (!held) { log(`${TAG} lock already gone at release; nothing renamed`); return; }
-    log(`${TAG} the lock now names pid ${held.pid}, not this process (${process.pid}); left it untouched`);
+    if (!done.length && !quiet) {
+        const held = queue.readLock(lockPaths[0]);
+        if (!held) log(`${TAG} lock already gone at release; nothing renamed`);
+        else log(`${TAG} the lock now names pid ${held.pid}, not this process (${process.pid}); left it untouched`);
+    }
+    return stillOurs(lockPaths, runId, token) === null;
+}
+
+/** The first lane whose lock still names this process with `runId` and `token`, or null. */
+function stillOurs(lockPaths, runId, token) {
+    for (const lp of lockPaths) {
+        let held = null;
+        try { held = queue.readLock(lp); } catch { return lp; }
+        if (held && held.pid === process.pid && (!held.meta || (held.meta.runId === runId && (token === null || held.meta.token === token)))) return lp;
+    }
+    return null;
 }
 
 // ---------------------------------------------------------------------------
@@ -255,15 +267,24 @@ function readSentinel(file, runId, token) {
 function runChainChild(root, sentinel, runId, token, waitGo = false) {
     // With --wait-go the parent records this runner's identity before any work
     // starts, then creates <sentinel>.go: a chain too short for one process
-    // snapshot is still journaled. A parent that never says go (it died) costs
-    // GO_WAIT_MS, then the chain runs anyway, as it did before the handshake.
+    // snapshot is still journaled. A parent that never says go (it died, or it
+    // could not publish the records) means nothing vouches for this run, so
+    // the chain does not start: exit 2, no record, after GO_WAIT_MS.
     if (waitGo) {
-        const until = Date.now() + GO_WAIT_MS;
-        while (!fs.existsSync(`${sentinel}.go`) && Date.now() < until) Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 25);
+        const waitMs = goWaitMs(process.env);
+        const until = Date.now() + waitMs;
+        let go = false;
+        while (!(go = fs.existsSync(`${sentinel}.go`)) && Date.now() < until) Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 25);
         try { fs.unlinkSync(`${sentinel}.go`); } catch { /* never written, or already gone */ }
+        if (!go) {
+            console.error(`${TAG} the gate never said go within ${waitMs} ms (its identity, journal and lease are unpublished); the chain did NOT run`);
+            process.exitCode = 2;
+            return;
+        }
     }
     const startUtc = new Date().toISOString();
-    const opts = { cwd: root, stdio: ['inherit', 'pipe', 'pipe'], windowsHide: true };
+    const opts = { cwd: root, stdio: ['inherit', 'pipe', 'pipe'], windowsHide: true,
+        env: { ...process.env, AUTODEV_GATE_RUN_ID: runId || '', AUTODEV_GATE_RUN_TOKEN: token === null ? '' : String(token) } };
     // One command string with shell on Windows (npm is npm.cmd there, and an
     // args array with shell:true is deprecated); no shell on POSIX, so a
     // forwarded signal reaches npm itself.
@@ -281,7 +302,7 @@ function runChainChild(root, sentinel, runId, token, waitGo = false) {
     npm.on('close', (code, signal) => {
         if (typeof code === 'number' && !signal) {
             const rec = { schema: 1, runId, token, originPid: process.ppid, runnerPid: process.pid, startUtc,
-                          endUtc: new Date().toISOString(), exit: code, signal: null, infra: scan.hits() };
+                          endUtc: new Date().toISOString(), exit: code, signal: null, infra: scan.hits(), lastStep: scan.lastStep() };
             try { fs.writeFileSync(sentinel, `${JSON.stringify(rec)}\n`); } catch { /* the parent reads a missing record as not finished */ }
             process.exitCode = code;
         } else {
@@ -291,6 +312,12 @@ function runChainChild(root, sentinel, runId, token, waitGo = false) {
 }
 
 const GO_WAIT_MS = 60000;
+
+/** The runner's wait for go: GO_WAIT_MS, or AUTODEV_GATE_GO_WAIT_MS (a test seam). */
+function goWaitMs(env) {
+    const n = Number(env.AUTODEV_GATE_GO_WAIT_MS);
+    return env.AUTODEV_GATE_GO_WAIT_MS && Number.isFinite(n) && n >= 0 ? n : GO_WAIT_MS;
+}
 
 function label(exit) {
     if (exit === 0) return 'PASS';
@@ -386,6 +413,7 @@ function main() {
     let lockPaths = [base];
     let lane = null;
     let token = null;
+    let previousToken = null;
     let arrival = null;
     let owner = null;
     let chainRoot = null;
@@ -395,14 +423,31 @@ function main() {
     let heartbeat = null;
     let attempt = 0;
 
+    // Is another run's lease on this worktree still running? Judged like a
+    // lane holder: its owner and its journaled execution. Unknown is alive.
+    const leaseLive = (v) => {
+        if (!v || !v.owner) return null;
+        const snap = freshSnapshot();
+        let execution = null;
+        let journalUnreadable = false;
+        if (v.runId) {
+            const r = records.readRun(base, v.runId);
+            if (r.state === 'ok') execution = r.value;
+            else if (r.state === 'malformed') journalUnreadable = true;
+        }
+        return ident.judgeExecution({ owner: v.owner, execution, journalUnreadable, snap, boot: snap.ok ? snap.boot : null,
+            msys: ident.msysTable(), legacyAlive: queue.isAlive }).alive;
+    };
+    /** Publishes the lease. True when written; the reason is logged when not. */
     const writeLease = (state, extra = {}, renew = true) => {
-        if (!useLock || token === null) return;
+        if (!useLock || token === null) return false;
         try {
             const r = records.writeLease(base, leaseKey, {
                 runId, token, worktree, lane, owner, execution: { chainRoot }, heartbeatUtc: nowIso(), state, attempt, ...extra,
-            }, { expect: renew ? { runId, token } : null, isDead: (p) => queue.isAlive(p) === false });
+            }, { expect: renew ? { runId, token } : null, isDead: (p) => queue.isAlive(p) === false, isLive: leaseLive });
             if (!r.written) log(`${TAG} lease not written (${state}): ${r.why}`);
-        } catch (e) { log(`${TAG} lease not written (${state}): ${e.message}`); }
+            return r.written;
+        } catch (e) { log(`${TAG} lease not written (${state}): ${e.message}`); return false; }
     };
     const journal = (mutate) => {
         if (!useLock) return null;
@@ -414,17 +459,26 @@ function main() {
     // runs when nothing is held too: a signal can land between a lane being
     // handed over and this process seeing it, and a waiter's tickets must not
     // outlive it.
+    // True when no lane names this run any more.
     const releaseNow = ({ quiet }) => {
+        let freed = false;
         try {
             queue.leaveQueues(lockPaths, process.pid);
-            release(lockPaths, log, { quiet, runId, token });
+            freed = release(lockPaths, log, { quiet, runId, token });
         } catch (e) { log(`${TAG} could not release ${base}: ${e.message}`); }
         held = false;
+        return freed;
     };
+    // Processes of the chain that outlived the wait: while any runs, the lane
+    // is NOT given up. The lock stays, naming this run, and its journal names
+    // them, so a waiter judges the lane held until they exit, then takes it as
+    // a dead holder's.
+    let keepLane = null;
     const releaseOnce = () => {
         if (!useLock || released) return;
         released = true;
         if (heartbeat) { clearInterval(heartbeat); heartbeat = null; }
+        if (keepLane) { writeLease('lingering', { lingering: keepLane.map((p) => ({ pid: p.pid, startUtc: p.startUtc })) }); return; }
         releaseNow({ quiet: !held });
         writeLease('released');
     };
@@ -460,18 +514,24 @@ function main() {
     if (process.platform === 'win32') signals.push('SIGBREAK');
     for (const s of signals) process.on(s, () => onSignal(s));
 
-    /** Waits until the chain has no live process, or the wait runs out. The live ones, or [] . */
+    /**
+     * Waits until the chain has no live process, or the wait runs out.
+     * { live, unknown }: the processes still running (journaled as
+     * descendants), and why exit could not be established, or null.
+     */
     const waitForDescendants = async () => {
-        if (!useLock || !chainRoot) return [];
+        if (!useLock) return { live: [], unknown: null };
+        if (!chainRoot) return { live: [], unknown: 'the chain root was never recorded' };
         const until = Date.now() + descendantWaitMs;
         for (;;) {
             const snap = freshSnapshot();
-            if (!snap.ok) return [];
-            const live = liveOfChain(chainRoot, readJournal(), snap);
-            if (!live.length) return [];
+            const live = snap.ok ? liveOfChain(chainRoot, readJournal(), snap) : [];
+            if (snap.ok && !live.length) return { live: [], unknown: null };
             if (Date.now() >= until) {
+                if (!snap.ok) return { live: [], unknown: `no process snapshot (${snap.why})` };
+                journal((j) => ({ ...j, descendants: records.mergeDescendants(j.descendants, live, nowIso()) }));
                 log(`${TAG} ${live.length} process(es) of the chain still run after ${descendantWaitMs} ms: ${live.slice(0, 5).map((p) => p.pid).join(', ')}`);
-                return live;
+                return { live, unknown: null };
             }
             await new Promise((r) => setTimeout(r, 1000));
         }
@@ -481,16 +541,25 @@ function main() {
     const afterAttempt = async (outcome, rec) => {
         if (heartbeat) { clearInterval(heartbeat); heartbeat = null; }
         const v = verdict(outcome);
-        const lingering = await waitForDescendants();
-        const cfg = useLock ? recovery.readRecoveryConfig(base, env) : { config: null, why: 'the lock is skipped' };
+        const after = await waitForDescendants();
+        const lingering = after.live;
+        if (lingering.length) keepLane = lingering;
+        // A config that cannot be read disables re-admission; it never changes
+        // the attempt's own verdict.
+        let cfg;
+        try { cfg = useLock ? recovery.readRecoveryConfig(base, env) : { config: null, why: 'the lock is skipped' }; } catch (e) {
+            cfg = { config: null, why: `the recovery config could not be read (${e.message}), so no automatic re-admission` };
+        }
         const floor = cfg.config ? cfg.config.diskFloorBytes : recovery.DEFAULT_DISK_FLOOR;
         let c;
         try { c = await recovery.classify({ v, rec, root, diskFloorBytes: floor, env }); } catch (e) { c = { ...v, cause: null, why: `${v.why} (classification threw: ${e.message})` }; }
         journal((j) => ({ ...j, attempts: [...(j.attempts || []), { attempt, token, exit: c.exit, finished: c.finished, why: c.why, cause: c.cause, record: rec }] }));
-        if (!c.cause || interrupted) { finishWith(c); return; }
+        const keptWhy = lingering.length ? `; the lane stays held by this run's record while ${lingering.length} process(es) of the chain run (${lingering.slice(0, 5).map((p) => p.pid).join(', ')})` : '';
+        if (!c.cause || interrupted) { finishWith({ ...c, why: `${c.why}${keptWhy}` }); return; }
         log(`${TAG} attempt ${attempt} is INDETERMINATE: ${c.why}`);
-        if (!cfg.config) { finishWith({ ...c, why: `${c.why}; ${cfg.why}` }); return; }
-        if (lingering.length) { finishWith({ ...c, why: `${c.why}; not queued again while ${lingering.length} process(es) of the chain still run` }); return; }
+        if (!cfg.config) { finishWith({ ...c, why: `${c.why}; ${cfg.why}${keptWhy}` }); return; }
+        if (lingering.length) { finishWith({ ...c, why: `${c.why}; not queued again${keptWhy}` }); return; }
+        if (after.unknown) { finishWith({ ...c, why: `${c.why}; not queued again: whether the chain's processes exited is unknown (${after.unknown})` }); return; }
         const head = git(root, ['rev-parse', 'HEAD']) || 'no-head';
         const counter = recovery.counterFile(records.runsDir(base), worktree, head);
         const spent = recovery.readmissionsSpent(counter);
@@ -501,10 +570,25 @@ function main() {
         writeLease('awaiting-clearance');
         const clear = await recovery.awaitClearance(c.cause, cfg.config, root, rec.endUtc, { env, log });
         if (!clear.cleared || interrupted) { finishWith({ ...c, why: `${c.why}; ${clear.why}` }); return; }
-        const n = recovery.spendReadmission(counter, worktree, head);
-        log(`${TAG} ${clear.why}; queueing again (re-admission ${n} of ${cfg.config.maxReadmissions}), keeping arrival ${arrival}`);
+        // The limit is checked again and spent in one step under the worktree
+        // mutex: a second wrapper on this worktree and head cannot spend the
+        // same re-admission.
+        let spend;
+        try {
+            spend = records.withWorktreeMutex(base, leaseKey, () => recovery.spendReadmission(counter, worktree, head, cfg.config.maxReadmissions),
+                { isDead: (p) => queue.isAlive(p) === false });
+        } catch (e) { spend = { spent: false, count: null, why: e.message }; }
+        if (!spend.spent) {
+            finishWith({ ...c, why: `${c.why}; re-admission limit reached (${spend.count === null ? spend.why : `${spend.count} of ${cfg.config.maxReadmissions}`} for this worktree and head)` });
+            return;
+        }
+        log(`${TAG} ${clear.why}; queueing again (re-admission ${spend.count} of ${cfg.config.maxReadmissions}), keeping arrival ${arrival}`);
         writeLease('requeued');
-        releaseNow({ quiet: false });
+        if (!releaseNow({ quiet: false })) {
+            finishWith({ ...c, why: `${c.why}; not queued again: the lane could not be released, so a re-admission would run under the old token` });
+            return;
+        }
+        previousToken = token;
         admit(Number.isFinite(Date.parse(arrival)) ? Date.parse(arrival) : null);
     };
 
@@ -522,11 +606,22 @@ function main() {
             { cwd: root, stdio: 'inherit', windowsHide: true });
         log(`${TAG} chain pid ${child.pid}: npm run ${CHAIN_SCRIPT}${useLock ? ` (run ${runId}, token ${token}, attempt ${attempt})` : ''}`);
         if (useLock) {
+            const delay = envMs(env, 'AUTODEV_GATE_TEST_PUBLISH_DELAY_MS', 0);
+            if (delay) Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, delay);
             const snap = freshSnapshot();
             chainRoot = snap.ok && snap.procs.get(child.pid) ? { pid: child.pid, startUtc: snap.procs.get(child.pid).startUtc, ppid: process.pid } : null;
-            journal((j) => ({ ...j, token, chainRoot, owner, descendants: j.descendants || [] }));
-            writeLease('running');
-            try { fs.writeFileSync(`${sentinel}.go`, ''); } catch (e) { log(`${TAG} could not signal the runner (${e.code || e.message}); it starts after ${GO_WAIT_MS} ms`); }
+            if (!chainRoot) log(`${TAG} the chain root's identity could not be recorded (${snap.ok ? `pid ${child.pid} is not in the snapshot` : snap.why})`);
+            const journaled = journal((j) => ({ ...j, token, chainRoot, owner, descendants: j.descendants || [] }));
+            const leased = writeLease('running');
+            // No go without both records: a runner nothing vouches for never
+            // starts its chain (it exits 2 after its wait), and this attempt
+            // reads as not finished.
+            if (!journaled || !leased) {
+                log(`${TAG} the run journal or the worktree lease could not be published; the runner is not told to start`);
+                try { child.kill(); } catch { /* gone */ }
+            } else {
+                try { fs.writeFileSync(`${sentinel}.go`, ''); } catch (e) { log(`${TAG} could not signal the runner (${e.code || e.message}); it will not start`); try { child.kill(); } catch { /* gone */ } }
+            }
             heartbeat = setInterval(() => {
                 const s = freshSnapshot();
                 if (s.ok && chainRoot) {
@@ -575,11 +670,19 @@ function main() {
                     finishWith({ exit: 2, finished: false, why: `the lock at ${got} is not this run's (${own.why}); the chain did NOT run` });
                     return;
                 }
+                if (previousToken !== null && !(own.meta.token > previousToken)) {
+                    token = own.meta.token;
+                    finishWith({ exit: 2, finished: false, why: `the re-admission carries token ${own.meta.token}, not one later than ${previousToken}; the chain did NOT run again` });
+                    return;
+                }
                 token = own.meta.token;
                 arrival = arrival || own.meta.arrival;
                 owner = own.meta.owner || null;
                 log(`${TAG} lock taken: ${got} (pid ${process.pid}) run ${runId} token ${token}${own.adopted ? ", adopted from a lock without a record" : ""}`);
-                writeLease('admitted', {}, false);
+                if (!writeLease('admitted', {}, false)) {
+                    finishWith({ exit: 2, finished: false, why: 'the worktree lease could not be published (see the line above); the chain did NOT run' });
+                    return;
+                }
                 runChain();
             })
             .catch((e) => {

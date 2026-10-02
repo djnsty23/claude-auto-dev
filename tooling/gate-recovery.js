@@ -12,7 +12,7 @@
  * could not have produced, and an exit code alone is never evidence:
  *   - MEMORY: a crash exit (134, 0xC0000409, 0x80000003, 0xC0000005,
  *     0xC0000017) AND a Resource-Exhaustion-Detector event 2004 in the System
- *     log inside the attempt's window (start to end plus 10 s). "No event" and
+ *     log inside the attempt's window (its start to its end). "No event" and
  *     "the log could not be read" are different answers, and neither is
  *     evidence.
  *   - DISK: the output said ENOSPC AND the gate's volume is below the free-space
@@ -35,7 +35,9 @@
  *
  * TEST SEAM. AUTODEV_GATE_EVENTS_FIXTURE names a JSON file of events
  * ({ "times": [iso...] } or { "status": "failed" }) read in place of the event
- * log; the window filter still applies.
+ * log; the window filter still applies. AUTODEV_GATE_HEADROOM_FIXTURE names a
+ * JSON file ({ "samples": [bytes|null, ...] }) read in place of the commit
+ * counters, one entry per read, on every platform.
  */
 'use strict';
 
@@ -47,7 +49,6 @@ const crypto = require('crypto');
 const WIN = process.platform === 'win32';
 const CRASH_EXITS = new Set([134, 0xC0000409, 0x80000003, 0xC0000005, 0xC0000017]);
 const DEFAULT_DISK_FLOOR = 1024 * 1024 * 1024;
-const EVENT_SLACK_MS = 10000;
 
 // ---------------------------------------------------------------------------
 // Scanning the chain's output.
@@ -84,6 +85,7 @@ function createScanner() {
             for (const l of lines) line(l);
         },
         hits() { if (partial) { line(partial); partial = ''; } return hits.slice(); },
+        lastStep() { return step; },
     };
 }
 
@@ -132,8 +134,25 @@ function memoryEvents(fromIso, toIso, env = process.env) {
     } catch { return { status: 'failed', times: [], why: 'the event query printed no JSON' }; }
 }
 
+/**
+ * The test seam's headroom: the file holds { "samples": [bytes|null, ...] }.
+ * Each read takes the first entry and writes the rest back, so a suite can
+ * count the reads; the last entry repeats. null reads as a failed probe.
+ */
+function headroomFixture(file) {
+    let j;
+    try { j = JSON.parse(fs.readFileSync(file, 'utf8')); } catch (e) { return { status: 'failed', headroomBytes: null, why: `the headroom fixture is unreadable (${e.code || e.message})` }; }
+    const list = j && Array.isArray(j.samples) ? j.samples : [];
+    if (!list.length) return { status: 'failed', headroomBytes: null, why: 'the headroom fixture is empty' };
+    const v = list[0];
+    const rest = list.length > 1 ? list.slice(1) : list;
+    try { fs.writeFileSync(file, JSON.stringify({ ...j, samples: rest, reads: (Number(j.reads) || 0) + 1 })); } catch { /* the count is the suite's concern */ }
+    return typeof v === 'number' ? { status: 'ok', headroomBytes: v, why: null } : { status: 'failed', headroomBytes: null, why: 'the headroom fixture says the probe failed' };
+}
+
 /** Commit headroom (CommitLimit - CommittedBytes): { status: ok|failed|unsupported, headroomBytes }. */
-function commitHeadroom() {
+function commitHeadroom(env = process.env) {
+    if (env.AUTODEV_GATE_HEADROOM_FIXTURE) return headroomFixture(env.AUTODEV_GATE_HEADROOM_FIXTURE);
     if (!WIN) return { status: 'unsupported', headroomBytes: null, why: 'no commit counters here' };
     const r = runPowerShell("$m = Get-CimInstance -ClassName Win32_PerfFormattedData_PerfOS_Memory -ErrorAction Stop\nConvertTo-Json -Compress -InputObject @{ c = [double]$m.CommittedBytes; l = [double]$m.CommitLimit }");
     if (!r.ok) return { status: 'failed', headroomBytes: null, why: r.why };
@@ -179,6 +198,7 @@ function readRecoveryConfig(base, env = process.env) {
     }
     let j;
     try { j = JSON.parse(raw); } catch { return { config: null, file, why: 'the recovery config is not JSON' }; }
+    if (!j || typeof j !== 'object' || Array.isArray(j)) return { config: null, file, why: 'the recovery config is not a JSON object' };
     const need = ['diskFloorBytes', 'memoryHeadroomBytes', 'sampleIntervalMs', 'clearanceTimeoutMs', 'maxReadmissions'];
     const bad = need.filter((k) => !(typeof j[k] === 'number' && Number.isFinite(j[k]) && j[k] >= 0));
     if (bad.length) return { config: null, file, why: `the recovery config lacks a non-negative number for ${bad.join(', ')}` };
@@ -204,7 +224,7 @@ function readRecoveryConfig(base, env = process.env) {
 async function classify({ v, rec, root, diskFloorBytes = DEFAULT_DISK_FLOOR, env = process.env }) {
     if (!v.finished || v.exit === 0 || v.exit === 2 || !rec) return { ...v, cause: null };
     if (CRASH_EXITS.has(v.exit)) {
-        const end = new Date(Date.parse(rec.endUtc) + EVENT_SLACK_MS).toISOString();
+        const end = rec.endUtc;
         const ev = memoryEvents(rec.startUtc, end, env);
         const memoryConfirmed = ev.status === 'found';
         if (memoryConfirmed) {
@@ -214,7 +234,11 @@ async function classify({ v, rec, root, diskFloorBytes = DEFAULT_DISK_FLOOR, env
         const said = ev.status === 'none' ? 'no event 2004 inside the attempt' : `the event log could not answer (${ev.why})`;
         return { ...v, cause: null, why: `${v.why}, a crash exit with ${said}, so it stands as a failure` };
     }
-    const hits = Array.isArray(rec.infra) ? rec.infra : [];
+    // Only evidence printed by the step that failed counts: in an && chain the
+    // failing step is the last one that started, and a string an earlier,
+    // passing step printed (a suite testing ENOSPC handling) is not a cause.
+    const all = Array.isArray(rec.infra) ? rec.infra : [];
+    const hits = rec.lastStep ? all.filter((h) => h.step === rec.lastStep) : all;
     if (hits.some((h) => h.kind === 'ENOSPC')) {
         const d = diskFree(root);
         if (d.status === 'ok' && d.freeBytes < diskFloorBytes) {
@@ -244,7 +268,7 @@ async function sample(cause, cfg, root, sinceIso, env = process.env) {
         return { healthy: p.status === 'free', why: `port ${cause.port} ${p.status}` };
     }
     if (cause.kind === 'memory') {
-        const h = commitHeadroom();
+        const h = commitHeadroom(env);
         const ev = memoryEvents(sinceIso, new Date().toISOString(), env);
         const room = h.status === 'ok' ? h.headroomBytes >= cfg.memoryHeadroomBytes : false;
         return { healthy: room && ev.status === 'none', why: `headroom ${h.status === 'ok' ? h.headroomBytes : h.why}, events ${ev.status}` };
@@ -291,14 +315,20 @@ function readmissionsSpent(file) {
     } catch (e) { return e.code === 'ENOENT' ? 0 : Infinity; }
 }
 
-function spendReadmission(file, worktree, head) {
+/**
+ * Checks the limit and spends one re-admission in one step: { spent, count }.
+ * The caller holds the worktree mutex around it, so two wrappers cannot both
+ * read count 1 and both spend the second. A malformed counter is the limit.
+ */
+function spendReadmission(file, worktree, head, max) {
     const n = readmissionsSpent(file);
-    const next = (Number.isFinite(n) ? n : 0) + 1;
+    if (!(n < max)) return { spent: false, count: n };
+    const next = n + 1;
     fs.mkdirSync(path.dirname(file), { recursive: true });
     const tmp = `${file}.${process.pid}.tmp`;
     fs.writeFileSync(tmp, `${JSON.stringify({ count: next, worktree, head, lastUtc: new Date().toISOString() })}\n`);
     fs.renameSync(tmp, file);
-    return next;
+    return { spent: true, count: next };
 }
 
 module.exports = {
