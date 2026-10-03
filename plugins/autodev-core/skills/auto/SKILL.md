@@ -229,28 +229,7 @@ Bash({ command: "npm run dev", run_in_background: true })
 # Wait for startup, then verify
 ```
 
-Drive the page with the built-in browser tools:
-
-1. `navigate` to the page.
-2. `read_page` — the accessibility tree, and the assertion surface. Cheaper and more
-   reliable than a screenshot for text and structure.
-3. `computer` `screenshot` for the desktop view.
-4. `resize_window` `{preset: 'mobile'}`, reload, then screenshot again.
-5. `read_console_messages` `{onlyErrors: true}`.
-
-**Two viewports, not one.** Check 390px *and* 414px — a layout can survive one and
-break the other. And `resize_window`'s mobile preset changes the viewport and the
-user agent, which is enough for a CSS breakpoint but not proof that a load-time
-*device* gate fired; when the code branches on device rather than width, use
-chrome-devtools `emulate` and reload so those gates re-run.
-
-**Assert the viewport you think you measured.** A resize tool can report success
-while the page never changed, which turns "I verified the mobile layout" into a
-desktop screenshot with a mobile label. Read `window.innerWidth` in the same call
-that takes the measurement.
-
-If the browser tools are unavailable, `WebFetch` verifies that a page loads at all —
-say that is what you did, and do not describe it as visual verification.
+Load [references/browser-verification.md](references/browser-verification.md) whenever the task touched UI: it holds the five browser steps, the two-viewport rule and the viewport assertion.
 
 Analyze screenshots for: broken layout, missing content, visual regressions, design quality, dark mode correctness.
 Fix console errors or visual issues before marking task complete.
@@ -267,60 +246,7 @@ story closes on an **assertion about state**, not on a picture. The `flow`
 verify tag (`references/verify-tags.md`) marks it; infer it from the
 criteria when the tag is absent.
 
-1. Start or find the dev server exactly as above.
-2. Drive the **primary flow the criterion describes** with the browser tools:
-   `navigate`, `find`, `form_input`, `computer`. For a bug fix, drive it
-   first on the pre-fix tree and record what you read as `observedBefore`.
-3. Read the outcome back, never eyeball it: `read_page` or `find` for a DOM
-   count or text, `read_network_requests` for a request and its shape,
-   `read_console_messages` for a log line or the error count, `javascript_tool`
-   for a value the page holds. Use a **fresh tab** per check: the console
-   buffer accumulates across navigations, and a tab left open across edits
-   logs Fast Refresh errors that a fresh load does not reproduce. Read the
-   error count once **before** the flow and record it as
-   `consoleErrorsBaseline`; two dev trees here carried errors on every load.
-   **While the Browser pane is hidden, `computer` clicks and key presses do
-   not reach the page** (`[measured 2026-09-08]` a keydown listener saw
-   nothing; `document.visibilityState` was `hidden`), while `navigate`,
-   `find`, `form_input` and `javascript_tool` work. Front the tab with
-   `tabs_select`, or dispatch the event from `javascript_tool`, and prove the
-   input arrived before reading the outcome, or the red you report is about
-   the probe.
-4. Write `.claude/evidence/<story>/flow.json` — `node
-   ${CLAUDE_PLUGIN_ROOT}/scripts/flow-evidence.js --template` prints the
-   shape — with the steps, the assertion (`subject`, `claim`, `expected`),
-   the `observed` value, screenshot paths, console error count, timestamp,
-   and `commit`: the 40-character sha `git rev-parse HEAD` prints when the
-   flow is driven, the tree the dev server was serving. The template fills it
-   from the cwd; confirm it is still HEAD if you committed between driving and
-   writing. Screenshot paths are **relative to the repository root**
-   (`.claude/evidence/<story>/after.png`), not to the record's directory.
-5. `node ${CLAUDE_PLUGIN_ROOT}/scripts/flow-evidence.js .claude/evidence/<story>/flow.json`.
-   Exit 0 is PASS. Exit 1 is the product failing its own criterion: fix,
-   re-drive, re-run. Exit 2 is the **record** being refused — no assertion,
-   a "looked fine" claim, a `visual` subject, no observed value, or a
-   `commit` that is missing, malformed, or not reachable from HEAD (the
-   record was measured on another revision; `--at <sha>` verifies against a
-   different commit) — and a refused record does not close a story. Commit the
-   record with the change, as `prove` does with its captures: its `commit`
-   is then the parent of the commit that carries it, which is what the
-   ancestry rule expects.
-
-**What it reaches, honestly.** `[measured 2026-09-08]` over 30 first-pass
-fixes in a live repo, 4 were catchable by driving the primary flow with a state
-assertion, 3 more only with specific data (a rate-limited account, a particular
-prompt), 23 not at all — copy, contrast, cron, admin-only routes, server-side
-counts. Replayed against the parent of three of those four fixes, the check
-went red on every parent and green on every fix. It costs about 50 s and
-three to five tool calls per story on a dev server the visual check already
-needs. Cheap insurance on the 4, not a gate on the 30
-(`docs/evidence-flow-verification-2026-09-08.md`).
-
-**The Stop hook does not enforce this, on purpose.** `stop-auto-check.js`
-blocks the end of a turn while pending stories remain; a block on a missing
-flow record would hold every turn in a repo with no dev server, no browser
-tools, or a criterion that names nothing user-visible. Enforcement is here, in
-the verification step, and the validator is what makes the record checkable.
+Load [references/runtime-flow-check.md](references/runtime-flow-check.md) for the five steps, the `flow-evidence.js` exit codes, what the check reaches and why the Stop hook does not enforce it.
 
 ### Self-Verification (after each task)
 
@@ -338,12 +264,7 @@ npm test -- --passWithNoTests --watchAll=false 2>/dev/null
 
 **3. Resource Validation**
 If the task added external resources (images, fonts, API URLs), validate them:
-```bash
-# Check image/asset URLs are reachable
-grep -rn 'https://.*\.(png|jpg|svg|webp|woff2)' src/ --include="*.tsx" --include="*.ts" | while read line; do
-  url=$(echo "$line" | grep -oP 'https://[^\s"'\'']+'); curl -s -o /dev/null -w "%{http_code} $url\n" "$url"
-done
-```
+Run the URL check in [references/self-verification-checks.md](references/self-verification-checks.md).
 Fix broken URLs before committing — they cause blank images and layout shifts in production.
 
 **4. Self-Review**
@@ -355,31 +276,13 @@ If the task involved a bulk find-and-replace (e.g., renaming, migrating values, 
 **4c. Hardening Check (per-task audit-lite)**
 Review the diff for these patterns in the files you just changed. Fix before marking done:
 
-| Pattern | What to Check | Fix |
-|---------|--------------|-----|
-| **Fail-open auth** | `if (secret && ...)` skips auth when env var is unset | Fail-closed: return 401 if env var missing |
-| **Unsafe casts** | `as unknown as`, `as any`, double assertions | Create a validator (Zod or manual), parse instead of cast |
-| **Fire-and-forget fetch** | `fetch()` without try/catch or `.ok` check | Wrap in try/catch, check `res.ok`, revert optimistic state on failure |
-| **Missing form labels** | `<input placeholder="...">` without `<label>` or `aria-label` | Add `<label>` or `aria-label` to every input |
-| **Missing autocomplete** | Login/signup inputs without `autoComplete` | Add `autoComplete="email"`, `autoComplete="current-password"`, etc. |
-| **User-supplied URLs** | Server-side `fetch(userUrl)` without validation | Validate URL, resolve DNS, block private IP ranges |
-| **Env var fallbacks** | `process.env.X \|\| 'localhost'` or `\|\| ''` | Throw if missing in production, only fallback in dev |
-| **RLS policy logic** | New table or RLS change | Verify policy restricts to `auth.uid()` for user data |
-| **Missing focus styles** | Raw `<button>` without `focus-visible:ring-*` | Add `focus-visible:ring-2 focus-visible:ring-ring` |
-| **Stock UI** | Fonts declared but not loaded, text-only nav, generic empty states | Load fonts via next/font, add icons, add visual personality |
-| **Dark mode** | Colors that don't use theme tokens, cards same color as background | Use semantic tokens, add elevation distinction |
-| **Chart colors** | `hsl(var(--x))` when var already contains `hsl(...)` | Use raw HSL values or remove outer `hsl()` wrapper |
+Load [references/self-verification-checks.md](references/self-verification-checks.md) for the twelve patterns: what to check and the fix for each.
 
 Only check patterns relevant to the files you changed — this is a 30-second scan of your own diff, not a full audit.
 
 **5. Design Token Compliance (UI tasks only)**
 If the task changed `.tsx` or `.css` files, verify the output uses the project's actual tokens:
-```bash
-# Check for stock shadcn / hardcoded colors in changed files
-git diff --name-only | xargs grep -n "text-white\|bg-black\|text-gray-\|bg-gray-\|#[0-9a-fA-F]\{6\}" 2>/dev/null | grep -v "gradient\|from-\|to-\|via-" | head -10
-# Check fonts are loaded, not just declared
-grep -rn "fontFamily\|font-family" src/ --include="*.css" --include="*.tsx" | grep -v "next/font\|@font-face\|tailwind" | head -5
-```
+Run the two greps in [references/self-verification-checks.md](references/self-verification-checks.md) on your changed files.
 If stock colors or unloaded fonts found in YOUR changes, fix before proceeding.
 
 **6. UI/API Change? Visual Verification**
@@ -405,23 +308,7 @@ Track error types across tasks. When the same error pattern appears 3+ times:
 1. Save it to auto-memory as a known pattern with its fix recipe
 2. On future occurrences, apply the fix immediately without the auto-fix→retry cycle
 
-Common patterns to recognize:
-| Error Pattern | Instant Fix |
-|--------------|-------------|
-| `exactOptionalPropertyTypes` error | Add `\| undefined` to optional prop types: `foo?: string \| undefined` |
-| `Cannot find module './X'` | Check file exists, fix path or create file |
-| `Type 'X' is not assignable to type 'Y'` | Check the type definition, add union or cast |
-| `Property 'X' does not exist on type 'Y'` | Add to interface or use optional chaining |
-| `RLS policy violation` | Check auth.uid() in policy, verify user is authenticated |
-| `CORS error` | Check API route headers or middleware config |
-| `as unknown as` cast | Create a validator function, parse instead of assert |
-| Unhandled fetch in component | Wrap in try/catch, check res.ok, add error feedback |
-| `<input>` without label | Add `<label htmlFor>` or `aria-label` prop |
-| Env var `\|\| ''` fallback | Throw if missing, fallback only with NODE_ENV check |
-| Middleware blocks new route | Add to PUBLIC_PREFIXES or route matcher |
-| Font declared but not loaded | Add `next/font` import in layout.tsx |
-| `hsl(var(--x))` double-wrap | Remove outer `hsl()` when CSS var already contains it |
-| Stock shadcn tokens | Read project's globals.css, use actual brand colors |
+Load [references/error-patterns.md](references/error-patterns.md) for the common error patterns and their instant fixes.
 
 ## Handback: a story blocked on a person
 
@@ -463,17 +350,7 @@ observable holds, and its dependents become ready then — not when the person
 says "done", because the agent verifying is the half that catches a key pasted
 into the wrong environment.
 
-**Why a script and a same-turn rule, measured.** `[measured 2026-09-07]` on
-the trunk of three product repos, `needs-setup` had been written 0, 0 and 1
-times against 45, 7 and 23 writes of `deferred`, while six of one client
-repo's ten pending stories were waiting on a person — a pipeline variable, a
-partner's API, a design decision — and had sat as `passes: null` for up to 122
-days. Prose has told sessions to write the state since it was invented; the
-one session that did (a greenfield run, 2026-09-07) put the handback in a log
-file and pointed the story at it. `wizard` was written after a session retried
-a browser error that named the remedy for 2 h 10 m; its handback goes to the
-chat, which is gone when the session ends. The story is what `status`, `auto`
-and the Stop hook read, so the story is where the handback lives.
+Load [references/handback-rationale.md](references/handback-rationale.md) when the script or the same-turn rule is questioned: it holds the measured evidence behind both.
 
 ## Commit Cadence
 
@@ -484,23 +361,7 @@ and the Stop hook read, so the story is where the handback lives.
 
 ## Save Project Knowledge (Continuous Learning)
 
-After solving hard problems (debugging, retries, unexpected errors), save reusable lessons to auto-memory:
-
-| What to Save | Example |
-|-------------|---------|
-| **Environment quirks** | "This project uses Vite on port 5173, not CRA on 3000" |
-| **Error fix recipes** | "RLS 'permission denied' → check auth.uid() in policy, not custom function" |
-| **Architecture patterns** | "API routes follow /api/v1/[resource]/route.ts pattern" |
-| **Build gotchas** | "Must run `npm run generate` before build (Prisma client)" |
-| **Test setup** | "Tests need `TEST_DB_URL` env var, seed with `npm run seed:test`" |
-| **Deploy requirements** | "Vercel needs `ANALYZE=true` for bundle analysis" |
-
-Also save after these events:
-- **Same error 3+ times across tasks** → save as known pattern with fix recipe
-- **Unexpected project structure** → save the actual structure for next session
-- **Workarounds discovered** → save so next session doesn't rediscover them
-
-This builds per-project context that compounds across sessions.
+After solving hard problems (debugging, retries, unexpected errors), save reusable lessons to auto-memory. Load [references/project-knowledge.md](references/project-knowledge.md) for what to save and which events trigger a save.
 
 ## Token Management
 
@@ -569,82 +430,7 @@ If no tasks to work on:
 3. Output completion summary
 4. Assess context to decide next action
 
-### Auto Sprint Transition
-
-When all pending tasks are done, auto handles the sprint lifecycle — but verifies the work first and surfaces a summary before bumping.
-
-```
-1. BUILD GATE — run the real deploy-target build before anything else:
-   npm run build  (or pnpm/yarn/bun equivalent)
-   If it fails, do NOT archive or bump. Create a prd.json story for each
-   error and continue working. Sprint can only close on a clean build.
-
-2. Log summary to .claude/sprint-history.md:
-   "Sprint [N]: [done]/[total] tasks | [date] | [one-line summary of work]"
-
-3. Apply the archive-prd skill's split and durability checks:
-   - Preserve unresolved stories, passed QA records, and the full prerequisite
-     chain referenced by retained work; do not delete every passed record.
-   - Prove a tracked archive destination before writing, read back the archive,
-     and preserve every record by id and payload across archive plus active PRD.
-   - Keep dependency readiness intact and commit the archive and PRD together.
-     If any check fails, preserve the PRD and stop the transition.
-
-4. Decide whether to bump — show a one-line honesty summary first:
-
-   Sprint [N] closed: [done]/[total] tasks.
-   Average realness: [avg]%  (see realness field in core schema)
-   Build: passed in [T]s
-   Carried forward: [M] deferred, [K] new findings
-   Bumping to Sprint [N+1]. Say "stop" to pause.
-
-   Then proceed — no confirmation needed, but the user has a clean
-   window to interrupt. This beats silent bumps AND beats blocking
-   prompts that break autonomous execution.
-
-5. If no new work exists, skip the bump and go to "Ask User" below.
-```
-
-**Honest close criteria:** A sprint doesn't close just because every story has `passes: true`. It closes when (a) build passes on deploy target, (b) the summary accurately reflects what shipped, and (c) realness scores are filled in honestly.
-
-### Decision Matrix
-
-| Signal | Action |
-|--------|--------|
-| Deferred tasks from previous sprint | Preserve the decision; reactivate only when the mandate explicitly changes |
-| Audit/brainstorm created new stories | Bump sprint, continue |
-| Dev server running + UI changes made | Run visual scan, fix issues found |
-| TODOs/FIXMEs in changed files | Create stories, fix them |
-| Build warnings | Fix directly (no story needed) |
-| Clean codebase, no work | Ask user (see below) |
-
-### Auto-Continue (Obvious Work)
-
-When new work exists after sprint transition, continue immediately:
-```
-Sprint [N] complete ([done]/[total] tasks).
-Archived completed stories. [M] tasks carried forward.
-Continuing as Sprint [N+1].
-```
-
-Limit: 2 auto-continued sprints per session. After that, ask the user.
-
-### Ask User (No Obvious Work or Limit Reached)
-
-If the sprint had 5+ tasks, suggest simplify first:
-```
-Sprint [N] complete ([done]/[total] tasks).
-
-Recommended: run `simplify` to catch duplicate code from this sprint.
-
-What's next?
-1. simplify - Review for duplicate code and over-abstraction
-2. audit - Deep quality scan (finds bugs + violations)
-3. brainstorm - Feature ideas + dead code scan
-4. Done for now
-```
-
-Keep the auto flag while asking. If the user picks "Done for now", write `.claude/auto-exit` with the Write tool; the Stop hook removes this session's flag.
+Load [references/sprint-transition.md](references/sprint-transition.md) at step 2: it holds the build gate, the archive and bump steps, the honest close criteria, the decision matrix, the auto-continue limit and the ask-user prompt.
 
 ## Quick Reference
 

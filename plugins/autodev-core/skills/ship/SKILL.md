@@ -244,37 +244,7 @@ it: whatever was served was public while it was up.
 
 ### `.vercelignore` — the Vercel CLI does not read `.gitignore`
 
-Independent of the target defect, and the one that turns a harmless mis-deploy
-into a disclosure.
-
-`[measured 2026-09-08]` on the accidental deploy above, **423 tracked files and
-16 gitignored files were uploaded** — `.claude/settings.local.json`,
-`.claude/memory-sessions/*`, `.claude/reports/telemetry-*.jsonl`. With no
-framework detected Vercel set the output directory to `.` and **served the tree
-statically**:
-
-```
-curl /.claude/settings.local.json  ->  HTTP 200     publicly fetchable
-curl /                             ->  HTTP 404
-```
-
-That instance was low-value — a public repo, no secret-shaped strings in the
-uploaded set. The mechanism does not know that. The same command from a product
-worktree uploads whatever that repo gitignores.
-
-**Every directory you deploy from needs a `.vercelignore`** covering at minimum
-`.claude/`, `.git/`, `node_modules/` and `.env`, plus everything that repo's
-`.gitignore` names. `check-deploy-target.js --ignore-file` refuses without one,
-and refuses an empty one — the file existing is not the protection, the patterns
-in it are.
-
-**`.vercelignore` is not `.gitignore` again.** `.gitignore` decides what is
-*tracked*; `.vercelignore` decides what is *uploaded and served*. A file can be
-tracked and still be one you would never serve, so matching `.gitignore` is a
-**floor, not the rule**. Where a repo names narrow paths because partial tracking
-is deliberate, the deploy manifest still takes the wide pattern: over-excluding
-costs a missing asset, under-excluding costs a public URL. This repo's own
-`.vercelignore` is the worked example.
+**Every directory you deploy from needs a `.vercelignore`**, and `check-deploy-target.js --ignore-file` refuses without one. Load [references/vercelignore.md](references/vercelignore.md) before the first deploy from a directory: it holds the measured disclosure, the minimum patterns and why `.gitignore` is only the floor.
 
 ### Netlify
 
@@ -334,42 +304,7 @@ as unresolved and continue checks that can actually run.
 
 ### Tracking parity (when the change touches clickable UI)
 
-A redesign can drop a tracking attribute or wire a button to fire twice while
-every other check stays green. Two subcommands, run BEFORE the merge:
-
-- `static` on every UI diff. It walks the public pages and their imports and
-  flags each clickable without the action attribute (default `data-cta`) and
-  each form without the form attribute (default `data-form`). Read the
-  population line: zero roots exits 2 and means the config is wrong.
-
-  ```bash
-  node "${CLAUDE_PLUGIN_ROOT}/scripts/tracking-parity.js" static . --config tracking-parity.json
-  ```
-
-- `judge` against a local or preview build, never production: the probe clicks
-  every tracked element and their handlers really run. Harvest the base branch
-  and the candidate on the same page, then compare:
-
-  ⚠️ **A local build pointed at the production database changes real data.**
-  `preventDefault` stops navigation and form submission, not an `onClick` that
-  calls an API. Point the build at a disposable database, and mark every
-  control that writes, deletes or sends with `data-parity-skip` (on the element
-  or on a region around it). The probe also refuses an unmarked control that
-  reads as destructive (delete, remove, revoke, unsubscribe, a `destructive` or
-  `danger` style) and leaves the run at exit 2 until it is marked.
-  1. `node "${CLAUDE_PLUGIN_ROOT}/scripts/tracking-parity.js" judge --print-probe --settle-ms 400`
-     prints one expression.
-  2. In the in-app Browser pane, open the page (for example
-     `http://localhost:3000/`) and run `javascript_tool` with
-     `JSON.stringify(await <printed expression>)`. The probe blocks navigation
-     and form submission with a capture-phase `preventDefault`.
-  3. Save the returned JSON as `before.json` (base) and `after.json` (candidate).
-  4. `node "${CLAUDE_PLUGIN_ROOT}/scripts/tracking-parity.js" judge --baseline before.json --candidate after.json`
-
-Exit 1 names each `untracked` or `double` element and each `lost-event` (a name
-the baseline fired that the candidate never fires). Exit 2 means a harvest was
-missing, empty or unreadable, or an element was refused as destructive or could
-not be clicked: something was not judged, so it is not a pass.
+Run it BEFORE the merge. Load [references/tracking-parity.md](references/tracking-parity.md) for the `static` and `judge` subcommands, the production-database warning and the exit codes.
 
 ### Verification Checklist
 
@@ -421,51 +356,7 @@ node "${CLAUDE_PLUGIN_ROOT}/scripts/deploy-ledger.js" --verify --since "$previou
 once, matching changed-file details and five checked cells; it rejects missing,
 malformed or stale commit-window records. Run it before calling a deploy verified.
 
-Regeneration preserves checks and metrics only for the same resolved base and
-candidate. Changing either commit or loading an older ledger without that
-provenance resets them. Without `--candidate`, the CLI uses current HEAD and
-still rejects evidence from an earlier candidate. An explicit older candidate
-verifies only that historical record, never the newer checkout or deployment.
-Commit/archive the evidence separately from a production trigger. If a later
-commit is actually promoted, it is a new candidate requiring its own checks and
-live readback; do not reuse historical verification to claim that commit passed.
-
-This binds recorded assertions to a commit window, not to the actual
-browser, deployed environment or business outcome. Keep those artifacts and
-readbacks separately. Independently inventory affected flows from the product
-contract and add checks the file/route heuristics cannot derive. Unsupported
-Markdown/control characters in a surface path produce an explicit tool gap,
-not a checked surface or permission to rename the user's files.
-
-For a verified first deployment there is no prior deployed commit. Treat the
-entire candidate as the affected surface inventory; the current ledger CLI
-requires a commit baseline and cannot derive that first-release case from an
-empty tree. Record that tool limitation and perform the complete first-release
-acceptance checks; do not invent a deployed SHA or use HEAD to make it pass.
-
-The CLI falls back from `--since` to `.claude/last-deploy`, then the most recent
-tag. This workflow supplies the saved verified baseline explicitly; fallback
-resolution is not evidence that a marker/tag was actually deployed. **If none resolves it refuses with exit 2 rather than
-diffing against something arbitrary** — "no surfaces changed" and "I could not
-tell what changed" are opposite answers and must not print the same.
-
-Three things it deliberately does not do:
-
-- **It does not execute verification.** A human or a browser-driving agent
-  records the result. Row/commit validation cannot prove that a browser flow
-  ran or its business outcome passed.
-- **Its WIDE detection is heuristic.** Known config, token and layout names are
-  considered across UI, JavaScript/TypeScript and JSON files, including
-  `tailwind.config.js`. Other shared dependencies may still be omitted.
-  Independently inspect them; a zero detector count does not prove that no
-  user-facing behavior changed.
-- **It does not derive metrics.** The ledger has a metrics section that must be
-  filled or explicitly waived, and an empty one fails `--verify`. Nothing here
-  knows which metrics your deploy could move.
-
-Route derivation is convention-based (`app/`, `pages/`, `src/routes/`). A
-project routing some other way gets its changed files listed without a route,
-which is honest rather than wrong — the row still has to be checked.
+Load [references/deploy-ledger.md](references/deploy-ledger.md) before calling a deploy verified: it covers regeneration and provenance, the first-deployment case, the baseline fallback and what the ledger deliberately does not do.
 
 ## Step 6: Rollback (if needed)
 

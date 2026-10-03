@@ -59,26 +59,7 @@ review rounds so increasingly narrow findings do not consume an unlimited run.
 
 ### The adversary needs TOOLS, or you are buying assertions
 
-`[measured 2026-08-31]` The routing table above was first written crediting the
-*vendor* for those eight findings. A controlled test the next day does not
-support that reading, and the correction is the more useful half.
-
-Same prompt, same unreviewed 214-line authorization gate, neither model having
-seen it. The cross-vendor adversary returned 11 findings; an in-house subagent
-on the builder's own model returned 10; about 8 were the same defects. The
-in-house one additionally caught a **live** false pass the other missed, and
-prefixed every finding with "Measured" — it had actually executed the predicate
-and run the target's selftest against an empty root. The cross-vendor reviewer
-reasoned statically and asserted.
-
-The confound was the operator's: the subagent was given Bash and Read; the
-cross-vendor reviewer was given a read-only sandbox. One could verify
-empirically and did. **That is tool posture, not vendor judgment**, and it
-plausibly explains the entire apparent gap.
-
-So the likely source of the original eight findings is this skill's PROTOCOL
-rather than the second vendor: an adversary required to write tests that FAIL
-on the defect produces empirical evidence by construction.
+Load [references/tool-posture-ab.md](references/tool-posture-ab.md) when comparing two reviewers or choosing a vendor: it holds the measured A/B that traced the apparent vendor gap to tool posture.
 
 Three rules follow, and they outrank the routing table above:
 
@@ -95,7 +76,8 @@ Three rules follow, and they outrank the routing table above:
   because you expect it to see more.
 
 And when comparing two reviewers: **an A/B is void unless their tool grants
-match.** Check that before believing any comparison, including the one above.
+match.** Check that before believing any comparison, including the one in
+references/tool-posture-ab.md.
 
 ## Use the actually available agent transport
 
@@ -105,35 +87,7 @@ do not prove those tools exist on another host. A native worker acknowledgment
 and recorded owner/return artifact establish dispatch, not a clickable task chip.
 Preserve scope and current authorization across rounds.
 
-`[measured 2026-08-31]` The same audit was driven by computer-use into a
-desktop app, and the transport — not the model — produced most of the waste:
-roughly fifteen click batches lost to focus changes, two stale clipboard
-re-pastes that burned two entire review cycles, and several stalls waiting for
-a human to unlock the machine.
-
-An MCP server removes that failure class outright. Measured against the same
-vendor's CLI on identical prompts:
-
-| | MCP | CLI |
-|---|---|---|
-| Latency | 8,245 ms median | 8,993 ms median — a tie, ~8s is inference |
-| Server startup | 207 ms, paid once | full process per call |
-| Input tokens per call | 22,800 | 29,343 (−22% for MCP) |
-| Multi-turn | returns a thread id; replies continue it | a thread another writer holds refuses resume |
-| Concurrency | two calls in flight returned at +7.3s and +7.9s, not 2x | one process per call |
-| Output | structured JSON | stdout to scrape |
-
-Two operational notes that cost real time to learn:
-
-- **The CLI appends piped stdin to the prompt.** Spawning it with an open stdin
-  pipe blocks forever waiting for EOF. Close stdin explicitly.
-- **Put the commit SHA in every message.** It is what catches a duplicate or
-  stale send immediately, instead of spending a review round on already-reviewed
-  work.
-
-Pick the reviewing model deliberately and verify what RAN, not what was asked:
-a per-call model override is honoured, but read it back from the vendor's own
-session log before trusting it.
+Load [references/agent-transport.md](references/agent-transport.md) when choosing between an MCP server and a CLI for the adversary: it holds the measured cost table and three operational rules, close the CLI's stdin, put the commit SHA in every message, and read back which model ran.
 
 ## One thread for the whole loop, not one per round
 
@@ -439,48 +393,7 @@ The rest follows once you know which case you are in:
   verbatim.** That is what recovery came from when the untracked file was gone.
   It is a backstop, not a plan — committing is the plan.
 
-### Recovery is a stitching job, because incremental writing fragments it
-
-`[measured 2026-09-01]` The two halves of this section pull against each other,
-and it is worth knowing before you need it. Writing incrementally is what stops
-a timeout losing everything. It is also why **no single payload in the log holds
-the finished file.**
-
-A 32,327-byte report was destroyed by a `git worktree remove` — the reports
-directory is gitignored, so the deliverable was untracked and the removal took
-it. Recovering it from the delegate's session log:
-
-| | |
-|---|---|
-| Longest single payload | 15,871 chars, 7 of 11 findings |
-| Payloads carrying a finding | 7, written as successive appends |
-| Stitched result | 11 of 11 findings, 27,609 chars |
-
-So a recovery script cannot take the last write or the biggest one. It has to
-**collect payloads in event order and distinguish append, replacement and explicit
-correction**. Preserve provenance and conflicts when an operation is unclear. A
-longer earlier section can contain a defect that a shorter correction removes;
-neither longest-wins nor last-wins reconstructs arbitrary edits safely. Byte count will not match the original, because the log
-holds what was written and not the file's final assembly; count the SECTIONS
-recovered against the sections you expect.
-
-Two guards that made the result trustworthy rather than plausible:
-
-- **Run a known-positive before believing a gap.** The first attempt reported
-  the report missing from the log entirely. The control failed too, which meant
-  the probe was pointed at the wrong session — `--last` and newest-mtime both
-  pick the wrong file when several runs overlap. Address the session by id.
-- **Count against the delegate's own closing message.** It said 10 HIGH and 1
-  MEDIUM; recovery produced exactly 11 sections. A grep for headings had said
-  12, and the grep was wrong. Reconcile against something with a different
-  provenance before declaring anything lost.
-
-**This is not licence to move the report.** An audit report belongs under
-`.claude/reports/`, gitignored, for the reason stated above: raw audit output
-must not be stageable. The cheap protection is not relocating it — it is
-remembering that removing a worktree destroys everything ignored inside it, so
-copy the report out before running `git worktree remove`, and treat the
-delegate's session log as the recovery path when you forget.
+Load [references/timeout-recovery.md](references/timeout-recovery.md) when a delegate's deliverable was lost and must be rebuilt from its session log: recovery stitches payloads in event order and reconciles against a source with different provenance.
 
 **Instruct the adversary to write incrementally.** Append findings to a file as
 it goes rather than composing one answer at the end, and prefer a format that
@@ -521,24 +434,4 @@ coverage and each relevant canary result separately. Zero test defects can be a
 valid result; it does not prove mutation testing was skipped and is never a
 quota of flaws the reviewer must invent.
 
-Worked example — the first production run, an 8-finding audit of a plugin
-repo's own gates, merged as one squashed PR:
-
-| | |
-|---|---|
-| Rounds to clean | 24 (capped at 5; see the bounding section) |
-| Original findings | 8, every one a gate that could return a false verdict |
-| Defects in the adversary's own tests | 2, found by mutation-testing them |
-| Full gate runs | 14, all green at the commit reviewed |
-| Rounds that changed the design | 11 — the shared-tree mutation engine was replaced by a private worktree, net −151 lines |
-| Rounds spent on one decision | 5 (20–24), all real, all narrow |
-
-The builder believed the work was done after round 1. What the following 23
-rounds bought was not polish: they replaced three successive restore
-strategies that each lost a concurrent writer's edit, deleted an entire
-lock/nonce/announce protocol in favour of isolation, and established that an
-infrastructure failure must never be scoreable as test evidence. Two of them
-found defects in the acceptance tests themselves.
-
-The honest cost line beside that: the last five rounds circled a single exit
-code, and the loop kept its rigour long after it had stopped buying much.
+Load [references/first-production-run.md](references/first-production-run.md) for a worked example of these totals from the first production run.
