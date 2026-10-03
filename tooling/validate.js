@@ -1008,6 +1008,21 @@ function checkReferenceContents() {
   for (const f of r.failures) log('FAIL', `${f.file}: ${f.problems.join('; ')}`);
 }
 
+// Every SKILL.md is at most the line limit and links each other markdown file
+// in its skill. The logic and its fixture suite live in check-skill-layout.js
+// and test-skill-layout.js.
+function checkSkillLayout() {
+  const { checkTree, LIMIT } = require('./check-skill-layout.js');
+  const r = checkTree(ROOT);
+  if (!r.skills) {
+    return log('FAIL', 'Skill layout: NOT CHECKED - 0 skills found, so this gate had no subject. That is not a pass.');
+  }
+  if (!r.failures.length) {
+    return log('PASS', `Skill layout: ${r.skills} of ${r.skills} skill(s) are at most ${LIMIT} lines and link all ${r.files} reference file(s) they hold`);
+  }
+  for (const f of r.failures) log('FAIL', `${f.skill}: ${f.problems.join('; ')}`);
+}
+
 // ---------------------------------------------------------------- run
 
 console.log('Validating autodev marketplace...\n');
@@ -1018,6 +1033,7 @@ checkPluginManifests();
 checkSkillFrontmatter();
 checkSkillCrossReferences();
 checkReferenceContents();
+checkSkillLayout();
 checkHookWiring();
 checkScriptReferences();
 checkShellGlobQuoting();
