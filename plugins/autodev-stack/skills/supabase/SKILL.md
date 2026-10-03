@@ -106,6 +106,7 @@ and row-dependent policy work; compare before/after latency and plans.
 Load the relevant shipped reference for a concrete question:
 
 - [Query indexes](references/query-missing-indexes.md)
+- [Foreign key indexes](references/schema-foreign-key-indexes.md)
 - [Connection pooling](references/conn-pooling.md)
 - [RLS performance](references/security-rls-performance.md)
 - [RLS basics](references/security-rls-basics.md)

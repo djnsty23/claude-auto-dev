@@ -231,6 +231,12 @@ When audit finds repeated issues (3+ files):
 ```
 Log to `.claude/mistakes.md` for future reference.
 
+## Why audit is not a Workflow script
+
+Load [references/why-this-stays-a-skill.md](references/why-this-stays-a-skill.md)
+only when proposing to rewrite audit as a Workflow script. It records the
+measured decision and what would reopen it.
+
 ## Plan the authorized fixes
 
 Group confirmed issues by root cause, order fixes by impact and dependencies,
