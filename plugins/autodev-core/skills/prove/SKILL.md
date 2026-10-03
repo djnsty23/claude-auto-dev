@@ -4,6 +4,7 @@ description: "Capture the evidence a change actually works: the BEFORE state whi
 when_to_use: "Use before the first edit of a fix and again once it works. Use whenever asked to write a status line, summary, report or release note that says something is fixed, passing or done, whenever a claim would otherwise have no command output behind it, and on the word prove."
 allowed-tools: Bash, Read, Write, Grep, Glob, mcp__Claude_Browser__*
 model: opus
+# Tested 2026-10-03 on Sonnet 5.5 (xhigh) and Opus 5.5 (high), 9 of 9 scored steps each, 3 of 9 without the skill
 user-invocable: true
 argument-hint: "[before <slug> | after <slug>]"
 ---
