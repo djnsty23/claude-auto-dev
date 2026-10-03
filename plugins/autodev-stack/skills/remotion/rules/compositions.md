@@ -5,6 +5,14 @@ metadata:
   tags: composition, still, folder, props, metadata
 ---
 
+## Contents
+
+- Default Props
+- Folders
+- Stills
+- Calculate Metadata
+- Nesting compositions within another
+
 A `<Composition>` defines the component, width, height, fps and duration of a renderable video.
 
 It normally is placed in the `src/Root.tsx` file.

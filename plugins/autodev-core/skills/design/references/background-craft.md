@@ -8,6 +8,20 @@ The parent skill's "Backgrounds & Visual Details" section covers backgrounds you
 draw in CSS. This covers backgrounds you source or generate, which fail in
 different ways.
 
+## Contents
+
+- What the technique actually buys
+- Production pipeline
+  - Reframing: composition and copy placement are one decision
+  - Animating: the prompt is a restraint instruction
+- Implementation rules
+  - The video element
+  - Reduced motion is not optional here
+  - Legibility is measured on the rendered surface
+  - Scrims, when you need one
+- Slop tells specific to this technique
+- Verification
+
 ## What the technique actually buys
 
 The pattern is easy to misread as decoration. It is a hierarchy decision.

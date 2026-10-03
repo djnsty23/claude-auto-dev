@@ -5,6 +5,15 @@ Preserve existing policy during onboarding. Validate templates against the insta
 versions; configuration syntax and defaults below are examples, not current API
 guarantees. Keep version choices in `version-defaults.md` and verify them at use.
 
+## Contents
+
+- TypeScript — maximum strictness
+- Biome — when selected for this project
+- shadcn/ui when selected
+- .gitattributes (cross-platform essential)
+- .gitignore additions (beyond create-next-app)
+- .npmrc
+
 ## TypeScript — maximum strictness
 
 Start from Next.js defaults, add these flags to every tsconfig:
