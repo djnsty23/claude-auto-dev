@@ -35,6 +35,13 @@
  *   P21o any lock naming the pid is the caller's    -> a reused pid inherits a dead run's lane (S13)
  *   P22o iso7 formats an unparseable time           -> an odd creation time throws in the judgement (S13)
  *   P23o the POSIX probes answer with a fixed boot  -> a boot identity that no reboot changes (S13)
+ *   P24o a root seen gone adopts later children     -> a reused pid's exited holder leaves its game adopted (S14)
+ *   P25o no gone moment is ever stamped             -> the same, once the reuser has exited (S14)
+ *   P26o the bound is the root's last sighting      -> a real child created before the death is dropped (S14)
+ *   P27o a journaled process is trusted as is       -> a game the old writer journaled holds the lane (S14)
+ *   P28o an old journal derives no bound            -> a lease written before the fix never frees (S14)
+ *   P29o the cap stops refreshing sightings         -> a journal at 500 entries goes stale (S14)
+ *   P30o the owner's last child bounds nothing      -> a later holder of the owner's pid is adopted (S14)
  *
  * The machine's real lock is never touched: every spawn sets
  * AUTODEV_GATE_LOCK_PATH to a temp directory.
@@ -631,6 +638,106 @@ function s13Identity(subject) {
 const s13Defaults = (subject) => [...s13Records(subject), ...s13Handover(subject), ...s13Identity(subject)];
 
 /**
+ * S14: a parent pid reused by a process that has exited too. The sequence
+ * measured on 2026-10-03: a journaled descendant died, a launcher took its
+ * pid, started a game and exited, and the game with its six overlay children
+ * was adopted, so the lane stayed held. Synthetic snapshots make every time
+ * exact. Each row has a control that must stay adopted: a real child created
+ * after the parent's last sighting and before its death.
+ */
+function s14GoneReuser(subject) {
+    const dir = path.dirname(subject);
+    const id = require(path.join(dir, 'gate-identity.js'));
+    const rec = require(path.join(dir, 'gate-records.js'));
+    const BOOT = 'host|2026-10-03T06:00:00.0000000Z';
+    const msys = { ok: true, byMsys: new Map(), ambiguous: new Set() };
+    const at = (hms) => `2026-10-03T${hms}Z`;
+    const ms = (hms) => `2026-10-03T${hms}.000Z`;
+    const snapAt = (takenHms, list) => {
+        const procs = new Map();
+        const children = new Map();
+        for (const p of [{ pid: 4, ppid: 0, startUtc: at('06:00:01.0000000') }, ...list]) {
+            procs.set(p.pid, p);
+            if (!children.has(p.ppid)) children.set(p.ppid, []);
+            children.get(p.ppid).push(p);
+        }
+        return { ok: true, takenMs: Date.parse(ms(takenHms)), boot: { id: BOOT }, procs, children };
+    };
+    const owner = { pid: 40512, startUtc: at('14:39:44.5000000'), bootId: BOOT };
+    const chainRoot = { pid: 40600, ppid: 40512, startUtc: at('14:39:45.0000000') };
+    const root = { pid: 39576, ppid: 40600, startUtc: at('14:47:54.6780000'), firstSeen: ms('14:48:16'), lastSeen: ms('14:48:16') };
+    const sibling = { pid: 41000, ppid: 40600, startUtc: at('14:40:00.0000000'), firstSeen: ms('14:40:16'), lastSeen: ms('14:48:46') };
+    const game = { pid: 47040, ppid: 39576, startUtc: at('15:15:05.6297700') };
+    const overlays = [0, 1, 2, 3, 4, 5].map((i) => ({ pid: 47100 + i, ppid: 47040, startUtc: at('15:15:07.0000000') }));
+    const realChild = { pid: 45000, ppid: 39576, startUtc: at('14:48:30.0000000') };
+    const judge = (execution, snap, o = owner) => id.judgeExecution({ owner: o, execution, snap, boot: snap.boot, msys });
+    const show = (j) => JSON.stringify(j);
+    const rows = [];
+
+    // The heartbeat after the root died saw its pid empty and stamped it then.
+    const afterDeath = snapAt('14:48:46', [{ ...sibling, firstSeen: undefined, lastSeen: undefined }]);
+    const [stamped, siblingAfter] = id.markGone([root, sibling], afterDeath);
+    rows.push(['S14: a journaled root missing from a snapshot is stamped gone at that snapshot, a running one is not',
+        stamped.goneUtc === at('14:48:46.0000000') && !siblingAfter.goneUtc, show([stamped, siblingAfter])]);
+    const late = snapAt('15:20:00', [game, ...overlays]);
+    const stampedJournal = { stampsGone: true, chainRoot, descendants: [stamped, sibling] };
+    let j = judge(stampedJournal, late);
+    const adopted = id.liveDescendants(id.executionRecords(owner, stampedJournal), late).map((p) => p.pid);
+    rows.push(['S14: the measured sequence: a child of a pid whose next holder also exited is not adopted',
+        j.alive === false && adopted.length === 0, `${show(j)} adopted=${adopted.join(',')}`]);
+    j = judge(stampedJournal, snapAt('15:20:00', [game, ...overlays, realChild]));
+    rows.push(['S14 control: a real child created between the root\'s last sighting and its death is adopted',
+        j.alive === true && /45000/.test(j.why), show(j)]);
+
+    // The launcher still runs: the reuse is seen, and its moment outlives it.
+    const launcher = { pid: 39576, ppid: 4, startUtc: at('15:15:00.0000000') };
+    const [reusedStamp] = id.markGone([root], snapAt('15:15:10', [launcher, game]));
+    j = judge({ stampsGone: true, chainRoot, descendants: [root] }, snapAt('15:15:10', [launcher, game]));
+    const after = judge({ stampsGone: true, chainRoot, descendants: [reusedStamp] }, late);
+    rows.push(['S14: a live reuser\'s child is not adopted, and the reuse moment keeps it out once the reuser exits',
+        j.alive === false && reusedStamp.goneUtc === at('15:15:00.0000000') && after.alive === false, `${show(j)} ${show(reusedStamp)} ${show(after)}`]);
+
+    // A journal that already names the game, as the defective writer left it.
+    const journaled = [game, ...overlays].map((p) => ({ ...p, firstSeen: ms('15:15:20'), lastSeen: ms('15:19:50') }));
+    j = judge({ stampsGone: true, chainRoot, descendants: [stamped, sibling, ...journaled] }, late);
+    rows.push(['S14: a journaled process created after its parent\'s gone moment no longer holds the lane, nor its children',
+        j.alive === false, show(j)]);
+
+    // A journal from a writer that stamped nothing: the next write after the
+    // root's last sighting bounds it, and the lane frees itself.
+    const oldJournal = { chainRoot, descendants: [root, sibling, ...journaled] };
+    j = judge(oldJournal, late);
+    const oldControl = judge(oldJournal, snapAt('15:20:00', [game, ...overlays, realChild]));
+    rows.push(['S14: an old journal\'s bad lease frees itself: the root is bounded by the next journal write',
+        j.alive === false, show(j)]);
+    rows.push(['S14 control: in that old journal the real child is still adopted', oldControl.alive === true && /45000/.test(oldControl.why), show(oldControl)]);
+
+    // At the 500-entry cap a heartbeat still refreshes every journaled process
+    // and still stamps the gone ones: a stalled sighting would bound too early.
+    const filler = Array.from({ length: 499 }, (_, i) => ({ pid: 60000 + i, ppid: 40600, startUtc: at('14:40:30.0000000'), firstSeen: ms('14:41:00'), lastSeen: ms('14:41:00') }));
+    const early = { ...root, firstSeen: ms('14:48:00'), lastSeen: ms('14:48:00') };
+    const merged = rec.mergeDescendants([...filler, early], [early, { pid: 61000, ppid: 39576, startUtc: at('14:48:10.0000000') }], ms('14:48:16'));
+    const capRoot = merged.find((d) => d.pid === 39576);
+    const capStamped = id.markGone(merged, snapAt('14:48:46', []));
+    j = judge({ stampsGone: true, chainRoot, descendants: capStamped }, snapAt('15:20:00', [game, realChild]));
+    rows.push(['S14: at the cap a journaled process is still refreshed, nothing new is added, and the gone root is stamped',
+        merged.length === 500 && capRoot.lastSeen === ms('14:48:16') && capStamped.find((d) => d.pid === 39576).goneUtc === at('14:48:46.0000000'),
+        `length=${merged.length} root=${show(capRoot)}`]);
+    rows.push(['S14 control: at the cap the real child is adopted and the game is not', j.alive === true && /45000/.test(j.why), show(j)]);
+
+    // The owner says when it started its last child: a later holder of its
+    // pid adopts nothing, while its earlier orphan still counts.
+    const ownerJournal = { stampsGone: true, chainRoot: { ...chainRoot, goneUtc: at('15:00:00.0000000') }, ownerDoneUtc: at('15:00:01.0000000'), descendants: [] };
+    const intruder = { pid: 48000, ppid: 40512, startUtc: at('15:10:00.0000000') };
+    const orphan = { pid: 46000, ppid: 40512, startUtc: at('14:50:00.0000000') };
+    j = judge(ownerJournal, snapAt('15:20:00', [intruder]));
+    const ownerControl = judge(ownerJournal, snapAt('15:20:00', [intruder, orphan]));
+    rows.push(['S14: a child of the owner\'s pid created after the owner\'s last child is not adopted', j.alive === false, show(j)]);
+    rows.push(['S14 control: the owner\'s own earlier orphan is adopted', ownerControl.alive === true && /46000/.test(ownerControl.why), show(ownerControl)]);
+    return rows;
+}
+
+/**
  * S11: the readers the reaper imports see what admission wrote: lane locks with
  * their meta, tickets, and leases; a lease renewal from another run is refused.
  * `subject` is a full-gate-queue.js whose siblings are the libraries to load.
@@ -717,6 +824,7 @@ async function main() {
         S7: () => s7Msys(SUBJECT, msys), S8: () => s8Descendants(SUBJECT, orphan), S9: () => s9Fence(SUBJECT),
         S10: () => s10Malformed(SUBJECT), S10b: () => s10bSemantic(SUBJECT), S11: () => s11Readers(SUBJECT), S12: () => s12Library(SUBJECT),
         S13: () => s13Defaults(SUBJECT),
+        S14: () => s14GoneReuser(SUBJECT),
     };
     for (const [id, fn] of Object.entries(real)) if (want(id)) report(id, await fn());
 
@@ -783,6 +891,21 @@ async function main() {
                 ["source: 'sysctl kern.boottime' };", "source: 'sysctl kern.boottime', id: 'planted' };"],
                 ['    return null;\n}\n\nfunction posixSnapshot() {', "    return { id: 'planted', source: 'planted' };\n}\n\nfunction posixSnapshot() {"]],
             (s) => s13Identity(s).filter(([n]) => n.startsWith('S13 posix')), ['S13']],
+        ['P24o', 'a root seen gone adopts children created after it', 'gate-identity.js',
+            [['            if (goneAt && normaliseTime(c.startUtc) >= goneAt) continue;\n', '']], (s) => s14GoneReuser(s), ['S14']],
+        ['P25o', 'no gone moment is ever stamped', 'gate-identity.js',
+            [['        const gone = goneMoment(r, snap);', '        const gone = null;']], (s) => s14GoneReuser(s), ['S14']],
+        ['P26o', 'the bound is the root\'s last sighting', 'gate-identity.js',
+            [['    if (!p) return iso7(snap.takenMs);', '    if (!p) return normaliseTime(rec.lastSeen) || iso7(snap.takenMs);']], (s) => s14GoneReuser(s), ['S14']],
+        ['P27o', 'a journaled process is trusted as is', 'gate-identity.js',
+            [['    return recs.filter((r, i) => (owner && i === 0) || !foreign(i));', '    return recs;']], (s) => s14GoneReuser(s), ['S14']],
+        ['P28o', 'an old journal derives no bound', 'gate-identity.js',
+            [['    if (!ex.stampsGone) {', '    if (false) {']], (s) => s14GoneReuser(s), ['S14']],
+        ['P29o', 'the cap stops refreshing sightings', 'gate-records.js',
+            [['        if (hit) hit.lastSeen = nowIso;', '        if (hit && out.length < cap) hit.lastSeen = nowIso;']], (s) => s14GoneReuser(s), ['S14']],
+        ['P30o', 'the owner\'s last child bounds nothing', 'gate-identity.js',
+            [['    if (owner) list.push(ex.ownerDoneUtc && !owner.goneUtc ? { ...owner, goneUtc: ex.ownerDoneUtc } : owner);', '    if (owner) list.push(owner);']],
+            (s) => s14GoneReuser(s), ['S14']],
     ];
     for (const [id, what, file, edits, scenario, covers] of plants) {
         if (!want(id) && !covers.some(want)) continue;

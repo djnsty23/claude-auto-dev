@@ -244,6 +244,12 @@ function verdict({ code, signal, interrupted, spawnError, recorded }) {
     return { exit: code, finished: true, why: `the chain exited ${code}` };
 }
 
+/** `rec` when it is a runner's record of an attempt of this run and token, else null. */
+function attemptRecord(rec, runId, token) {
+    if (!rec || typeof rec !== 'object' || !Number.isInteger(rec.exit) || rec.runId !== runId || rec.token !== token) return null;
+    return rec;
+}
+
 /**
  * The runner's record of one attempt, or null when absent, malformed, or
  * written for another run or token. Removes our own temp file.
@@ -254,8 +260,33 @@ function readSentinel(file, runId, token) {
     try { fs.unlinkSync(file); } catch { /* temp file, best effort */ }
     let rec;
     try { rec = JSON.parse(text); } catch { return null; }
-    if (!rec || typeof rec !== 'object' || !Number.isInteger(rec.exit) || rec.runId !== runId || rec.token !== token) return null;
-    return rec;
+    return attemptRecord(rec, runId, token);
+}
+
+/**
+ * Where the runner passes one of the chain's output streams. A failed write
+ * (ENOSPC on a redirected log, a closed pipe) never ends the runner, so it
+ * goes on supervising npm and the attempt still gets its record; the failure
+ * is reported once per error code to `onFault`. To a file the write is
+ * synchronous and each chunk tries again, so output resumes once the disk has
+ * room. A stream (a pipe, a terminal) that fails stays failed: its 'error' is
+ * handled and later chunks are dropped. `[measured 2026-10-03]` a bare
+ * stream write to a full disk threw from the 'data' handler and killed the
+ * runner, and the chain ran on with nobody recording its exit.
+ */
+function outputSink(stream, onFault) {
+    let fd = null;
+    try { if (fs.fstatSync(stream.fd).isFile()) fd = stream.fd; } catch { /* not a file, or no descriptor */ }
+    let broken = false;
+    if (fd === null) stream.on('error', (e) => { broken = true; onFault(e); });
+    return (b) => {
+        if (fd !== null) {
+            try { for (let off = 0; off < b.length;) off += fs.writeSync(fd, b, off, b.length - off); } catch (e) { onFault(e); }
+            return;
+        }
+        if (broken) return;
+        try { stream.write(b); } catch (e) { broken = true; onFault(e); }
+    };
 }
 
 /**
@@ -263,8 +294,13 @@ function readSentinel(file, runId, token) {
  * scanning it for infrastructure markers, and write a record of the attempt
  * (run id, token, times, npm's exit, the markers) only when npm exited with a
  * code and no signal. Anything else, or this process being killed, leaves none.
+ * The record also goes to the parent over the IPC channel when there is one:
+ * on a full disk the sentinel cannot be written, and the record is the only
+ * proof the chain finished.
  */
 function runChainChild(root, sentinel, runId, token, waitGo = false) {
+    // The channel must not keep the runner alive; a pending send still does.
+    if (process.channel) process.channel.unref();
     // With --wait-go the parent records this runner's identity before any work
     // starts, then creates <sentinel>.go: a chain too short for one process
     // snapshot is still journaled. A parent that never says go (it died, or it
@@ -292,8 +328,19 @@ function runChainChild(root, sentinel, runId, token, waitGo = false) {
         ? spawn(`npm run ${CHAIN_SCRIPT}`, { ...opts, shell: true })
         : spawn('npm', ['run', CHAIN_SCRIPT], opts);
     const scan = recovery.createScanner();
-    npm.stdout.on('data', (b) => { process.stdout.write(b); scan.feed(b); });
-    npm.stderr.on('data', (b) => { process.stderr.write(b); scan.feed(b); });
+    // An output write that fails is evidence about the machine, recorded
+    // against the step that was running, and never the runner's end.
+    const faults = [];
+    const onFault = (e) => {
+        const code = (e && e.code) || 'EWRITE';
+        if (faults.some((f) => f.code === code)) return;
+        faults.push({ code, step: scan.lastStep(), atUtc: new Date().toISOString() });
+        if (code === 'ENOSPC') scan.note(code);
+    };
+    const toStdout = outputSink(process.stdout, onFault);
+    const toStderr = outputSink(process.stderr, onFault);
+    npm.stdout.on('data', (b) => { scan.feed(b); toStdout(b); });
+    npm.stderr.on('data', (b) => { scan.feed(b); toStderr(b); });
     const forward = (sig) => { try { npm.kill(sig === 'SIGBREAK' ? 'SIGTERM' : sig); } catch { /* gone */ } };
     const signals = ['SIGINT', 'SIGTERM', 'SIGHUP'];
     if (process.platform === 'win32') signals.push('SIGBREAK');
@@ -302,9 +349,17 @@ function runChainChild(root, sentinel, runId, token, waitGo = false) {
     npm.on('close', (code, signal) => {
         if (typeof code === 'number' && !signal) {
             const rec = { schema: 1, runId, token, originPid: process.ppid, runnerPid: process.pid, startUtc,
-                          endUtc: new Date().toISOString(), exit: code, signal: null, infra: scan.hits(), lastStep: scan.lastStep() };
-            try { fs.writeFileSync(sentinel, `${JSON.stringify(rec)}\n`); } catch { /* the parent reads a missing record as not finished */ }
+                          endUtc: new Date().toISOString(), exit: code, signal: null, infra: scan.hits(), lastStep: scan.lastStep(),
+                          outputFaults: faults };
+            let sentinelError = null;
+            try { fs.writeFileSync(sentinel, `${JSON.stringify(rec)}\n`); } catch (e) { sentinelError = e.code || e.message; }
             process.exitCode = code;
+            // With neither a sentinel nor a message the parent reads the attempt as not finished.
+            if (process.send && process.connected) {
+                try {
+                    process.send({ type: 'gate-attempt', rec: { ...rec, sentinelError } }, () => { try { process.disconnect(); } catch { /* gone */ } });
+                } catch { /* the parent is gone */ }
+            }
         } else {
             process.exitCode = 2;
         }
@@ -312,6 +367,7 @@ function runChainChild(root, sentinel, runId, token, waitGo = false) {
 }
 
 const GO_WAIT_MS = 60000;
+const LATE_CLOSE_MS = 5000;
 
 /** The runner's wait for go: GO_WAIT_MS, or AUTODEV_GATE_GO_WAIT_MS (a test seam). */
 function goWaitMs(env) {
@@ -338,10 +394,17 @@ function freshSnapshot() {
     try { return ident.snapshot({ maxAgeMs: 0 }); } catch (e) { return { ok: false, why: e.message }; }
 }
 
-/** Every live process of the chain: descendants of its root or of anything journaled. */
+/**
+ * Every live process of the chain: descendants of its root or of anything
+ * journaled. The roots come through executionRecords, so a process created
+ * after its parent's pid changed hands is never the chain's, even once the
+ * pid's next holder has exited too.
+ */
 function liveOfChain(chainRoot, journal, snap) {
     if (!snap.ok || !chainRoot) return [];
-    const roots = [chainRoot, ...((journal && journal.descendants) || [])];
+    const own = journal && journal.chainRoot;
+    const root = own && own.pid === chainRoot.pid && own.startUtc === chainRoot.startUtc ? own : chainRoot;
+    const roots = ident.executionRecords(null, { ...(journal || {}), chainRoot: root });
     const live = ident.liveDescendants(roots, snap).filter((p) => p.pid !== process.pid);
     for (const r of roots.slice(1)) if (ident.recordLive(r, snap) && !live.some((p) => p.pid === r.pid)) live.push(snap.procs.get(r.pid));
     return live;
@@ -454,6 +517,19 @@ function main() {
         try { return records.updateRun(base, runId, mutate); } catch (e) { log(`${TAG} run journal not written: ${e.message}`); return null; }
     };
     const readJournal = () => { const r = records.readRun(base, runId); return r.state === 'ok' ? r.value : null; };
+    // One journal write per observation, from one read: what runs is merged
+    // in with the time, and every journaled process that has stopped gets its
+    // gone moment, so a later holder of its pid adopts none of its children
+    // when it exits too. Returns the chain's live processes.
+    const observe = (snap) => {
+        let live = null;
+        journal((j) => {
+            live = liveOfChain(chainRoot, j, snap);
+            return { ...j, chainRoot: j.chainRoot ? ident.markGone([j.chainRoot], snap)[0] : j.chainRoot,
+                     descendants: ident.markGone(records.mergeDescendants(j.descendants, live, nowIso()), snap) };
+        });
+        return live || liveOfChain(chainRoot, readJournal(), snap);
+    };
 
     // Leaves every queue and frees any lane naming this process and token. It
     // runs when nothing is held too: a signal can land between a lane being
@@ -486,6 +562,9 @@ function main() {
         if (done) return;
         done = true;
         releaseOnce();
+        // This process starts no child from here on, so a waiter judging the
+        // lane by its records adopts nothing a later holder of its pid starts.
+        if (attempt > 0) journal((j) => ({ ...j, ownerDoneUtc: j.ownerDoneUtc || ident.iso7(Date.now()) }));
         const how = v.finished ? 'the chain finished' : 'the chain did NOT finish';
         log(`${TAG} verdict ${label(v.exit)} (exit ${v.exit}), ${how}: ${v.why}`);
         process.exitCode = v.exit;
@@ -529,9 +608,10 @@ function main() {
             if (snap.ok && !live.length) return { live: [], unknown: null };
             if (Date.now() >= until) {
                 if (!snap.ok) return { live: [], unknown: `no process snapshot (${snap.why})` };
-                journal((j) => ({ ...j, descendants: records.mergeDescendants(j.descendants, live, nowIso()) }));
-                log(`${TAG} ${live.length} process(es) of the chain still run after ${descendantWaitMs} ms: ${live.slice(0, 5).map((p) => p.pid).join(', ')}`);
-                return { live, unknown: null };
+                const kept = observe(snap);
+                if (!kept.length) return { live: [], unknown: null };
+                log(`${TAG} ${kept.length} process(es) of the chain still run after ${descendantWaitMs} ms: ${kept.slice(0, 5).map((p) => p.pid).join(', ')}`);
+                return { live: kept, unknown: null };
             }
             await new Promise((r) => setTimeout(r, 1000));
         }
@@ -603,7 +683,10 @@ function main() {
         const sentinel = path.join(os.tmpdir(), `gate-lock-${process.pid}-${Date.now()}.exit`);
         child = spawn(process.execPath, [__filename, '--run-chain', '--root', root, '--sentinel', sentinel,
             '--run-id', runId, '--token', token === null ? 'none' : String(token), ...(useLock ? ['--wait-go'] : [])],
-            { cwd: root, stdio: 'inherit', windowsHide: true });
+            { cwd: root, stdio: ['inherit', 'inherit', 'inherit', 'ipc'], windowsHide: true });
+        // The runner's record also arrives here, for when its sentinel could not be written.
+        let sent = null;
+        child.on('message', (m) => { if (m && m.type === 'gate-attempt' && !sent) sent = attemptRecord(m.rec, runId, token); });
         log(`${TAG} chain pid ${child.pid}: npm run ${CHAIN_SCRIPT}${useLock ? ` (run ${runId}, token ${token}, attempt ${attempt})` : ''}`);
         if (useLock) {
             const delay = envMs(env, 'AUTODEV_GATE_TEST_PUBLISH_DELAY_MS', 0);
@@ -611,7 +694,7 @@ function main() {
             const snap = freshSnapshot();
             chainRoot = snap.ok && snap.procs.get(child.pid) ? { pid: child.pid, startUtc: snap.procs.get(child.pid).startUtc, ppid: process.pid } : null;
             if (!chainRoot) log(`${TAG} the chain root's identity could not be recorded (${snap.ok ? `pid ${child.pid} is not in the snapshot` : snap.why})`);
-            const journaled = journal((j) => ({ ...j, token, chainRoot, owner, descendants: j.descendants || [] }));
+            const journaled = journal((j) => ({ ...j, token, chainRoot, owner, stampsGone: true, descendants: j.descendants || [] }));
             const leased = writeLease('running');
             // No go without both records: a runner nothing vouches for never
             // starts its chain (it exits 2 after its wait), and this attempt
@@ -624,21 +707,42 @@ function main() {
             }
             heartbeat = setInterval(() => {
                 const s = freshSnapshot();
-                if (s.ok && chainRoot) {
-                    const live = liveOfChain(chainRoot, readJournal(), s);
-                    journal((j) => ({ ...j, descendants: records.mergeDescendants(j.descendants, live, nowIso()) }));
-                }
+                if (s.ok && chainRoot) observe(s);
                 writeLease('running');
             }, heartbeatMs);
             heartbeat.unref();
         }
         child.on('error', (e) => finish({ spawnError: e.message }));
+        const runner = child;
+        let exited = null;
+        let settled = false;
+        let late = null;
+        // The attempt is settled on 'close', once the IPC channel has closed
+        // too, so a record the runner sent just before it exited has arrived.
+        // A channel that never closes is waited on for LATE_CLOSE_MS only.
+        const settle = () => {
+            if (settled || done) return;
+            settled = true;
+            if (late) clearTimeout(late);
+            try { if (runner.connected) runner.disconnect(); } catch { /* already closed */ }
+            const rec = readSentinel(sentinel, runId, token) || sent;
+            const outcome = { code: exited ? exited.code : null, signal: exited ? exited.signal : null, interrupted, recorded: rec ? rec.exit : null };
+            afterAttempt(outcome, rec).catch((e) => finish({ spawnError: `gate-lock could not settle the attempt (${e.message})` }));
+        };
         child.on('exit', (code, signal) => {
             child = null;
-            const rec = readSentinel(sentinel, runId, token);
-            const outcome = { code, signal, interrupted, recorded: rec ? rec.exit : null };
-            afterAttempt(outcome, rec).catch((e) => finish({ spawnError: `gate-lock could not settle the attempt (${e.message})` }));
+            exited = { code, signal };
+            // The runner has exited, so every child it had already exists: its
+            // gone moment is now, and its pid's next holder adopts nothing.
+            if (useLock && chainRoot) {
+                const gone = ident.iso7(Date.now());
+                const same = (r) => r && r.pid === chainRoot.pid && r.startUtc === chainRoot.startUtc;
+                chainRoot = { ...chainRoot, goneUtc: chainRoot.goneUtc || gone };
+                journal((j) => (same(j.chainRoot) ? { ...j, chainRoot: { ...j.chainRoot, goneUtc: j.chainRoot.goneUtc || gone } } : j));
+            }
+            late = setTimeout(settle, LATE_CLOSE_MS);
         });
+        child.on('close', settle);
     };
 
     if (!useLock) {

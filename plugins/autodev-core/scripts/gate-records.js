@@ -322,7 +322,12 @@ function updateRun(base, runId, mutate) {
     return next;
 }
 
-/** Merges observed processes into a journal's descendants (pid, ppid, startUtc, firstSeen, lastSeen). */
+/**
+ * Merges observed processes into a journal's descendants (pid, ppid, startUtc,
+ * firstSeen, lastSeen; other fields such as goneUtc are kept). At the cap a new
+ * process is dropped, but a journaled one is still refreshed: a stalled
+ * lastSeen would bound its children too early in gate-identity executionRecords.
+ */
 function mergeDescendants(list, observed, nowIso, cap = 500) {
     const out = Array.isArray(list) ? list.slice() : [];
     for (const p of observed) {
