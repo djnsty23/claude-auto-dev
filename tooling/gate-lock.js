@@ -338,10 +338,17 @@ function freshSnapshot() {
     try { return ident.snapshot({ maxAgeMs: 0 }); } catch (e) { return { ok: false, why: e.message }; }
 }
 
-/** Every live process of the chain: descendants of its root or of anything journaled. */
+/**
+ * Every live process of the chain: descendants of its root or of anything
+ * journaled. The roots come through executionRecords, so a process created
+ * after its parent's pid changed hands is never the chain's, even once the
+ * pid's next holder has exited too.
+ */
 function liveOfChain(chainRoot, journal, snap) {
     if (!snap.ok || !chainRoot) return [];
-    const roots = [chainRoot, ...((journal && journal.descendants) || [])];
+    const own = journal && journal.chainRoot;
+    const root = own && own.pid === chainRoot.pid && own.startUtc === chainRoot.startUtc ? own : chainRoot;
+    const roots = ident.executionRecords(null, { ...(journal || {}), chainRoot: root });
     const live = ident.liveDescendants(roots, snap).filter((p) => p.pid !== process.pid);
     for (const r of roots.slice(1)) if (ident.recordLive(r, snap) && !live.some((p) => p.pid === r.pid)) live.push(snap.procs.get(r.pid));
     return live;
@@ -454,6 +461,19 @@ function main() {
         try { return records.updateRun(base, runId, mutate); } catch (e) { log(`${TAG} run journal not written: ${e.message}`); return null; }
     };
     const readJournal = () => { const r = records.readRun(base, runId); return r.state === 'ok' ? r.value : null; };
+    // One journal write per observation, from one read: what runs is merged
+    // in with the time, and every journaled process that has stopped gets its
+    // gone moment, so a later holder of its pid adopts none of its children
+    // when it exits too. Returns the chain's live processes.
+    const observe = (snap) => {
+        let live = null;
+        journal((j) => {
+            live = liveOfChain(chainRoot, j, snap);
+            return { ...j, chainRoot: j.chainRoot ? ident.markGone([j.chainRoot], snap)[0] : j.chainRoot,
+                     descendants: ident.markGone(records.mergeDescendants(j.descendants, live, nowIso()), snap) };
+        });
+        return live || liveOfChain(chainRoot, readJournal(), snap);
+    };
 
     // Leaves every queue and frees any lane naming this process and token. It
     // runs when nothing is held too: a signal can land between a lane being
@@ -486,6 +506,9 @@ function main() {
         if (done) return;
         done = true;
         releaseOnce();
+        // This process starts no child from here on, so a waiter judging the
+        // lane by its records adopts nothing a later holder of its pid starts.
+        if (attempt > 0) journal((j) => ({ ...j, ownerDoneUtc: j.ownerDoneUtc || ident.iso7(Date.now()) }));
         const how = v.finished ? 'the chain finished' : 'the chain did NOT finish';
         log(`${TAG} verdict ${label(v.exit)} (exit ${v.exit}), ${how}: ${v.why}`);
         process.exitCode = v.exit;
@@ -529,9 +552,10 @@ function main() {
             if (snap.ok && !live.length) return { live: [], unknown: null };
             if (Date.now() >= until) {
                 if (!snap.ok) return { live: [], unknown: `no process snapshot (${snap.why})` };
-                journal((j) => ({ ...j, descendants: records.mergeDescendants(j.descendants, live, nowIso()) }));
-                log(`${TAG} ${live.length} process(es) of the chain still run after ${descendantWaitMs} ms: ${live.slice(0, 5).map((p) => p.pid).join(', ')}`);
-                return { live, unknown: null };
+                const kept = observe(snap);
+                if (!kept.length) return { live: [], unknown: null };
+                log(`${TAG} ${kept.length} process(es) of the chain still run after ${descendantWaitMs} ms: ${kept.slice(0, 5).map((p) => p.pid).join(', ')}`);
+                return { live: kept, unknown: null };
             }
             await new Promise((r) => setTimeout(r, 1000));
         }
@@ -611,7 +635,7 @@ function main() {
             const snap = freshSnapshot();
             chainRoot = snap.ok && snap.procs.get(child.pid) ? { pid: child.pid, startUtc: snap.procs.get(child.pid).startUtc, ppid: process.pid } : null;
             if (!chainRoot) log(`${TAG} the chain root's identity could not be recorded (${snap.ok ? `pid ${child.pid} is not in the snapshot` : snap.why})`);
-            const journaled = journal((j) => ({ ...j, token, chainRoot, owner, descendants: j.descendants || [] }));
+            const journaled = journal((j) => ({ ...j, token, chainRoot, owner, stampsGone: true, descendants: j.descendants || [] }));
             const leased = writeLease('running');
             // No go without both records: a runner nothing vouches for never
             // starts its chain (it exits 2 after its wait), and this attempt
@@ -624,10 +648,7 @@ function main() {
             }
             heartbeat = setInterval(() => {
                 const s = freshSnapshot();
-                if (s.ok && chainRoot) {
-                    const live = liveOfChain(chainRoot, readJournal(), s);
-                    journal((j) => ({ ...j, descendants: records.mergeDescendants(j.descendants, live, nowIso()) }));
-                }
+                if (s.ok && chainRoot) observe(s);
                 writeLease('running');
             }, heartbeatMs);
             heartbeat.unref();
@@ -635,6 +656,14 @@ function main() {
         child.on('error', (e) => finish({ spawnError: e.message }));
         child.on('exit', (code, signal) => {
             child = null;
+            // The runner has exited, so every child it had already exists: its
+            // gone moment is now, and its pid's next holder adopts nothing.
+            if (useLock && chainRoot) {
+                const gone = ident.iso7(Date.now());
+                const same = (r) => r && r.pid === chainRoot.pid && r.startUtc === chainRoot.startUtc;
+                chainRoot = { ...chainRoot, goneUtc: chainRoot.goneUtc || gone };
+                journal((j) => (same(j.chainRoot) ? { ...j, chainRoot: { ...j.chainRoot, goneUtc: j.chainRoot.goneUtc || gone } } : j));
+            }
             const rec = readSentinel(sentinel, runId, token);
             const outcome = { code, signal, interrupted, recorded: rec ? rec.exit : null };
             afterAttempt(outcome, rec).catch((e) => finish({ spawnError: `gate-lock could not settle the attempt (${e.message})` }));

@@ -291,6 +291,37 @@ function identityOf(pid, { snap = null, boot = null } = {}) {
 }
 
 /**
+ * The moment `rec` provably stopped being its recorded process, as an iso7
+ * string, or null while it may still be. A later process now holds its pid:
+ * that process's creation time. A complete snapshot lacks its pid: the time
+ * the snapshot was taken. Every child the recorded process had was created
+ * before either moment. A pid whose creation time cannot be read proves
+ * nothing, and neither does a snapshot with no time.
+ */
+function goneMoment(rec, snap) {
+    if (!rec || !Number.isInteger(rec.pid) || !rec.startUtc || !snap || !snap.ok) return null;
+    const p = snap.procs.get(rec.pid);
+    if (!p) return iso7(snap.takenMs);
+    if (!p.startUtc || p.startUtc === rec.startUtc) return null;
+    const later = normaliseTime(p.startUtc);
+    return later && later > normaliseTime(rec.startUtc) ? later : null;
+}
+
+/**
+ * `list` with `goneUtc` stamped on each record `snap` shows gone (goneMoment).
+ * The first stamp stands. A record keeps its gone moment after its pid's next
+ * holder exits too, so the children that holder left are never adopted.
+ */
+function markGone(list, snap) {
+    if (!Array.isArray(list)) return list;
+    return list.map((r) => {
+        if (!r || typeof r !== 'object' || r.goneUtc) return r;
+        const gone = goneMoment(r, snap);
+        return gone ? { ...r, goneUtc: gone } : r;
+    });
+}
+
+/**
  * Every live process descending from the recorded processes. `roots` are
  * { pid, startUtc } records (the owner, the chain root, journaled
  * descendants), alive or not: a dead parent's pid still names its orphans. A
@@ -298,6 +329,8 @@ function identityOf(pid, { snap = null, boot = null } = {}) {
  * that pid. When that pid now belongs to a later process, a child created
  * after that process started is the later process's own, so a reused parent
  * pid adopts nobody: not even the console host every new process gets.
+ * The same holds once the later process has exited too: a root stamped with
+ * `goneUtc` (markGone) adopts no child created at or after that moment.
  */
 function liveDescendants(roots, snap) {
     const found = new Map();
@@ -310,14 +343,68 @@ function liveDescendants(roots, snap) {
         seen.add(key);
         const now = snap.procs.get(r.pid);
         const reusedAt = now && now.startUtc && now.startUtc !== r.startUtc ? now.startUtc : null;
+        const goneAt = r.goneUtc && !recordLive(r, snap) ? normaliseTime(r.goneUtc) : null;
         for (const c of snap.children.get(r.pid) || []) {
             if (!c.startUtc || c.startUtc < r.startUtc || c.pid === r.pid) continue;
             if (reusedAt && c.startUtc >= reusedAt) continue;
+            if (goneAt && normaliseTime(c.startUtc) >= goneAt) continue;
             if (!found.has(c.pid)) found.set(c.pid, c);
             queue.push(c);
         }
     }
     return [...found.values()];
+}
+
+/**
+ * The records a judgement starts from: `owner` (when given), the journal's
+ * chain root and its descendants. A journaled descendant created at or after
+ * its recorded parent's gone moment belonged to a later process at that pid,
+ * so it is dropped, and so is everything journaled below it: a journal written
+ * before this rule existed may name such a process, and the lane it holds then
+ * frees itself on the next judgement. A descendant whose parent was never
+ * journaled stays.
+ *
+ * The owner's own bound is `ownerDoneUtc`, written by the owner once it has
+ * started its last child. A journal without `stampsGone` came from a writer
+ * that stamped no gone moments; there a descendant's bound is the first
+ * journal write after its `lastSeen`: every write records the time on each
+ * process it observes running, so a later write proves this one had stopped.
+ */
+function executionRecords(owner, execution) {
+    const ex = execution && typeof execution === 'object' ? execution : {};
+    const list = [];
+    if (owner) list.push(ex.ownerDoneUtc && !owner.goneUtc ? { ...owner, goneUtc: ex.ownerDoneUtc } : owner);
+    if (ex.chainRoot) list.push(ex.chainRoot);
+    if (Array.isArray(ex.descendants)) list.push(...ex.descendants);
+    const recs = list.filter((r) => r && typeof r === 'object' && Number.isInteger(r.pid));
+    if (!ex.stampsGone) {
+        const writes = [...new Set(recs.flatMap((r) => [r.firstSeen, r.lastSeen]).map(normaliseTime).filter(Boolean))].sort();
+        for (let i = 0; i < recs.length; i++) {
+            const seen = !recs[i].goneUtc && normaliseTime(recs[i].lastSeen);
+            const next = seen ? writes.find((t) => t > seen) : null;
+            if (next) recs[i] = { ...recs[i], goneUtc: next };
+        }
+    }
+    const byPid = new Map();
+    recs.forEach((r, i) => { if (!byPid.has(r.pid)) byPid.set(r.pid, []); byPid.get(r.pid).push(i); });
+    const verdict = new Map();
+    const foreign = (i) => {
+        if (verdict.has(i)) return verdict.get(i);
+        verdict.set(i, false);
+        const r = recs[i];
+        const start = normaliseTime(r.startUtc);
+        let parent = -1;
+        for (const k of (start && byPid.get(r.ppid)) || []) {
+            const ps = normaliseTime(recs[k].startUtc);
+            if (k === i || !ps || ps > start) continue;
+            if (parent < 0 || ps > normaliseTime(recs[parent].startUtc)) parent = k;
+        }
+        const p = parent < 0 ? null : recs[parent];
+        const out = Boolean(p) && ((p.goneUtc && start >= normaliseTime(p.goneUtc)) || foreign(parent));
+        verdict.set(i, out);
+        return out;
+    };
+    return recs.filter((r, i) => (owner && i === 0) || !foreign(i));
 }
 
 /** True when `rec` names a live process: the same pid created at the same time. */
@@ -367,9 +454,7 @@ function judgeExecution({ owner, execution = null, journalUnreadable = false, sn
             return { alive: true, why: `MSYS pid ${owner.msysPid} is running` };
         }
     }
-    const recorded = [owner];
-    if (execution && execution.chainRoot) recorded.push(execution.chainRoot);
-    if (execution && Array.isArray(execution.descendants)) recorded.push(...execution.descendants);
+    const recorded = executionRecords(owner, execution);
     for (const r of recorded.slice(1)) {
         if (recordLive(r, snap)) return { alive: true, why: `pid ${r.pid} of its execution is running` };
         if (!unknown && recordUnreadable(r, snap)) unknown = `pid ${r.pid} of its execution is running with a creation time that could not be read`;
@@ -464,7 +549,7 @@ function pathKey(canonical) {
 
 module.exports = {
     runPowerShell, snapshot, forgetSnapshot, bootIdentity, parsePsW, msysTable, forgetMsys, identityOf,
-    liveDescendants, recordLive, recordUnreadable, judgeExecution, canonicalPath, repoIdentity, normaliseOrigin, pathKey,
+    liveDescendants, goneMoment, markGone, executionRecords, recordLive, recordUnreadable, judgeExecution, canonicalPath, repoIdentity, normaliseOrigin, pathKey,
     normaliseTime, iso7, posixBoot, posixSnapshot,
 };
 

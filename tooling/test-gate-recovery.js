@@ -29,6 +29,9 @@
  *   P23  the suite runner's step is judged as one step    -> R17 goes red
  *   P24  one failed suite's cause excuses every failed one -> R19 goes red
  *   P25  a receipt from before the attempt counts          -> R20 goes red
+ *   P28  a heartbeat never stamps an exited descendant     -> R15 goes red
+ *   P29  the runner's exit is never stamped on the chain root -> R1 goes red
+ *   P30  the owner never records its last child            -> R1 goes red
  *
  * Commit headroom comes from AUTODEV_GATE_HEADROOM_FIXTURE in every case, so
  * the memory scenarios clear the same way on every platform.
@@ -174,6 +177,13 @@ function runGate(subject, fx, extra, ms = 120000) {
     });
 }
 
+/** The fixture's one run journal, or null. */
+const journalOf = (fx) => {
+    const dir = records.runsDir(fx.lockPath);
+    const runs = fs.existsSync(dir) ? fs.readdirSync(dir).filter((n) => n.endsWith('.json') && !n.startsWith('readmit-')) : [];
+    return runs.length ? records.readRun(fx.lockPath, runs[0].replace(/\.json$/, '')).value : null;
+};
+
 const attempts = (fx) => { try { return Number(fs.readFileSync(path.join(fx.dir, 'attempts.txt'), 'utf8')); } catch { return 0; } };
 const locksSeen = (fx) => {
     try { return fs.readFileSync(path.join(fx.dir, 'locks.jsonl'), 'utf8').trim().split('\n').map((l) => JSON.parse(l)); } catch { return []; }
@@ -195,9 +205,9 @@ async function r1CrashNoEvent(subject) {
     const r = await runGate(subject, fx, { AUTODEV_GATE_TEST_PUBLISH_DELAY_MS: '1500' });
     const seen = locksSeen(fx);
     const leases = records.readLeases(fx.lockPath);
-    const runs = fs.existsSync(records.runsDir(fx.lockPath)) ? fs.readdirSync(records.runsDir(fx.lockPath)).filter((n) => n.endsWith('.json') && !n.startsWith('readmit-')) : [];
-    const journal = runs.length ? records.readRun(fx.lockPath, runs[0].replace(/\.json$/, '')).value : null;
+    const journal = journalOf(fx);
     const lease = leases[0] && leases[0].value;
+    const root = journal && journal.chainRoot;
     return [
         ['R1: exit 134 with no event 2004 stays 134, a FAIL', r.code === 134 && /verdict FAIL/.test(r.out), `exit=${r.code}\n${r.out}`],
         ['R1: one attempt', attempts(fx) === 1, `attempts=${attempts(fx)}`],
@@ -207,6 +217,11 @@ async function r1CrashNoEvent(subject) {
             journal.attempts.length === 1 && journal.attempts[0].exit === 134 && Boolean(journal.chainRoot), JSON.stringify(journal)],
         ['R1: the chain\'s first instruction already saw its journaled root and its running lease', seen.length === 1 &&
             seen[0].journaled === true && seen[0].leased === true, JSON.stringify(seen)],
+        ['R1: the journal says its writer stamps gone moments, and the chain root is stamped gone at its exit',
+            Boolean(journal) && journal.stampsGone === true && Boolean(root) && Boolean(root.goneUtc) &&
+            ident.normaliseTime(root.goneUtc) > ident.normaliseTime(root.startUtc), JSON.stringify(journal)],
+        ['R1: the journal records when the owner started its last child', Boolean(journal) && Boolean(ident.normaliseTime(journal.ownerDoneUtc)),
+            JSON.stringify(journal)],
     ];
 }
 
@@ -358,8 +373,15 @@ async function r15Lingering(subject) {
     let judged = null;
     try { judged = queueOf(subject).readLaneLocks(fx.lockPath, envFor(fx))[0]; } catch (e) { judged = { error: e.message }; }
     const lease = records.readLeases(fx.lockPath)[0];
+    const journal = journalOf(fx);
+    const journaled = (journal && Array.isArray(journal.descendants)) ? journal.descendants : [];
+    const own = journaled.find((d) => d.pid === linger);
+    const parent = own && journaled.find((d) => d.pid === own.ppid);
     return [
         ['R15: the attempt is a FAIL (exit 1)', r.code === 1, `exit=${r.code}\n${r.out}`],
+        ['R15: the lingering process\'s exited parent is stamped gone after the lingering one started',
+            Boolean(parent) && Boolean(parent.goneUtc) && ident.normaliseTime(parent.goneUtc) > ident.normaliseTime(own.startUtc),
+            `own=${JSON.stringify(own)} parent=${JSON.stringify(parent)}`],
         ['R15: the lock stays, naming the run', Boolean(lock) && Boolean(lock.meta) && Boolean(linger), `${lock ? lock.text : '(no lock)'} linger=${linger}`],
         ['R15: a waiter judges the lane held', Boolean(judged) && judged.alive === true, JSON.stringify(judged)],
         ['R15: the lease says lingering and names the process', Boolean(lease) && lease.value && lease.value.state === 'lingering' &&
@@ -557,6 +579,14 @@ async function main() {
             (s) => r19RunnerMixed(s), ['R19']],
         ['P25', 'a receipt from before the attempt counts', 'tooling/gate-recovery.js',
             [[' || started < from || finished > to) {', ') {']], (s) => r20RunnerStale(s), ['R20']],
+        ['P28', 'a heartbeat never stamps an exited descendant', 'tooling/gate-lock.js',
+            [['descendants: ident.markGone(records.mergeDescendants(j.descendants, live, nowIso()), snap) };', 'descendants: records.mergeDescendants(j.descendants, live, nowIso()) };']],
+            (s) => r15Lingering(s), ['R15']],
+        ['P29', 'the runner\'s exit is never stamped on the chain root', 'tooling/gate-lock.js',
+            [['            if (useLock && chainRoot) {\n                const gone', '            if (false) {\n                const gone']], (s) => r1CrashNoEvent(s), ['R1']],
+        ['P30', 'the owner never records its last child', 'tooling/gate-lock.js',
+            [['        if (attempt > 0) journal((j) => ({ ...j, ownerDoneUtc: j.ownerDoneUtc || ident.iso7(Date.now()) }));\n', '']],
+            (s) => r1CrashNoEvent(s), ['R1']],
     ];
     for (const [id, what, rel, edits, scenario, covers] of plants) {
         if (!want(id) && !covers.some(want)) continue;
