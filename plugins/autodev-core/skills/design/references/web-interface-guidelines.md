@@ -2,6 +2,25 @@
 
 Curated from [Vercel's Web Interface Guidelines](https://github.com/vercel-labs/web-interface-guidelines). Apply to all frontend work.
 
+## Contents
+
+- Accessibility
+- Focus States
+- Forms
+- Animation
+- Typography
+- Content Handling
+- Images
+- Performance
+- Navigation & URL State
+- Touch & Mobile
+- Safe Areas & Layout
+- Dark Mode & Theming
+- Hydration Safety
+- Interactive States
+- Copy & Content
+- Anti-Patterns (Always Flag)
+
 ## Accessibility
 
 - Icon-only buttons need `aria-label`
