@@ -2,6 +2,17 @@
 
 After aggregating audit results, write findings to prd.json so they survive session restart and /compact.
 
+## Contents
+
+- 1. Read current prd.json
+- 2. Deduplicate against existing stories
+- 3. Batch trivial findings
+- 4. Add new stories
+- 5. Optional session task mirror
+- 6. Report
+- 7. Score tracking
+- 8. npm audit
+
 ## 1. Read current prd.json
 
 Load `core` and use the current `prd-states.js` helpers to enumerate all story

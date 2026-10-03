@@ -5,6 +5,16 @@ metadata:
   tags: spring, bounce, easing, interpolation
 ---
 
+## Contents
+
+- Spring animations
+  - Physical properties
+  - Delay
+  - Duration
+  - Combining spring() with interpolate()
+  - Adding springs
+- Easing
+
 A simple linear interpolation is done using the `interpolate` function.
 
 ```ts title="Going from 0 to 1 over 100 frames"
