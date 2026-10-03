@@ -11,6 +11,15 @@ model: opus
 
 Video creation in React using Remotion.
 
+## Setup
+
+Check `package.json` for `remotion` and `@remotion/cli` before writing code. A
+new project starts with `npx create-video@latest`. An existing one adds the
+packages with its own package manager, for example
+`npm i remotion @remotion/cli`. Embedding video also needs `@remotion/media`
+([rules/videos.md](rules/videos.md)). Match the versions already installed: every
+`remotion` and `@remotion/*` package must share one version.
+
 ## When to Use
 
 - Creating video compositions
