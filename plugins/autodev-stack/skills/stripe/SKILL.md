@@ -12,6 +12,10 @@ user-invocable: true
 Based on [stripe/ai](https://github.com/stripe/ai) (MIT). Read the installed SDK,
 account/request API version and webhook endpoint version before changing an
 integration. Do not treat a date cached in this skill as the latest version.
+If `package.json` has no `stripe` dependency, add the server SDK with the
+project's package manager (`npm i stripe`). Local webhook testing uses the
+[Stripe CLI](https://docs.stripe.com/stripe-cli) (`stripe listen`), checked
+with `stripe --version` before use.
 See [Stripe versioning](https://docs.stripe.com/api/versioning).
 
 ## API Selection
