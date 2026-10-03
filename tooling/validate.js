@@ -993,6 +993,21 @@ function checkSlugReversalRestoresDrive() {
   for (const n of naked) console.log(`         ${n}`);
 }
 
+// Every skill reference file over the line limit opens with a contents list
+// matching its headings. The logic and its fixture suite live in
+// check-reference-contents.js and test-reference-contents.js.
+function checkReferenceContents() {
+  const { checkTree, LIMIT } = require('./check-reference-contents.js');
+  const r = checkTree(ROOT);
+  if (!r.scanned) {
+    return log('FAIL', 'Reference contents: NOT CHECKED - 0 skill reference files found, so this gate had no subject. That is not a pass.');
+  }
+  if (!r.failures.length) {
+    return log('PASS', `Reference contents: ${r.long} of ${r.long} reference file(s) over ${LIMIT} lines carry a matching contents list (${r.scanned} scanned)`);
+  }
+  for (const f of r.failures) log('FAIL', `${f.file}: ${f.problems.join('; ')}`);
+}
+
 // ---------------------------------------------------------------- run
 
 console.log('Validating autodev marketplace...\n');
@@ -1002,6 +1017,7 @@ checkMarketplace();
 checkPluginManifests();
 checkSkillFrontmatter();
 checkSkillCrossReferences();
+checkReferenceContents();
 checkHookWiring();
 checkScriptReferences();
 checkShellGlobQuoting();

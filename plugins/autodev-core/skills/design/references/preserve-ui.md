@@ -2,6 +2,16 @@
 
 When modifying ANY UI component, follow this protocol to avoid breaking existing layouts.
 
+## Contents
+
+- Before Touching UI (MANDATORY)
+- Rules for UI Changes
+- Forbidden Actions
+- Responsive Considerations
+- Before Submitting UI Changes
+- Common Mistakes
+- Summary
+
 ## Before Touching UI (MANDATORY)
 
 ### 1. Context Loading
