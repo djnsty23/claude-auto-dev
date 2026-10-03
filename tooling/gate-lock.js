@@ -244,6 +244,12 @@ function verdict({ code, signal, interrupted, spawnError, recorded }) {
     return { exit: code, finished: true, why: `the chain exited ${code}` };
 }
 
+/** `rec` when it is a runner's record of an attempt of this run and token, else null. */
+function attemptRecord(rec, runId, token) {
+    if (!rec || typeof rec !== 'object' || !Number.isInteger(rec.exit) || rec.runId !== runId || rec.token !== token) return null;
+    return rec;
+}
+
 /**
  * The runner's record of one attempt, or null when absent, malformed, or
  * written for another run or token. Removes our own temp file.
@@ -254,8 +260,33 @@ function readSentinel(file, runId, token) {
     try { fs.unlinkSync(file); } catch { /* temp file, best effort */ }
     let rec;
     try { rec = JSON.parse(text); } catch { return null; }
-    if (!rec || typeof rec !== 'object' || !Number.isInteger(rec.exit) || rec.runId !== runId || rec.token !== token) return null;
-    return rec;
+    return attemptRecord(rec, runId, token);
+}
+
+/**
+ * Where the runner passes one of the chain's output streams. A failed write
+ * (ENOSPC on a redirected log, a closed pipe) never ends the runner, so it
+ * goes on supervising npm and the attempt still gets its record; the failure
+ * is reported once per error code to `onFault`. To a file the write is
+ * synchronous and each chunk tries again, so output resumes once the disk has
+ * room. A stream (a pipe, a terminal) that fails stays failed: its 'error' is
+ * handled and later chunks are dropped. `[measured 2026-10-03]` a bare
+ * stream write to a full disk threw from the 'data' handler and killed the
+ * runner, and the chain ran on with nobody recording its exit.
+ */
+function outputSink(stream, onFault) {
+    let fd = null;
+    try { if (fs.fstatSync(stream.fd).isFile()) fd = stream.fd; } catch { /* not a file, or no descriptor */ }
+    let broken = false;
+    if (fd === null) stream.on('error', (e) => { broken = true; onFault(e); });
+    return (b) => {
+        if (fd !== null) {
+            try { for (let off = 0; off < b.length;) off += fs.writeSync(fd, b, off, b.length - off); } catch (e) { onFault(e); }
+            return;
+        }
+        if (broken) return;
+        try { stream.write(b); } catch (e) { broken = true; onFault(e); }
+    };
 }
 
 /**
@@ -263,8 +294,13 @@ function readSentinel(file, runId, token) {
  * scanning it for infrastructure markers, and write a record of the attempt
  * (run id, token, times, npm's exit, the markers) only when npm exited with a
  * code and no signal. Anything else, or this process being killed, leaves none.
+ * The record also goes to the parent over the IPC channel when there is one:
+ * on a full disk the sentinel cannot be written, and the record is the only
+ * proof the chain finished.
  */
 function runChainChild(root, sentinel, runId, token, waitGo = false) {
+    // The channel must not keep the runner alive; a pending send still does.
+    if (process.channel) process.channel.unref();
     // With --wait-go the parent records this runner's identity before any work
     // starts, then creates <sentinel>.go: a chain too short for one process
     // snapshot is still journaled. A parent that never says go (it died, or it
@@ -292,8 +328,19 @@ function runChainChild(root, sentinel, runId, token, waitGo = false) {
         ? spawn(`npm run ${CHAIN_SCRIPT}`, { ...opts, shell: true })
         : spawn('npm', ['run', CHAIN_SCRIPT], opts);
     const scan = recovery.createScanner();
-    npm.stdout.on('data', (b) => { process.stdout.write(b); scan.feed(b); });
-    npm.stderr.on('data', (b) => { process.stderr.write(b); scan.feed(b); });
+    // An output write that fails is evidence about the machine, recorded
+    // against the step that was running, and never the runner's end.
+    const faults = [];
+    const onFault = (e) => {
+        const code = (e && e.code) || 'EWRITE';
+        if (faults.some((f) => f.code === code)) return;
+        faults.push({ code, step: scan.lastStep(), atUtc: new Date().toISOString() });
+        if (code === 'ENOSPC') scan.note(code);
+    };
+    const toStdout = outputSink(process.stdout, onFault);
+    const toStderr = outputSink(process.stderr, onFault);
+    npm.stdout.on('data', (b) => { scan.feed(b); toStdout(b); });
+    npm.stderr.on('data', (b) => { scan.feed(b); toStderr(b); });
     const forward = (sig) => { try { npm.kill(sig === 'SIGBREAK' ? 'SIGTERM' : sig); } catch { /* gone */ } };
     const signals = ['SIGINT', 'SIGTERM', 'SIGHUP'];
     if (process.platform === 'win32') signals.push('SIGBREAK');
@@ -302,9 +349,17 @@ function runChainChild(root, sentinel, runId, token, waitGo = false) {
     npm.on('close', (code, signal) => {
         if (typeof code === 'number' && !signal) {
             const rec = { schema: 1, runId, token, originPid: process.ppid, runnerPid: process.pid, startUtc,
-                          endUtc: new Date().toISOString(), exit: code, signal: null, infra: scan.hits(), lastStep: scan.lastStep() };
-            try { fs.writeFileSync(sentinel, `${JSON.stringify(rec)}\n`); } catch { /* the parent reads a missing record as not finished */ }
+                          endUtc: new Date().toISOString(), exit: code, signal: null, infra: scan.hits(), lastStep: scan.lastStep(),
+                          outputFaults: faults };
+            let sentinelError = null;
+            try { fs.writeFileSync(sentinel, `${JSON.stringify(rec)}\n`); } catch (e) { sentinelError = e.code || e.message; }
             process.exitCode = code;
+            // With neither a sentinel nor a message the parent reads the attempt as not finished.
+            if (process.send && process.connected) {
+                try {
+                    process.send({ type: 'gate-attempt', rec: { ...rec, sentinelError } }, () => { try { process.disconnect(); } catch { /* gone */ } });
+                } catch { /* the parent is gone */ }
+            }
         } else {
             process.exitCode = 2;
         }
@@ -312,6 +367,7 @@ function runChainChild(root, sentinel, runId, token, waitGo = false) {
 }
 
 const GO_WAIT_MS = 60000;
+const LATE_CLOSE_MS = 5000;
 
 /** The runner's wait for go: GO_WAIT_MS, or AUTODEV_GATE_GO_WAIT_MS (a test seam). */
 function goWaitMs(env) {
@@ -603,7 +659,10 @@ function main() {
         const sentinel = path.join(os.tmpdir(), `gate-lock-${process.pid}-${Date.now()}.exit`);
         child = spawn(process.execPath, [__filename, '--run-chain', '--root', root, '--sentinel', sentinel,
             '--run-id', runId, '--token', token === null ? 'none' : String(token), ...(useLock ? ['--wait-go'] : [])],
-            { cwd: root, stdio: 'inherit', windowsHide: true });
+            { cwd: root, stdio: ['inherit', 'inherit', 'inherit', 'ipc'], windowsHide: true });
+        // The runner's record also arrives here, for when its sentinel could not be written.
+        let sent = null;
+        child.on('message', (m) => { if (m && m.type === 'gate-attempt' && !sent) sent = attemptRecord(m.rec, runId, token); });
         log(`${TAG} chain pid ${child.pid}: npm run ${CHAIN_SCRIPT}${useLock ? ` (run ${runId}, token ${token}, attempt ${attempt})` : ''}`);
         if (useLock) {
             const delay = envMs(env, 'AUTODEV_GATE_TEST_PUBLISH_DELAY_MS', 0);
@@ -633,12 +692,28 @@ function main() {
             heartbeat.unref();
         }
         child.on('error', (e) => finish({ spawnError: e.message }));
+        const runner = child;
+        let exited = null;
+        let settled = false;
+        let late = null;
+        // The attempt is settled on 'close', once the IPC channel has closed
+        // too, so a record the runner sent just before it exited has arrived.
+        // A channel that never closes is waited on for LATE_CLOSE_MS only.
+        const settle = () => {
+            if (settled || done) return;
+            settled = true;
+            if (late) clearTimeout(late);
+            try { if (runner.connected) runner.disconnect(); } catch { /* already closed */ }
+            const rec = readSentinel(sentinel, runId, token) || sent;
+            const outcome = { code: exited ? exited.code : null, signal: exited ? exited.signal : null, interrupted, recorded: rec ? rec.exit : null };
+            afterAttempt(outcome, rec).catch((e) => finish({ spawnError: `gate-lock could not settle the attempt (${e.message})` }));
+        };
         child.on('exit', (code, signal) => {
             child = null;
-            const rec = readSentinel(sentinel, runId, token);
-            const outcome = { code, signal, interrupted, recorded: rec ? rec.exit : null };
-            afterAttempt(outcome, rec).catch((e) => finish({ spawnError: `gate-lock could not settle the attempt (${e.message})` }));
+            exited = { code, signal };
+            late = setTimeout(settle, LATE_CLOSE_MS);
         });
+        child.on('close', settle);
     };
 
     if (!useLock) {

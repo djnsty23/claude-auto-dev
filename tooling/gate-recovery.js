@@ -62,6 +62,8 @@ const DEFAULT_DISK_FLOOR = 1024 * 1024 * 1024;
 /**
  * A line scanner for the chain's output. Each hit names the npm step whose
  * output it was in: the last `> name@version script` header npm printed.
+ * `note(kind)` records a hit the runner met itself (a write of the chain's
+ * output that failed with ENOSPC) against the step running at that moment.
  */
 function createScanner() {
     let step = null;
@@ -91,6 +93,7 @@ function createScanner() {
         },
         hits() { if (partial) { line(partial); partial = ''; } return hits.slice(); },
         lastStep() { return step; },
+        note(kind) { add({ kind, step, source: 'output' }); },
     };
 }
 
