@@ -29,6 +29,8 @@
  *   P23  the suite runner's step is judged as one step    -> R17 goes red
  *   P24  one failed suite's cause excuses every failed one -> R19 goes red
  *   P25  a receipt from before the attempt counts          -> R20 goes red
+ *   P26  the runner writes output to a bare stream         -> R22 goes red
+ *   P27  the record sent over IPC is ignored               -> R23 goes red
  *   P28  a heartbeat never stamps an exited descendant     -> R15 goes red
  *   P29  the runner's exit is never stamped on the chain root -> R1 goes red
  *   P30  the owner never records its last child            -> R1 goes red
@@ -120,7 +122,38 @@ if (step.linger) {
     const until = Date.now() + 4000;
     while (Date.now() < until) Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 50);
 }
+if (step.sleep) {
+    const until = Date.now() + step.sleep;
+    while (Date.now() < until) Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 50);
+}
+fs.writeFileSync('done.txt', new Date().toISOString());
 process.exitCode = step.exit;
+`;
+
+/**
+ * A full disk under the chain runner, loaded through NODE_OPTIONS into every
+ * node process of a scenario. Only the runner (argv --run-chain) is hit: its
+ * writes to fd 1 and 2 throw ENOSPC, and with GATE_FAULT_SENTINEL so does its
+ * sentinel. Node's SyncWriteStream calls fs.writeSync, so a bare
+ * process.stdout.write to a file fails exactly as it did on the full disk.
+ */
+const FAULT = `'use strict';
+if (process.argv.includes('--run-chain')) {
+    const fs = require('fs');
+    const full = (syscall) => Object.assign(new Error('ENOSPC: no space left on device, ' + syscall), { code: 'ENOSPC', syscall });
+    const writeSync = fs.writeSync;
+    fs.writeSync = function (fd, ...rest) {
+        if (fd === 1 || fd === 2) throw full('write');
+        return writeSync.call(this, fd, ...rest);
+    };
+    if (process.env.GATE_FAULT_SENTINEL) {
+        const writeFileSync = fs.writeFileSync;
+        fs.writeFileSync = function (file, ...rest) {
+            if (typeof file === 'string' && file.endsWith('.exit')) throw full('open');
+            return writeFileSync.call(this, file, ...rest);
+        };
+    }
+}
 `;
 
 let bootCache = null;
@@ -174,6 +207,29 @@ function runGate(subject, fx, extra, ms = 120000) {
         c.stderr.on('data', (d) => { out += d; });
         const t = setTimeout(() => { try { c.kill('SIGKILL'); } catch { /* gone */ } out += `\n(test killed the wrapper after ${ms} ms)`; }, ms);
         c.on('close', (code) => { clearTimeout(t); resolve({ code, out }); });
+    });
+}
+
+/**
+ * runGate with the wrapper's output going to a file, as a redirected log
+ * does: the runner inherits it, so its stdout is a SyncWriteStream over a
+ * file. `doneAtExit` says whether the chain had finished when the wrapper exited.
+ */
+function runGateToFile(subject, fx, extra, ms = 120000) {
+    const file = path.join(fx.lockDir, 'gate-output.txt');
+    const fd = fs.openSync(file, 'w');
+    return new Promise((resolve) => {
+        const c = spawn(process.execPath, [subject, '--root', fx.dir], { env: envFor(fx, extra), stdio: ['ignore', fd, fd], windowsHide: true });
+        fs.closeSync(fd);
+        let killed = '';
+        const t = setTimeout(() => { try { c.kill('SIGKILL'); } catch { /* gone */ } killed = `\n(test killed the wrapper after ${ms} ms)`; }, ms);
+        c.on('close', (code) => {
+            clearTimeout(t);
+            const doneAtExit = fs.existsSync(path.join(fx.dir, 'done.txt'));
+            let out = '';
+            try { out = fs.readFileSync(file, 'utf8'); } catch { /* never written */ }
+            resolve({ code, out: out + killed, doneAtExit });
+        });
     });
 }
 
@@ -487,6 +543,41 @@ async function r20RunnerStale(subject) {
         r.code === 1 && /verdict FAIL/.test(r.out) && /not published inside this attempt/.test(r.out), `exit=${r.code}\n${r.out}`]];
 }
 
+/**
+ * R22, R23: the runner's output goes to a full disk (measured 2026-10-03:
+ * the write threw from the 'data' handler, the runner died, and the chain ran
+ * unsupervised). The runner must keep supervising, record npm's exit, and
+ * name ENOSPC as the machine cause. R23 loses the sentinel too, so the record
+ * can only arrive over the IPC channel.
+ */
+async function enospcOutput(subject, id, sentinelToo) {
+    const fx = fixture([{ exit: 1, print: 'chain step output', sleep: 3000 }], { config: { ...CONFIG, diskFloorBytes: 1e18 } });
+    const fault = path.join(fx.lockDir, 'fault.js');
+    fs.writeFileSync(fault, FAULT);
+    const r = await runGateToFile(subject, fx, {
+        NODE_OPTIONS: [process.env.NODE_OPTIONS, `--require "${fault.replace(/\\/g, '/')}"`].filter(Boolean).join(' '),
+        ...(sentinelToo ? { GATE_FAULT_SENTINEL: '1' } : {}),
+    });
+    const journal = journalOf(fx);
+    const a = journal && Array.isArray(journal.attempts) ? journal.attempts[0] : null;
+    const rec = a && a.record;
+    const shown = JSON.stringify(a);
+    const rows = [
+        [`${id}: a full disk under the runner's output exits 2, INDETERMINATE, naming ENOSPC and not a lost exit`,
+            r.code === 2 && /ENOSPC/.test(r.out) && !/without recording/.test(r.out), `exit=${r.code}\n${r.out}`],
+        [`${id}: the runner kept supervising: the chain had finished when the gate exited, after one attempt`,
+            r.doneAtExit && attempts(fx) === 1, `doneAtExit=${r.doneAtExit} attempts=${attempts(fx)}`],
+        [`${id}: the journal holds npm's exit 1 and a disk cause`, Boolean(rec) && rec.exit === 1 && Boolean(a.cause) && a.cause.kind === 'disk', shown],
+        [`${id}: the record names the failed write and its step, and carries ENOSPC as output evidence`, Boolean(rec) &&
+            Array.isArray(rec.outputFaults) && rec.outputFaults.some((f) => f.code === 'ENOSPC' && f.step === rec.lastStep) &&
+            Array.isArray(rec.infra) && rec.infra.some((h) => h.kind === 'ENOSPC' && h.source === 'output'), shown],
+    ];
+    if (sentinelToo) rows.push([`${id}: the record came over IPC and says the sentinel could not be written`, Boolean(rec) && rec.sentinelError === 'ENOSPC', shown]);
+    return rows;
+}
+const r22OutputFull = (subject) => enospcOutput(subject, 'R22', false);
+const r23OutputAndSentinelFull = (subject) => enospcOutput(subject, 'R23', true);
+
 /** R21: the real gate's first step is the one the per-suite rule guards. */
 function r21RealRunnerStep() {
     const pkg = JSON.parse(fs.readFileSync(path.join(ROOT, 'package.json'), 'utf8'));
@@ -532,7 +623,7 @@ async function main() {
                    R5: r5PortPersistent, R6: r6Limit, R7: r7KeepsArrival, R8: r8NoConfig, R9: r9OtherStep,
                    R10: r10TwoInARow, R11: r11EventAfter, R12: r12ConfigNull, R13: r13CounterSurvivesPrune, R14: r14NoGo,
                    R15: r15Lingering, R16: r16LeaseHeld, R17: r17RunnerPassingNoise, R18: r18RunnerOwnLog, R19: r19RunnerMixed,
-                   R20: r20RunnerStale, R21: async () => r21RealRunnerStep() };
+                   R20: r20RunnerStale, R21: async () => r21RealRunnerStep(), R22: r22OutputFull, R23: r23OutputAndSentinelFull };
     for (const [id, fn] of Object.entries(real)) if (want(id)) for (const [n, ok, d] of await fn(SUBJECT)) check(n, ok, d);
 
     const plants = [
@@ -579,6 +670,12 @@ async function main() {
             (s) => r19RunnerMixed(s), ['R19']],
         ['P25', 'a receipt from before the attempt counts', 'tooling/gate-recovery.js',
             [[' || started < from || finished > to) {', ') {']], (s) => r20RunnerStale(s), ['R20']],
+        ['P26', 'the runner writes the chain\'s output to a bare stream', 'tooling/gate-lock.js',
+            [['    npm.stdout.on(\'data\', (b) => { scan.feed(b); toStdout(b); });', '    npm.stdout.on(\'data\', (b) => { process.stdout.write(b); scan.feed(b); });']],
+            (s) => r22OutputFull(s), ['R22']],
+        ['P27', 'the record sent over IPC is ignored', 'tooling/gate-lock.js',
+            [['const rec = readSentinel(sentinel, runId, token) || sent;', 'const rec = readSentinel(sentinel, runId, token);']],
+            (s) => r23OutputAndSentinelFull(s), ['R23']],
         ['P28', 'a heartbeat never stamps an exited descendant', 'tooling/gate-lock.js',
             [['descendants: ident.markGone(records.mergeDescendants(j.descendants, live, nowIso()), snap) };', 'descendants: records.mergeDescendants(j.descendants, live, nowIso()) };']],
             (s) => r15Lingering(s), ['R15']],
