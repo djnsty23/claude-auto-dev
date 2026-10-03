@@ -10,6 +10,22 @@ The entries below came out of one redesign of a calm, night-time product and
 are generalised here. Add an entry when a touch lands with an operator: it needs
 the pattern, one line on when it fits, and one line on its guard.
 
+## Contents
+
+- How to pick
+- Guards every entry inherits
+- The catalogue
+  - 1. The visitor's own context as ambience
+  - 2. Rare, calendar-true events
+  - 3. Numbers that roll like an odometer
+  - 4. Multi-step flows that narrate progress
+  - 5. A countdown before timed activity, and a resting state that fits
+  - 6. Living data visualisations
+  - 7. Refined audio and a licensed media library
+  - 8. Brand polish, checked on the real surfaces
+  - 9. Space use
+  - 10. Pick up where they left off
+
 ## How to pick
 
 1. **Profile the product.** Start from brainstorm's Step 1 answers, then add the

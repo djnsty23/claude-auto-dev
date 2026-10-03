@@ -26,6 +26,11 @@ supabase db push --help
 supabase functions deploy --help
 ```
 
+If `supabase --version` fails, install the CLI as a project dev dependency
+(`npm i -D supabase`, then run it as `npx supabase`) or follow the
+[install guide](https://supabase.com/docs/guides/local-development/cli/getting-started)
+for a global install. Prefer the version the project already pins.
+
 `supabase status` describes the local stack and can print credentials. It is
 not a remote health probe; keep secret-bearing output out of the transcript.
 Database pushes use the verified linked target or supported explicit database
@@ -106,6 +111,7 @@ and row-dependent policy work; compare before/after latency and plans.
 Load the relevant shipped reference for a concrete question:
 
 - [Query indexes](references/query-missing-indexes.md)
+- [Foreign key indexes](references/schema-foreign-key-indexes.md)
 - [Connection pooling](references/conn-pooling.md)
 - [RLS performance](references/security-rls-performance.md)
 - [RLS basics](references/security-rls-basics.md)
