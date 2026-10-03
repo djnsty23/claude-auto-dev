@@ -105,10 +105,10 @@ generation time over the rules on disk:
 
 | variant | bytes | dated claims kept |
 |---|---|---|
-| A  full body | 130,940 | 22 of 22 |
-| B  description + first paragraph + dated PARAGRAPHS + Never/Always ← emitted | 22,250 | 22 of 22 |
-| B′ same, but dated LINES instead of paragraphs | 15,147 | 1 of 22 |
-| C  description only | 6,666 | 0 of 22 |
+| A  full body | 117,341 | 16 of 16 |
+| B  description + first paragraph + dated PARAGRAPHS + Never/Always ← emitted | 20,008 | 16 of 16 |
+| B′ same, but dated LINES instead of paragraphs | 14,669 | 1 of 16 |
+| C  description only | 6,666 | 0 of 16 |
 
 ### rule-ab-testing
 
@@ -253,16 +253,6 @@ callback each delivered all 1,048,576. All three variants exited 0 and all file
 controls were complete. See the [platform contract](https://nodejs.org/api/process.html#a-note-on-process-io);
 Linux and Windows were not executed in this control.
 
-`[measured 2026-09-07]` A staleness detector grew a veto so that
-`NO prod tag is pending` -- a sentence asserting the ABSENCE of open work, in
-the exact grammar of asserting its presence -- would not be reported. The veto
-allowed one token between `no` and the verb. The subject is a noun phrase, so
-it never matched the sentence it was written for, and it vetoed nothing.
-
-`[measured 2026-09-02]` git 2.54.0.windows.1, two throwaway repos, both forms of
-`git merge-tree` against a real conflict and against a clean merge of the same
-file in non-overlapping regions:
-
 `[measured 2026-09-03]` A pricing page shipped a grid declaring 5 items in
 `coinPacks.ts` against 4 columns in a Tailwind class in `Pricing.tsx`, so the
 last row held one stranded cell at every breakpoint. Its layout suite at the
@@ -270,37 +260,6 @@ time asserted only a per-element floor (every control at least 44px) and a
 page-level absence (no horizontal scroll). Both passed, correctly. `/pricing`
 was in the route list and carried two dedicated tests, so coverage was never
 the gap.
-
-`[measured 2026-09-08]` A comment stripper in a production repo blanked comments
-so a checker would read code and not prose about code. Its completeness control
-was:
-
-```js
-export function hasComment(text, fileName) {
-  return commentRanges(text, fileName).length > 0;   // the function under test
-}
-```
-
-`[measured 2026-09-08]` Two of eight gate steps in a production repo shipped a
-substantial selftest — planted violations, both directions, a clean fixture
-required to stay silent. Nothing in the repository ever ran either one: not the
-gate, not CI, not a test. Standing in for execution was
-
-`[measured 2026-09-08]` a shipped collector scrubbed credentials out of everything
-it wrote by holding the secret's value in a set and doing
-`text.split(value).join('[REDACTED]')`. It ran that scrub over **serialised
-JSON**. A secret containing a `"` was already `\"` in the serialised text, so the
-raw value was not present, no replacement happened, and the credential landed in
-the report, the ledger and the candidates file — recoverable with one
-`JSON.parse`. The suite asserted `!everything.includes(CANARY)` and was green,
-because the canary was `sk-live-CANARY-7Qz9pX2mLr41`: **JSON-safe by
-construction, so the assertion could not fail for the defect it named.**
-
-and it is **wrong for exactly the reason the subject was wrong**: in a JSON file
-the value is stored escaped, so grepping the raw form misses a secret that is
-fully present. `[measured 2026-09-08]` this was hit three times in one session —
-twice by a reviewer auditing the code above, once in the code itself. A "clean"
-result from a detector that searches the pre-transform value is not evidence.
 
 Full text: `plugins/autodev-core/skills/rule-gate-integrity/SKILL.md`
 
