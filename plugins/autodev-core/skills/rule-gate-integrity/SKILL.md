@@ -238,119 +238,11 @@ defect with real state present.
 
 ## 7. Measure precision on the real corpus before wiring anything
 
-A gate earns its wiring with a triaged first run, never with a passing
-selftest. The selftest proves the check CAN fire. Only the corpus says
-whether what it catches is worth reading.
-
-**A worked negative, kept because the result is the useful part.** A
-reviewer found a real defect no suite here could see: a document that
-denied a thing in one paragraph and measured it in another, where each
-sentence was individually plausible and only their conjunction was false.
-A detector for that shape was written, and it passed a careful selftest
-8 of 8, including the real defect planted verbatim and the fixed text
-staying quiet.
-
-Then it met the corpus: **204 hits over 123 files, and 12 of the first 12
-triaged by hand were false.** Every one paired unrelated paragraphs -- "no
-releases" in one changelog entry against "releases" in a different entry
-forty paragraphs later. The check matched a shared noun; the question was
-whether two statements are about the same subject, and a string comparison
-cannot answer it.
-
-Three things that generalise past this one check:
-
-- **A selftest measures the author's imagination.** Both the positive and
-  the negatives were cases considered while writing it. The corpus
-  supplies the cases that were not.
-- **Fix your own bugs before condemning the class.** The first sweep
-  flagged `the`, `from`, `its`: the capture took the token after the
-  negation, which is often a determiner. That was 24 hits of author error
-  masquerading as evidence about the problem. Removing them moved 228 to
-  204 and changed no conclusion, but the conclusion was only trustworthy
-  after.
-- **A detector at zero precision is worse than none**, and the reason is
-  the same one that makes a reassuring skip worse than silence: a check
-  people mute stops catching the real thing later. Ship the negative
-  result instead. "This class needs a semantic comparison, here is the
-  measurement that says so" is a finding.
-
-### Counting how often a suppressor FIRED is not measuring whether it CAN
-
-A census over the corpus answers "how much does this rule change the output".
-It does not answer "does this rule work", and the two come apart exactly where
-it matters: **a suppressor that fires zero times looks unexercised and may be
-incapable.** Both produce the same number, and the reassuring reading is the
-one a census invites.
-
-`[measured 2026-09-07]` A staleness detector grew a veto so that
-`NO prod tag is pending` -- a sentence asserting the ABSENCE of open work, in
-the exact grammar of asserting its presence -- would not be reported. The veto
-allowed one token between `no` and the verb. The subject is a noun phrase, so
-it never matched the sentence it was written for, and it vetoed nothing.
-
-The fleet census scored it **0 firings**. That was read as "defensive, not yet
-needed on this corpus". It meant "structurally cannot match anything". The two
-were indistinguishable from the measurement, and the sentence that motivated
-the veto was sitting in the corpus being counted, unmatched.
-
-What separated them was a mutation: **deleting the veto entirely left the suite
-green**, which is the signal that the assertion guarding it never reached it.
-Chasing that survivor found the defect in the subject.
-
-- A veto, a filter, an allowlist carve-out -- anything that can only REMOVE
-  output -- needs a case proving it removes something, not a count of how often
-  it did.
-- Assert the intermediate, not the outcome. "This row matches the pattern AND
-  matches the veto" fails loudly when either half stops being true; "this row is
-  not reported" passes just as happily when the row never matched anything.
-- **A zero in a census is two claims wearing one number.** Before recording a
-  rule as unexercised, run one input through it by hand and watch it fire.
+Load [references/corpus-precision.md](references/corpus-precision.md) before wiring a new gate or detector: a passing selftest is not precision, so triage its first corpus run by hand, and prove every suppressor fires on one input.
 
 ## 8. A probe is bound to the command form it was measured on
 
-> Two spellings of one command. Each is discriminated by exactly one probe, and
-> that probe reports clean on the other spelling.
-
-`[measured 2026-09-02]` git 2.54.0.windows.1, two throwaway repos, both forms of
-`git merge-tree` against a real conflict and against a clean merge of the same
-file in non-overlapping regions:
-
-| probe | 3-arg, conflict | 3-arg, clean | `--write-tree`, conflict | `--write-tree`, clean |
-|---|---|---|---|---|
-| exit code | **0** | 0 | 1 | 0 |
-| `grep -c '^<<<<<<<'` | **0** | 0 | 0 | 0 |
-| `grep -c '<<<<<<<'` | 1 | 0 | **0** | 0 |
-| `grep -c 'changed in both'` | 1 | **1** | n/a | n/a |
-| `grep -c 'CONFLICT'` | 0 | 0 | 1 | 0 |
-
-Every bold cell is a plausible probe returning the reassuring answer. The 3-arg
-form exits **0 with conflicts present**, and prints its markers indented inside a
-diff hunk, so a line-anchored grep finds none. The `--write-tree` form prints no
-markers at all and signals by exit status and a `CONFLICT` line. And
-`changed in both` fires on a merge that is clean, so it means both branches
-touched the file, not that they disagree.
-
-So: 3-arg needs the unanchored marker grep and nothing else works. `--write-tree`
-needs the exit code or a `CONFLICT` grep and the marker grep does not work. A
-check that pairs one form with the other's probe is green by construction.
-
-Two sessions found this from opposite ends and neither had it alone. One blamed
-the command form when its own probe had failed on the line-start anchor; the
-other offered the exit code as the fix, which is correct for one form and wrong
-for the other. **The joint result only appeared because both published the
-marker count, the exit code and a known-negative control together.** Any one of
-the three alone reads as clean.
-
-Generalise past git: a probe is calibrated against the exact invocation it was
-measured on. Change a flag, a subcommand, a version, or a platform, and the
-signal may move to a different channel without anything erroring. **Pin the form
-and the probe on the same line**, and re-measure when either moves.
-
-The remedy that survives both forms is to stop reading status and read the
-RESULT: perform the merge in a throwaway worktree and parse the output. For a
-JSON file, parse the actual merged result and independently assert the expected
-record identities and values. Valid JSON alone does not prove records survived;
-a successfully parsed empty object is the counterexample.
+Load [references/probe-command-form.md](references/probe-command-form.md) when a probe reads a command's exit code or output: pin the invocation and the probe on the same line, and re-measure when either moves.
 
 ## 9. Sample the input before you build the reader
 
@@ -475,99 +367,11 @@ selector that will drift.
 
 ## 11. A control must not share a mechanism with its subject
 
-Section 1 is about grading a COPY. This is the mirror image: grading the real
-thing, with the real thing. The control runs the actual implementation — so it
-passes every check in section 1 — and still cannot fail, because it inherits the
-subject's blind spot exactly.
-
-`[measured 2026-09-08]` A comment stripper in a production repo blanked comments
-so a checker would read code and not prose about code. Its completeness control
-was:
-
-```js
-export function hasComment(text, fileName) {
-  return commentRanges(text, fileName).length > 0;   // the function under test
-}
-```
-
-`blankComments` uses `commentRanges` to decide what to blank. `hasComment` then
-used `commentRanges` to ask whether anything had been missed. A comment the range
-walk cannot see is a comment it does not blank AND a comment the control does not
-find. Over 198 real files, with each of the two range functions dropped in turn:
-
-```
-getTrailingCommentRanges dropped ->  146 comments survive in  44 of 198 files
-getLeadingCommentRanges dropped  -> 1012 comments survive in 120 of 198 files
-```
-
-and the control reported **zero survivors across all 198 files in both cases**.
-The first mutation was not hypothetical — it was the bug that implementation had
-actually shipped in its first draft. The single piece of evidence that blanking
-was complete would have gone green on the defect it existed to catch.
-
-The companion population figure did not help: "186 of 198 files have a comment"
-stayed at 185 and 180 under the two mutations, because it asked the same
-function. **A population floor (section 2) drawn with the subject's own
-mechanism is not independent of the subject.**
-
-The fix is a DIFFERENT MECHANISM, not a second opinion from the same one. There
-the subject asked a parser API where the comments are; the control walks the tree
-and reads the raw text between each terminal token's `getFullStart()` and its
-`getStart()` — the trivia span, by definition everything the parser did not turn
-into a token. Anything the range functions miss still lands in that span. After
-the change the same two mutations turn it red on 44 and on 120 files.
-
-**The question to ask**: if the subject has a blind spot, does the control look
-through the same eye? Sharing a PARSE is fine — both walks can use one syntax
-tree. Sharing the API whose contract can be misread is the defect.
-
-And a control needs both halves. "Nothing survived" is also what a function that
-returns false says, so measure the positive: this one is true for 186 of the 198
-files before blanking and 0 after.
+Load [references/controls-and-selftests.md](references/controls-and-selftests.md) when writing a completeness control: a control that asks the subject's own mechanism inherits its blind spot, so use a different mechanism and measure the positive half.
 
 ## 12. Asserting that a control EXISTS is not running it
 
-A selftest proves a checker can fail. A test that reads the checker's SOURCE and
-asserts the selftest is present proves only that somebody typed it.
-
-`[measured 2026-09-08]` Two of eight gate steps in a production repo shipped a
-substantial selftest — planted violations, both directions, a clean fixture
-required to stay silent. Nothing in the repository ever ran either one: not the
-gate, not CI, not a test. Standing in for execution was
-
-```js
-const gate = readFileSync("scripts/a11y-check.mjs", "utf8");
-it("has a selftest, because a checker nobody has seen fail may be unable to", () => {
-  expect(gate).toContain("--selftest");
-});
-```
-
-Narrowing that checker's heading rule from `!== 1` to `< 1` — a real defect, and
-precisely the one its selftest plants:
-
-```
-node scripts/a11y-check.mjs --selftest   ->  FAIL, h1=false, exit 2
-npx vitest run tests/seo.test.ts         ->  76 of 76 PASS
-```
-
-The control worked. The test named after the control did not run it. And the
-gate step could not catch the defect independently, because it passes on the real
-site with the correct rule — every page has exactly one heading, so a rule firing
-only below one is indistinguishable from the right one on that corpus.
-
-Note what the source-text test does buy: deleting the selftest function turned it
-red, because the same test also asserted a string that lived inside the function.
-That is why it survived so long. **It detects deletion and is blind to breakage**,
-which is the worst ratio for a guard to have, because deletion is the failure
-nobody commits and breakage is the one everybody does.
-
-The repair is not a better source-text assertion. It is to make the control run
-on the path the gate actually takes — in that repo the one step whose selftest
-worked was the one that ran it inline at module load, on every invocation, rather
-than behind a flag. A flag nobody passes is not an entry point.
-
-**Ask of every selftest: name the command that executes it.** If the answer is
-its own `--selftest` flag, grep for who passes that flag before believing it.
+Load [references/controls-and-selftests.md](references/controls-and-selftests.md) when a gate ships a selftest: name the command that executes it, because a test that greps the source for the selftest detects deletion and is blind to breakage.
 
 ## 13. Bind evidence to the candidate and transition
 
@@ -581,79 +385,7 @@ transitions with controls, not just an unchanged happy-path ledger.
 
 ## 14. Redact BEFORE you transform, and search for the TRANSFORMED value
 
-`[measured 2026-09-08]` a shipped collector scrubbed credentials out of everything
-it wrote by holding the secret's value in a set and doing
-`text.split(value).join('[REDACTED]')`. It ran that scrub over **serialised
-JSON**. A secret containing a `"` was already `\"` in the serialised text, so the
-raw value was not present, no replacement happened, and the credential landed in
-the report, the ledger and the candidates file — recoverable with one
-`JSON.parse`. The suite asserted `!everything.includes(CANARY)` and was green,
-because the canary was `sk-live-CANARY-7Qz9pX2mLr41`: **JSON-safe by
-construction, so the assertion could not fail for the defect it named.**
-
-The fix registered the escaped form alongside the raw one. That closed the
-demonstrated case and not the class, because the root cause was never JSON
-escaping — it is that **redaction ran after a transform, while the redactor only
-knew untransformed forms.** Two more transforms in the same file were still live
-after the fix:
-
-```
-clip(s, n) { const t = String(s).replace(/\s+/g, ' ').trim();
-             return t.length <= n ? t : t.slice(0, n - 1) + '…'; }
-```
-
-- **whitespace collapse** — a secret containing a newline became `SEC NEWLINE-1234`
-  in the output. Neither registered form matched. **Full disclosure.**
-- **truncation** — a 172-character secret was clipped to 140 before the scrub, so
-  115 characters survived in plaintext. **Partial disclosure.**
-
-Multi-line secrets are ordinary: PEM private keys, service-account JSON, base64
-wrapped at 64 columns.
-
-**So:** scrub at the point values ENTER the record — walk the object and replace
-on string leaves before `clip`, before `JSON.stringify` — rather than scrubbing
-the rendered text afterwards. Registering each transform's output is whack-a-mole,
-and the next transform added to the file re-opens it silently, with no test going
-red.
-
-### The detector has the same bug, and that is the harder half
-
-Checking whether a secret survived, the obvious command is
-
-```bash
-grep -F "$SECRET" out/*        # reports "clean"
-```
-
-and it is **wrong for exactly the reason the subject was wrong**: in a JSON file
-the value is stored escaped, so grepping the raw form misses a secret that is
-fully present. `[measured 2026-09-08]` this was hit three times in one session —
-twice by a reviewer auditing the code above, once in the code itself. A "clean"
-result from a detector that searches the pre-transform value is not evidence.
-
-Two rules follow, and the second is the one that saves you:
-
-1. **Search for every form the pipeline can produce** — raw, JSON-escaped,
-   whitespace-collapsed, truncated — or better, parse the artefact and inspect
-   the DECODED string values rather than the bytes.
-2. **Assert the positive marker, not the absence of the string you fear.** A
-   report containing the leaky field and **zero `[REDACTED]` markers** is
-   inconsistent with a successful scrub, and that inconsistency is what exposed
-   the surviving variants. Absence of a match has two causes — it was redacted,
-   or you looked for the wrong string — and only the marker tells them apart.
-   This is §2's population floor pointed at a redactor.
-
-### The canary must carry every shape the transforms can alter
-
-A canary widened to the *reported* defect fires for the two shapes that were
-demonstrated and stays green for the ones that were not. After the fix above the
-canary was `sk-live-CANARY-7Qz9\pX"2mLr41` — a quote and a backslash, exactly the
-two variants named in the review — with no whitespace and short enough never to
-be clipped. Both remaining variants were invisible to it.
-
-Give the canary a `"`, a `\`, a newline, and enough length to be truncated. Then
-assert on the decoded values of what was written, not on its bytes. The general
-form is §3's rule with a sharper edge: it is not enough that the canary CAN fire;
-it must be able to fire **for every mechanism the code path contains**.
+Load [references/redaction-before-transform.md](references/redaction-before-transform.md) when a gate, collector or detector handles secrets: scrub values where they enter the record, search every transformed form, and confirm a clean result by a positive marker.
 
 ## Before shipping a gate
 
