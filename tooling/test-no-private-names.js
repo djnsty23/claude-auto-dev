@@ -117,6 +117,13 @@ try {
         const dashNix = sweepWith(`see -${s.parent}-${s.user}-work-repo for details`, home);
         check(`dash-encoded home path is caught, rooted shape (${tag})`,
             dashNix.status !== 0 && dashNix.namesProbe);
+
+        // The account name ending at a word boundary rather than at a hyphen.
+        // The lookahead once read `[-\b]`, and inside a character class `\b`
+        // is a backspace byte, so this shape was never caught.
+        const dashEnd = sweepWith(`see C--${s.parent}-${s.user}/notes for details`, home);
+        check(`dash-encoded home path is caught at a word boundary (${tag})`,
+            dashEnd.status !== 0 && dashEnd.namesProbe);
     }
 
     // ------------------------------------------- the false positive, must NOT
