@@ -387,12 +387,12 @@ function main(argv) {
             // the same trap in a smaller costume: an example realistic enough
             // to illustrate a rule is realistic enough to fire it.
             HOME_PARENT
-                ? new RegExp(esc(HOME_PARENT) + '-' + esc(LOCAL_USER) + '(?=[-\\b])', 'gi')
+                ? new RegExp(esc(HOME_PARENT) + '-' + esc(LOCAL_USER) + '(?![A-Za-z0-9_])', 'gi')
                 // No parent segment, e.g. a home directory at the filesystem
                 // root. Fall back to the original, broader form rather than
                 // silently dropping the check: over-reporting is recoverable
                 // here and a missing detector is not.
-                : new RegExp('-' + esc(LOCAL_USER) + '(?=[-\\b])', 'gi'),
+                : new RegExp('-' + esc(LOCAL_USER) + '(?![A-Za-z0-9_])', 'gi'),
           ]
         : null;
 
