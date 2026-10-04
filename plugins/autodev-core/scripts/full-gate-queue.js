@@ -332,10 +332,11 @@ function replaceInPlace(file, body) {
 }
 
 // ---------------------------------------------------------------------------
-// Liveness. On Windows a pid is alive if ANY probe finds it (a signal-0 open,
-// ps, tasklist): a waiter or holder may have written its MSYS pid. It is dead
-// only when both tasklist and ps ran and neither listed it. Returns true,
-// false, or null when no probe could answer; every caller treats null as alive.
+// Liveness. On Windows a pid is alive if ANY probe finds it (a signal-0 open
+// of a multiple of 4, ps, tasklist): a waiter or holder may have written its
+// MSYS pid. It is dead only when both tasklist and ps ran and neither listed
+// it. Returns true, false, or null when no probe could answer; every caller
+// treats null as alive.
 // ---------------------------------------------------------------------------
 
 let psCommand; // resolved once: 'ps' on PATH, Git's bundled ps.exe, or null
@@ -393,12 +394,19 @@ function msysPidSet() {
 }
 
 function probeAlive(pid) {
-    // A signal-0 probe answers for a native pid in microseconds. On Windows
-    // it asks the same process table tasklist reads, so a hit is enough; a miss
-    // is NOT a verdict there, because the pid may be an MSYS one.
-    try { process.kill(pid, 0); return true; } catch (e) {
-        if (e.code === 'EPERM') return true;
-        if (process.platform !== 'win32') return false;
+    // A signal-0 probe answers for a native pid in microseconds. On Windows a
+    // miss is NOT a verdict, because the pid may be an MSYS one, and a hit is
+    // proof only for a multiple of 4: Windows ignores a pid's low two bits when
+    // it opens it [measured 2026-10-03: a live 57172 answered as 57173, 57174
+    // and 57175]. Native pids are multiples of 4 and MSYS pids need not be, so a
+    // dead Git Bash holder M read alive whenever any process held M - M % 4.
+    // Any other number goes straight to the ps and tasklist tables below.
+    const win = process.platform === 'win32';
+    if (!win || pid % 4 === 0) {
+        try { process.kill(pid, 0); return true; } catch (e) {
+            if (e.code === 'EPERM') return true;
+            if (!win) return false;
+        }
     }
     const msys = msysPidSet();
     const psRan = msys !== null;
