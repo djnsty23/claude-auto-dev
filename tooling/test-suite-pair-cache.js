@@ -341,13 +341,20 @@ let unitRepo;
         has('read', 'data.txt') && has('list') && has('stat', 'nope') && has('write', 'out.txt'), JSON.stringify(t.records.slice(0, 20)));
     check('tracer: a native child is recorded by name', has('native') && t.records.some((x) => x[0] === 'native' && x[1] === 'git'));
     check('tracer: a Node child started with a replaced environment is recorded as untraced', has('untraced'));
+    // Node records the main module and a require's parent by real path, so a temp
+    // directory behind a symlink (macOS /var -> /private/var) names the script
+    // under its other spelling. The same file, either way.
+    const scriptReal = fs.realpathSync.native(script);
+    const isScript = (p) => typeof p === 'string' && (p === script || p === scriptReal);
     check('tracer: the script it compiled is recorded with its text digest',
-        t.records.some((x) => x[0] === 'compile' && x[1] === script && x[2] === tr.textDigest(fs.readFileSync(script))));
+        t.records.some((x) => x[0] === 'compile' && isScript(x[1]) && x[2] === tr.textDigest(fs.readFileSync(script))),
+        JSON.stringify(t.records.filter((x) => x[0] === 'compile')));
     check('tracer: a write that threw is not recorded as a write', !has('write', 'failed.txt'));
     check('tracer: a file opened r+ is recorded as read', has('read', 'rw.txt'));
     check('tracer: a read in an exit listener registered after the preload is recorded', has('read', 'late.txt'));
     check('tracer: a require() is recorded with its request and parent',
-        t.records.some((x) => x[0] === 'resolve' && x[1] === './lib' && x[2] === script));
+        t.records.some((x) => x[0] === 'resolve' && x[1] === './lib' && isScript(x[2])),
+        JSON.stringify(t.records.filter((x) => x[0] === 'resolve')));
     check('tracer: fork() with a non-Node execPath is a native child',
         JSON.stringify(tr.classifyChild('fork', ['x.js', [], { execPath: 'C:/tools/native-reader.exe', env: {} }], {}))
         === JSON.stringify(['native', 'native-reader']));
