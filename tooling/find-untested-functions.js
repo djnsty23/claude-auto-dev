@@ -185,7 +185,19 @@ const asJson = argv.includes('--json');
 // suite runs, never a pass and never a regression: it has no floor to exceed.
 const FLOORS = {
     darwin: { untested: 40, neverLoaded: 1, measured: '2026-09-08 at fcfb8fa' },
-    linux: { untested: 40, neverLoaded: 1, measured: '2026-09-08 at fcfb8fa' },
+    // `[measured 2026-10-04]` ubuntu-latest CI runs 37166302077 and 37166303320
+    // at 061a180, both green through the suite and listing the same 44. The last
+    // graded linux run, ee675ab1 on 2026-10-02, scored 39. Main's own ubuntu
+    // job never reached this step in between, because test-gate-ownership S8
+    // failed first, so the rise surfaced on the PR that fixed S8. Six named
+    // functions arrived through main's merges, none through that PR, and none can
+    // run on linux: gate-identity.js runPowerShell(), windowsSnapshot(),
+    // resolvePs() and parsePsW() (b297b4db, the win32 and MSYS probes),
+    // reap-build-output.js expandShortPaths() (124d92ae, 8.3 aliases, win32
+    // only), and layout-probe.js harvestComponents(), which runs only inside a
+    // page after toString(), as harvest() does. The other 38 all predate
+    // ee675ab1. darwin keeps its own number: macOS CI does not run this step.
+    linux: { untested: 44, neverLoaded: 1, measured: '2026-10-04 at 061a180' },
     // `[measured 2026-09-13]` on Windows 11 at 84e0a75: 1061 named functions, 93
     // never called, of which 57 are REFUSED_BY_DESIGN below and 36 are graded
     // (the linux buckets plus four POSIX-gated single functions), 1 never loaded.
