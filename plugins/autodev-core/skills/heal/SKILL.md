@@ -122,6 +122,7 @@ The fix agent creates its own worktree explicitly, inside the target repo:
 cd "<target repo>"
 git status --short    # a dirty tree you did not dirty means another session is here
 git worktree add .claude/worktrees/<topic> -b fix/<topic>
+node "${CLAUDE_PLUGIN_ROOT}/scripts/shared-install.js" link .claude/worktrees/<topic>   # node_modules as hardlinks, or the npm ci it needs
 ```
 
 Add `.claude/worktrees/` to that repo's `.gitignore` first if it is not there — a

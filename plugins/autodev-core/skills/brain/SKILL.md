@@ -332,7 +332,10 @@ do:
   itself, so a worker never dispatches a worker. Fan-out stays with you.
 - It starts in your origin checkout, and the tool takes no cwd. The STEP 0 that
   `brief` writes (`git worktree add`, then `cd` on every command) is the only
-  thing keeping it out of the shared tree.
+  thing keeping it out of the shared tree. STEP 0 also links the worktree's
+  node_modules to the main checkout's (`shared-install.js link`). A chip or
+  any other brief you write by hand carries the same line after its
+  `git worktree add`: `node "$(printf '%s\n' "${CLAUDE_CONFIG_DIR:-$HOME/.claude}"/plugins/cache/*/autodev-core/*/scripts/shared-install.js | sort -V | tail -1)" link .`
 
 **With an empty inbox, DRIVE. Fan the work out to background agents from this
 session.** Reporting and waiting for an inbound peer message is not coordination;

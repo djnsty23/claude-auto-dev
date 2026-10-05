@@ -944,7 +944,7 @@ function briefText(repo, base, opts) {
         '',
         'Load the `unslop` skill and follow it. Scope: this repository only, on a local dev or prod build.',
         '',
-        '1. `git worktree add .claude/worktrees/unslop-<date> -b chore/unslop-<date> origin/main`, copy `.env.local` in, install, and start the app on a free port.',
+        '1. `git worktree add .claude/worktrees/unslop-<date> -b chore/unslop-<date> origin/main`, copy `.env.local` in, run `node "<plugin>/scripts/shared-install.js" link .claude/worktrees/unslop-<date>` (it hardlinks the main checkout\'s node_modules, or prints the `npm ci` to run), and start the app on a free port.',
         `2. Sweep: \`node "<plugin>/scripts/unslop-sweep.js" sweep --root . --base ${base} --out .claude/reports/unslop/<date> --sitemap auto\`. Add \`--email-env\`/\`--password-env\` only when the test login variables are present in env (\`doppler run --\`), and only on localhost.`,
         '3. Turn findings into stories: `unslop-sweep.js stories <out> --prd prd.json --write`. One shared header or footer defect is one story.',
         '4. Hand the stories to `auto`. After the fixes, sweep again with `--baseline <first out>` and run `unslop-sweep.js compare <first out> <second out>`. A fix counts only when its target drops and nothing else rises.',

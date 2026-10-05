@@ -146,3 +146,6 @@ immediately before `bump.js`.
 **Commit and push autodev freely.** In a product repo, who merges and deploys is the operator's
 decision policy (`~/.claude/rules/decision-policy.md`), and without one, ask first. Use
 `git worktree add`, never `git checkout` in a live main tree, and re-run its gate after a rebase.
+Then `plugins/autodev-core/scripts/shared-install.js link <worktree>` hardlinks the main
+checkout's node_modules, and a linked tree is unshared before anything installs into it
+([docs/shared-install.md](docs/shared-install.md)).

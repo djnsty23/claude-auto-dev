@@ -309,6 +309,7 @@ HOW TO WORK:
      git worktree add .claude/worktrees/heal-<topic> -b fix/heal-<topic>
      cd .claude/worktrees/heal-<topic>
      pwd && git rev-parse --abbrev-ref HEAD
+     node "$(printf '%s\\n' "\${CLAUDE_CONFIG_DIR:-$HOME/.claude}"/plugins/cache/*/autodev-core/*/scripts/shared-install.js | sort -V | tail -1)" link .
 
    Pick <topic> yourself from the vulnerability class. Report that pwd and that
    branch as the FIRST LINE of gateResult. NEVER switch the main clone's branch,

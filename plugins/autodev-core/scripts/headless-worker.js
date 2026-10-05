@@ -138,7 +138,9 @@ const DENIED_NOTE = 'DENIED UP FRONT: expect the permission classifier to refuse
 function placementNote(scratchDir) {
     return 'PLACEMENT: a git worktree goes INSIDE its repo, at <repo>/.claude/worktrees/<name> '
         + '(`git -C <repo> worktree add .claude/worktrees/<name> -b <branch> origin/main`), never beside the repo '
-        + 'and never in the directory that holds the checkouts. A bare clone is scratch too. Logs, diffs, exit '
+        + 'and never in the directory that holds the checkouts. Right after adding one, run '
+        + `\`node "${path.join(__dirname, 'shared-install.js').replace(/\\/g, '/')}" link <worktree>\`: it hardlinks the main `
+        + 'checkout\'s node_modules when the lockfiles match, and prints the `npm ci` to run where they do not. A bare clone is scratch too. Logs, diffs, exit '
         + `files and every other scratch output go under ${scratchDir.replace(/\\/g, '/')}, never in a checkout's parent directory.`;
 }
 

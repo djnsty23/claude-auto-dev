@@ -136,6 +136,10 @@ try {
         const top = (r.stdout.match(/TOP=(.*)/) || [])[1] || '';
         const expected = path.join(repo, '.claude', 'worktrees', 'logo-guide').replace(/\\/g, '/');
         check('STEP 0 exits 0', r.status === 0, r.stderr.trim().slice(0, 300));
+        // The link line runs the real shared-install.js by the path the prompt
+        // names. This fixture has no lockfile, so it must say there is nothing
+        // to share, and a run that prints nothing means the path was wrong.
+        check('STEP 0 runs shared-install link on the new worktree', /\[shared-install\] link [^\n]*logo-guide\n\s+no tracked package-lock\.json/.test(r.stdout), r.stdout.slice(0, 400) + r.stderr.slice(0, 200));
         check('STEP 0 ends inside the new worktree', top.toLowerCase() === expected.toLowerCase(), top + ' vs ' + expected);
         check('STEP 0 ends on claude/<slug>', /BRANCH=claude\/logo-guide/.test(r.stdout), r.stdout);
         check('the shared checkout stays on main', g(repo, 'rev-parse', '--abbrev-ref', 'HEAD') === 'main');

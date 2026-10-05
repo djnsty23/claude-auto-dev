@@ -168,7 +168,8 @@ performance outcome needed to call it a winner.
 Use a dedicated worktree and `<agent>/marketing-radar-*` branch for framework
 changes, created INSIDE the repo. `<agent>` is `claude` when running under
 Claude Code and `codex` under Codex:
-`git -C <repo> worktree add .claude/worktrees/marketing-radar-<topic> -b <agent>/marketing-radar-<topic> origin/main`.
+`git -C <repo> worktree add .claude/worktrees/marketing-radar-<topic> -b <agent>/marketing-radar-<topic> origin/main`,
+then `node "${CLAUDE_PLUGIN_ROOT}/scripts/shared-install.js" link <repo>/.claude/worktrees/marketing-radar-<topic>` for its dependencies.
 Never place it beside the checkout. Logs, diffs and exit files go in the session
 scratchpad or `~/.claude/autodev/reports/<run>/`, never in the directory that
 holds the checkouts. Preserve raw commands, exit codes, elapsed time and evidence paths.
