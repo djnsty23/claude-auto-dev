@@ -25,6 +25,7 @@ const { spawnSync } = require('child_process');
 
 const hook = path.resolve(__dirname, '..', 'plugins', 'autodev-core', 'hooks', 'telemetry.js');
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'queuedrained-'));
+const config = path.join(tmp, 'config');
 
 let failures = 0;
 function check(name, cond, detail) {
@@ -182,6 +183,8 @@ function runStop(transcriptPath) {
         }),
         encoding: 'utf8',
         cwd: dir,
+        // Stop notes live in profile state. Never inherit the operator's profile.
+        env: { ...process.env, CLAUDE_CONFIG_DIR: config },
         windowsHide: true,
     });
     const stdout = (res.stdout || '').trim();
@@ -197,6 +200,9 @@ function runStop(transcriptPath) {
     check('the decision survives untouched', !!r.parsed && r.parsed.decision === 'approve', `decision=${r.parsed && r.parsed.decision}`);
     check('systemMessage names the carried item', !!r.parsed && String(r.parsed.systemMessage || '').includes(CARRIED), `systemMessage=${JSON.stringify(r.parsed && r.parsed.systemMessage)}`);
     check('systemMessage carries no decision of its own', !!r.parsed && !('reason' in r.parsed), 'a reason field appeared on an approve');
+    const notes = path.join(config, 'autodev', 'stop-notes');
+    check('Stop persists its deduplication ledger in the fixture profile',
+        fs.existsSync(notes) && fs.readdirSync(notes).some((name) => name.endsWith('.json')), 'no fixture ledger');
     check('the carried item also reaches the model (Stop additionalContext)', !!r.parsed && !!r.parsed.hookSpecificOutput
         && r.parsed.hookSpecificOutput.hookEventName === 'Stop'
         && String(r.parsed.hookSpecificOutput.additionalContext || '').includes(CARRIED),
@@ -331,6 +337,6 @@ for (const f of [cliCopy, stdinCopy]) {
 }
 try { fs.rmSync(tmp, { recursive: true, force: true }); } catch { /* best effort */ }
 
-const total = 50;
+const total = 51;
 console.log(`\ntest-queue-drained: ${failures ? `FAIL (${failures} of ${total})` : `PASS (${total} assertions)`}\n`);
 process.exit(failures ? 1 : 0);
