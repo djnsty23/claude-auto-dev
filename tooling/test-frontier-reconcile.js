@@ -18,6 +18,8 @@ function fixture() {
     fs.mkdirSync(path.join(c.data, 'batches'), { recursive: true });
     const dead = spawnSync(process.execPath, ['-e', 'console.log(process.pid)'], { encoding: 'utf8', windowsHide: true });
     const loopPid = Number(dead.stdout.trim());
+    const supervisor = spawnSync(process.execPath, ['-e', 'console.log(process.pid)'], { encoding: 'utf8', windowsHide: true });
+    const supervisorPid = Number(supervisor.stdout.trim());
     const file = path.join(c.data, 'batches', `${id}.json`);
     const batch = { id, state: 'running', loopPid, account: 'fixture', items: [
         { task: 'T1', variant: 'V0', rep: 1, state: 'done', run: 'F-01010001-T1-V0-1', verdict: 'fail' },
@@ -27,7 +29,7 @@ function fixture() {
     fs.writeFileSync(file, JSON.stringify(batch));
     const runDir = path.join(c.work, 'runs', batch.items[2].run);
     fs.mkdirSync(runDir, { recursive: true });
-    fs.writeFileSync(path.join(runDir, 'run.json'), JSON.stringify({ supervisorPid: loopPid }));
+    fs.writeFileSync(path.join(runDir, 'run.json'), JSON.stringify({ supervisorPid }));
     fs.writeFileSync(path.join(runDir, 'worker.log'), 'unfinished stream\n');
     return { c, file, batch, loopPid, runDir, snap: { ok: true, boot: { id: 'fixture-boot' }, procs: new Map() } };
 }
