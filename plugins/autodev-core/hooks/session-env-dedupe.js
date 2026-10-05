@@ -19,7 +19,8 @@
 // tracking quote state across lines. An `export NAME=<literal>` line is removed
 // only when a later line exports NAME again as a literal and no line anywhere
 // reads $NAME or ${NAME}. Bash ends up with the same values; every other line
-// stays verbatim. The steady state after a compaction is two copies of each
+// stays verbatim. Scripts with executable or non-literal lines are left alone.
+// The steady state for literal blocks after a compaction is two copies of each
 // variable, not an unbounded pile.
 //
 // EVERY OS, NOT ONLY WINDOWS. The growth is the harness's and happens on every
@@ -100,15 +101,22 @@ function readSnapshot(dir) {
 function plan(snapshot) {
     const lines = [];
     let state = null;
+    let opaque = false;
     for (const file of snapshot) {
         const parts = file.text.split('\n');
         if (parts[parts.length - 1] === '') parts.pop();
         for (const line of parts) {
             const m = state === null ? line.match(LITERAL_EXPORT_RE) : null;
             lines.push({ file: file.name, line, name: m ? m[1] : null });
-            state = quoteStateAfter(line, state);
+            const comment = state === null && /^\s*#/.test(line);
+            if (!m && line.trim() && !comment) opaque = true;
+            if (!comment) state = quoteStateAfter(line, state);
         }
     }
+    // Child processes read exported values without spelling $NAME. Control
+    // flow, heredocs and continued commands also make a later export conditional.
+    // Only a complete straight-line literal export block is safe to shorten.
+    if (opaque || state !== null) return [];
     const lastIndex = new Map();
     lines.forEach((l, i) => { if (l.name) lastIndex.set(l.name, i); });
     const isRead = (name) => {
