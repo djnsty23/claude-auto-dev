@@ -26,6 +26,7 @@
  *   M8  no harness cap                                         -> harness gates take the last free lane
  *   M9  the cap is lanes - 1 even on one lane                  -> a lone harness gate never runs
  *   M10 no hand-over to a classless ticket at the front        -> an older version and a harness gate wait on each other
+ *   M11 a signal-0 hit is proof for any pid on Windows         -> a dead holder at F + 1 is never reclaimed
  */
 'use strict';
 
@@ -267,6 +268,80 @@ function scenarioMsysWaiter(subject, msys) {
     rows.push([`H releases: the lock is handed to the live MSYS pid ${msys}, not dropped`,
         rel.code === 0 && lockPid(fx) === msys, `${rel.out}\nlock: ${lockPid(fx)}`]);
     return rows;
+}
+
+/**
+ * A dead holder at F + 1 while a native process holds F. On Windows signal 0
+ * ignores a pid's low two bits, so F + 1 answers it although no process has
+ * that number: the shape of an exited Git Bash holder whose MSYS pid shares a
+ * slot with a live native pid. F + 1 must read dead, and F must still read alive.
+ */
+function scenarioAliasedHolder(subject, f) {
+    const alias = f + 1;
+    const rows = [];
+    {
+        const fx = fixture();
+        const a = sleeper();
+        fs.writeFileSync(fx.lock, `${alias}\nexited Git Bash holder\n`);
+        const ra = take(subject, fx, a);
+        rows.push([`a lock naming ${alias} while native ${f} runs: A moves it to .stale-HHMM and takes the lock`,
+            ra.code === 0 && lockPid(fx) === a && asides(fx, 'stale').length === 1, ra.out]);
+    }
+    {
+        const fx = fixture();
+        const r = take(subject, fx, alias);
+        rows.push([`take --pid ${alias} exits 1, "not running", and queues nothing`,
+            r.code === 1 && /not running/.test(r.out) && tickets(fx).length === 0 && !fs.existsSync(fx.lock), r.out]);
+    }
+    {
+        const fx = fixture();
+        const a = sleeper();
+        fs.writeFileSync(fx.lock, `${f}\nlive native holder\n`);
+        const ra = take(subject, fx, a);
+        rows.push([`control: a lock naming native ${f} itself is waited for (exit 3), not moved`,
+            ra.code === 3 && lockPid(fx) === f && asides(fx, 'stale').length === 0, ra.out]);
+    }
+    return rows;
+}
+
+/**
+ * Null when F is a live native pid, a multiple of 4, and F + 1 answers signal 0
+ * while neither `ps -e` nor tasklist lists an F + 1. Otherwise why not: the
+ * scenario above proves nothing unless the alias, and only the alias, answers.
+ */
+function aliasState(f) {
+    const sig0 = (p) => { try { process.kill(p, 0); return true; } catch (e) { return e.code === 'EPERM'; } };
+    if (f % 4 !== 0) return `native pid ${f} is not a multiple of 4`;
+    if (!sig0(f)) return `native pid ${f} is not running`;
+    if (!sig0(f + 1)) return `signal 0 does not answer for ${f + 1}, so nothing aliases it`;
+    const ps = gitUsrBin('ps.exe');
+    if (!ps) return 'Git ps.exe not found';
+    const p = spawnSync(ps, ['-e'], { encoding: 'utf8', windowsHide: true, timeout: 30000 });
+    if (p.error || p.status !== 0) return 'ps -e did not run';
+    if ((p.stdout || '').split(/\r?\n/).some((l) => l.trim().split(/\s+/)[0] === String(f + 1))) return `ps lists an MSYS pid ${f + 1}`;
+    const t = spawnSync('tasklist', ['/FI', `PID eq ${f + 1}`, '/NH', '/FO', 'CSV'], { encoding: 'utf8', windowsHide: true, timeout: 30000 });
+    if (t.error || t.status !== 0) return 'tasklist did not run';
+    if (new RegExp(`^"[^"]*","${f + 1}"`, 'm').test(t.stdout || '')) return `tasklist lists a Windows process ${f + 1}`;
+    return null;
+}
+
+/**
+ * scenarioAliasedHolder against `subject`, with a fresh native F checked by
+ * aliasState right before and right after the judgement. { rows, f }, or
+ * { rows: null, why } when three tries found the alias missing or occupied.
+ */
+function judgeAliased(subject) {
+    const seen = [];
+    for (let i = 0; i < 3; i++) {
+        const f = sleeper();
+        const before = aliasState(f);
+        if (before) { seen.push(`${before}, before the judgement`); continue; }
+        const rows = scenarioAliasedHolder(subject, f);
+        const after = aliasState(f);
+        if (!after) return { rows, f };
+        seen.push(`${after}, after the judgement`);
+    }
+    return { rows: null, why: seen.join('; ') };
 }
 
 /**
@@ -564,6 +639,24 @@ async function main() {
         const ra = take(SUBJECT, fx, a);
         check('dead holder: A, the head, moves it to .stale-HHMM and takes the lock',
             ra.code === 0 && lockPid(fx) === a && asides(fx, 'stale').length === 1, ra.out);
+    }
+
+    // A dead holder whose pid aliases a live native one. [measured 2026-10-03]
+    // Windows answers signal 0 for pid & ~3, and the subject took a hit as
+    // proof before it asked ps or tasklist, so the lock was never reclaimed.
+    if (WIN) {
+        const real = judgeAliased(SUBJECT);
+        if (!real.rows) {
+            console.log(`SKIP  aliased holder and planted M11: ${real.why}`);
+        } else {
+            report(`aliased holder (F = ${real.f})`, real.rows);
+            const m11 = mutant('M11', 'if (!win || pid % 4 === 0) {', 'if (true) {');
+            const red = m11 ? judgeAliased(m11) : null;
+            if (red && red.rows) expectRed('M11', 'a signal-0 hit is proof for any pid', red.rows);
+            else if (red) console.log(`SKIP  planted M11: ${red.why}`);
+        }
+    } else {
+        console.log('SKIP  aliased holder and planted M11: signal 0 matches the pid exactly off Windows');
     }
 
     // A live holder the queue cannot judge is waited for, never moved.
