@@ -7,20 +7,22 @@
 // ("Handles deployment") gives the model nothing to match a situation against;
 // it loads on vibes, or never.
 //
-// Every description is resident in context for every session on this machine,
-// so the set has a standing cost whether or not any skill is ever used. This
-// prints that cost alongside the classification, because "add another skill" is
-// usually discussed as free.
+// Report description text separately from custom when_to_use metadata.
+// File bytes are a static inventory, not a measurement of host prompt tokens.
+// Trigger classification uses the description the skill advertises, not a
+// custom field that could conceal a vague description.
 //
 // Heuristic, deliberately: it flags candidates and prints them for a human to
 // judge, rather than pretending to grade prose. Read the flagged lines.
 //
-// Usage: node tooling/check-skill-triggers.js [--all]
+// Usage: node tooling/check-skill-triggers.js [--all] [--root <plugins dir>] [--json]
 
 const fs = require('fs');
 const path = require('path');
 
-const ROOT = path.resolve(__dirname, '..', 'plugins');
+const ROOT_AT = process.argv.indexOf('--root');
+const ROOT = ROOT_AT < 0 ? path.resolve(__dirname, '..', 'plugins') : process.argv[ROOT_AT + 1];
+const AS_JSON = process.argv.includes('--json');
 const SHOW_ALL = process.argv.includes('--all');
 
 // Words that name a CONDITION — the thing that makes a description matchable
@@ -56,9 +58,10 @@ function frontmatter(text) {
     return out;
 }
 
-const files = walk(ROOT);
+const files = ROOT && !ROOT.startsWith('--') ? walk(ROOT) : [];
 const rows = [];
-let bytes = 0;
+let descriptionBytes = 0;
+let whenToUseBytes = 0;
 
 for (const f of files) {
     let text; try { text = fs.readFileSync(f, 'utf8'); } catch { continue; }
@@ -66,8 +69,9 @@ for (const f of files) {
     if (!fm || !fm.description) continue;
     const desc = fm.description.replace(/^["']|["']$/g, '');
     const whenToUse = (fm.when_to_use || '').replace(/^["']|["']$/g, '');
-    const combined = (desc + ' ' + whenToUse).toLowerCase();
-    bytes += desc.length + whenToUse.length;
+    const combined = desc.toLowerCase();
+    descriptionBytes += Buffer.byteLength(desc, 'utf8');
+    whenToUseBytes += Buffer.byteLength(whenToUse, 'utf8');
     rows.push({
         name: fm.name || path.basename(path.dirname(f)),
         desc,
@@ -81,9 +85,15 @@ rows.sort((a, b) => a.name.localeCompare(b.name));
 const label = rows.filter((r) => !r.hasCondition);
 const long = rows.filter((r) => r.len > 320);
 
+const population = { files: files.length, described: rows.length };
+process.exitCode = files.length === 0 || rows.length !== files.length ? 2 : 0;
+if (AS_JSON) {
+    console.log(JSON.stringify({ population, descriptionBytes, whenToUseBytes, rows }));
+} else {
 console.log(`skill trigger audit — ${rows.length} skills with a description`);
-console.log(`standing context cost: ${bytes} bytes of description + when_to_use, resident every session`);
-console.log(`  roughly ${Math.round(bytes / 4)} tokens, paid whether or not a single skill loads\n`);
+console.log(`description text: ${descriptionBytes} UTF-8 bytes on disk`);
+console.log(`custom when_to_use metadata: ${whenToUseBytes} UTF-8 bytes, counted separately`);
+console.log(`  description token heuristic: ~${Math.round(descriptionBytes / 4)}, not measured prompt tokens\n`);
 
 console.log(`names no condition (loads on vibes, or never): ${label.length} of ${rows.length}`);
 for (const r of label) console.log(`  ${r.name.padEnd(28)} ${r.desc.slice(0, 96)}`);
@@ -94,7 +104,11 @@ for (const r of long) console.log(`  ${r.name.padEnd(28)} ${r.len} chars`);
 const noWhen = rows.filter((r) => !r.hasWhenToUse);
 console.log(`\nno when_to_use field: ${noWhen.length} of ${rows.length}`);
 
-if (SHOW_ALL) {
+console.log(`population: ${rows.length} described of ${files.length} skill files`);
+if (process.exitCode) console.log('INDETERMINATE: missing, empty or partially described skill population.');
+}
+
+if (SHOW_ALL && !AS_JSON) {
     console.log('\nall descriptions:');
     for (const r of rows) console.log(`  ${r.hasCondition ? 'T' : ' '} ${r.name.padEnd(28)} ${r.desc.slice(0, 90)}`);
 }
