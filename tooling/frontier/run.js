@@ -974,13 +974,19 @@ function latestSevenDay(c, account, running) {
     return best;
 }
 
-function createBatch(c, { tasks, variants, account, k, max, quietWaitMin = 0 }) {
-    const id = `B-${stamp()}`;
+function createBatch(c, { tasks, variants, account, k, max, quietWaitMin = 0, now = Date.now() }) {
     const items = [];
     for (let rep = 1; rep <= k; rep++) for (const t of tasks) for (const v of variants) items.push({ task: t, variant: v, rep, state: 'queued', run: null, verdict: null });
-    const batch = { id, createdAt: new Date().toISOString(), account, max, budgetStop: c.budgetStop, quietWaitMin, items, state: 'running', loopPid: null };
-    writeJsonAtomic(batchFile(c, id), batch);
-    return batch;
+    fs.mkdirSync(path.join(c.data, 'batches'), { recursive: true });
+    for (let i = 0; i < 100; i++) {
+        const id = `B-${stamp(new Date(now + i * 1000))}`;
+        let fd;
+        try { fd = fs.openSync(batchFile(c, id), 'wx'); } catch (e) { if (e.code === 'EEXIST') continue; throw e; }
+        const batch = { id, createdAt: new Date().toISOString(), account, max, budgetStop: c.budgetStop, quietWaitMin, items, state: 'running', loopPid: null };
+        try { fs.writeFileSync(fd, JSON.stringify(batch, null, 2) + '\n'); } finally { fs.closeSync(fd); }
+        return batch;
+    }
+    fault('batch-id', 'no free batch id in 100 tries; existing batches untouched');
 }
 /**
  * With --quiet-wait, an item starts only when no gate, coverage run or full
@@ -1170,4 +1176,4 @@ if (require.main === module) {
 
 module.exports = { parseArgs, fixTokens, scanForTokens, workerEnv, checksEnv, composePrompt, parseStream, tokensOf, leakHits,
     gradeLocate, gradeReview, gradeDecide, decideAnswer, plantedFindings, readRows, RUN_RE, SCRUB_RE, SETTINGS_KEEP, CODEY,
-    processList, heavyJobs, noteLoad, loadRecord, quietGate, HEAVY_RE, reconcileBatch };
+    processList, heavyJobs, noteLoad, loadRecord, quietGate, HEAVY_RE, reconcileBatch, createBatch };

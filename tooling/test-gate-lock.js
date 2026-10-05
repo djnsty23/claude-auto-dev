@@ -40,11 +40,23 @@ const mkTemp = (p) => { const d = fs.mkdtempSync(path.join(os.tmpdir(), p)); tem
 
 const PROBE = `'use strict';
 const fs = require('fs');
+const path = require('path');
 const [code, sleepMs] = [Number(process.argv[2] || 0), Number(process.argv[3] || 0)];
-const lock = process.env.AUTODEV_GATE_LOCK_PATH;
+let lock = process.env.AUTODEV_GATE_LOCK_PATH;
 let content = null;
-try { content = fs.readFileSync(lock, 'utf8'); } catch {}
-fs.writeFileSync('probe-saw.json', JSON.stringify({ pid: process.pid, exists: content !== null, content }));
+try {
+    for (const name of fs.readdirSync(path.dirname(lock))) {
+        if (!/^full-gate(?:-[2-8])?\\.lock$/.test(name)) continue;
+        const candidate = path.join(path.dirname(lock), name);
+        const text = fs.readFileSync(candidate, 'utf8');
+        const metaLine = text.split(/\\r?\\n/).find((line) => line.startsWith('meta '));
+        const meta = metaLine ? JSON.parse(metaLine.slice(5)) : null;
+        if (meta && meta.runId === process.env.AUTODEV_GATE_RUN_ID && String(meta.token) === process.env.AUTODEV_GATE_RUN_TOKEN) {
+            lock = candidate; content = text; break;
+        }
+    }
+} catch {}
+fs.writeFileSync('probe-saw.json', JSON.stringify({ pid: process.pid, exists: content !== null, content, lockPath: lock }));
 if (sleepMs > 0) setTimeout(() => process.exit(code), sleepMs);
 else process.exitCode = code;
 `;
@@ -466,7 +478,8 @@ async function main() {
         const probe = saw(fx);
         check('harness cap: after the peer leaves, the wrapper takes one lane and exits 0',
             r.code === 0 && Boolean(admission) && (r.out.match(/lock taken:/g) || []).length === 1
-                && Boolean(probe && probe.exists) && Number(probe.content.split(/\r?\n/)[0]) === Number(admission[2]),
+                && Boolean(probe && probe.exists) && probe.lockPath === admission[1]
+                && Number(probe.content.split(/\r?\n/)[0]) === Number(admission[2]),
             `exit=${r.code}\n${r.out}`);
     }
 }

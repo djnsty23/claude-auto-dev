@@ -7,7 +7,7 @@ const os = require('os');
 const path = require('path');
 const { spawnSync } = require('child_process');
 const subject = process.env.FRONTIER_RECONCILE_SUBJECT || path.join(__dirname, 'frontier', 'run.js');
-const { reconcileBatch } = require(subject);
+const { reconcileBatch, createBatch } = require(subject);
 const root = fs.mkdtempSync(path.join(os.tmpdir(), 'frontier-reconcile-'));
 const id = 'B-01010101';
 let passed = 0, failed = 0;
@@ -46,6 +46,20 @@ function refused(name, fx, snap, code) {
     check(`${name}: mutex released`, !fs.existsSync(`${fx.file}.reconcile.lock`));
 }
 try {
+    const collision = fixture();
+    const spec = { tasks: ['T1'], variants: ['V0'], account: 'fixture', k: 1, max: 1, now: Date.UTC(2026, 0, 1) };
+    const first = createBatch(collision.c, spec);
+    const firstFile = path.join(collision.c.data, 'batches', `${first.id}.json`);
+    fs.writeFileSync(firstFile, JSON.stringify({ ...first, state: 'stopped-budget', preserved: 'independent-fixture' }));
+    const original = fs.readFileSync(firstFile, 'utf8');
+    const second = createBatch(collision.c, spec);
+    check('batch ids: two creations in the same second have distinct stable ids', first.id !== second.id);
+    check('batch ids: the earlier batch survives byte-for-byte', fs.readFileSync(firstFile, 'utf8') === original);
+    for (let n = 2; n < 100; n++) createBatch(collision.c, spec);
+    let exhausted;
+    try { createBatch(collision.c, spec); } catch (e) { exhausted = e.publicCode; }
+    check('batch ids: exhausted reservation population refuses without overwriting', exhausted === 'batch-id'
+        && fs.readFileSync(firstFile, 'utf8') === original);
     const fx = fixture();
     const originalQueue = JSON.stringify(fx.batch.items[1]);
     const r = cli(fx);
