@@ -96,14 +96,24 @@ function parseArgs(argv) {
 // Worktrees.
 // ---------------------------------------------------------------------------
 
-/** `git worktree list --porcelain` -> [{ path, bare, prunable }]. CRLF-safe. */
+/**
+ * `git worktree list --porcelain` -> [{ path, bare, prunable, locked, detached,
+ * head, branch }]. CRLF-safe. `branch` is the short name, null when detached.
+ */
 function parsePorcelain(text) {
     const out = [];
     let cur = null;
     for (const raw of String(text || '').split(/\r?\n/)) {
         const line = raw.replace(/\r$/, '');
-        if (line.startsWith('worktree ')) { cur = { path: line.slice('worktree '.length), bare: false, prunable: false }; out.push(cur); }
+        if (line.startsWith('worktree ')) {
+            cur = { path: line.slice('worktree '.length), bare: false, prunable: false, locked: false, detached: false, head: null, branch: null };
+            out.push(cur);
+        }
         else if (cur && line === 'bare') cur.bare = true;
+        else if (cur && line === 'detached') cur.detached = true;
+        else if (cur && (line === 'locked' || line.startsWith('locked '))) cur.locked = true;
+        else if (cur && line.startsWith('HEAD ')) cur.head = line.slice(5);
+        else if (cur && line.startsWith('branch ')) cur.branch = line.slice(7).replace(/^refs\/heads\//, '');
         else if (cur && (line === 'prunable' || line.startsWith('prunable '))) cur.prunable = true;
     }
     return out;
@@ -626,6 +636,8 @@ function main(argv = process.argv.slice(2), env = process.env) {
 module.exports = {
     parseArgs, parsePorcelain, listWorktrees, gateClaims, leaseCovers, readProcesses, processUses, pathSpellings,
     newestShallow, shapeFault, measure, assess, apply, main, leaseFault, expandShortPaths,
+    // worktree-reap.js asks the same three questions (gate claim, lease, process) before removing a worktree.
+    context, claimedBy,
 };
 
 if (require.main === module) {
