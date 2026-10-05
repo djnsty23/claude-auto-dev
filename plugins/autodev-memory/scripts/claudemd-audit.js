@@ -121,10 +121,11 @@ for (const repo of repos) {
             })
     )].sort((a, b) => b.length - a.length);
 
-    // Sentences mentioning each ref, for the historical-language test.
-    const sentencesFor = (ref) => text.split('\n')
-        .filter((l) => l.includes(ref))
-        .join(' ');
+    // Exemptions belong to the statement that makes them. A historical or
+    // private mention cannot silence another statement claiming a current path.
+    // Split sentence boundaries only after punctuation followed by whitespace,
+    // so dots within a filename remain part of the reference.
+    const scopes = text.split(/\r?\n/).flatMap((line) => line.split(/(?<=[.!?])\s+/));
 
     for (const ref of refs) {
         if (ref.startsWith('/')) continue;                 // absolute — not ours to judge
@@ -132,11 +133,10 @@ for (const repo of repos) {
 
         // A dead markdown link is always broken. Otherwise, prose that describes
         // the file as gone is a record, not a rot.
-        const isLink = linkRe(ref).test(text);
-        const sentences = sentencesFor(ref);
-        if (NOT_IN_REPO.test(sentences)) { skippedHistorical++; continue; }
-        const contradicts = HISTORICAL.test(sentences) && PRESENT_CLAIM.test(sentences);
-        if (!isLink && !contradicts && HISTORICAL.test(sentences)) { skippedHistorical++; continue; }
+        const mentions = scopes.filter((scope) => scope.includes(ref));
+        const exempt = (scope) => NOT_IN_REPO.test(scope)
+            || (!linkRe(ref).test(scope) && HISTORICAL.test(scope) && !PRESENT_CLAIM.test(scope));
+        if (mentions.length && mentions.every(exempt)) { skippedHistorical++; continue; }
 
         const claimsLocation = ref.includes('/');
         const base = path.basename(ref);
