@@ -75,6 +75,23 @@ const MAX_BYTES = 1024 * 1024;
 const dirOf = (p) => (p.includes('/') ? p.slice(0, p.lastIndexOf('/')) : '');
 const under = (dir, p) => dir === '' || p === dir || p.startsWith(`${dir}/`);
 
+/** True for an ES module: .mjs/.mts, or the nearest package.json says "type": "module". .cjs/.cts never. */
+function isEsmModule(p, files) {
+  if (/\.[cm]?[jt]s$/.test(p) === false) return false;
+  if (/\.c[jt]s$/.test(p)) return false;
+  if (/\.m[jt]s$/.test(p)) return true;
+  let d = dirOf(p);
+  for (;;) {
+    const pkg = files.get(d ? `${d}/package.json` : 'package.json');
+    if (pkg) {
+      const json = readJson(pkg);
+      if (json) return json.type === 'module';
+    }
+    if (!d) return false;
+    d = dirOf(d);
+  }
+}
+
 function readJson(text) {
   try {
     return JSON.parse(text);
@@ -109,7 +126,13 @@ function scanFiles(files) {
   for (const p of code) {
     if (C.isTestPath(p)) continue;
     add(C.checkSinks(p, files.get(p)));
+    add(C.checkEsmRequire(p, files.get(p), isEsmModule(p, files)));
+    add(C.checkSelectStar(p, files.get(p)));
+    add(C.checkCronFetch(p, files.get(p)));
+    add(C.checkBackupRead(p, files.get(p)));
+    add(C.checkStripeList(p, files.get(p)));
   }
+  add(C.checkAdminTree(code.filter((p) => !C.isTestPath(p)).map((p) => ({ path: p, text: files.get(p) }))));
 
   // Extensions: a manifest.json declaring manifest_version.
   const manifests = [];
@@ -142,6 +165,8 @@ function scanFiles(files) {
 
   const sqlFiles = migrations.map((p) => ({ path: p, text: files.get(p) }));
   add(C.checkMigrations(sqlFiles));
+  add(C.checkPolicyInitplan(sqlFiles));
+  add(C.checkFkIndexes(sqlFiles));
 
   // Web apps: a package.json depending on a web framework needs a CSP somewhere at or under it.
   const apps = [];
@@ -202,6 +227,17 @@ function plantedSample() {
     'create policy anyone on public.notes for all to anon using (true);',
     'create view public.all_notes as select * from public.notes;',
   ].join('\n'));
+  files.set('supabase/migrations/0002_learned.sql', [
+    'create table public.parents (id bigint primary key);',
+    'create table public.kids (id bigint primary key, parent_id bigint references public.parents(id), user_id uuid);',
+    'create policy mine on public.kids for select to authenticated using (auth.uid() = user_id);',
+  ].join('\n'));
+  files.set('lib/esm/pkg.mjs', "export const id = () => require('node:crypto').randomUUID();");
+  files.set('src/db.ts', "export const all = () => supabase.from('t').select('*');");
+  files.set('app/api/cron/tick/route.ts', "export async function GET() { await fetch('https://example.com/x'); return Response.json({}); }");
+  files.set('app/api/backup/route.ts', "export async function GET() { const { data } = await sb.from('scans').select('id, code'); return Response.json(data); }");
+  files.set('lib/stripe-revenue.ts', 'export const revenue = () => stripe.charges.list({ limit: 100 });');
+  files.set('app/admin/page.tsx', "export default async function A() { const { data } = await supabase.auth.getUser(); return data.user ? 'ok' : null; }");
   files.set('ext/manifest.json', JSON.stringify({
     manifest_version: 3,
     background: { service_worker: 'bg.js' },
@@ -226,7 +262,7 @@ function cleanSample() {
     'create table public.notes (id bigint primary key, user_id uuid, body text);',
     'alter table public.notes enable row level security;',
     'grant select, insert on public.notes to authenticated;',
-    'create policy own on public.notes for all to authenticated using (auth.uid() = user_id);',
+    'create policy own on public.notes for all to authenticated using ((select auth.uid()) = user_id);',
     "create function public.peek() returns int language sql security definer set search_path = '' as $$ select 1 $$;",
     'create view public.my_notes with (security_invoker = true) as select * from public.notes;',
   ].join('\n'));
@@ -237,6 +273,21 @@ function cleanSample() {
   }));
   files.set('ext/bg.js', 'chrome.runtime.onMessage.addListener((m, sender, r) => { if (sender.id !== chrome.runtime.id) return; r({}); });');
   files.set('ext/cs.js', 'chrome.runtime.sendMessage({ type: "ingest" });');
+  files.set('supabase/migrations/0003_learned_clean.sql', [
+    'create table public.parents2 (id bigint primary key);',
+    'create table public.kids2 (id bigint primary key, parent_id bigint references public.parents2(id), user_id uuid);',
+    'create index kids2_parent_idx on public.kids2 (parent_id);',
+    'alter table public.parents2 enable row level security;',
+    'alter table public.kids2 enable row level security;',
+    'grant select on public.parents2, public.kids2 to authenticated;',
+    'create policy mine2 on public.kids2 for select to authenticated using ((select auth.uid()) = user_id);',
+  ].join('\n'));
+  files.set('lib/esm/pkg.mjs', "import { randomUUID } from 'node:crypto';\nexport const id = () => randomUUID();");
+  files.set('src/db.ts', "export const all = () => supabase.from('t').select('id, name');\nexport const n = () => supabase.from('t').select('*', { count: 'exact', head: true });");
+  files.set('app/api/cron/tick/route.ts', "export async function GET() { const secret = process.env.CRON_SECRET; await fetch('https://example.com/x', { signal: AbortSignal.timeout(5000) }); return Response.json({}); }");
+  files.set('app/api/backup/route.ts', "export async function GET() { await sb.auth.getUser(); const { data } = await sb.from('scans').select('id, code').range(0, 999); return Response.json(data); }");
+  files.set('lib/stripe-revenue.ts', 'export const revenue = cachedRead(() => stripe.charges.list({ limit: 100 }));');
+  files.set('app/admin/page.tsx', "export default async function A() { const { data } = await supabase.auth.getUser(); if (!(await isAdmin(data.user))) return null; return 'ok'; }");
   // Placeholders measured in real repos, which must stay silent.
   files.set('docs/setup.md', [
     `KEY="${['-----BEGIN', 'PRIVATE', 'KEY-----'].join(' ')}\\n...\\n-----END PRIVATE KEY-----"`,

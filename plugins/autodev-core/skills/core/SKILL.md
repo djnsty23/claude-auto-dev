@@ -153,3 +153,7 @@ records to its verified tracked `prd-archives/` destination; preserve unresolved
 stories and completed prerequisites still referenced by retained work. Age or
 size never authorizes deleting unfinished sprints. Commit the archive and PRD
 update together, then continue the already authorized work.
+
+## Build defaults learned from shipped fixes
+
+Eight classes have an advisory gate rule and a dozen more need a design decision. Build these in from the first commit: fail-closed operator layouts, Zod at every boundary with int8 ids coerced, an index with every foreign key, counters outside hot rows, bounded stats windows, cached third-party reads, batched sends that resume, ISR on public pages, and local JWT claims instead of a network auth call on read paths. Full list and reasons: `core/references/learned-defaults.md`.

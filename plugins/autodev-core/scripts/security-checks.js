@@ -38,6 +38,14 @@ const RULES = {
   'ext-sender-unchecked': { severity: 'error', what: 'An extension worker handles messages without checking the sender.' },
   'ext-content-origin': { severity: 'error', what: 'An extension content script trusts window messages without checking origin.' },
   'ext-broad-hosts': { severity: 'warn', what: 'The extension asks for every site.' },
+  'esm-inline-require': { severity: 'warn', what: 'A Node builtin is loaded with require() inside an ES module, where require does not exist.' },
+  'sql-policy-initplan': { severity: 'warn', what: 'A policy calls auth.uid() or an is_admin() style function per row instead of once per statement.' },
+  'sql-fk-unindexed': { severity: 'warn', what: 'A foreign key column has no index that leads with it.' },
+  'admin-no-role-check': { severity: 'warn', what: 'An admin page or route shows no server-side role check, only (at most) a sign-in check.' },
+  'select-star': { severity: 'warn', what: 'A query selects every column of every row it returns.' },
+  'cron-fetch-no-timeout': { severity: 'warn', what: 'A scheduled job calls fetch with no timeout or abort signal.' },
+  'backup-unbounded-read': { severity: 'warn', what: 'A backup or export reads a table with no range, so it silently stops at the API row cap.' },
+  'uncached-stripe-list': { severity: 'warn', what: 'A page or route lists from Stripe with no cache, so every render pays a Stripe call.' },
   'live-csp-missing': { severity: 'error', what: 'The live page sends no enforced Content-Security-Policy.' },
   'live-csp-script': { severity: 'error', what: 'The live script policy allows inline script, eval, data: or any host.' },
   'live-frame': { severity: 'error', what: 'The live page can be framed.' },
@@ -341,6 +349,273 @@ function checkBackground(path, text) {
   return [finding('ext-sender-unchecked', path, lineAt(text, m.index), 'Messages are handled without reading sender.id, sender.url or sender.tab.', 'Check sender.id === chrome.runtime.id, then allow each message type only from the contexts that need it.')];
 }
 
+// ------------------------------------------------------- learned from fixes
+//
+// Classes found and fixed in the 2026-10 sweeps, each with a signature a grep
+// can hold. Every rule here is advisory (`warn`): its measured precision is in
+// docs/learned-rules.md, and a rule that cannot show its precision does not turn
+// a build red.
+
+const NODE_BUILTINS = 'assert|buffer|child_process|cluster|crypto|dns|events|fs|http|http2|https|net|os|path|perf_hooks|querystring|readline|stream|string_decoder|timers|tls|url|util|vm|worker_threads|zlib';
+const BUILTIN_REQUIRE = new RegExp(`(?<![\\w.$])require\\s*\\(\\s*(['"\`])(?:node:)?(?:${NODE_BUILTINS})(?:/[\\w/]+)?\\1\\s*\\)`, 'g');
+
+/** Comments blanked to spaces, offsets kept. Only whole-line // comments, so a URL in a string survives. */
+function blankComments(text) {
+  return text.replace(/\/\*[\s\S]*?\*\//g, (c) => c.replace(/[^\n]/g, ' ')).replace(/^[ \t]*\/\/.*$/gm, (c) => ' '.repeat(c.length));
+}
+
+/**
+ * isEsm: the caller knows the module system (.mjs, or the nearest package.json
+ * says "type": "module"). `require` does not exist there, so a builtin loaded
+ * with it throws on first call, long after the build passed.
+ */
+function checkEsmRequire(path, text, isEsm) {
+  if (!isEsm || /\bcreateRequire\b/.test(text)) return [];
+  const hits = [...blankComments(text).matchAll(BUILTIN_REQUIRE)];
+  if (!hits.length) return [];
+  return [finding('esm-inline-require', path, lineAt(text, hits[0].index), `${hits.length} require() call(s) of a Node builtin inside an ES module.`, "Use a top-level `import ... from 'node:...'`.")];
+}
+
+const WRAPPED_CALL = /\(\s*select\s+[\w."]+\s*\([^()]*\)\s*(?:as\s+\w+\s*)?\)/gi;
+const PER_ROW_CALL = /\b(?:auth\.(?:uid|jwt|role|email)|(?:\w+\.)?(?:is_admin|has_role))\s*\(/i;
+
+/** True when a policy expression calls an auth function outside a `(select ...)` wrapper. */
+function bareAuthCall(expr) {
+  let s = expr;
+  for (let i = 0; i < 6; i++) {
+    const next = s.replace(WRAPPED_CALL, ' ');
+    if (next === s) break;
+    s = next;
+  }
+  return PER_ROW_CALL.test(s);
+}
+
+/** The USING and WITH CHECK halves of one policy statement's tail. */
+function policyClauses(tail) {
+  const at = tail.search(/\bwith\s+check\b/i);
+  const using = at < 0 ? tail : tail.slice(0, at);
+  return { using: /\busing\b/i.test(using) ? using : null, check: at < 0 ? null : tail.slice(at) };
+}
+
+/** Policies as the migration history leaves them: a later drop, create or alter replaces an earlier one. */
+function checkPolicyInitplan(files) {
+  const policies = new Map();
+  const key = (n, t) => `${ident(n)}|${bare(t)}`;
+  for (const { path, text } of files) {
+    const sql = text.replace(/--[^\n]*/g, (c) => ' '.repeat(c.length));
+    const events = [];
+    for (const m of sql.matchAll(/drop\s+policy\s+(?:if\s+exists\s+)?("[^"]+"|\w+)\s+on\s+([\w."]+)/gi)) events.push({ at: m.index, drop: key(m[1], m[2]) });
+    for (const m of sql.matchAll(/create\s+policy\s+("[^"]+"|\w+)\s+on\s+([\w."]+)([^;]*);/gi)) events.push({ at: m.index, create: key(m[1], m[2]), tail: m[3], line: lineAt(sql, m.index) });
+    for (const m of sql.matchAll(/alter\s+policy\s+("[^"]+"|\w+)\s+on\s+([\w."]+)([^;]*);/gi)) events.push({ at: m.index, alter: key(m[1], m[2]), tail: m[3] });
+    events.sort((a, b) => a.at - b.at);
+    for (const e of events) {
+      if (e.drop) policies.delete(e.drop);
+      else if (e.create) policies.set(e.create, { path, line: e.line, ...policyClauses(e.tail) });
+      else if (policies.has(e.alter)) {
+        const next = policyClauses(e.tail);
+        const old = policies.get(e.alter);
+        policies.set(e.alter, { ...old, using: next.using ?? old.using, check: next.check ?? old.check });
+      }
+    }
+  }
+  const byFile = new Map();
+  for (const p of policies.values()) {
+    if (!bareAuthCall(`${p.using || ''} ${p.check || ''}`)) continue;
+    const at = byFile.get(p.path) || { line: p.line, n: 0 };
+    at.n++;
+    byFile.set(p.path, at);
+  }
+  return [...byFile].map(([path, at]) => finding('sql-policy-initplan', path, at.line, `${at.n} polic${at.n === 1 ? 'y calls' : 'ies call'} auth.uid() or is_admin() once per row.`, 'Wrap each call: `(select auth.uid())`, so Postgres evaluates it once per statement.'));
+}
+
+/** Top-level comma split of a parenthesised body, quotes respected. */
+function splitTop(s) {
+  const parts = [];
+  let depth = 0;
+  let quote = '';
+  let cur = '';
+  for (const ch of s) {
+    if (quote) {
+      if (ch === quote) quote = '';
+    } else if (ch === "'" || ch === '"') quote = ch;
+    else if (ch === '(') depth++;
+    else if (ch === ')') depth--;
+    else if (ch === ',' && depth === 0) {
+      parts.push(cur);
+      cur = '';
+      continue;
+    }
+    cur += ch;
+  }
+  if (cur.trim()) parts.push(cur);
+  return parts;
+}
+
+const qual = (t) => {
+  const parts = ident(t).split('.');
+  return parts.length > 1 ? `${parts[0]}.${parts[1]}` : `public.${parts[0]}`;
+};
+const firstCol = (s) => {
+  const m = /\(\s*"?(\w+)"?/.exec(s);
+  return m ? m[1].toLowerCase() : null;
+};
+
+/** Foreign key columns that no index, primary key or unique constraint leads with. */
+function checkFkIndexes(files) {
+  const fks = new Map();
+  const indexed = new Set();
+  const indexNames = new Map();
+  const note = (table, col, path, line) => {
+    if (col) fks.set(`${table}|${col}`, { path, line });
+  };
+  const constraint = (table, part, path, line) => {
+    const p = part.trim().replace(/^constraint\s+\S+\s+/i, '');
+    if (/^foreign\s+key\b/i.test(p)) note(table, firstCol(p), path, line);
+    else if (/^(primary\s+key|unique)\b/i.test(p)) {
+      const c = firstCol(p);
+      if (c) indexed.add(`${table}|${c}`);
+    }
+  };
+  const column = (table, p, path, line) => {
+    const col = /^"?(\w+)"?/.exec(p);
+    if (!col) return;
+    if (/\breferences\b/i.test(p)) note(table, col[1].toLowerCase(), path, line);
+    if (/\bprimary\s+key\b|\bunique\b/i.test(p)) indexed.add(`${table}|${col[1].toLowerCase()}`);
+  };
+  for (const { path, text } of files) {
+    const sql = text.replace(/--[^\n]*/g, (c) => ' '.repeat(c.length));
+    const CREATE = /create\s+table\s+(?:if\s+not\s+exists\s+)?([\w."]+)\s*\(/gi;
+    let m;
+    while ((m = CREATE.exec(sql))) {
+      const table = qual(m[1]);
+      let depth = 1;
+      let i = CREATE.lastIndex;
+      const start = i;
+      while (i < sql.length && depth > 0) {
+        if (sql[i] === '(') depth++;
+        else if (sql[i] === ')') depth--;
+        i++;
+      }
+      const line = lineAt(sql, m.index);
+      for (const part of splitTop(sql.slice(start, i - 1))) {
+        const p = part.trim();
+        if (/^(constraint|foreign|primary|unique)\b/i.test(p)) constraint(table, p, path, line);
+        else column(table, p, path, line);
+      }
+    }
+    for (const a of sql.matchAll(/alter\s+table\s+(?:if\s+exists\s+)?(?:only\s+)?([\w."]+)\s+([^;]*);/gi)) {
+      const table = qual(a[1]);
+      for (const act of splitTop(a[2])) {
+        const add = /^\s*add\s+(?:column\s+(?:if\s+not\s+exists\s+)?)?([\s\S]*)$/i.exec(act);
+        if (!add) continue;
+        const body = add[1].trim();
+        if (/^(constraint|foreign|primary|unique)\b/i.test(body)) constraint(table, body, path, lineAt(sql, a.index));
+        else column(table, body, path, lineAt(sql, a.index));
+      }
+    }
+    const INDEX = /create\s+(?:unique\s+)?index\s+(?:concurrently\s+)?(?:if\s+not\s+exists\s+)?(?:("?\w+"?)\s+)?on\s+(?:only\s+)?([\w."]+)\s*(?:using\s+\w+\s*)?(\([^;]*)/gi;
+    for (const ix of sql.matchAll(INDEX)) {
+      const c = firstCol(ix[3]);
+      if (!c) continue;
+      indexed.add(`${qual(ix[2])}|${c}`);
+      if (ix[1]) indexNames.set(ident(ix[1]), `${qual(ix[2])}|${c}`);
+    }
+    for (const d of sql.matchAll(/drop\s+index\s+(?:concurrently\s+)?(?:if\s+exists\s+)?([\w."]+)/gi)) {
+      const gone = indexNames.get(ident(d[1]).split('.').pop());
+      if (gone) indexed.delete(gone);
+    }
+    for (const d of sql.matchAll(/drop\s+table\s+(?:if\s+exists\s+)?([\w."]+)/gi)) {
+      const t = `${qual(d[1])}|`;
+      for (const k of [...fks.keys()]) if (k.startsWith(t)) fks.delete(k);
+    }
+  }
+  const out = [];
+  for (const [k, at] of fks) {
+    if (indexed.has(k)) continue;
+    const [table, col] = k.split('|');
+    out.push(finding('sql-fk-unindexed', at.path, at.line, `Foreign key ${table}.${col} has no index that leads with it.`, 'Create an index on the column (concurrently on a large table). Without it, every delete on the parent scans this table.'));
+  }
+  return out;
+}
+
+// Directory names that mark an operator-only surface. `debug` and `workers` are here because
+// an operator console reached by every signed-in user was found under /settings/workers.
+const OPERATOR_DIR = '(?:admin|debug|workers|internal|staff)';
+const ADMIN_FILE = new RegExp(`(^|/)(?:app|pages)/(?:[^/]+/)*${OPERATOR_DIR}/(?:[^/]+/)*(page|layout|route|index)\\.[cm]?[jt]sx?$|(^|/)pages/api/(?:[^/]+/)*${OPERATOR_DIR}/[^/]+\\.[cm]?[jt]sx?$`);
+const ROLE_MARKER = /\b(?:(?:is_?admin|isAdmin|requireAdmin|requireRole|assertAdmin|checkAdmin|verifyAdmin|ensureAdmin|requireOwner|assertRole)\w*|adminOnly|ADMIN_EMAILS|admin-guard|has_role|readAdminSession|readAdminState|isDbAdmin|superuser|isOwner|passesGate|hasPermission|canAccess)\b|\.role\b|\brole\s*(?:===|!==|==)|\broles?\.includes\(/i;
+const isGateFile = (p) => /(^|\/)(?:middleware|proxy)\.[cm]?[jt]s$/.test(p);
+
+/**
+ * Pages and routes under an admin directory need a role check on the server:
+ * their own, an ancestor layout's up to the admin directory, or a middleware
+ * that names /admin and a role. A sign-in check alone lets every signed-in
+ * user in. files: [{ path, text }] of non-test code. A page under a layout
+ * that has no check is not reported: the layout is the entry that is.
+ */
+function checkAdminTree(files) {
+  const text = new Map(files.map((f) => [f.path, f.text]));
+  const gate = files.some((f) => isGateFile(f.path) && /admin/i.test(f.text) && ROLE_MARKER.test(f.text));
+  const out = [];
+  for (const f of files.filter((x) => ADMIN_FILE.test(x.path))) {
+    if (ROLE_MARKER.test(f.text) || gate) continue;
+    const isPage = /(^|\/)(page|index)\.[cm]?[jt]sx?$/.test(f.path) && !/\/pages\/api\//.test(f.path);
+    let layouts = [];
+    if (isPage) {
+      let d = f.path.includes('/') ? f.path.slice(0, f.path.lastIndexOf('/')) : '';
+      for (;;) {
+        layouts.push(...['tsx', 'ts', 'jsx', 'js'].map((e) => `${d ? `${d}/` : ''}layout.${e}`));
+        if (new RegExp(`(^|/)${OPERATOR_DIR}$`).test(d) || !d) break;
+        d = d.includes('/') ? d.slice(0, d.lastIndexOf('/')) : '';
+      }
+      layouts = layouts.filter((p) => text.has(p));
+    }
+    if (layouts.length) continue;
+    out.push(finding('admin-no-role-check', f.path, 1, 'No server-side role check on this admin entry (own, ancestor layout or middleware).', 'Check the role on the server before any data is read and answer 403 or notFound, not only that a user is signed in.'));
+  }
+  return out;
+}
+
+function checkSelectStar(path, text) {
+  const hits = [];
+  for (const m of text.matchAll(/\.select\(\s*(['"`])\s*\*\s*(?:\1|,)|[?&]select=\*/g)) {
+    if (!/head\s*:\s*true/.test(text.slice(m.index, m.index + 120))) hits.push(m);
+  }
+  if (!hits.length) return [];
+  return [finding('select-star', path, lineAt(text, hits[0].index), `Selects every column (${hits.length} place${hits.length === 1 ? '' : 's'} in this file).`, 'Name the columns the caller reads. A wide row (JSON, logos, prompts) multiplies bytes on every list.')];
+}
+
+const CRON_PATH = /(^|\/)crons?\/|(^|\/)[^/]*cron[^/]*\.[cm]?[jt]s$/i;
+
+function checkCronFetch(path, text) {
+  if (!CRON_PATH.test(path)) return [];
+  const code = blankComments(text);
+  const m = /(?<![\w.$])fetch\s*\(/.exec(code);
+  if (!m || /AbortSignal|AbortController|\bsignal\s*:|timeout/i.test(code)) return [];
+  return [finding('cron-fetch-no-timeout', path, lineAt(text, m.index), 'A scheduled job calls fetch with no timeout or abort signal.', 'Pass `signal: AbortSignal.timeout(ms)` to every fetch and give each step a share of the function budget.')];
+}
+
+const BACKUP_PATH = /(backup|dump|export|archive)/i;
+
+function checkBackupRead(path, text) {
+  if (!BACKUP_PATH.test(path) || /\.[jt]sx$/.test(path)) return [];
+  const code = blankComments(text);
+  const m = /\.from\(\s*['"`][\w.]+['"`]\s*\)\s*\.select\(/.exec(code);
+  if (!m || /\.range\(|\.limit\(|fetchAll|paginat|hasMore|nextPage|\boffset\b|\.single\(|\.maybeSingle\(|head\s*:\s*true/i.test(code)) return [];
+  return [finding('backup-unbounded-read', path, lineAt(text, m.index), 'Reads a table with no range or limit. The API caps a response (1000 rows on Supabase), so a larger table is silently cut.', 'Page with .range() until a short page returns, and fail the backup when the count read back differs from the count written.')];
+}
+
+// The SDK form (stripe.charges.list) and a REST helper form (stripeApi('invoices?...')).
+const STRIPE_LIST = /\bstripe\w*\.\w+\.(?:list|search)\(|\.autoPagingToArray\(|\bstripe\w*\(\s*[`'"](?:invoices|prices|charges|subscriptions|customers|payment_intents|balance_transactions|checkout\/sessions)\?/i;
+const STRIPE_CACHE = /stripe-cache|unstable_cache|\brevalidate\b|use cache|\bcache\w*\(|\bcached\b|\bttl\b|memo|cache-control/i;
+
+function checkStripeList(path, text) {
+  if (!isCode(path) || /\.[jt]sx$/.test(path)) return [];
+  const code = blankComments(text);
+  const m = STRIPE_LIST.exec(code);
+  if (!m || STRIPE_CACHE.test(code)) return [];
+  return [finding('uncached-stripe-list', path, lineAt(text, m.index), 'Lists from Stripe with no cache in this file, so every call pays a Stripe round trip.', 'Cache the read with a TTL and expire it from the webhook on the events that change it.')];
+}
+
 // ---------------------------------------------------------------- live
 
 /** Directive name to value list, from one CSP header value. */
@@ -489,6 +764,15 @@ module.exports = {
   checkRoute,
   checkManifest,
   checkBackground,
+  checkEsmRequire,
+  checkPolicyInitplan,
+  checkFkIndexes,
+  checkAdminTree,
+  checkSelectStar,
+  checkCronFetch,
+  checkBackupRead,
+  checkStripeList,
+  bareAuthCall,
   checkLiveHeaders,
   checkLiveApi,
   checkLiveSignup,

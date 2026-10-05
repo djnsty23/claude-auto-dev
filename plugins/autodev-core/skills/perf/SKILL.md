@@ -99,3 +99,7 @@ and tool version. Repeat noisy measurements and report the sample count and
 spread before claiming a gain. A comparison across different
 conditions is worse than no comparison; it is a wrong number that reads as
 authoritative. If only one side could be measured, say which and why.
+
+## Performance defaults learned from shipped fixes
+
+Check these before profiling: a foreign key with no index, `select('*')` on wide rows, `auth.uid()` called per row in a policy, a hot row updated per event, an unbounded stats window, a third-party list call with no cache, a public page rendered dynamically, `getUser()` on a read path, and polling from hidden tabs. Each was a measured win in a shipped product. Full list and reasons: `core/references/learned-defaults.md`.

@@ -224,3 +224,7 @@ selected versions and compatibility against official sources before scaffolding.
 Keep existing lockfile versions when onboarding unless upgrading is in scope.
 Record the resolved versions and successful install/build/behavior evidence;
 this skill does not maintain a second independent version table.
+
+## Scaffold defaults learned from shipped fixes
+
+A new project starts with: one layout per operator tree (`admin`, `debug`, `workers`) that checks the role on the server and returns not-found, `import` only in ES modules, `select` with named columns, policies written as `(select auth.uid())`, an index in the same migration as every foreign key, and `revalidate` on every public page. Full list and reasons: `core/references/learned-defaults.md`.
