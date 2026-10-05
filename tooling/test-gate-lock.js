@@ -460,8 +460,14 @@ async function main() {
         fs.renameSync(fx.lockPath, fx.lockPath + '.released-peer');
         const r = await finished(run);
         killTree(peer.pid);
-        check('harness cap: once lane 1 frees, the wrapper takes it and exits 0',
-            r.code === 0 && /lock taken: .*full-gate\.lock \(pid \d+\)/.test(r.out), `exit=${r.code}\n${r.out}`);
+        // Either lane is legal once no harness peer occupies one. The cap is
+        // on simultaneous harness gates, not on a preferred lane number.
+        const admission = /lock taken: (.+full-gate(?:-2)?\.lock) \(pid (\d+)\)/.exec(r.out);
+        const probe = saw(fx);
+        check('harness cap: after the peer leaves, the wrapper takes one lane and exits 0',
+            r.code === 0 && Boolean(admission) && (r.out.match(/lock taken:/g) || []).length === 1
+                && Boolean(probe && probe.exists) && Number(probe.content.split(/\r?\n/)[0]) === Number(admission[2]),
+            `exit=${r.code}\n${r.out}`);
     }
 }
 

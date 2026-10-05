@@ -30,6 +30,7 @@ const os = require('os');
 const path = require('path');
 const crypto = require('crypto');
 const { spawnSync, spawn } = require('child_process');
+const gateIdentity = require('../../plugins/autodev-core/scripts/gate-identity.js');
 
 const USAGE = [
     'Usage: node tooling/frontier/run.js <command> [options]',
@@ -42,6 +43,7 @@ const USAGE = [
     '                                  --quiet-wait holds each item until no gate, coverage run or full suite runs on the',
     '                                  machine, at most <min> minutes (10 when given alone), then starts it as a loaded row',
     '  batch-resume --batch <id>       restart the loop of a batch whose loop died',
+    '  batch-reconcile --batch <id>    mark a dead loop stalled, restore recorded outcomes, preserve ungraded runs and queued work; starts and kills nothing',
     '  status [--json]                 batches and the latest rows',
     'Options: --src <repo> --tasks-dir <dir> --data <dir> --work <dir> --claude-bin <path> --hw <headless-worker.js>',
     '         --budget-stop 0.70 (seven-day utilisation that stops a batch) --api-sources none (allowed apiKeySource values)',
@@ -897,6 +899,53 @@ function plant(c, ids) {
 
 // ---------------------------------------------------------------- batch
 function batchFile(c, id) { return path.join(c.data, 'batches', `${id}.json`); }
+
+/** Recover bookkeeping only. Absence of an exit/result is never a verdict. */
+function reconcileBatch(c, id, { snap = gateIdentity.snapshot() } = {}) {
+    if (!/^B-\d{8}$/.test(String(id))) fault('usage', 'batch-reconcile needs a valid batch id');
+    if (!snap.ok) fault('process-unchecked', `cannot reconcile without a process snapshot (${snap.why})`);
+    const file = batchFile(c, id);
+    const lock = `${file}.reconcile.lock`;
+    let fd;
+    try { fd = fs.openSync(lock, 'wx'); } catch (e) { fault('reconcile-locked', `batch reconciliation unavailable (${e.code})`); }
+    try {
+        const batch = readJson(file);
+        if (!Number.isInteger(batch.loopPid) || batch.loopPid <= 0) fault('process-unchecked', 'the batch has no recorded loop pid');
+        // A reused pid is also refused: these legacy records lack creation time.
+        if (snap.procs.has(batch.loopPid)) fault('loop-alive', `${id} has a live or reused loop pid; no bookkeeping changed`);
+        let text = '';
+        try { text = fs.readFileSync(rowsFile(c), 'utf8'); } catch (e) { if (e.code !== 'ENOENT') throw e; }
+        const rows = text.split('\n').filter(Boolean).map((line) => JSON.parse(line));
+        const pending = [];
+        for (const it of batch.items.filter((x) => x.state === 'running')) {
+            const found = rows.filter((r) => r.run === it.run);
+            if (found.length > 1) fault('result-conflict', `multiple result rows for ${it.run}`);
+            if (found.length) {
+                if (typeof found[0].verdict !== 'string' || !found[0].verdict) fault('result-unreadable', `missing verdict for ${it.run}`);
+                it.state = 'done'; it.verdict = found[0].verdict;
+                delete it.pending;
+                continue;
+            }
+            if (!RUN_RE.test(String(it.run))) fault('run-unreadable', 'a running item has no valid run id');
+            const meta = readJson(runPaths(c, it.run).meta);
+            if (!Number.isInteger(meta.supervisorPid) || meta.supervisorPid <= 0) fault('process-unchecked', `${it.run} has no supervisor pid`);
+            if (snap.procs.has(meta.supervisorPid)) fault('worker-alive', `${it.run} has a live or reused supervisor pid; no bookkeeping changed`);
+            const why = 'loop and supervisor absent from process snapshot; no recorded result, execution outcome remains ungraded';
+            it.pending = { owner: 'frontier-runner', blocker: why };
+            pending.push(it.run);
+        }
+        const unfinished = batch.items.some((it) => it.state === 'queued' || it.state === 'running');
+        batch.state = unfinished ? 'stalled' : 'done';
+        batch.recovery = { at: new Date().toISOString(), loopPid: batch.loopPid, bootId: snap.boot.id,
+            pending, action: 'bookkeeping only; no worker started or killed; queued items preserved' };
+        batch.updatedAt = batch.recovery.at;
+        writeJsonAtomic(file, batch);
+        return { batch: id, state: batch.state, queued: batch.items.filter((it) => it.state === 'queued').length, pending };
+    } finally {
+        fs.closeSync(fd);
+        fs.rmSync(lock, { force: true });
+    }
+}
 function pidAlive(pid) {
     if (!pid) return false;
     if (process.platform === 'win32') {
@@ -1036,10 +1085,11 @@ function status(c) {
     const rows = readRows(c);
     return {
         batches: batches.map((b) => ({ id: b.id, state: b.state, loopAlive: b.state === 'running' ? pidAlive(b.loopPid) : null, account: b.account,
-            done: b.items.filter((i) => i.state === 'done').length, running: b.items.filter((i) => i.state === 'running').length,
+            done: b.items.filter((i) => i.state === 'done').length, running: b.items.filter((i) => i.state === 'running' && !i.pending).length,
+            pending: b.items.filter((i) => i.pending).map((i) => ({ run: i.run, ...i.pending })),
             queued: b.items.filter((i) => i.state === 'queued').length, skipped: b.items.filter((i) => i.state === 'skipped').length,
             pass: b.items.filter((i) => i.verdict === 'pass').length, lastBudget: b.lastBudget || null,
-            waiting: b.waitingSince ? { since: b.waitingSince, on: b.waitingOn || [] } : null })),
+            waiting: b.state === 'running' && b.waitingSince ? { since: b.waitingSince, on: b.waitingOn || [] } : null })),
         rows: rows.length,
         latest: rows.slice(-10).map((r) => ({ run: r.run, verdict: r.verdict, wallMs: r.wallMs, tokens: r.tokens ? r.tokens.total : null, costUsd: r.costUsd })),
     };
@@ -1095,9 +1145,12 @@ function main(argv) {
             if (!opts.batch) fault('usage', 'batch-resume needs --batch');
             const b = readJson(batchFile(c, opts.batch));
             if (b.state === 'running' && pidAlive(b.loopPid)) fault('loop-alive', `${b.id} has a live loop, pid ${b.loopPid}`);
+            if (b.items.some((it) => it.pending)) fault('pending-run', 'ungraded interrupted attempts must be resolved before restarting the batch');
+            workerEnv(process.env, b.account);
             value = { batch: b.id, loopPid: spawnLoop(c, b.id, opts) };
             break;
         }
+        case 'batch-reconcile': value = reconcileBatch(c, opts.batch); break;
         case 'batch-loop': value = batchLoop(c, opts.batch); break;
         case 'status': value = status(c); break;
         default: fault('usage', `unknown command ${cmd}; run with --help`);
@@ -1117,4 +1170,4 @@ if (require.main === module) {
 
 module.exports = { parseArgs, fixTokens, scanForTokens, workerEnv, checksEnv, composePrompt, parseStream, tokensOf, leakHits,
     gradeLocate, gradeReview, gradeDecide, decideAnswer, plantedFindings, readRows, RUN_RE, SCRUB_RE, SETTINGS_KEEP, CODEY,
-    processList, heavyJobs, noteLoad, loadRecord, quietGate, HEAVY_RE };
+    processList, heavyJobs, noteLoad, loadRecord, quietGate, HEAVY_RE, reconcileBatch };

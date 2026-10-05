@@ -297,7 +297,11 @@ let unitRepo;
 
 // --- the tracer itself, preloaded into real processes ---------------------------
 {
-    const d = tmp('tracer');
+    const disk = tmp('tracer');
+    const d = path.join(tmp('tracer-alias'), 'entry');
+    // Force an alias on every host, so a path-spelling regression is not a
+    // macOS-only test. Junctions do not require Windows symlink privileges.
+    fs.symlinkSync(disk, d, process.platform === 'win32' ? 'junction' : 'dir');
     const traceDir = path.join(d, 't');
     const covDir = path.join(d, 'c');
     fs.mkdirSync(traceDir);
@@ -334,6 +338,9 @@ let unitRepo;
     check('tracer: the traced process runs normally and the tracer prints nothing',
         r.status === 0 && r.stdout === 'probe-done' && r.stderr === '', `exit ${r.status} stdout ${JSON.stringify(r.stdout)} stderr ${JSON.stringify(r.stderr.slice(0, 300))}`);
     const t = tr.readTraceDir(traceDir);
+    // Node compiles the canonical entry path (/private/var on macOS), not
+    // necessarily the spelling used to launch the temporary fixture.
+    const compiledScript = fs.realpathSync(script);
     const has = (kind, tail) => t.records.some((x) => x[0] === kind && (tail === undefined || String(x[1]).endsWith(tail)));
     check('tracer: every process that ran under it left a complete record',
         t.processes.length === 2 && t.processes.every((p) => p.complete), JSON.stringify(t.processes));
@@ -342,12 +349,12 @@ let unitRepo;
     check('tracer: a native child is recorded by name', has('native') && t.records.some((x) => x[0] === 'native' && x[1] === 'git'));
     check('tracer: a Node child started with a replaced environment is recorded as untraced', has('untraced'));
     check('tracer: the script it compiled is recorded with its text digest',
-        t.records.some((x) => x[0] === 'compile' && x[1] === script && x[2] === tr.textDigest(fs.readFileSync(script))));
+        t.records.some((x) => x[0] === 'compile' && x[1] === compiledScript && x[2] === tr.textDigest(fs.readFileSync(script))));
     check('tracer: a write that threw is not recorded as a write', !has('write', 'failed.txt'));
     check('tracer: a file opened r+ is recorded as read', has('read', 'rw.txt'));
     check('tracer: a read in an exit listener registered after the preload is recorded', has('read', 'late.txt'));
     check('tracer: a require() is recorded with its request and parent',
-        t.records.some((x) => x[0] === 'resolve' && x[1] === './lib' && x[2] === script));
+        t.records.some((x) => x[0] === 'resolve' && x[1] === './lib' && x[2] === compiledScript));
     check('tracer: fork() with a non-Node execPath is a native child',
         JSON.stringify(tr.classifyChild('fork', ['x.js', [], { execPath: 'C:/tools/native-reader.exe', env: {} }], {}))
         === JSON.stringify(['native', 'native-reader']));

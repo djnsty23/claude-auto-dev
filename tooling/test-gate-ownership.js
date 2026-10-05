@@ -438,7 +438,12 @@ async function s8Descendants(subject, orphan) {
     records.updateRun(fx.lock, runId, (v) => ({ ...v, chainRoot }));
     rows.push(...takeRows(subject, fx, 'S8 (dead owner, live chain root)', true));
     fx = fixture(1);
-    metaLock(fx, orphan.owner);
+    // POSIX reparents an orphan, so its former ancestry is no longer in ps.
+    // The wrapper's heartbeat journals observed descendants before that exit.
+    const orphanRun = metaLock(fx, orphan.owner);
+    records.updateRun(fx.lock, orphanRun.runId, (v) => ({ ...v, descendants: [orphan.child] }));
+    rows.push(['S8: the recorded owner exited while its journaled child still runs',
+        !ident.recordLive(orphan.owner, s) && ident.recordLive(orphan.child, s)]);
     rows.push(...takeRows(subject, fx, 'S8 (dead owner, live detached grandchild)', true));
     // An owner recorded from a ticket (no creation time) that died while the
     // chain root its journal names runs on.
@@ -707,9 +712,13 @@ async function main() {
     const msys = await msysSleeper();
     freshSnap();
     const op = await parentWithOrphan();
-    const owner = ident.identityOf(op.parent, { snap: freshSnap() });
+    const observed = freshSnap();
+    const owner = ident.identityOf(op.parent, { snap: observed });
+    const child = ident.identityOf(op.child, { snap: observed });
+    check('S8 fixture: the child is observed under its owner before orphaning',
+        observed.ok && observed.procs.get(op.child)?.ppid === op.parent && Boolean(child.startUtc));
     await op.release();
-    const orphan = { owner: { pid: owner.pid, startUtc: owner.startUtc, bootId } };
+    const orphan = { owner: { pid: owner.pid, startUtc: owner.startUtc, bootId }, child };
 
     const real = {
         S1: () => s1HarnessRace(SUBJECT), S2: () => s2ConcurrentRelease(SUBJECT), S3: () => s3DerivedClass(SUBJECT),
