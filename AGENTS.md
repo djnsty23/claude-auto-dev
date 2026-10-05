@@ -4,8 +4,8 @@
 Codex looks for `AGENTS.md`, so this file exists to point you at the real
 document and to carry two things it does not: the few facts that are true only
 for you, in the hand-maintained section here, and below the `GENERATED` marker
-an index of the always-on `rule-*` conventions that Claude Code sessions load
-by path glob and you would otherwise never see.
+an index of the `rule-*` conventions that sessions must load explicitly.
+A skill's `paths:` globs describe its scope and do not load it automatically.
 
 <!-- HAND-MAINTAINED. Everything above the GENERATED marker is copied through
      verbatim by tooling/generate-agents-md.js; edit it freely. Everything below
@@ -94,9 +94,9 @@ this machine. `CLAUDE.md` has the specifics.
 
 ## Conventions this repo enforces (generated)
 
-Distilled from the always-on `rule-*` skills that every Claude Code session in
-this repo loads by path glob. Each entry names the globs that trigger the rule,
-its description, its opening paragraph, and every dated measurement in it, so a
+Distilled from the explicitly loaded `rule-*` skills. Load the applicable skills explicitly:
+a `paths:` glob describes scope and does not load a skill. Each entry names the declared
+scope, its description, its opening paragraph, and every dated measurement in it, so a
 reader outside Claude Code sees the same conventions and the incidents that
 produced them. The `Full text` path is the authority; this is the index.
 
@@ -105,10 +105,10 @@ generation time over the rules on disk:
 
 | variant | bytes | dated claims kept |
 |---|---|---|
-| A  full body | 130,910 | 22 of 22 |
-| B  description + first paragraph + dated PARAGRAPHS + Never/Always ← emitted | 22,220 | 22 of 22 |
-| B′ same, but dated LINES instead of paragraphs | 15,117 | 1 of 22 |
-| C  description only | 6,636 | 0 of 22 |
+| A  full body | 130,940 | 22 of 22 |
+| B  description + first paragraph + dated PARAGRAPHS + Never/Always ← emitted | 22,250 | 22 of 22 |
+| B′ same, but dated LINES instead of paragraphs | 15,147 | 1 of 22 |
+| C  description only | 6,666 | 0 of 22 |
 
 ### rule-ab-testing
 

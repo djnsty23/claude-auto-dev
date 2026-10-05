@@ -1,14 +1,12 @@
 #!/usr/bin/env node
 'use strict';
-// generate-agents-md.js — distil the always-on rule-* skills into AGENTS.md.
+// generate-agents-md.js: distil the explicitly loaded rule-* skills into AGENTS.md.
 //
-// WHY. The 16 always-on `rule-*` skills under plugins/autodev-core/skills/ load
-// into every Claude Code session by `paths:` glob. A Codex session in the same
-// repo reads AGENTS.md instead, which was 4,200 bytes and hand-written, so the
-// auditor never saw the conventions it was auditing against. A hand-maintained
-// copy rots (the reference harness's own AGENTS.md was five months stale), and a
-// verbatim copy costs every Codex turn the full 128 KB. So: generate the
-// distillation from the rules, and gate drift between the two with --check.
+// WHY. Rule skills are selected explicitly. Their paths fields describe scope
+// but do not auto-load them. A Codex session reads AGENTS.md, so distil the
+// applicable conventions there and gate drift against the source skills.
+// A hand-maintained copy rots and a verbatim copy adds unnecessary context.
+// This index preserves the evidence without making a runtime-loading claim.
 //
 // WHAT IT EMITS. AGENTS.md has two parts. Everything ABOVE the GENERATED marker
 // is hand-maintained and copied through verbatim on every run — that is where
@@ -248,9 +246,9 @@ function renderGenerated(rules, variant, version, measurement) {
     lines.push('');
     lines.push('## Conventions this repo enforces (generated)');
     lines.push('');
-    lines.push('Distilled from the always-on `rule-*` skills that every Claude Code session in');
-    lines.push('this repo loads by path glob. Each entry names the globs that trigger the rule,');
-    lines.push('its description, its opening paragraph, and every dated measurement in it, so a');
+    lines.push('Distilled from the explicitly loaded `rule-*` skills. Load the applicable skills explicitly:');
+    lines.push('a `paths:` glob describes scope and does not load a skill. Each entry names the declared');
+    lines.push('scope, its description, its opening paragraph, and every dated measurement in it, so a');
     lines.push('reader outside Claude Code sees the same conventions and the incidents that');
     lines.push('produced them. The `Full text` path is the authority; this is the index.');
     lines.push('');
