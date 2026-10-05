@@ -149,6 +149,8 @@ const DECISIONS = {
         'it fails open everywhere: an unreadable payload is the harness\'s problem, not a reason to refuse a command'),
     'plugins/autodev-core/hooks/headless-guard.js': OPEN(
         'any throw, a non-JSON stdin included, exits 0 with zero bytes'),
+    'plugins/autodev-core/hooks/shared-install-guard.js': OPEN(
+        'it ships installed, and an install it cannot judge is the private install the tree already had before any link'),
     'plugins/autodev-core/hooks/artifact-write-guard.js': OPEN(
         'it ships installed, so a defect here must not block every shared-database write'),
     'plugins/autodev-core/hooks/peer-send-ledger.js': OPEN(
