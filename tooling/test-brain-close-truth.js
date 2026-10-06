@@ -40,4 +40,20 @@ try {
     assert.equal(statuses['missing-exit'], 'failed', 'missing exit is not success');
     console.log('PASS tick closes exit-zero success and refuses crash or missing-exit success');
   }
+  if (!which || which === 'unsettled') {
+    const waiting = fixture('unverified', 'running', null, null);
+    const prompt = fixture('prompted', 'running', null, null);
+    fs.mkdirSync(path.join(scratch, 'prompted'));
+    fs.writeFileSync(path.join(scratch, 'prompted', 'ask.json'), JSON.stringify({ question: 'Choose a mode' }));
+    const finished = fixture('unsettled-exit', 'running', 1, null);
+    const out = tick([waiting, prompt, finished], 'unsettled');
+    const states = Object.fromEntries(out.events.filter(e => e.type === 'judge.close-pending').map(e => [e.detail.taskId, e.detail]));
+    assert.equal(states.prompted?.ask, 'open', 'prompted worker is reported to the coordinator');
+    assert.equal(states['unsettled-exit']?.process, 'exited', 'crashed unsettled worker is reported as exited');
+    assert.ok(states.unverified && ['unknown', 'running'].includes(states.unverified.process), 'unsettled process observation is explicit');
+    assert.ok(out.lines.some(l => /awaiting settlement/.test(l)), 'unsettled ledger is not summarized as still running');
+    const second = tick([waiting, prompt, finished], 'unsettled');
+    assert.equal(second.events.filter(e => e.type === 'judge.close-pending').length, 0, 'unchanged observations are quiet on the next tick');
+    console.log('PASS tick reports prompted and exited workers and deduplicates unchanged observations');
+  }
 } finally { fs.rmSync(scratch, { recursive: true, force: true }); }

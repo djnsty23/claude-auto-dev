@@ -300,7 +300,19 @@ function closeStep(ctx) {
             }
             continue;
         }
-        if (h.state !== 'settled') { waiting++; continue; }
+        if (h.state !== 'settled') {
+            waiting++;
+            const observed = hw.recordStatus(h, hw.bootAt(), undefined, headless);
+            const detail = { taskId: rec.taskId, slug: rec.slug, process: observed.process,
+                exit: observed.exit, ask: observed.ask,
+                lostReason: observed.exit === null ? hw.lostReason(h, hw.bootAt()) : null };
+            const signature = JSON.stringify(detail);
+            if (state.reported[`pending:${key}`] !== signature) {
+                state.reported[`pending:${key}`] = signature;
+                out.events.push({ type: 'judge.close-pending', key, detail });
+            }
+            continue;
+        }
         const runStatus = runStatusOfHeadless(h.result, h.exit);
         const detail = { taskId: rec.taskId, slug: rec.slug, result: h.result, runStatus, sentence: String(h.sentence || '').slice(0, 200) };
         if (mode === 'dry') {
@@ -318,7 +330,7 @@ function closeStep(ctx) {
             out.events.push({ type: 'judge.close-failed', key, detail: { ...detail, error: e.publicCode || 'internal', message: e.message } });
         }
     }
-    out.lines.push(`close (${mode}): ${started.length} headless runs started, ${closed} ${mode === 'dry' ? 'would close' : 'closed'}, ${waiting} still running, `
+    out.lines.push(`close (${mode}): ${started.length} headless runs started, ${closed} ${mode === 'dry' ? 'would close' : 'closed'}, ${waiting} awaiting settlement, `
         + `${orphan} with no headless record${unreadable ? `, ${unreadable} in a headless ledger that could not be read` : ''}`);
 }
 
