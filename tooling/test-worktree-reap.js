@@ -125,7 +125,7 @@ commit(d, 'x.txt', 'x\n', 'more work');
 g(main, 'merge', '-q', '--no-ff', '-m', 'merge b/more', 'b/more');
 commit(d, 'x2.txt', 'x2\n', 'after the merge');
 // dirty, envsame, envdiff, active, transcript, proc, junction: each merged by a merge commit.
-for (const name of ['dirty', 'envsame', 'envdiff', 'active', 'transcript', 'served', 'junction', 'recheck']) {
+for (const name of ['dirty', 'envsame', 'envdiff', 'nestedbuild', 'active', 'transcript', 'served', 'junction', 'recheck']) {
     d = addWt(name);
     commit(d, `${name}.txt`, `${name}\n`, `${name} work`);
     g(main, 'merge', '-q', '--no-ff', '-m', `merge b/${name}`, `b/${name}`);
@@ -134,6 +134,7 @@ write(path.join(W.dirty, 'notes.txt'), 'only here\n');
 write(path.join(W.envsame, '.env.local'), 'KEY=shared\n');
 write(path.join(W.envdiff, '.env.local'), 'KEY=only-here\n');
 write(path.join(W.envsame, 'node_modules', 'pkg', 'index.js'), 'module.exports = 1;\n');
+write(path.join(W.nestedbuild, '.claude', 'reports', 'build', 'notes.md'), 'handwritten nested build evidence\n');
 // fresh: created at main's tip, nothing committed. detached, locked: no branch or a lock.
 addWt('fresh');
 addWt('detached', { detach: true });
@@ -192,6 +193,7 @@ const kept = {
     more: /1 of its 1 commits have no equivalent/,
     dirty: /1 changed or untracked: notes\.txt/,
     envdiff: /1 ignored file exist[s]? only here: \.env\.local/,
+    nestedbuild: /1 ignored file exist[s]? only here: \.claude\/reports\/build\/notes\.md/,
     active: /within the 1h idle window/,
     transcript: /a session transcript was written/,
     served: /pid 4242 runs with this worktree's path/,
@@ -267,6 +269,13 @@ const st = reaper.parseStatusZ('R  new.txt\0old.txt\0?? u.txt\0!! node_modules/\
 check('parseStatusZ drops a rename source and keeps the others', st.length === 3 && st[0].path === 'new.txt' && st[1].xy === '??' && st[2].path === 'node_modules/', JSON.stringify(st));
 check('residue: node_modules and .next are regenerable, .claude/handoffs is not',
     residue.isRegenerable('node_modules/') && residue.isRegenerable('site/.next/') && !residue.isRegenerable('.claude/handoffs/h.md'));
+for (const name of ['build', 'out', 'dist', 'coverage', 'target', '.cache', '.turbo', 'test-results', 'playwright-report', '.vercel', '.pytest_cache', '.parcel-cache']) {
+    check('W2 residue: ' + name + ' is regenerable at root only', residue.isRegenerable(name + '/generated.txt')
+        && !residue.isRegenerable('.claude/reports/' + name + '/notes.md'));
+}
+for (const name of ['node_modules', '.next', '__pycache__', '.venv']) {
+    check('W2 residue: ' + name + ' is regenerable at any depth', residue.isRegenerable('nested/' + name + '/generated.txt'));
+}
 check('residue: every profile directory under the home is read', residue.transcriptDirs('C:/x/y', { USERPROFILE: TMP, HOME: TMP }).length >= 1);
 const help = run(['--help']);
 check('--help exits 0, prints the header, and runs nothing', help.exit === 0 && /removes the linked worktrees whose work has landed/.test(help.stdout) && !/\[worktree-reap\]/.test(help.stdout), help.stdout.slice(0, 200));
