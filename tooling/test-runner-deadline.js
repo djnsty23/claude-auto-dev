@@ -58,6 +58,24 @@ try {
   assert.doesNotMatch(invalid.stdout, /=== test-/);
   console.log('PASS invalid deadline refuses before executing suites');
   fs.writeFileSync(path.join(dir, 'test-b.js'), 'console.log("LATER-CONTROL");\n');
+  fs.writeFileSync(path.join(dir, 'test-a.js'), 'console.log("FAIL ASSERTION CANARY"); process.exitCode = 1; setInterval(() => {}, 1000);\n');
+  const failureThenHang = run();
+  assert.equal(failureThenHang.status, 2, 'unobserved exitCode before hang is not a completed verdict');
+  assert.match(failureThenHang.stdout, /FAIL ASSERTION CANARY/);
+  assert.match(failureThenHang.stdout, /INDET\s+test-a/);
+  assert.match(failureThenHang.stdout, /Output may contain assertion failures/,
+    'timeout summary acknowledges preserved failure evidence');
+  console.log('PASS failure text and assigned exitCode before hang stay INDET with preserved evidence');
+  fs.writeFileSync(path.join(dir, 'test-a.js'), 'console.log("FAIL textual control, completed exit zero");\n');
+  const textualFailure = run();
+  assert.equal(textualFailure.status, 0, 'arbitrary failure-looking stdout cannot override completed exit zero');
+  assert.match(textualFailure.stdout, /PASS\s+test-a/);
+  fs.writeFileSync(path.join(dir, 'test-a.js'), 'console.log("PASS textual control, no completed exit"); setInterval(() => {}, 1000);\n');
+  const textualPass = run();
+  assert.equal(textualPass.status, 2, 'success-looking stdout cannot turn a timeout into a pass');
+  assert.match(textualPass.stdout, /INDET\s+test-a/);
+  console.log('PASS verdicts use observed exit only, never failure-looking or success-looking stdout');
+  fs.writeFileSync(path.join(dir, 'test-b.js'), 'console.log("LATER-CONTROL");\n');
   for (const code of [1, 0]) {
     const pidFile = path.join(tmp, 'holder.pid');
     fs.writeFileSync(path.join(dir, 'test-a.js'), `
