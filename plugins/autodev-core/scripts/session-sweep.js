@@ -2,7 +2,8 @@
 /**
  * session-sweep.js — classify Claude Code Desktop sessions for archiving.
  *
- * READ-ONLY. Prints a verdict table and optionally writes resume stubs. It never
+ * Prints a verdict table, optionally writes resume stubs or preserves local
+ * files in verified archives, and can mark orphaned store records archived. It never
  * archives anything itself: archiving is an MCP call the model makes after
  * reading this output, so a bug here cannot destroy a worktree.
  *
@@ -18,6 +19,7 @@
  *   node session-sweep.js --ephemeral-days 2  # age below which a session counts as ephemeral
  *   node session-sweep.js --done-minutes N    # cold floor for PR-less DONE (default 240)
  *   node session-sweep.js --write-resume      # also write resume stubs for SAFE rows
+ *   node session-sweep.js --preserve-local    # verify archives of local-only files
  *   node session-sweep.js --archive-orphaned  # clear records the app no longer tracks
  *   node session-sweep.js --self              # may the session in THIS cwd settle? (JSON)
  *   node session-sweep.js --json              # machine-readable output
@@ -49,6 +51,7 @@ const fs = require('fs');
 const path = require('path');
 const claudePaths = require('./claude-paths.js');
 const { execFileSync, spawnSync } = require('child_process');
+const { createHash, randomBytes } = require('crypto');
 
 // SESSION_SWEEP_STORE exists so the suite can drive a synthetic population
 // through the REAL code path. The safety check is the whole point of this
@@ -144,7 +147,8 @@ function mergedMinMinutes() {
 const MERGED_MIN_MINUTES = mergedMinMinutes();
 const AS_JSON = flag('--json');
 const WRITE_RESUME = flag('--write-resume');
-// The ONLY mode in which this script mutates anything. Off by default and never
+const PRESERVE_LOCAL = flag('--preserve-local');
+// Off by default and never
 // implied: it marks clean records archived by editing the store, for workspaces
 // the app no longer tracks. It still never touches a git worktree.
 const ARCHIVE_ORPHANED = flag('--archive-orphaned');
@@ -282,8 +286,8 @@ function workspaceStanding(ws, current, orphaned) {
 // never a verdict. git() is the old contract on top of it, trimmed stdout on
 // exit 0 and null otherwise, for the callers that already fail CLOSED on null.
 // A caller that would read null as "nothing there" must use gitRun instead.
-function gitRun(cwd, args) {
-  const r = spawnSync('git', args, { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true });
+function gitRun(cwd, args, input) {
+  const r = spawnSync('git', args, { cwd, input, encoding: 'utf8', stdio: [input === undefined ? 'ignore' : 'pipe', 'pipe', 'pipe'], windowsHide: true, maxBuffer: 64 << 20 });
   return {
     command: 'git ' + args[0],
     status: r.status,
@@ -297,6 +301,173 @@ function gitRun(cwd, args) {
 function git(cwd, args) {
   const r = gitRun(cwd, args);
   return r.error || r.signal || r.status !== 0 ? null : r.stdout.trim();
+}
+
+function samePath(a, b) {
+  const normalize = (p) => {
+    const real = fs.realpathSync(p);
+    return process.platform === 'win32' ? real.toLowerCase() : real;
+  };
+  return normalize(a) === normalize(b);
+}
+
+// Git searches parents when .git is absent. Inspect the marker before reading
+// worktree state, then use the parent only to rule out tracked subdirectories.
+function worktreeIdentity(dir) {
+  try {
+    if (!fs.lstatSync(dir).isDirectory()) return 'invalid';
+    let marker;
+    try { marker = fs.lstatSync(path.join(dir, '.git')); }
+    catch (e) {
+      if (e.code !== 'ENOENT') return 'unreadable';
+      // A missing marker alone does not make a checkout subdirectory residue.
+      const parent = gitRun(path.dirname(dir), ['rev-parse', '--show-toplevel']);
+      if (parent.status === 128 && !parent.error && !parent.signal && /not a git repository/.test(parent.stderr)) return 'leftover';
+      if (!answered(parent, [0])) return 'unreadable';
+      const top = parent.stdout.trim();
+      const rel = path.relative(top, fs.realpathSync(dir)).replace(/\\/g, '/');
+      if (!rel || rel === '..' || rel.startsWith('../') || path.isAbsolute(rel)) return 'invalid';
+      const tracked = gitRun(top, ['ls-files', '-z', '--', rel]);
+      if (!answered(tracked, [0])) return 'unreadable';
+      return tracked.stdout ? 'tracked-subdirectory' : 'leftover';
+    }
+    if (!marker.isFile() && !marker.isDirectory()) return 'invalid';
+    const top = git(dir, ['rev-parse', '--show-toplevel']);
+    if (!top || !samePath(top, dir)) return 'invalid';
+    return marker.isFile() ? 'linked' : 'checkout';
+  } catch (e) { return e.code === 'ENOENT' ? 'missing' : 'unreadable'; }
+}
+
+function repoDirOf(s) {
+  if (s.worktreePath && ['linked', 'checkout'].includes(worktreeIdentity(s.worktreePath))) return s.worktreePath;
+  for (const dir of [s.originCwd, s.cwd]) {
+    if (!dir) continue;
+    // Metadata cwd may be a package directory, so resolve its containing repo.
+    // Never resolve a leftover worktreePath through its parent this way.
+    if (s.worktreePath && path.resolve(dir) === path.resolve(s.worktreePath) &&
+        !['linked', 'checkout'].includes(worktreeIdentity(s.worktreePath))) continue;
+    const top = git(dir, ['rev-parse', '--show-toplevel']);
+    if (top) return top;
+  }
+  return null;
+}
+
+// Removed worktrees have no ignore policy to distinguish generated output
+// from user documents. Only installed dependency directories can be skipped.
+const LEFTOVER_DEPENDENCIES = /(^|\/)(node_modules|\.venv|__pycache__)\//;
+
+function leftoverFiles(dir, rel = '') {
+  const files = [];
+  for (const entry of fs.readdirSync(path.join(dir, rel), { withFileTypes: true })) {
+    const name = rel ? rel + '/' + entry.name : entry.name;
+    if (LEFTOVER_DEPENDENCIES.test(name + (entry.isDirectory() ? '/' : ''))) continue;
+    if (entry.isDirectory()) files.push(...leftoverFiles(dir, name));
+    else files.push(name);
+  }
+  return files;
+}
+
+function ignoredLocalFiles(dir, rel) {
+  const files = [];
+  for (const entry of fs.readdirSync(path.join(dir, rel), { withFileTypes: true })) {
+    const name = rel + entry.name + (entry.isDirectory() ? '/' : '');
+    if (REGENERABLE.some((re) => re.test(name))) continue;
+    if (entry.isDirectory()) files.push(...ignoredLocalFiles(dir, name));
+    else files.push(name);
+  }
+  return files;
+}
+
+function preserveLocal(s, all, files) {
+  const wt = s.worktreePath;
+  let scratch = null;
+  try {
+    const identity = worktreeIdentity(wt);
+    if (!['linked', 'leftover'].includes(identity)) {
+      throw new Error(identity === 'checkout' ? 'main checkout, not a linked worktree' : 'worktree identity is ' + identity);
+    }
+    // Recheck every guard with only the local-file blocker waived. A local-only
+    // risk precedes the branch check, so it does not prove there are no commits.
+    const remaining = worktreeRisk(s, all, { localPreserved: true });
+    if (remaining.reason) throw new Error(remaining.reason);
+    if (JSON.stringify(remaining.localOnly) !== JSON.stringify(files)) throw new Error('local files changed before preservation');
+    if (identity === 'linked') {
+      const count = git(wt, ['rev-list', '--count', 'HEAD', '--not', '--remotes']);
+      if (count !== '0') throw new Error(count === null ? 'commit check unreadable' : count + ' commit(s) on no remote');
+    }
+    if (!files.length) return { archive: null, reason: null };
+    if (process.platform === 'win32' && files.some((name) => /[^\x00-\x7f]/.test(name))) {
+      throw new Error('non-ASCII local paths are unsupported on win32');
+    }
+    for (const name of files) {
+      // A symlink would preserve only its link text, not the local data it names.
+      // Line breaks cannot be compared unambiguously with tar's listing output.
+      if (/[\r\n]/.test(name) || !fs.lstatSync(path.join(wt, name)).isFile()) {
+        throw new Error('unsupported local file: ' + JSON.stringify(name));
+      }
+    }
+    const snapshot = () => JSON.stringify(files.map((name) => {
+      const stat = fs.lstatSync(path.join(wt, name));
+      return [stat.size, stat.mtimeMs, stat.ctimeMs, stat.ino, stat.mode];
+    }));
+    const before = snapshot();
+    const archiveDir = path.resolve(process.env.SESSION_SWEEP_ARCHIVE_DIR ||
+      path.join(claudePaths.homeDir(), '.claude', 'autodev', 'archives', 'worktrees'));
+    const within = (root, candidate) => {
+      const rel = path.relative(root, candidate);
+      return rel === '' || (!rel.startsWith('..' + path.sep) && rel !== '..' && !path.isAbsolute(rel));
+    };
+    if (within(path.resolve(wt), archiveDir)) throw new Error('archive directory is inside the worktree');
+    fs.mkdirSync(archiveDir, { recursive: true, mode: 0o700 });
+    if (within(fs.realpathSync(wt), fs.realpathSync(archiveDir))) throw new Error('archive directory resolves inside the worktree');
+    const common = identity === 'linked' ? git(wt, ['rev-parse', '--git-common-dir']) : null;
+    if (identity === 'linked' && !common) throw new Error('repository identity unreadable');
+    const repo = common ? fs.realpathSync(path.resolve(wt, common)) : fs.realpathSync(repoDirOf(s) || path.dirname(wt));
+    const repoHash = createHash('sha256').update(process.platform === 'win32' ? repo.toLowerCase() : repo).digest('hex').slice(0, 10);
+    const stamp = new Date().toISOString().replace(/[-:.]/g, '');
+    const archive = path.join(archiveDir, path.basename(wt) + '-' + repoHash + '-' + stamp + '-' + randomBytes(4).toString('hex') + '.tgz');
+    if (fs.existsSync(archive)) throw new Error('archive already exists, refusing to overwrite');
+    scratch = fs.mkdtempSync(path.join(archiveDir, '.preserve-'));
+    const list = path.join(scratch, 'files.txt');
+    fs.writeFileSync(list, files.map((f) => './' + f).join('\0') + '\0', { mode: 0o600 });
+    const staged = path.join(scratch, 'archive.tgz');
+    const tar = process.platform === 'win32'
+      ? path.join(process.env.SystemRoot || 'C:\\Windows', 'System32', 'tar.exe') : 'tar';
+    const options = { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true, maxBuffer: 64 << 20 };
+    let back;
+    try {
+      execFileSync(tar, ['-czf', staged, '-C', wt, '--null', '-T', list], options);
+      back = execFileSync(tar, ['-tzf', staged], options).split('\n')
+        .map((name) => name.replace(/\r$/, '').replace(/^\.\//, '')).filter(Boolean);
+    } catch (e) {
+      // Tar may print mangled paths or environment fragments. Only its numeric
+      // exit status is safe to carry into the sweep's risk text.
+      const code = Number.isInteger(e.status) && e.status >= 0 && e.status <= 255 ? ' (exit ' + e.status + ')' : '';
+      throw new Error('tar failed' + code);
+    }
+    if (back.length !== files.length || JSON.stringify([...back].sort()) !== JSON.stringify([...files].sort())) {
+      throw new Error('read-back holds ' + back.length + ' of ' + files.length + ' files or member names disagree');
+    }
+    const finalRisk = worktreeRisk(s, all, { localPreserved: true });
+    if (finalRisk.reason || worktreeIdentity(wt) !== identity) throw new Error(finalRisk.reason || 'worktree identity changed during preservation');
+    if (before !== snapshot() || JSON.stringify([...finalRisk.localOnly].sort()) !== JSON.stringify([...files].sort())) {
+      throw new Error('local files changed during preservation');
+    }
+    if (identity === 'linked' && git(wt, ['rev-list', '--count', 'HEAD', '--not', '--remotes']) !== '0') {
+      throw new Error('commit check changed during preservation');
+    }
+    fs.chmodSync(staged, 0o600);
+    // Publish without clobbering an earlier backup, including a concurrent one.
+    fs.linkSync(staged, archive);
+    return { archive, reason: null };
+  } catch (e) {
+    return { archive: null, reason: String(e.message).trim().split('\n')[0] };
+  } finally {
+    if (scratch) {
+      try { fs.rmSync(scratch, { recursive: true, force: true, maxRetries: 3 }); }
+      catch { /* The verified archive remains outside the source worktree. */ }
+    }
+  }
 }
 
 /** Did git run to the end, exit with one of `statuses`, and print nothing on stderr? */
@@ -332,7 +503,7 @@ function describeFailure(r) {
  */
 const slugCache = new Map();
 function repoSlugOf(s) {
-  const dir = [s.worktreePath, s.originCwd, s.cwd].find((d) => d && fs.existsSync(d));
+  const dir = repoDirOf(s);
   if (!dir) return null;
   if (slugCache.has(dir)) return slugCache.get(dir);
   // Backslashes first: a remote cloned from a Windows path spells its segments
@@ -347,7 +518,7 @@ function repoSlugOf(s) {
 }
 
 function liveBranch(s) {
-  const wt = s.worktreePath && fs.existsSync(s.worktreePath) ? s.worktreePath : null;
+  const wt = s.worktreePath && ['linked', 'checkout'].includes(worktreeIdentity(s.worktreePath)) ? s.worktreePath : null;
   return (wt && git(wt, ['rev-parse', '--abbrev-ref', 'HEAD'])) || s.branch || null;
 }
 
@@ -441,8 +612,8 @@ function bindingsOf(sessions) {
  * third-party and excluded from the sweep.
  */
 function isThirdParty(s) {
-  const dir = fs.existsSync(s.worktreePath || '') ? s.worktreePath : s.originCwd || s.cwd;
-  if (!dir || !fs.existsSync(dir)) return false;
+  const dir = repoDirOf(s);
+  if (!dir) return false;
   const remote = (git(dir, ['remote', 'get-url', 'origin']) || '').toLowerCase();
   if (!remote) return false;
   if (DENY.some((d) => remote.includes(d) || (s.originCwd || '').toLowerCase().includes(d))) return true;
@@ -525,6 +696,12 @@ function transcriptFreshMinutes(wt) {
 }
 
 function worktreeRisk(s, all, opts = {}) {
+  const localOnly = [];
+  const reason = inspectWorktreeRisk(s, all, opts, localOnly);
+  return { reason, localOnly };
+}
+
+function inspectWorktreeRisk(s, all, opts, localOnly) {
   // Both of these are about OTHER sessions and hold whether or not the worktree
   // still exists on disk, so they come before the existence check below.
   const shared = all ? sharedWorktree(s, all) : null;
@@ -541,12 +718,117 @@ function worktreeRisk(s, all, opts = {}) {
   if (!wt) return null;                  // no worktree, nothing to lose
   if (!fs.existsSync(wt)) return null;   // already cleaned up
 
-  const status = git(wt, ['status', '--porcelain']);
+  const identity = worktreeIdentity(wt);
+  if (identity === 'leftover') {
+    try {
+      localOnly.push(...leftoverFiles(wt).sort());
+      return opts.localPreserved ? null : `leftover-dir(${localOnly.length} files)`;
+    }
+    catch { return 'leftover-dir-unreadable'; }
+  }
+  if (identity === 'tracked-subdirectory') return identity;
+  if (identity === 'checkout') return 'main-checkout';
+  if (identity !== 'linked') return 'git-unreadable';
+
+  // The parent cannot list a submodule's ignored files or local commits, and
+  // forced worktree removal deletes its private modules directory as well.
+  const admin = gitRun(wt, ['rev-parse', '--absolute-git-dir']);
+  if (!answered(admin, [0]) || !admin.stdout.trim()) return 'submodules-uncheckable';
+  let modules = false;
+  try {
+    const stat = fs.lstatSync(path.join(admin.stdout.trim(), 'modules'));
+    if (!stat.isDirectory()) return 'submodules-uncheckable';
+    modules = true;
+  }
+  catch (e) { if (e.code !== 'ENOENT') return 'submodules-uncheckable'; }
+  if (modules) return 'submodules(1)';
+  // Avoid launching Git's submodule shell helper in repos with no gitlinks.
+  const index = gitRun(wt, ['ls-files', '--stage', '-z']);
+  if (!answered(index, [0])) return 'submodules-uncheckable';
+  const indexEntries = index.stdout.split('\0').filter(Boolean);
+  const gitlinks = indexEntries.filter((entry) => entry.startsWith('160000 '));
+  if (gitlinks.length) {
+    // A '-' status does not prove emptiness. Manual clones and ordinary files
+    // are both invisible to the parent's status and ignored-file inventory.
+    let occupied = 0;
+    for (const entry of gitlinks) {
+      const name = entry.slice(entry.indexOf('\t') + 1);
+      try {
+        const dir = path.join(wt, name);
+        if (!fs.lstatSync(dir).isDirectory() || fs.readdirSync(dir).length) occupied++;
+      } catch (e) { if (e.code !== 'ENOENT') return 'submodules-uncheckable'; }
+    }
+    if (occupied) {
+      const sub = gitRun(wt, ['submodule', 'status', '--recursive']);
+      if (!answered(sub, [0])) return 'submodules-uncheckable';
+      const subLines = sub.stdout.split(/\r?\n/).filter(Boolean);
+      if (subLines.some((line) => !/^[-+ U][0-9a-f]{40,64}\s/.test(line))) return 'submodules-uncheckable';
+      const initialized = subLines.filter((line) => !line.startsWith('-')).length;
+      if (initialized) return `submodules(${initialized})`;
+      return `submodule-dir-not-empty(${occupied})`;
+    }
+  }
+
+  const status = git(wt, ['status', '--porcelain', '--untracked-files=normal']);
   if (status === null) return 'git-unreadable';
   if (status.length > 0) {
     const n = status.split('\n').filter(Boolean).length;
     return `dirty(${n} file${n === 1 ? '' : 's'})`;
   }
+
+  // Status trusts these index flags. Hash flagged files with Git's path filters
+  // against the recorded index blob, without changing flags or refreshing it.
+  const flags = gitRun(wt, ['ls-files', '-v', '-z']);
+  if (!answered(flags, [0])) return 'hidden-index-uncheckable';
+  const blobs = new Map(indexEntries.map((entry) => {
+    const match = /^(\d{6}) ([0-9a-f]{40,64}) 0\t([\s\S]+)$/.exec(entry);
+    return match ? [match[3], { mode: match[1], oid: match[2] }] : [null, null];
+  }));
+  let hiddenChanges = 0;
+  const toHash = [];
+  for (const entry of flags.stdout.split('\0').filter(Boolean)) {
+    if (!/^[a-zS] /.test(entry)) continue;
+    const name = entry.slice(2);
+    // A lossy UTF-8 decode cannot establish that the actual index path is absent.
+    if (name.includes('\uFFFD')) return 'hidden-index-uncheckable';
+    const blob = blobs.get(name);
+    let stat;
+    try {
+      stat = fs.lstatSync(path.join(wt, name));
+    } catch (e) {
+      // Sparse checkout removes skip-worktree paths whose index blobs survive.
+      // Assume-unchanged alone does not authorize a missing file.
+      if (e.code === 'ENOENT') {
+        if (entry[0].toUpperCase() !== 'S') hiddenChanges++;
+        continue;
+      }
+      return 'hidden-index-uncheckable';
+    }
+    if (!blob || !['100644', '100755'].includes(blob.mode)) return 'hidden-index-uncheckable';
+    if (!stat.isFile()) { hiddenChanges++; continue; }
+    toHash.push({ name, oid: blob.oid });
+  }
+  if (toHash.length) {
+    // --stdin-paths applies each path's filters and accepts Git C-style quotes.
+    // Quote UTF-8 bytes with octal escapes so newlines and unusual names cannot
+    // become extra input records. JSON's Unicode escapes are not Git escapes.
+    const input = toHash.map(({ name }) => '"' + Array.from(Buffer.from(name), (byte) =>
+      byte < 32 || byte >= 127 || byte === 34 || byte === 92
+        ? '\\' + byte.toString(8).padStart(3, '0') : String.fromCharCode(byte)).join('') + '"\n').join('');
+    const hashes = gitRun(wt, ['hash-object', '--stdin-paths'], input);
+    if (!answered(hashes, [0])) return 'hidden-index-uncheckable';
+    const oids = hashes.stdout.trim().split(/\r?\n/);
+    if (oids.length !== toHash.length || oids.some((oid) => !/^[0-9a-f]{40,64}$/.test(oid))) return 'hidden-index-uncheckable';
+    for (let i = 0; i < toHash.length; i++) if (oids[i] !== toHash[i].oid) hiddenChanges++;
+  }
+  if (hiddenChanges) return `hidden-index-changes(${hiddenChanges})`;
+
+  // Detached HEAD and per-worktree refs disappear with the worktree. Branches,
+  // tags and remote refs in the common repository survive its removal.
+  const detached = gitRun(wt, ['rev-list', '--count', 'HEAD', '--glob=refs/worktree/*', '--glob=refs/bisect/*', '--glob=refs/rewritten/*', '--not', '--remotes', '--branches', '--tags']);
+  if (!answered(detached, [0]) || !/^\d+$/.test(detached.stdout.trim())) return 'commit-uncheckable';
+  const unreferenced = Number(detached.stdout.trim());
+  if (unreferenced > 0) return `orphan-commits(${unreferenced})`;
 
   // Gitignored files go with the worktree too, and `status --porcelain` is
   // silent about them by design. [measured 2026-09-16] a session's `.env.local`
@@ -554,15 +836,14 @@ function worktreeRisk(s, all, opts = {}) {
   // auto-archived the session, and the worktree removal took the only copy.
   // The sweep had nothing to say, because every check above was green.
   //
-  // Traditional mode lists a fully ignored directory once (`node_modules/`)
+  // Directory mode lists a fully ignored directory once (`node_modules/`)
   // rather than every file in it, so this stays cheap on a real worktree. The
   // regenerable list is the one `safe-cleanup` uses for the same question:
   // anything a build or install writes back is clutter, not loss.
-  const ignored = git(wt, ['status', '--porcelain', '--ignored=traditional']);
-  if (ignored === null) return 'git-unreadable';
-  const entries = ignored.split('\n').filter((l) => l.startsWith('!! ')).map((l) => l.slice(3).replace(/^"|"$/g, ''));
+  const ignored = gitRun(wt, ['ls-files', '--others', '--ignored', '--exclude-standard', '--directory', '-z']);
+  if (!answered(ignored, [0])) return 'git-unreadable';
+  const entries = ignored.stdout.split('\0').filter(Boolean);
   const regenerable = (p) => REGENERABLE.some((re) => re.test(p));
-  const localOnly = [];
   for (const entry of entries) {
     if (regenerable(entry)) continue;
     if (!entry.endsWith('/')) { localOnly.push(entry); continue; }
@@ -571,13 +852,16 @@ function worktreeRisk(s, all, opts = {}) {
     // harness state must not block, and one holding a report must name it.
     // Only directories that are not regenerable get opened, so `node_modules/`
     // is never enumerated.
-    const inside = git(wt, ['ls-files', '--others', '--ignored', '--exclude-standard', '--', entry]);
-    if (inside === null) return 'git-unreadable';
-    const files = inside.split('\n').filter(Boolean).map((f) => f.replace(/^"|"$/g, ''));
-    if (!files.length) localOnly.push(entry);
+    let files;
+    try { files = ignoredLocalFiles(wt, entry); }
+    catch { return 'git-unreadable'; }
     for (const f of files) if (!regenerable(f)) localOnly.push(f);
   }
-  if (localOnly.length > 0) {
+  // Directory-mode Git listings can include both ancestors and descendants.
+  // Normalise and deduplicate before counting, naming or preserving any file.
+  const unique = [...new Set(localOnly.map((name) => path.posix.normalize(name)))].sort();
+  localOnly.splice(0, localOnly.length, ...unique);
+  if (localOnly.length > 0 && !opts.localPreserved) {
     const n = localOnly.length;
     const named = localOnly.slice(0, 3).join(', ') + (n > 3 ? ', ...' : '');
     return `local-only(${n} file${n === 1 ? '' : 's'}: ${named})`;
@@ -844,17 +1128,25 @@ function main() {
       const c = classify(s, prStates, unbound);
       const finished = FINISHED.has(c.state);
       const thirdParty = finished ? isThirdParty(s) : false;
-      const risk = finished ? worktreeRisk(s, all) : null;
+      const inspected = finished ? worktreeRisk(s, all) : { reason: null, localOnly: [] };
+      let risk = inspected.reason;
       // The app has its own opt-out. Honour it rather than inventing a second one.
       const exempt = s.autoArchiveExempt === true;
+      const standing = workspaceStanding(s.__workspace, currentWorkspace, orphanedWorkspaces);
+      const reachable = standing === 'live' || standing === 'undetermined';
+      let archive = null;
+      if (PRESERVE_LOCAL && !SELF && finished && !thirdParty && !exempt && reachable &&
+          /^(local-only\(|leftover-dir\()/.test(risk || '')) {
+        const preserved = preserveLocal(s, all, inspected.localOnly);
+        archive = preserved.archive;
+        risk = preserved.reason ? risk + `, preserve-refused(${preserved.reason})` : null;
+      }
       // `clean` is everything archiving could lose, checked and empty. `safe`
       // adds the one thing the model's archive call needs: a record it can
       // resolve. A clean row outside the live workspace comes back "not found".
       const clean = finished && !thirdParty && !exempt && risk === null;
-      const standing = workspaceStanding(s.__workspace, currentWorkspace, orphanedWorkspaces);
-      const reachable = standing === 'live' || standing === 'undetermined';
       return {
-        s, c, risk, thirdParty, exempt, unbound, clean, standing, reachable,
+        s, c, risk, archive, thirdParty, exempt, unbound, clean, standing, reachable,
         safe: clean && reachable,
       };
     });
@@ -887,7 +1179,7 @@ function main() {
         if (unsettled.length) blockers.push(`pr-unsettled(${unsettled.map((p) => '#' + p.prNumber).join(', ')})`);
         if (row.exempt) blockers.push('autoArchiveExempt');
         const risk = worktreeRisk(row.s, all, { self: true });
-        if (risk) blockers.push(risk);
+        if (risk.reason) blockers.push(risk.reason);
       }
       console.log(JSON.stringify({
         sessionId: row ? row.s.sessionId : null,
@@ -904,6 +1196,8 @@ function main() {
         sessionId: r.s.sessionId,
         title: r.s.title,
         cwd: r.s.originCwd || r.s.cwd,
+        worktreePath: r.s.worktreePath || null,
+        archive: r.archive,
         branch: r.s.branch,
         state: r.c.state,
         why: r.c.why,
@@ -952,6 +1246,7 @@ function main() {
     }
 
     const safe = rows.filter((r) => r.safe);
+    for (const r of safe.filter((r) => r.archive)) console.log(`Preserved ${r.s.sessionId}: ${r.archive}`);
     // `clean`, not `safe`: a clean row outside the live workspace has nothing
     // to lose, so it must not reach BLOCKED with a null risk beside it.
     const finished = rows.filter((r) => !r.clean && FINISHED.has(r.c.state));
