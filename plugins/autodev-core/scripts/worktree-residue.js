@@ -17,6 +17,9 @@ const claudePaths = require('./claude-paths.js');
 // which ends in '/' for a directory and may sit under a package directory
 // (`site/.next/`). Keep this list narrow: a miss here is clutter (a worktree
 // kept a little longer), a false entry is loss.
+// Only node_modules, .next, __pycache__ and .venv are disposable directories
+// at any depth. Other build-output names apply only at the worktree root, so
+// a nested reports/build/notes.md remains local evidence for both consumers.
 //
 // The harness entries are its own throttle, flag and scratch files, rewritten
 // on the next run. `.claude/reports/`, `.claude/archives/`, `.claude/handoffs/`
@@ -26,11 +29,11 @@ const claudePaths = require('./claude-paths.js');
 // flagged five, three of them for hundreds of `.claude/COMMIT_MSG_v*.txt`
 // scratch files beside the one `.claude/archives/` that was the real finding.
 const REGENERABLE = [
-    /(^|\/)node_modules\//, /(^|\/)\.next\//, /(^|\/)dist\//, /(^|\/)build\//, /^out\//,
-    /(^|\/)coverage\//, /(^|\/)\.turbo\//, /(^|\/)\.vercel\//, /(^|\/)\.cache\//,
-    /(^|\/)__pycache__\//, /\.pyc$/, /(^|\/)\.pytest_cache\//, /(^|\/)\.venv\//,
-    /(^|\/)target\//, /(^|\/)\.parcel-cache\//, /(^|\/)playwright-report\//,
-    /(^|\/)test-results\//, /(^|\/)tsconfig\.tsbuildinfo$/, /(^|\/)next-env\.d\.ts$/,
+    /(^|\/)node_modules\//, /(^|\/)\.next\//, /^dist\//, /^build\//, /^out\//,
+    /^coverage\//, /^\.turbo\//, /^\.vercel\//, /^\.cache\//,
+    /(^|\/)__pycache__\//, /\.pyc$/, /^\.pytest_cache\//, /(^|\/)\.venv\//,
+    /^target\//, /^\.parcel-cache\//, /^playwright-report\//,
+    /^test-results\//, /(^|\/)tsconfig\.tsbuildinfo$/, /(^|\/)next-env\.d\.ts$/,
     /(^|\/)\.DS_Store$/, /(^|\/)Thumbs\.db$/,
     /^\.claude\/memory-sessions\//, /^\.claude\/\.claude\//, /^\.claude\/types\//,
     /^\.claude\/knowledge-surfaced$/, /^\.claude\/panel-deny\.json$/,
