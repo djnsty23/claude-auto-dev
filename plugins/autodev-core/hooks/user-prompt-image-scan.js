@@ -13,7 +13,7 @@ if (process.env.CLAUDE_PLUGIN_OPTION_IMAGE_SCAN === 'false') process.exit(0);
 const fs = require('fs');
 const path = require('path');
 
-// Hard budget — if anything takes longer, bail silently.
+// Cooperative budget, checked between reads and after parsing each record.
 const DEADLINE_MS = 150;
 const started = Date.now();
 const timeLeft = () => DEADLINE_MS - (Date.now() - started);
@@ -47,7 +47,9 @@ function latestUserMessage(transcriptPath) {
         fd = fs.openSync(transcriptPath, 'r');
         let pos = fs.fstatSync(fd).size;
         let scanned = 0;
-        let carry = Buffer.alloc(0);
+        // Slices are stored newest first. Each read byte is searched once and
+        // copied at most once, when a complete record needs decoding.
+        let pending = [];
         while (pos > 0 && scanned < MAX_SCAN_BYTES && timeLeft() > 0) {
             const length = Math.min(CHUNK_BYTES, pos, MAX_SCAN_BYTES - scanned);
             pos -= length;
@@ -59,20 +61,25 @@ function latestUserMessage(transcriptPath) {
                 read += n;
             }
             scanned += length;
-            const bytes = Buffer.concat([chunk, carry]);
-            let end = bytes.length;
+            let end = chunk.length;
             while (end > 0 && timeLeft() > 0) {
-                const newline = bytes.lastIndexOf(10, end - 1);
-                if (newline < 0 && pos > 0) break;
-                const line = bytes.subarray(newline + 1, end).toString('utf8').trim();
+                const newline = chunk.lastIndexOf(10, end - 1);
+                const fragment = chunk.subarray(newline + 1, end);
+                if (newline < 0 && pos > 0) {
+                    pending.push(fragment);
+                    break;
+                }
+                const bytes = pending.length ? Buffer.concat([fragment, ...pending.reverse()]) : fragment;
+                pending = [];
+                const line = bytes.toString('utf8').trim();
                 end = newline < 0 ? 0 : newline;
                 if (!line) continue;
                 let rec;
                 try { rec = JSON.parse(line); } catch { continue; }
+                if (timeLeft() <= 0) return null;
                 const msg = rec && (rec.message || rec);
                 if (msg && msg.role === 'user') return msg;
             }
-            carry = bytes.subarray(0, end);
         }
         return null;
     } catch { return null; }
