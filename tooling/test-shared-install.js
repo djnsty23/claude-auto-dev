@@ -139,7 +139,8 @@ const payload = (command, cwd) => JSON.stringify({ tool_name: 'Bash', tool_input
     check('1e. .vite and .cache are left out', !fs.existsSync(path.join(fx.wtNm, '.vite')) && !fs.existsSync(path.join(fx.wtNm, '.cache')));
     const wsLink = path.join(fx.wtNm, '@ws', 'a');
     check('1f. a workspace junction is recreated pointing into the worktree',
-        fs.lstatSync(wsLink).isSymbolicLink() && path.resolve(fs.realpathSync(wsLink)).toLowerCase() === path.resolve(fs.realpathSync(path.join(fx.wt, 'packages', 'a'))).toLowerCase());
+        // .native: only it expands an 8.3 temp path (a Windows runner's), so both sides get one spelling.
+        fs.lstatSync(wsLink).isSymbolicLink() && fs.realpathSync.native(wsLink).toLowerCase() === fs.realpathSync.native(path.join(fx.wt, 'packages', 'a')).toLowerCase());
     const nested = path.join('packages', 'a', 'node_modules', 'left-pad', 'index.js');
     check('1g. a nested node_modules the lockfile names is linked too', sameFile(path.join(fx.main, nested), path.join(fx.wt, nested)));
     const marker = si.readMarker(fx.wtNm);
