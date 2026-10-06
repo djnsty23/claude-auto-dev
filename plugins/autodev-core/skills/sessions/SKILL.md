@@ -75,6 +75,10 @@ Detection is structural (`scheduledTaskId`), never a title regex. A regex would
 miss renamed tasks and catch hand-started work that happens to be called
 "daily digest".
 
+Use `--preserve-local` to archive exactly the local-only files named by the blocker in finished, clean linked worktrees, or files in untracked `leftover-dir(N files)` folders without `.git`, into verified `~/.claude/autodev/archives/worktrees/<basename>-<repo-hash>-<time>-<nonce>.tgz` archives before reporting SAFE, with leftovers skipping only node_modules, .venv and __pycache__.
+`SESSION_SWEEP_ARCHIVE_DIR` overrides the archive directory, and any refused preservation, tracked checkout subdirectory, unreferenced detached commit or changed final safety check leaves the row blocked without removing source files.
+In linked worktrees, only node_modules, .next, __pycache__ and .venv are regenerable directories at any depth, while other build-output names apply at the root. Windows refuses non-ASCII preserve paths before tar, and tar failures report fixed text with at most a numeric exit code.
+
 Disposition is separate from verdict, and it is the one that decides:
 
 - `SAFE` — finished, own repo, worktree clean, branch pushed. Archivable.
@@ -90,6 +94,19 @@ Disposition is separate from verdict, and it is the one that decides:
 - `unpushed-uncheckable(<git's error>)`: the unpushed check itself failed,
   most often because the branch is on origin but this clone never fetched it.
   Unknown is not safe: fetch, then sweep again.
+- `local-only(N files: paths)`: ignored local files exist only in this worktree. Preserve and verify them before archiving.
+- `leftover-dir(N files)`: an untracked folder without `.git` holds local residue. Preserve its files before clearing the blocker.
+- `leftover-dir-unreadable`: leftover files cannot be inventoried. Keep the folder until it can be read.
+- `tracked-subdirectory`: the target contains tracked checkout files. Keep it and correct the worktree target.
+- `main-checkout`: the target is a main checkout. Never remove it through session cleanup.
+- `orphan-commits(N)`: commits reachable from the current HEAD, including a detached HEAD, or held only by `refs/worktree/*`, `refs/bisect/*` or `refs/rewritten/*` are not proven retained elsewhere. A commit held only by ORIG_HEAD or the HEAD reflog is not detected. Retain local commits before archiving.
+- `commit-uncheckable`: commit reachability cannot be verified. Keep the worktree until the check succeeds.
+- `submodules(N)`: initialized submodules or a private modules directory hold data the parent cannot inventory. Keep the worktree with or without preservation.
+- `submodules-uncheckable`: submodule state cannot be verified. Keep the worktree until it can be checked.
+- `submodule-dir-not-empty(N)`: uninitialized gitlink paths hold files or directories, including manual clones. Keep the worktree with or without preservation.
+- `hidden-index-changes(N)`: skip-worktree or assume-unchanged files differ from their index entries. Retain those changes before archiving.
+- `hidden-index-uncheckable`: flagged index entries cannot be compared safely. Keep the worktree until they can be checked.
+- `preserve-refused(reason)`: preservation failed a safety or archive check. The original blocker remains and source files stay in place.
 - `third-party` — remote is not the operator's own account. Excluded entirely;
   client work is not swept by a tool.
 
@@ -115,7 +132,7 @@ is intact either way, but a deep one re-bills its whole context on every turn an
 carries its own accumulated wrong turns; `RESUME.md` and `DECISIONS.md` carry the
 conclusions without the cost.
 
-## The reach limit, and the one case where the script writes
+## The reach limit and orphaned record updates
 
 `archive_session` reaches only the workspace directory the app currently tracks
 — measured at ~70 of 482 records, and `limit` does not change it. The cause is
@@ -129,7 +146,7 @@ were not. The directory decides.
 node "${CLAUDE_PLUGIN_ROOT}/scripts/session-sweep.js" --archive-orphaned
 ```
 
-This is the ONLY mode in which the script mutates anything. It marks `orphaned-ws`
+This mode marks `orphaned-ws`
 records archived by string-replacing `"isArchived":false` in the store JSON, and
 **only** for orphaned workspaces. It still never touches a git worktree.
 
