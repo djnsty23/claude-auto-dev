@@ -31,11 +31,14 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 const { spawnSync } = require('child_process');
+const vm = require('node:vm');
+const { EventEmitter } = require('node:events');
 const { tally, exitCode } = require('./spawn-budget.js');
 const st = require('./suite-tmp.js');
 
 const TOOLING = __dirname;
 const HELPER = path.join(TOOLING, 'suite-tmp.js');
+const TREE_HELPER = path.join(TOOLING, 'suite-process-tree.js');
 
 const cases = [];
 const check = (label, ok, detail) => cases.push([label, ok, detail]);
@@ -259,6 +262,67 @@ async function asyncCases() {
             check('a grandchild holding the pipes does not hold the runner: resolved well before its 30 s',
                 r.status === 0 && took < 20000, `took ${took} ms, status ${r.status}`);
             check('  and the result says the pipes were held', r.stdioHeld === true, JSON.stringify(r));
+        }
+    }
+    // Execute the real supervisor with a simulated POSIX process table. This
+    // checks TERM refusal and PID recycling on Windows without claiming a
+    // Linux runtime check. Only the OS boundary is replaced.
+    for (const recycle of [false, true]) {
+        const root = 2000001, middle = 2000002, leaf = 2000003, stranger = 2000004;
+        const started = Date.now();
+        const born = Math.floor((started + 2000) / 1000) * 1000;
+        const rows = new Map([
+            [root, { parent: 0, born }], [middle, { parent: root, born }],
+            [leaf, { parent: middle, born }], [stranger, { parent: 0, born }],
+            [process.pid, { parent: 0, born: born - 10000 }],
+        ]);
+        const signals = [];
+        let snapshots = 0, recycled = false;
+        const send = (pid, signal) => {
+            signals.push({ pid, signal, at: Date.now() });
+            if (recycle && pid === leaf && signal === 'SIGTERM' && !recycled) {
+                recycled = true;
+                rows.set(leaf, { parent: 0, born: born + 10000 });
+            } else if (signal === 'SIGKILL') rows.delete(pid);
+        };
+        const module = { exports: {} };
+        const context = vm.createContext({ module, Buffer, setTimeout, clearTimeout,
+            process: { pid: process.pid, platform: 'linux', env: {}, kill: send },
+            require(name) {
+                if (name !== 'node:child_process') throw new Error('Unexpected supervisor dependency: ' + name);
+                return { spawn() {
+                    snapshots++;
+                    const child = new EventEmitter();
+                    child.stdout = new EventEmitter(); child.stderr = new EventEmitter(); child.kill = () => {};
+                    setImmediate(() => {
+                        child.stdout.emit('data', [...rows].map(([pid, row]) =>
+                            `${pid} ${row.parent} S ${new Date(row.born).toUTCString()}`).join('\n'));
+                        child.emit('close', 0);
+                    });
+                    return child;
+                } };
+            },
+        });
+        vm.runInContext(fs.readFileSync(TREE_HELPER, 'utf8'), context, { filename: TREE_HELPER });
+        const tree = module.exports.trackTree(root, started);
+        let error;
+        try { await tree.terminate(); } catch (e) { error = e; } finally { tree.stop(); }
+        const forced = signals.filter(row => row.signal === 'SIGKILL');
+        check(`POSIX simulation ${recycle}: live owner with an OS clock offset is supervised`, !error, error && error.message);
+        check(`POSIX simulation ${recycle}: TERM refusal escalates and completes within 2500 ms`,
+            forced.length > 0 && Date.now() - started < 2500
+                && forced[0].at - signals[0].at >= 400,
+            JSON.stringify({ snapshots, forced, signals: signals.slice(0, 3) }));
+        check(`POSIX simulation ${recycle}: signals start with deepest descendant`,
+            signals.slice(0, 3).map(row => row.pid).join(',') === [leaf, middle, root].join(','));
+        check(`POSIX simulation ${recycle}: unrelated process survives`,
+            rows.has(stranger) && !signals.some(row => row.pid === stranger));
+        if (recycle) {
+            check('PID recycling: replacement leaf survives and receives no KILL',
+                recycled && rows.get(leaf)?.born === born + 10000 && !forced.some(row => row.pid === leaf));
+        } else {
+            check('POSIX simulation: every original owner is gone before resolve',
+                snapshots > 1 && ![root, middle, leaf].some(pid => rows.has(pid)));
         }
     }
 }

@@ -73,12 +73,16 @@ function snapshot() {
   });
 }
 
-function remember(rows, owned, root, started, launched, exitedAt) {
+function remember(rows, owned, root, started, exitedAt) {
   // Root may have exited while a Windows pipe holder still retains its parent ID.
   const precision = process.platform === 'win32' ? 0 : 1000;
   const rootRow = rows.find(row => row.pid === root);
-  const rootValid = !rootRow || (rootRow.born >= started - precision && rootRow.born <= launched);
-  const parents = new Map(rootValid ? [[root, started - precision]] : []);
+  // While the ChildProcess has not emitted exit its process handle owns this
+  // PID. Learn the OS identity from it, rather than comparing clocks from
+  // Node and GetProcessTimes. After exit an unfamiliar root PID is refused.
+  const rootValid = !rootRow || exitedAt === Infinity || owned.get(root)?.born === rootRow.born;
+  const rootBorn = rootValid && rootRow ? rootRow.born : started - precision;
+  const parents = new Map(rootValid ? [[root, rootBorn]] : []);
   for (const row of owned.values()) {
     const current = rows.find(r => r.pid === row.pid);
     if (!current || current.born === row.born) parents.set(row.pid, row.born);
@@ -88,8 +92,8 @@ function remember(rows, owned, root, started, launched, exitedAt) {
     changed = false;
     for (const row of rows) {
       if (row.pid === process.pid || owned.has(row.pid)) continue;
-      const floor = row.pid === root && rootValid ? started - precision : parents.get(row.parent);
-      const ceiling = row.pid === root ? launched : row.parent === root ? exitedAt : Infinity;
+      const floor = row.pid === root && rootValid ? rootBorn : parents.get(row.parent);
+      const ceiling = row.parent === root ? exitedAt : Infinity;
       if (floor !== undefined && row.born >= floor && row.born <= ceiling) {
         owned.set(row.pid, row);
         parents.set(row.pid, row.born);
@@ -99,13 +103,13 @@ function remember(rows, owned, root, started, launched, exitedAt) {
   }
 }
 
-function trackTree(root, started, launched) {
+function trackTree(root, started) {
   const owned = new Map();
   let stopped = false, active = null, poll = null;
   let exitedAt = Infinity;
   const scan = () => {
     if (active) return active;
-    active = snapshot().then(rows => { remember(rows, owned, root, started, launched, exitedAt); return rows; })
+    active = snapshot().then(rows => { remember(rows, owned, root, started, exitedAt); return rows; })
       .finally(() => { active = null; });
     return active;
   };

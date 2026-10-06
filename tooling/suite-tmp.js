@@ -123,8 +123,8 @@ function spawnSuiteSync(file, args, options, opts) {
 
 // The async twin of spawnSuiteSync, for a runner that reads the child's output
 // as it arrives (test-all.js tees it to its own stdout and a per-suite log).
-// Resolves once the child has closed AND its temp root is gone, never before,
-// so a caller that starts the next suite on resolve never overlaps cleanup.
+// Resolves after child completion or bounded shutdown and attempted cleanup.
+// Tree termination settles before fixtures are removed or a caller advances.
 //
 // The result has spawnSync's shape: status, signal, error (ETIMEDOUT on a
 // timeout kill, the spawn error otherwise), pid, plus tmpRoot and tmpRemoved.
@@ -132,8 +132,8 @@ function spawnSuiteSync(file, args, options, opts) {
 //
 // 'close' waits for every holder of the child's pipes, and a suite that leaves
 // a grandchild holding them would hold the runner forever. So after 'exit' the
-// pipes get opts.closeGraceMs (default 5000) to drain, then they are destroyed
-// and the result says `stdioHeld: true`.
+// pipes get opts.closeGraceMs (default 5000) to drain, then their owned holders
+// are stopped before the streams are destroyed and `stdioHeld: true` is set.
 function spawnSuite(file, args, options, opts) {
     const { spawn } = require('child_process');
     const o = opts || {};
@@ -204,7 +204,7 @@ function spawnSuite(file, args, options, opts) {
             return;
         }
         res.pid = child.pid;
-        if (child.pid !== undefined) tree = trackTree(child.pid, started, Date.now());
+        if (child.pid !== undefined) tree = trackTree(child.pid, started);
         if (child.stdout && o.onStdout) child.stdout.on('data', o.onStdout);
         if (child.stderr && o.onStderr) child.stderr.on('data', o.onStderr);
         if (timeout > 0) {
