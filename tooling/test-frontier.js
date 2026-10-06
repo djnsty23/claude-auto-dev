@@ -506,6 +506,26 @@ function cliCases(shas) {
     check('65. a bare --quiet-wait means 10 minutes and a quiet machine starts at once, and a non-number is a usage error',
         bfb && bfb.quietWaitMin === 10 && rb && rb.load.quietWait && rb.load.quietWait.waitedSec === 0 && rb.load.class === 'quiet'
         && junk.json && junk.json.error && junk.json.error.code === 'usage', [bfb && bfb.quietWaitMin, rb && rb.load, junk.json]);
+
+    // a batch id is a one-second stamp: plant a batch under every id the next
+    // seconds could mint, and the new batch must take a suffix, not overwrite one
+    const p2 = (n) => String(n).padStart(2, '0');
+    const stampAt = (d) => `${p2(d.getUTCDate())}${p2(d.getUTCHours())}${p2(d.getUTCMinutes())}${p2(d.getUTCSeconds())}`;
+    const t0 = Date.now();
+    const planted = [0, 1, 2, 3, 4].map((s) => {
+        const id = `B-${stampAt(new Date(t0 + s * 1000))}`;
+        const file = path.join(DATA, 'batches', `${id}.json`);
+        const text = JSON.stringify({ id, state: 'done', items: [], planted: true }) + '\n';
+        fs.writeFileSync(file, text);
+        return { id, file, text };
+    });
+    const dup = run(['batch', '--tasks', 'TX', '--variants', 'V1', '--account', 'testacct'], { FAKE_MODE: 'fix' });
+    const dupId = dup.json && dup.json.value && dup.json.value.batch;
+    const bfd = batchDone(dupId, 240);
+    const intact = planted.every((p) => { try { return fs.readFileSync(p.file, 'utf8') === p.text; } catch { return false; } });
+    check('66. a batch created in the second of an existing batch takes a suffix and leaves the other file whole',
+        typeof dupId === 'string' && /^B-[0-9]{8}-[0-9]+$/.test(dupId) && planted.some((p) => dupId.startsWith(`${p.id}-`))
+        && bfd && bfd.id === dupId && bfd.state === 'done' && intact, [dupId, bfd && bfd.state, intact, dup.json || dup.stderr]);
 }
 
 // ---------------------------------------------------------------- main
