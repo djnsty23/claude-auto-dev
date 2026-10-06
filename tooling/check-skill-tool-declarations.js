@@ -167,12 +167,15 @@ const QUOTE_CUES = [
     'reproduced', 'unedited',
 ];
 
-function walk(dir, out = []) {
+function walk(dir, out = [], errors = []) {
     let entries;
-    try { entries = fs.readdirSync(dir, { withFileTypes: true }); } catch { return out; }
+    try { entries = fs.readdirSync(dir, { withFileTypes: true }); } catch (e) {
+        errors.push({ file: dir, code: e.code || 'unreadable' });
+        return out;
+    }
     for (const e of entries) {
         const p = path.join(dir, e.name);
-        if (e.isDirectory()) walk(p, out);
+        if (e.isDirectory()) walk(p, out, errors);
         else if (e.name === 'SKILL.md') out.push(p);
     }
     return out;
@@ -356,8 +359,13 @@ function scanFile(file) {
 }
 
 function scan() {
-    const files = walk(PLUGINS);
-    return { files, results: files.map(scanFile) };
+    const errors = [];
+    const files = walk(PLUGINS, [], errors);
+    const results = [];
+    for (const file of files) {
+        try { results.push(scanFile(file)); } catch (e) { errors.push({ file, code: e.code || 'unreadable' }); }
+    }
+    return { files, results, errors };
 }
 
 // --------------------------------------------------------------------------
@@ -480,7 +488,7 @@ function main() {
     const argv = process.argv.slice(2);
     if (argv.includes('--selftest')) return selftest();
 
-    const { files, results } = scan();
+    const { files, results, errors } = scan();
     const withDecl = results.filter((r) => r.declared !== null);
     const noDecl = results.filter((r) => r.declared === null);
     const refs = results.flatMap((r) => r.refs);
@@ -495,9 +503,10 @@ function main() {
         + refs.filter((r) => r.negative).length + ' vetoed as mentions');
     console.log('  ' + findings.length + ' flagged\n');
 
+    for (const e of errors) console.error(`NOT CHECKED: ${e.file} (${e.code})`);
     if (files.length === 0) {
         console.error('read 0 skills, so nothing was checked');
-        return 1;
+        return 2;
     }
 
     if (argv.includes('--all')) {
@@ -528,8 +537,8 @@ function main() {
     console.log('defects sat in that blind spot on 2026-09-01 (see the header). A clean');
     console.log('run means no DETECTABLE mandate is undeclared, not that none exists.');
 
-    if (argv.includes('--advisory')) return 0;
-    return findings.length ? 1 : 0;
+    if (findings.length && !argv.includes('--advisory')) return 1;
+    return errors.length ? 2 : 0;
 }
 
 if (require.main === module) process.exit(main());
