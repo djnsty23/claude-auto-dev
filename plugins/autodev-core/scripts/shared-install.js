@@ -94,8 +94,15 @@ function git(cwd, args) {
     return { ok: r.status === 0, out: (r.stdout || '').trim(), err: (r.stderr || '').trim() };
 }
 
+// One spelling per directory: macOS /var is /private/var and a Windows temp path can be an 8.3 short
+// name, while git reports the long real path. Only the native realpath expands 8.3 names.
+const canon = (p) => {
+    const r = path.resolve(p);
+    try { return fs.realpathSync.native(r); } catch { return r; }
+};
+
 const sameDir = (a, b) => {
-    const n = (p) => path.resolve(p).replace(/\\/g, '/').replace(/\/+$/, '');
+    const n = (p) => canon(p).replace(/\\/g, '/').replace(/\/+$/, '');
     return process.platform === 'win32' ? n(a).toLowerCase() === n(b).toLowerCase() : n(a) === n(b);
 };
 
@@ -174,7 +181,7 @@ function removeTree(dir) {
 function relink(src, dest, mainTop, wtTop) {
     const raw = fs.readlinkSync(src);
     const abs = path.resolve(path.dirname(src), raw);
-    const rel = path.relative(mainTop, abs);
+    const rel = path.relative(canon(mainTop), canon(abs));
     const inside = rel && !rel.startsWith('..') && !path.isAbsolute(rel);
     const target = inside ? path.join(wtTop, rel) : abs;
     let isDir = false;

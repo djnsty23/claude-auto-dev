@@ -86,8 +86,8 @@ const LOCK = {
 };
 
 /** A main checkout with an npm install written by hand, and one linked worktree. */
-function fixture(tag) {
-    const base = fs.mkdtempSync(path.join(os.tmpdir(), `si${tag}`));
+function fixture(tag, root = os.tmpdir()) {
+    const base = fs.mkdtempSync(path.join(root, `si${tag}`));
     const main = path.join(base, 'main');
     fs.mkdirSync(main);
     sh(main, 'git', ['init', '-q', '-b', 'main']);
@@ -154,6 +154,26 @@ const payload = (command, cwd) => JSON.stringify({ tool_name: 'Bash', tool_input
     check('1l. a cache written in the worktree does not reach the main checkout',
         fs.readFileSync(path.join(fx.nm, '.vite', 'deps', '_metadata.json'), 'utf8') === '{"hash":"main"}\n');
     cleanup(fx);
+}
+
+// 1m. The checkout is reached through an alias (macOS /var is /private/var, a Windows runner's temp is an
+// 8.3 short name), so a link target spells the main checkout differently from what git reports. It must
+// still be recognised as inside the main checkout and repointed into the worktree.
+{
+    const real = fs.mkdtempSync(path.join(os.tmpdir(), 'sialias'));
+    const alias = real + '-via';
+    fs.symlinkSync(real, alias, 'junction');
+    const fx = fixture('m', alias);
+    const r = cli('link', fx.wt);
+    const wsLink = path.join(fx.wtNm, '@ws', 'a');
+    let into = false;
+    try { into = fs.realpathSync.native(wsLink).toLowerCase() === fs.realpathSync.native(path.join(fx.wt, 'packages', 'a')).toLowerCase(); }
+    catch { /* no link: the check below fails */ }
+    check('1m. under an aliased path, a workspace junction still points into the worktree', r.exit === 0 && into,
+        `${r.exit} ${r.stdout}${r.stderr}`);
+    cleanup(fx);
+    try { fs.unlinkSync(alias); } catch { /* the runner removes the temp root */ }
+    try { fs.rmSync(real, { recursive: true, force: true }); } catch { /* the runner removes the temp root */ }
 }
 
 // 2. PLANTED A: the worktree's lockfile diverges before any link.
