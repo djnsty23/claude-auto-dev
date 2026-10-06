@@ -122,10 +122,24 @@ missing and both fail in ways that look like a bug in your change:
   Keep them ignored and do not print values. Do not import production targets
   merely because a sibling env file exists. Missing configuration is a setup
   gap, not evidence the implementation is broken.
-- **`node_modules`, but only if the repo has dependencies.** A worktree cut from
-  an older base, or reusing the parent's install, surfaces import errors for
-  dependencies added since. Count them before installing: a repo with zero deps
-  needs no install, and running one anyway is a minute spent per worktree.
+- **`node_modules`, but only if the repo has dependencies.** Link it first:
+
+  ```bash
+  node "${CLAUDE_PLUGIN_ROOT}/scripts/shared-install.js" link .claude/worktrees/<slug>
+  ```
+
+  When the worktree's `package-lock.json` is byte-equal to the main checkout's
+  and the main install matches it, this hardlinks the main checkout's
+  node_modules in about 10 to 20 seconds, at a few MB of disk instead of a
+  full install. Next.js, Vite, Vitest and Playwright resolve through it. Where a
+  lockfile differs, or the main install is stale, it creates nothing and prints
+  the `npm ci` that directory needs: run exactly that. A worktree cut from an
+  older base surfaces import errors for dependencies added since, and that is
+  the case it refuses.
+- **Never install into a shared tree.** A hardlink rewritten in place changes
+  the main checkout's copy too. The install guard denies `npm install`, `npm ci`,
+  `prisma generate` and the like there, and names the `unshare` command to run
+  first. `npm run <script>` that installs is the one case it cannot see.
 
 Verify required local configuration through the application’s safe startup/check
 without printing values. An env-file count does not prove configuration is
@@ -161,3 +175,11 @@ path. Check untracked files as well as git status for tracked edits. A clean
 index does not mean the directory is disposable. A stale worktree holds
 a branch checked out, so the next session that tries to use that branch gets a
 refusal it has no context for.
+
+A worktree left behind is not lost: `worktree-reap.js` removes the ones whose
+work landed, once they are clean and idle, and keeps every other one with the
+reason. A dry run lists them:
+
+```bash
+node "${CLAUDE_PLUGIN_ROOT}/scripts/worktree-reap.js" --repo "$(git rev-parse --path-format=absolute --git-common-dir)/.."
+```

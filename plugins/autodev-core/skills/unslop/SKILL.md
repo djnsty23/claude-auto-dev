@@ -66,7 +66,8 @@ source, reviewed like code and counted as `markedOk`.
 Use the product's own worktree, never its live main tree.
 
 1. **Serve it locally.** `git worktree add .claude/worktrees/unslop-<date> -b chore/unslop-<date> origin/main`,
-   copy `.env.local` in, install, start the dev server (or a prod build) on a free port.
+   copy `.env.local` in, link its dependencies (`node "${CLAUDE_PLUGIN_ROOT}/scripts/shared-install.js" link .claude/worktrees/unslop-<date>`, which hardlinks
+   the main checkout's node_modules or prints the `npm ci` to run), start the dev server (or a prod build) on a free port.
    **The sweep refuses any base that is not localhost, 127.0.0.1, [::1], *.localhost or *.test**,
    because it may sign in with a test login.
 2. **See what it will sweep**, and which test-login variable names exist:

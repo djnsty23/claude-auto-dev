@@ -75,33 +75,9 @@ const STORE = process.env.SESSION_SWEEP_STORE || path.join(
 // never in this repo — this one is public. One substring per line, '#' comments.
 const DENYLIST_FILE = path.join(claudePaths.configDir(), 'session-sweep-denylist.txt');
 
-// Gitignored paths a build, an install or this harness writes back. Anything
-// ignored and NOT on this list exists only in that worktree, and
-// archive_session deletes it with the worktree. Matched against the path
-// `git status --ignored` prints, which ends in '/' for a directory and may sit
-// under a package directory (`site/.next/`). Keep this list narrow: a miss here
-// is clutter (a worktree kept a little longer), a false entry is loss.
-//
-// The harness entries are its own throttle, flag and scratch files, rewritten
-// on the next run. `.claude/reports/`, `.claude/archives/`, `.claude/handoffs/`
-// and the rest of `.claude/` are deliberately NOT here: a report or a prd
-// archive in a worktree is the only copy, and naming it is the point.
-// [measured 2026-09-16] over 30 live session records, the unfiltered list
-// flagged five, three of them for hundreds of `.claude/COMMIT_MSG_v*.txt`
-// scratch files beside the one `.claude/archives/` that was the real finding.
-const REGENERABLE = [
-  /(^|\/)node_modules\//, /(^|\/)\.next\//, /(^|\/)dist\//, /(^|\/)build\//, /^out\//,
-  /(^|\/)coverage\//, /(^|\/)\.turbo\//, /(^|\/)\.vercel\//, /(^|\/)\.cache\//,
-  /(^|\/)__pycache__\//, /\.pyc$/, /(^|\/)\.pytest_cache\//, /(^|\/)\.venv\//,
-  /(^|\/)target\//, /(^|\/)\.parcel-cache\//, /(^|\/)playwright-report\//,
-  /(^|\/)test-results\//, /(^|\/)tsconfig\.tsbuildinfo$/, /(^|\/)next-env\.d\.ts$/,
-  /(^|\/)\.DS_Store$/, /(^|\/)Thumbs\.db$/,
-  /^\.claude\/memory-sessions\//, /^\.claude\/\.claude\//, /^\.claude\/types\//,
-  /^\.claude\/knowledge-surfaced$/, /^\.claude\/panel-deny\.json$/,
-  /^\.claude\/settings\.local\.json$/, /^\.claude\/pre-compact-state\.json$/,
-  /^\.claude\/auto-(active|exit|idle-triggered)$/, /^\.claude\/\.typecheck-pending(\.\d+\.claim)?$/,
-  /^\.claude\/memory-session-id$/, /^\.claude\/commit-msg\.txt$/, /^\.claude\/COMMIT_MSG_[^/]*\.txt$/,
-];
+// What counts as regenerable residue lives in worktree-residue.js, shared
+// with worktree-reap.js so the sweep and the reaper agree on what is loss.
+const { REGENERABLE } = require('./worktree-residue.js');
 
 const args = process.argv.slice(2);
 const flag = (n) => args.includes(n);

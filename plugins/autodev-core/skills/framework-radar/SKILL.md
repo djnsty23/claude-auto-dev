@@ -154,7 +154,8 @@ Never experiment in the shared checkout. Fetch the remote, verify the exact
 default-branch commit, and create a dedicated worktree and `<agent>/radar-*`
 branch from that commit INSIDE the repo. `<agent>` is `claude` when running
 under Claude Code and `codex` under Codex:
-`git -C <repo> worktree add .claude/worktrees/radar-<topic> -b <agent>/radar-<topic> <sha>`.
+`git -C <repo> worktree add .claude/worktrees/radar-<topic> -b <agent>/radar-<topic> <sha>`,
+then `node "${CLAUDE_PLUGIN_ROOT}/scripts/shared-install.js" link <repo>/.claude/worktrees/radar-<topic>` for its dependencies.
 Never place it beside the checkout, where it becomes a stray in the directory
 holding every other repo. Logs, diffs and exit files go in the session
 scratchpad or `~/.claude/autodev/reports/<run>/`, never in that directory

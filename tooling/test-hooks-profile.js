@@ -69,6 +69,9 @@ const GUARDING = [
     // Keeps the session's env files under the Bash command cap. Past it every
     // Bash call fails, so a switch would let a session turn off its own shell.
     'session-env-dedupe.js',
+    // Refuses a package install in a worktree whose node_modules is hardlinked to the
+    // main checkout's. A switch would let an install rewrite the main checkout's files.
+    'shared-install-guard.js',
 ];
 
 // ---------------------------------------------------------------- manifest

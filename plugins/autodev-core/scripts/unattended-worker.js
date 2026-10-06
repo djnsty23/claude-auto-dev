@@ -98,6 +98,10 @@ const { scriptPlacement, readLedger: readHeadlessLedger } = require('./headless-
 const crypto = require('node:crypto');
 const { spawnSync } = require('node:child_process');
 
+// STEP 0 links the new worktree's node_modules to the main checkout's. The path
+// is this install's own copy, so the prompt names a script that exists.
+const SHARED_INSTALL = path.join(__dirname, 'shared-install.js');
+
 const USAGE = [
     'Usage: node unattended-worker.js brief --repo <dir> --slug <topic> --brief-file <md> --return <address> [--report <file>] [--base origin/main] [--task-id <id>] [--title <text>] [--ledger <file>]',
     '       node unattended-worker.js record --task-id <id> --session <local_uuid> [--ledger <file>]',
@@ -264,8 +268,10 @@ function composePrompt({ repo, worktree, branch, base, taskId, returnTo, report,
         `git -C "${r}" worktree add "${w}" -b "${branch}" ${base}`,
         `cd "${w}"`,
         `test "$(git rev-parse --show-toplevel)" = "${w}" || { echo "STEP 0 FAILED: not inside ${w}"; exit 1; }`,
+        `node "${slashes(SHARED_INSTALL)}" link "${w}" || true`,
         '```',
         `Work ONLY inside ${w}, on branch ${branch}. Do not edit, commit, check out or stash in the checkout this session opened in.`,
+        'The `link` line gives the worktree the main checkout\'s node_modules as hardlinks when the lockfiles match, in seconds and with no extra disk. Where it prints `run: ... npm ci`, that directory needs its own install: run exactly that before building. Before any install of your own in a shared tree, run the `unshare` command the install guard names.',
         `Every later shell command starts with \`cd "${w}" && \`: the shell's working directory is reset to the checkout this session opened in between commands, so a bare command after STEP 0 runs in the shared checkout. Before any commit, push or merge, print \`git rev-parse --show-toplevel\` in the same command and check it says ${w}.`,
         `If STEP 0 fails, do no other work: write the failing command and its output to ${rep}, then stop. An unattended run cannot use SendMessage.`,
         `Any further worktree goes at ${r}/.claude/worktrees/<name>, never beside the repo.${scratch ? ` Logs, diffs, exit files and other scratch output go under ${slashes(scratch)}, never in the directory that holds the checkouts.` : ''}`,
