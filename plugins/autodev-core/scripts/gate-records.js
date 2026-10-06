@@ -22,6 +22,9 @@
  *   full-gate.runs/<id>.json a run's EXECUTION JOURNAL: its chain root, every
  *                            descendant observed with native pid, parent and
  *                            creation time, and each attempt's outcome.
+ *   full-gate.runs/<id>.steps.jsonl  a run's STEP RECORDS: a line as each
+ *                            chain step starts and one as it ends, so a gate
+ *                            whose tree died still names the step it died in.
  *   full-gate.leases/<key>.json  a WORKTREE LEASE: run id, token, canonical
  *                            worktree, owner and execution identities, heartbeat
  *                            and state. Written before a gate's chain starts.
@@ -366,6 +369,99 @@ function pruneRuns(base, maxAgeMs = 14 * 86400000) {
 }
 
 // ---------------------------------------------------------------------------
+// Step records: `full-gate.runs/<id>.steps.jsonl`, one line appended as each
+// chain step starts and one as it ends. `[measured 2026-10-06]` a detached
+// gate lost its process tree mid check:suites and left no exit line and no
+// kill in any log, so nothing said which step it died in. A start line with no
+// end line is that answer: the step was running when the tree died.
+// ---------------------------------------------------------------------------
+
+function stepsPath(base, runId) { return runPath(base, runId).replace(/\.json$/, '.steps.jsonl'); }
+
+/**
+ * Appends one step event ({ event: 'start' | 'end', index, step, pid, ... })
+ * and flushes it to disk before returning, so a kill right after the call
+ * still leaves the line. Throws on failure; the launcher logs it.
+ */
+function appendStep(base, runId, event) {
+    const file = stepsPath(base, runId);
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    const fd = fs.openSync(file, 'a');
+    try {
+        fs.writeSync(fd, `${JSON.stringify({ schema: SCHEMA, runId, ...event })}\n`);
+        try { fs.fsyncSync(fd); } catch { /* a filesystem without fsync still has the line */ }
+    } finally { fs.closeSync(fd); }
+}
+
+/**
+ * { state: 'absent' | 'ok' | 'malformed', steps, bad }: one entry per step
+ * that started, { index, of, step, pid, startUtc, endUtc, exit, signal, ended,
+ * worktree }, in start order. A line that does not parse is counted in `bad`
+ * and skipped: the last line of a file whose writer died can be torn.
+ */
+function readSteps(base, runId) {
+    let text;
+    try { text = fs.readFileSync(stepsPath(base, runId), 'utf8'); } catch (e) {
+        return e.code === 'ENOENT' ? { state: 'absent', steps: [], bad: 0 } : { state: 'malformed', steps: [], bad: 0, error: e.code || e.message };
+    }
+    const steps = [];
+    let bad = 0;
+    for (const line of text.split(/\r?\n/)) {
+        if (!line.trim()) continue;
+        let e;
+        try { e = JSON.parse(line); } catch { bad++; continue; }
+        if (!e || typeof e !== 'object' || !Number.isInteger(e.index) || typeof e.step !== 'string') { bad++; continue; }
+        if (e.event === 'start') {
+            steps.push({ index: e.index, of: Number.isInteger(e.of) ? e.of : null, step: e.step, pid: e.pid ?? null, startUtc: e.startUtc || null, endUtc: null,
+                         exit: null, signal: null, ended: false, worktree: e.worktree || null, token: e.token ?? null });
+        } else if (e.event === 'end') {
+            const s = steps.filter((x) => x.index === e.index && !x.ended).pop();
+            if (!s) { bad++; continue; }
+            Object.assign(s, { endUtc: e.endUtc || null, exit: Number.isInteger(e.exit) ? e.exit : null, signal: e.signal || null, ended: true });
+        } else bad++;
+    }
+    return { state: 'ok', steps, bad };
+}
+
+/** The step that started and never recorded its end, or null. Only the last can be open. */
+function openStep(steps) {
+    const last = Array.isArray(steps) && steps.length ? steps[steps.length - 1] : null;
+    return last && !last.ended ? last : null;
+}
+
+/** One canonical path is the other, or contains it: a worker's cwd can sit inside the tree its gate ran in. */
+function sameTree(a, b) {
+    if (typeof a !== 'string' || typeof b !== 'string' || !a || !b) return false;
+    const inside = (x, y) => x.startsWith(y.endsWith(path.sep) ? y : y + path.sep);
+    return a === b || inside(a, b) || inside(b, a);
+}
+
+/**
+ * Every run with an open step whose worktree is `worktree` (or contains it, or
+ * sits inside it) and which started
+ * at or after `sinceMs`: [{ runId, ...step }], newest first. For a reader that
+ * knows the worktree and when its gate began but not the run id, like
+ * `headless-worker.js settle --lost`.
+ */
+function findOpenSteps(base, { worktree, sinceMs = 0 }) {
+    let names = [];
+    try { names = fs.readdirSync(runsDir(base)); } catch { return []; }
+    const out = [];
+    for (const name of names) {
+        if (!name.endsWith('.steps.jsonl')) continue;
+        const runId = name.slice(0, -'.steps.jsonl'.length);
+        let r;
+        try { r = readSteps(base, runId); } catch { continue; }
+        const open = openStep(r.steps);
+        if (!open || !sameTree(open.worktree, worktree)) continue;
+        const at = Date.parse(open.startUtc || '');
+        if (!Number.isFinite(at) || at < sinceMs) continue;
+        out.push({ runId, ...open });
+    }
+    return out.sort((a, b) => Date.parse(b.startUtc) - Date.parse(a.startUtc));
+}
+
+// ---------------------------------------------------------------------------
 // Worktree leases.
 // ---------------------------------------------------------------------------
 
@@ -450,6 +546,7 @@ module.exports = {
     SCHEMA, ACTIVE_LEASE, parseMeta, metaLine, admissionPath, fencePath, bootCachePath, runsDir, leasesDir, leasePath,
     withAdmission, mintToken, readLaneLock, readLaneLocks, readTicketRecords, readRun, updateRun, mergeDescendants,
     pruneRuns, withWorktreeMutex, readLease, readLeases, writeLease, writeJsonAtomic, readJson, renameRetry, tryCreate,
+    stepsPath, appendStep, readSteps, openStep, findOpenSteps,
 };
 
 if (require.main === module) {
