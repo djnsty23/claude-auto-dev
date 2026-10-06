@@ -197,6 +197,41 @@ async function main() {
         check('A3. the receipt passes on the PASS line in UTF-8, CRLF and UTF-16LE', pass1 && crlf && u16, `utf8 ${pass1}, crlf ${crlf}, utf16 ${u16}`);
         check('A4. the receipt refuses another head, a last verdict that is not PASS, no verdict and no file',
             wrongHead && red && unfinished && missing, `head ${wrongHead}, red ${red}, unfinished ${unfinished}, missing ${missing}`);
+
+        // A product gate under the wrapper: its own summary table, a status
+        // line naming another sha, and the wrapper's closing exit line.
+        const table = (exit) => `gate: status base ${OLD} clean\nlint exit 0 12.3\ntest exit ${exit} 88.1\nbuild exit 0 41.0\n`;
+        const wrap = (h, exit, closing = `gate-receipt: exit ${exit}`) => `${h}\n${table(exit)}${closing}\n`;
+        const why = (name, text) => ml.receiptProblem(f(name, text), HEAD) || '';
+        const prodPass = ml.receiptProblem(f('w-pass.log', wrap(HEAD, 0)), HEAD) === null;
+        const prodU16 = ml.receiptProblem(f('w-u16.log', Buffer.concat([Buffer.from([0xff, 0xfe]),
+            Buffer.from(wrap(HEAD, 0).replace(/\n/g, '\r\n'), 'utf16le')])), HEAD) === null;
+        const harnessWrapped = ml.receiptProblem(f('w-harness.log',
+            `${HEAD}\n> gate\ngate-lock: verdict PASS (exit 0), the chain finished\n${ml.EXIT_PASS}\n`), HEAD) === null;
+        const prodRetry = ml.receiptProblem(f('w-retry.log', wrap(OLD, 1) + wrap(HEAD, 0)), HEAD) === null;
+        check('A4c. a wrapper receipt passes for a product gate (UTF-8, UTF-16LE CRLF), a wrapped harness gate and a retry that passed',
+            prodPass && prodU16 && harnessWrapped && prodRetry,
+            `product ${prodPass}, utf16 ${prodU16}, harness wrapped ${harnessWrapped}, retry ${prodRetry}`);
+
+        // Planted failures, one per refusal the wrapper keeps.
+        const otherHead = /does not name head/.test(why('w-other.log', wrap(OLD, 0)));
+        const firstShaOther = /starts with 8{40}, not a{40}/.test(why('w-first.log', `${OLD}\nHEAD is ${HEAD}\n${table(0)}${ml.EXIT_PASS}\n`));
+        const headEarlierRun = /starts with 8{40}/.test(why('w-earlier.log', wrap(HEAD, 1) + wrap(OLD, 0)));
+        const redFinal = /ends with "gate-receipt: exit 1", not "gate-receipt: exit 0"/.test(why('w-red.log', wrap(HEAD, 1)));
+        const crashFinal = /ends with "gate-receipt: exit -1073740791"/.test(why('w-crash.log', wrap(HEAD, 0, 'gate-receipt: exit -1073740791')));
+        const emptyExit = /ends with "gate-receipt: exit"/.test(why('w-empty.log', wrap(HEAD, 0, 'gate-receipt: exit ')));
+        const redAfterPass = /ends with "gate-receipt: exit 1"/.test(why('w-redafter.log', wrap(HEAD, 0) + wrap(HEAD, 1)));
+        const trailingRun = /goes on after its last verdict/.test(why('w-trail.log', `${wrap(HEAD, 0)}${HEAD}\nlint exit 0 12.3\n`));
+        const trailingLock = /goes on after its last verdict/.test(why('w-trail2.log', `${wrap(HEAD, 0)}gate-lock: lock taken\n`));
+        const pipedExit = /also printed "gate-lock: verdict FAIL \(exit 1\)"/.test(why('w-pipe.log',
+            `${HEAD}\ngate-lock: verdict FAIL (exit 1)\n${ml.EXIT_PASS}\n`));
+        const quoted = /no "gate-receipt:" line/.test(why('w-quoted.log', `${HEAD}\necho "gate-receipt: exit 0"\n`));
+        check('A4d. a wrapper receipt refuses another head, another first sha, a head only in an earlier run, a red, crashed or empty exit, a later red run, a trailing unfinished run, a red verdict under exit 0 and a quoted exit line',
+            otherHead && firstShaOther && headEarlierRun && redFinal && crashFinal && emptyExit && redAfterPass
+            && trailingRun && trailingLock && pipedExit && quoted,
+            `other head ${otherHead}, first sha ${firstShaOther}, earlier run ${headEarlierRun}, red ${redFinal}, crash ${crashFinal}, `
+            + `empty ${emptyExit}, red after pass ${redAfterPass}, trailing run ${trailingRun}, trailing lock ${trailingLock}, `
+            + `piped ${pipedExit}, quoted ${quoted}`);
     }
 
     {
@@ -316,6 +351,27 @@ async function main() {
         const touched = calls('noreceipt').length;
         check('B9. no --gate-receipt is refused before gh or the lock is touched', r.status === 1 && touched === 0
             && /no --gate-receipt/.test(r.stderr) && lockGone(), `exit ${r.status}, gh calls ${touched}`);
+    }
+    {
+        // The product receipt as PowerShell's *> writes it: UTF-16LE, CRLF.
+        const u16 = (text) => Buffer.concat([Buffer.from([0xff, 0xfe]), Buffer.from(text.replace(/\n/g, '\r\n'), 'utf16le')]);
+        const pass = path.join(root, 'product-pass.log');
+        const red = path.join(root, 'product-red.log');
+        fs.writeFileSync(pass, u16(`${HEAD}\nlint exit 0 12.3\ntest exit 0 88.1\ngate-receipt: exit 0\n`));
+        fs.writeFileSync(red, u16(`${HEAD}\nlint exit 0 12.3\ntest exit 1 88.1\ngate-receipt: exit 1\n`));
+        const run = (file, who) => {
+            const r = spawnSync(process.execPath, [SUBJECT, 'merge', '--repo', REPO, '--pr', '7', '--head', HEAD, '--gate-receipt', file],
+                { encoding: 'utf8', env: env(writeState(), who), timeout: 120000, windowsHide: true });
+            return { exit: r.status, out: r.stdout || '', err: r.stderr || '' };
+        };
+        const ok = run(pass, 'product');
+        const merged = calls('product').filter((c) => c.what.startsWith('pr merge')).length;
+        check('B13. a product gate\'s wrapper receipt merges through the lock like a harness receipt',
+            ok.exit === 0 && merged === 1 && /matches the proved tree/.test(ok.out) && lockGone(), detail(ok));
+        const no = run(red, 'productred');
+        const touched = calls('productred').length;
+        check('B14. a product gate\'s red wrapper receipt is refused before gh or the lock is touched',
+            no.exit === 1 && touched === 0 && /ends with "gate-receipt: exit 1"/.test(no.err) && lockGone(), detail(no));
     }
 
     // -----------------------------------------------------------------------

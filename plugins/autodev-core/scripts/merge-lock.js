@@ -45,13 +45,23 @@
  * THE GATE RECEIPT. Neither tooling/gate-lock.js nor full-gate-queue.js writes
  * a machine-readable pass verdict keyed by commit: the lock records only who
  * ran and where, and is renamed on release. So no receipt format is invented
- * here. --gate-receipt is a captured log of the gate on that tree, and it
- * passes when its LAST `gate-lock: verdict` line is
- * `gate-lock: verdict PASS (exit 0)`, the line gate-lock.js prints, the full
- * --head sha appears between that line and the verdict before it, and nothing
- * after it starts another run (a gate-lock line or a sha).
- * Capture one with (bash):
- *   { git rev-parse HEAD; npm run gate; } > receipt.log 2>&1
+ * here. --gate-receipt is a captured log of the gate on that tree. Its last
+ * closing line decides, and nothing after that line may start another run (a
+ * `gate-lock:` or `gate-receipt:` line, or a sha). Two closing lines count:
+ *   - `gate-lock: verdict PASS (exit 0)`, which this repo's tooling/gate-lock.js
+ *     prints. The full --head sha must appear between it and the closing line
+ *     before it.
+ *       { git rev-parse HEAD; npm run gate; } > receipt.log 2>&1
+ *   - `gate-receipt: exit 0`, the wrapper any repo's gate can produce. The
+ *     first sha in its run (everything since the `gate-receipt:` line before
+ *     it) must be --head, and every gate-lock verdict inside that run must be
+ *     PASS, since a red verdict under exit 0 means the exit came from a pipe.
+ *     The gate command must be the last command before the echo, never piped:
+ *       bash:  { git rev-parse HEAD; node scripts/gate.mjs; echo "gate-receipt: exit $?"; } > receipt.log 2>&1
+ *       pwsh:  & { git rev-parse HEAD; node scripts/gate.mjs; "gate-receipt: exit $LASTEXITCODE" } *> receipt.log
+ *     In PowerShell the gate must be a native command, which sets
+ *     $LASTEXITCODE. Any other `gate-receipt:` line, an empty exit included,
+ *     is red.
  * A receipt is text, so a hand-written one passes. It stops an honest mistake
  * (merging an ungated or red head), not a forgery.
  *
@@ -91,6 +101,13 @@ const SHA_RE = /^[0-9a-f]{40}$/;
 const REPO_RE = /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/;
 const PASS_LINE = 'gate-lock: verdict PASS (exit 0)';
 const VERDICT_RE = /gate-lock: verdict [A-Z]+ \(exit \d+\)/g;
+// The wrapper's closing line. Any `gate-receipt:` line closes a run, so an
+// empty or odd exit (an unset $LASTEXITCODE, a negative crash code) is red.
+const EXIT_PASS = 'gate-receipt: exit 0';
+const EXIT_RE = /^gate-receipt:[^\r\n]*/gm;
+const SHA_ANY_RE = /\b[0-9a-f]{40}\b/i;
+const WRAPPER_BASH = '{ git rev-parse HEAD; <gate command>; echo "gate-receipt: exit $?"; } > receipt.log 2>&1';
+const WRAPPER_PWSH = '& { git rev-parse HEAD; <gate command>; "gate-receipt: exit $LASTEXITCODE" } *> receipt.log';
 const STALE_MS = 600000;
 const DEFAULT_TIMEOUT_MS = 1800000;
 
@@ -126,26 +143,49 @@ function readText(file) {
 
 /** null when the receipt proves `head`, else why not. */
 function receiptProblem(file, head) {
-    if (!file) return 'no --gate-receipt given. Capture the gate on this tree: { git rev-parse HEAD; npm run gate; } > receipt.log 2>&1';
+    if (!file) return `no --gate-receipt given. Capture the gate on this tree: ${WRAPPER_BASH}`;
     let text;
     try { text = readText(file); } catch (e) { return `cannot read --gate-receipt ${file} (${e.code || e.message})`; }
     const lower = text.toLowerCase();
     if (!lower.includes(head)) return `--gate-receipt ${file} does not name head ${head}`;
-    const found = [...text.matchAll(VERDICT_RE)];
-    if (!found.length) return `--gate-receipt ${file} has no "gate-lock: verdict" line, so the gate did not finish in it`;
-    const last = found[found.length - 1];
-    if (last[0] !== PASS_LINE) return `--gate-receipt ${file} ends with "${last[0]}", not "${PASS_LINE}"`;
-    // A log can hold several runs. The PASS counts only for the run it ended:
-    // the head must appear after the verdict before it, and no run may start
-    // after it.
-    const tail = text.slice(last.index + last[0].length);
-    if (/gate-lock:/.test(tail) || /\b[0-9a-f]{40}\b/i.test(tail)) {
+    const verdicts = [...text.matchAll(VERDICT_RE)].map((m) => ({ kind: 'verdict', index: m.index, raw: m[0], line: m[0] }));
+    const exits = [...text.matchAll(EXIT_RE)].map((m) => ({ kind: 'exit', index: m.index, raw: m[0], line: m[0].trim() }));
+    const marks = [...verdicts, ...exits].sort((a, b) => a.index - b.index);
+    if (!marks.length) {
+        return `--gate-receipt ${file} has no "gate-lock: verdict" line and no "gate-receipt:" line, so the gate did not finish in it`;
+    }
+    const last = marks[marks.length - 1];
+    // A log can hold several runs. The last verdict or exit line counts only
+    // for the run it ended, and no run may start after it.
+    const tail = text.slice(last.index + last.raw.length);
+    if (/gate-lock:|gate-receipt:/.test(tail) || SHA_ANY_RE.test(tail)) {
         return `--gate-receipt ${file} goes on after its last verdict: another run started there and did not finish`;
     }
-    const prev = found[found.length - 2];
-    const from = prev ? prev.index + prev[0].length : 0;
-    if (!lower.slice(from, last.index).includes(head)) {
-        return `--gate-receipt ${file} names ${head} only outside the run that printed the last PASS, so that PASS proves another head`;
+    if (last.kind === 'verdict') {
+        if (last.line !== PASS_LINE) return `--gate-receipt ${file} ends with "${last.line}", not "${PASS_LINE}"`;
+        // The head must appear after the verdict or exit line before it.
+        const prev = marks[marks.length - 2];
+        const from = prev ? prev.index + prev.raw.length : 0;
+        if (!lower.slice(from, last.index).includes(head)) {
+            return `--gate-receipt ${file} names ${head} only outside the run that printed the last PASS, so that PASS proves another head`;
+        }
+        return null;
+    }
+    // The wrapper format: the run is everything since the exit line before it.
+    // A harness gate inside it prints its own verdict first, so that run
+    // reaches back past the verdict to the head the wrapper wrote.
+    if (last.line !== EXIT_PASS) return `--gate-receipt ${file} ends with "${last.line}", not "${EXIT_PASS}"`;
+    const prevExit = exits.filter((m) => m.index < last.index).pop();
+    const run = text.slice(prevExit ? prevExit.index + prevExit.raw.length : 0, last.index);
+    const first = run.match(SHA_ANY_RE);
+    if (!first || first[0].toLowerCase() !== head) {
+        return `--gate-receipt ${file}: the run that printed the last "${EXIT_PASS}" starts with ${first ? first[0] : 'no sha'}, `
+            + `not ${head}, so that exit proves another head. The wrapper writes the head first: ${WRAPPER_BASH}`;
+    }
+    const red = [...run.matchAll(VERDICT_RE)].find((m) => m[0] !== PASS_LINE);
+    if (red) {
+        return `--gate-receipt ${file}: the run that printed "${EXIT_PASS}" also printed "${red[0]}", `
+            + 'so the exit is not the gate\'s. A pipe after the gate command reports the pipe\'s status';
     }
     return null;
 }
@@ -384,8 +424,13 @@ function help() {
     console.log('');
     console.log('Merges one PR under a per-repo lock (<home>/.claude/autodev/locks/merge-<owner>__<name>.lock),');
     console.log('first come first served. Refuses unless the PR head is --head, --head is not behind its base,');
-    console.log('and the last run in the receipt names --head and ends with "gate-lock: verdict PASS (exit 0)". Merges with');
-    console.log('gh pr merge --rebase --match-head-commit, then reads the merged tree back.');
+    console.log('and the last run in the receipt names --head and ends with "gate-lock: verdict PASS (exit 0)"');
+    console.log('or "gate-receipt: exit 0". Merges with gh pr merge --rebase --match-head-commit, then reads the');
+    console.log('merged tree back.');
+    console.log('');
+    console.log('A receipt from any repo\'s gate (the gate command last, never piped):');
+    console.log(`  bash: ${WRAPPER_BASH}`);
+    console.log(`  pwsh: ${WRAPPER_PWSH}`);
     console.log('Exit 0 merged with the proved tree, 1 refused or a different tree, 2 indeterminate.');
     console.log('env: AUTODEV_GH_BIN (default gh), AUTODEV_MERGE_LOCK_POLL_MS, AUTODEV_MERGE_LOCK_READBACK_MS');
 }
@@ -439,7 +484,7 @@ async function main() {
     }
 }
 
-module.exports = { lockPathFor, receiptProblem, readText, parseArgs, ghCommand, signalHandler, acquire, PASS_LINE };
+module.exports = { lockPathFor, receiptProblem, readText, parseArgs, ghCommand, signalHandler, acquire, PASS_LINE, EXIT_PASS };
 
 if (require.main === module) {
     main().catch((e) => {
