@@ -420,11 +420,12 @@ try {
         write(ledger, JSON.stringify({ version: 1, records: [mk('ALIVE', process.pid), mk('DEAD', deadPid), mk('PREBOOT', process.pid, new Date(boot - 3600 * 1000).toISOString())] }, null, 2) + '\n');
         const st = hw(['status', '--ledger', ledger, '--json']);
         const byCode = Object.fromEntries((st.json ? st.json.value.records : []).map((r) => [r.code, r]));
-        check('13. a record whose pid is this suite reports process running', byCode.ALIVE && byCode.ALIVE.process === 'running' && byCode.ALIVE.exit === null, JSON.stringify(byCode.ALIVE));
+        const expectedProcess = require(SCRIPT).pidImage(process.pid) === null ? 'unknown' : 'running';
+        check('13. a live record reports running only when its image is readable', byCode.ALIVE && byCode.ALIVE.process === expectedProcess && byCode.ALIVE.exit === null, JSON.stringify(byCode.ALIVE));
         check('13. a record whose pid came from an exited child reports process unknown (no exit line, pid gone)',
             classify(dead) === 'verdict' && byCode.DEAD && byCode.DEAD.process === 'unknown', JSON.stringify(byCode.DEAD));
         check('13. a record started an hour BEFORE this boot reports process unknown although its pid (this suite) is alive',
-            byCode.PREBOOT && byCode.PREBOOT.process === 'unknown' && byCode.ALIVE && byCode.ALIVE.process === 'running', JSON.stringify(byCode.PREBOOT));
+            byCode.PREBOOT && byCode.PREBOOT.process === 'unknown' && byCode.ALIVE && byCode.ALIVE.process === expectedProcess, JSON.stringify(byCode.PREBOOT));
         check('13. all report result none with no report file', byCode.ALIVE && byCode.ALIVE.result === 'none' && byCode.DEAD.result === 'none' && byCode.PREBOOT.result === 'none');
         const one = hw(['status', '--ledger', ledger, '--code', 'DEAD', '--json']);
         check('13. status --code narrows to that code and says so in the population line',
@@ -1196,7 +1197,7 @@ try {
         check('29. another image is reused, the supervisor image and an unreadable one stay alive',
             supervisorLiveness(rec, { image: () => 'msedgewebview2.exe' }) === 'reused'
             && supervisorLiveness(rec, { image: () => 'node.exe' }) === 'alive'
-            && supervisorLiveness(rec, { image: () => null }) === 'alive');
+            && supervisorLiveness(rec, { image: () => null }) === 'unknown');
         check('29. a record written before supervisorImage existed expects node',
             isSupervisorImage({}, 'node.exe') && isSupervisorImage({}, 'node') && !isSupervisorImage({}, 'msedgewebview2.exe'));
         const boot = Date.now() - os.uptime() * 1000;
