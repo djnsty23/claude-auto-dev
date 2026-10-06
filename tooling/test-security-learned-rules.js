@@ -101,6 +101,18 @@ const CASES = [
     pk: {
       'supabase/migrations/0001_fk.sql': 'create table public.p (id bigint primary key);\ncreate table public.c (p_id bigint primary key references public.p(id));\nalter table public.p enable row level security;\nalter table public.c enable row level security;\ngrant select on public.p, public.c to authenticated;',
     },
+    // A table-level foreign key constraint is a foreign key too.
+    tableFk: {
+      'supabase/migrations/0001_fk.sql': 'create table public.p (id bigint primary key);\ncreate table public.c (id bigint primary key, p_id bigint, constraint c_p_fk foreign key (p_id) references public.p(id));\nalter table public.p enable row level security;\nalter table public.c enable row level security;\ngrant select on public.p, public.c to authenticated;',
+    },
+    // So is one added later by alter table.
+    alterFk: {
+      'supabase/migrations/0001_fk.sql': 'create table public.p (id bigint primary key);\ncreate table public.c (id bigint primary key, p_id bigint);\nalter table public.c add constraint c_p_fk foreign key (p_id) references public.p(id);\nalter table public.p enable row level security;\nalter table public.c enable row level security;\ngrant select on public.p, public.c to authenticated;',
+    },
+    // A table-level unique constraint on the FK column is already an index.
+    tableUnique: {
+      'supabase/migrations/0001_fk.sql': 'create table public.p (id bigint primary key);\ncreate table public.c (p_id bigint, constraint c_u unique (p_id), constraint c_p_fk foreign key (p_id) references public.p(id));\nalter table public.p enable row level security;\nalter table public.c enable row level security;\ngrant select on public.p, public.c to authenticated;',
+    },
   },
   {
     rule: 'admin-no-role-check',
@@ -159,10 +171,13 @@ for (const c of CASES) {
   arm(c.rule, 'bad', c.bad, true);
   arm(c.rule, 'good', c.good, false);
   if (c.mutant) arm(c.rule, 'mutant', c.mutant, true);
-  for (const k of ['cjs', 'bridge', 'superseded', 'pk', 'layout', 'head', 'scope']) {
+  for (const k of ['cjs', 'bridge', 'superseded', 'pk', 'tableUnique', 'layout', 'head', 'scope']) {
     if (c[k]) arm(c.rule, k, c[k], false);
   }
   if (c.openLayout) arm(c.rule, 'openLayout', c.openLayout, true);
+  for (const k of ['tableFk', 'alterFk']) {
+    if (c[k]) arm(c.rule, k, c[k], true);
+  }
 }
 
 // The control runs on every invocation and must still hold with the new rules.
