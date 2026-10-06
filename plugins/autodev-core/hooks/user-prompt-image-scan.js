@@ -36,6 +36,49 @@ function fail(msg) {
     process.exit(0);
 }
 
+// Read complete JSONL records from the tail. A base64 image can exceed one
+// chunk, so keep its incomplete prefix as bytes until the record is complete.
+// The first user record decides even when its content is plain text.
+function latestUserMessage(transcriptPath) {
+    const CHUNK_BYTES = 128 * 1024;
+    const MAX_SCAN_BYTES = 16 * 1024 * 1024;
+    let fd;
+    try {
+        fd = fs.openSync(transcriptPath, 'r');
+        let pos = fs.fstatSync(fd).size;
+        let scanned = 0;
+        let carry = Buffer.alloc(0);
+        while (pos > 0 && scanned < MAX_SCAN_BYTES && timeLeft() > 0) {
+            const length = Math.min(CHUNK_BYTES, pos, MAX_SCAN_BYTES - scanned);
+            pos -= length;
+            const chunk = Buffer.alloc(length);
+            let read = 0;
+            while (read < length) {
+                const n = fs.readSync(fd, chunk, read, length - read, pos + read);
+                if (!n) return null;
+                read += n;
+            }
+            scanned += length;
+            const bytes = Buffer.concat([chunk, carry]);
+            let end = bytes.length;
+            while (end > 0 && timeLeft() > 0) {
+                const newline = bytes.lastIndexOf(10, end - 1);
+                if (newline < 0 && pos > 0) break;
+                const line = bytes.subarray(newline + 1, end).toString('utf8').trim();
+                end = newline < 0 ? 0 : newline;
+                if (!line) continue;
+                let rec;
+                try { rec = JSON.parse(line); } catch { continue; }
+                const msg = rec && (rec.message || rec);
+                if (msg && msg.role === 'user') return msg;
+            }
+            carry = bytes.subarray(0, end);
+        }
+        return null;
+    } catch { return null; }
+    finally { if (fd !== undefined) { try { fs.closeSync(fd); } catch { /* already closed */ } } }
+}
+
 // --- Read stdin (UTF-8) ---
 let raw = '';
 process.stdin.setEncoding('utf8');
@@ -50,42 +93,8 @@ process.stdin.on('end', () => {
         const transcriptPath = payload && payload.transcript_path;
         if (!transcriptPath || !fs.existsSync(transcriptPath)) return done(null);
 
-        // --- Tail-read transcript: last ~128 KB is plenty for the current turn ---
-        const TAIL_BYTES = 128 * 1024;
-        let tail;
-        let tailedMidFile = false;
-        try {
-            const stat = fs.statSync(transcriptPath);
-            const start = Math.max(0, stat.size - TAIL_BYTES);
-            tailedMidFile = start > 0;
-            const fd = fs.openSync(transcriptPath, 'r');
-            const buf = Buffer.alloc(stat.size - start);
-            fs.readSync(fd, buf, 0, buf.length, start);
-            fs.closeSync(fd);
-            tail = buf.toString('utf8');
-        } catch { return done(null); }
-
-        // JSONL: split; if we started mid-file the first line is likely partial, drop it.
-        const lines = tail.split('\n');
-        if (tailedMidFile && lines.length > 1) lines.shift();
-
-        // Walk backwards to find the most recent user-role message.
-        let userEntry = null;
-        for (let i = lines.length - 1; i >= 0; i--) {
-            const line = lines[i].trim();
-            if (!line) continue;
-            if (timeLeft() <= 0) return done(null);
-            let rec;
-            try { rec = JSON.parse(line); } catch { continue; }
-            // CC transcript shape: { type: "user", message: { role: "user", content: [...] } }
-            // Be permissive — also accept {role: "user", content: [...]}.
-            const msg = rec.message || rec;
-            if (msg && msg.role === 'user' && Array.isArray(msg.content)) {
-                userEntry = msg;
-                break;
-            }
-        }
-        if (!userEntry) return done(null);
+        const userEntry = latestUserMessage(transcriptPath);
+        if (!userEntry || !Array.isArray(userEntry.content)) return done(null);
 
         // --- Detect image content items ---
         let imageCount = 0;
