@@ -474,7 +474,9 @@ function selftest() {
     check('a skill with NO allowed-tools is reported, not skipped', r.declared === null);
 
     const live = scan();
-    check('the live corpus is non-empty', live.files.length > 0);
+    for (const e of live.errors) console.error(`NOT CHECKED: ${e.file} (${e.code})`);
+    check('the live corpus is complete', live.errors.length === 0 && live.results.length === live.files.length);
+    check('the live corpus is non-empty', live.results.length > 0);
     check('the live corpus yields references to judge', live.results.some((x) => x.refs.length));
 
     fs.rmSync(dir, { recursive: true, force: true });
@@ -488,7 +490,7 @@ function main() {
     const argv = process.argv.slice(2);
     if (argv.includes('--selftest')) return selftest();
 
-    const { files, results, errors } = scan();
+    const { results, errors } = scan();
     const withDecl = results.filter((r) => r.declared !== null);
     const noDecl = results.filter((r) => r.declared === null);
     const refs = results.flatMap((r) => r.refs);
@@ -496,7 +498,7 @@ function main() {
 
     // Population first, so an empty scan is visible rather than reassuring.
     console.log('skill tool-declaration gate');
-    console.log('  ' + files.length + ' skills scanned, ' + withDecl.length
+    console.log('  ' + results.length + ' skills scanned, ' + withDecl.length
         + ' declare allowed-tools, ' + noDecl.length + ' do not');
     console.log('  ' + refs.length + ' tool references seen, '
         + refs.filter((r) => r.mandate).length + ' read as mandates, '
@@ -504,7 +506,7 @@ function main() {
     console.log('  ' + findings.length + ' flagged\n');
 
     for (const e of errors) console.error(`NOT CHECKED: ${e.file} (${e.code})`);
-    if (files.length === 0) {
+    if (results.length === 0) {
         console.error('read 0 skills, so nothing was checked');
         return 2;
     }
@@ -541,5 +543,5 @@ function main() {
     return errors.length ? 2 : 0;
 }
 
-if (require.main === module) process.exit(main());
+if (require.main === module) process.exitCode = main();
 module.exports = { scanFile, scan, isDeclared, mandateClass, negativeClass, VOCAB };
