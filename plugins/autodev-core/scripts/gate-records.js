@@ -322,13 +322,28 @@ function updateRun(base, runId, mutate) {
     return next;
 }
 
-/** Merges observed processes into a journal's descendants (pid, ppid, startUtc, firstSeen, lastSeen). */
-function mergeDescendants(list, observed, nowIso, cap = 500) {
+/** Merges observed processes into a journal's descendants (pid, ppid, startUtc, firstSeen, lastSeen, goneBy from snap). */
+function mergeDescendants(list, observed, nowIso, cap = 500, snap = null) {
     const out = Array.isArray(list) ? list.slice() : [];
     for (const p of observed) {
         const hit = out.find((d) => d.pid === p.pid && d.startUtc === p.startUtc);
         if (hit) hit.lastSeen = nowIso;
         else if (out.length < cap) out.push({ pid: p.pid, ppid: p.ppid, startUtc: p.startUtc, firstSeen: nowIso, lastSeen: nowIso });
+    }
+    // goneBy: the first time a good snapshot showed a journaled process exited
+    // (its pid absent, or held by a process with another creation time). A
+    // process created after it cannot be that one's child, even when its parent
+    // pid matches because the pid was reused by a process that exited too. A pid
+    // whose creation time is unreadable may still be it, so it is never stamped.
+    // A later holder's creation time is the earlier bound: the pid was free by then.
+    if (snap && snap.ok && snap.procs) {
+        for (const d of out) {
+            if (d.goneBy) continue;
+            const now = snap.procs.get(d.pid);
+            if (now && (!now.startUtc || now.startUtc === d.startUtc)) continue;
+            const later = now && Date.parse(now.startUtc) > Date.parse(d.startUtc);
+            d.goneBy = later ? now.startUtc : nowIso;
+        }
     }
     return out;
 }

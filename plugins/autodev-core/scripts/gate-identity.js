@@ -297,7 +297,10 @@ function identityOf(pid, { snap = null, boot = null } = {}) {
  * child counts only when it was created no earlier than the parent recorded at
  * that pid. When that pid now belongs to a later process, a child created
  * after that process started is the later process's own, so a reused parent
- * pid adopts nobody: not even the console host every new process gets.
+ * pid adopts nobody: not even the console host every new process gets. A
+ * record carrying goneBy (gate-records.js mergeDescendants) adopts nobody
+ * created after that time either, which covers a later holder that has
+ * exited in turn and left an orphan of its own.
  */
 function liveDescendants(roots, snap) {
     const found = new Map();
@@ -310,9 +313,13 @@ function liveDescendants(roots, snap) {
         seen.add(key);
         const now = snap.procs.get(r.pid);
         const reusedAt = now && now.startUtc && now.startUtc !== r.startUtc ? now.startUtc : null;
+        const goneMs = r.goneBy ? Date.parse(r.goneBy) : NaN;
         for (const c of snap.children.get(r.pid) || []) {
             if (!c.startUtc || c.startUtc < r.startUtc || c.pid === r.pid) continue;
             if (reusedAt && c.startUtc >= reusedAt) continue;
+            // Created after a snapshot already showed the parent gone: the pid's later
+            // holder made it, and that holder has exited too, so reusedAt cannot tell.
+            if (Number.isFinite(goneMs) && Date.parse(c.startUtc) >= goneMs) continue;
             if (!found.has(c.pid)) found.set(c.pid, c);
             queue.push(c);
         }

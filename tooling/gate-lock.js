@@ -529,7 +529,7 @@ function main() {
             if (snap.ok && !live.length) return { live: [], unknown: null };
             if (Date.now() >= until) {
                 if (!snap.ok) return { live: [], unknown: `no process snapshot (${snap.why})` };
-                journal((j) => ({ ...j, descendants: records.mergeDescendants(j.descendants, live, nowIso()) }));
+                journal((j) => ({ ...j, descendants: records.mergeDescendants(j.descendants, live, nowIso(), undefined, snap) }));
                 log(`${TAG} ${live.length} process(es) of the chain still run after ${descendantWaitMs} ms: ${live.slice(0, 5).map((p) => p.pid).join(', ')}`);
                 return { live, unknown: null };
             }
@@ -626,7 +626,7 @@ function main() {
                 const s = freshSnapshot();
                 if (s.ok && chainRoot) {
                     const live = liveOfChain(chainRoot, readJournal(), s);
-                    journal((j) => ({ ...j, descendants: records.mergeDescendants(j.descendants, live, nowIso()) }));
+                    journal((j) => ({ ...j, descendants: records.mergeDescendants(j.descendants, live, nowIso(), undefined, s) }));
                 }
                 writeLease('running');
             }, heartbeatMs);
