@@ -107,6 +107,7 @@ const queue = require(path.join(SCRIPTS, 'full-gate-queue.js'));
 const ident = require(path.join(SCRIPTS, 'gate-identity.js'));
 const records = require(path.join(SCRIPTS, 'gate-records.js'));
 const recovery = require('./gate-recovery.js');
+const gateSteps = require('./gate-steps.js');
 
 const STALE_MS = 600000;
 const MAX_POLL_ERRORS = 10;
@@ -259,12 +260,15 @@ function readSentinel(file, runId, token) {
 }
 
 /**
- * Runner mode: run `npm run gate:chain`, pass its output through while
- * scanning it for infrastructure markers, and write a record of the attempt
- * (run id, token, times, npm's exit, the markers) only when npm exited with a
- * code and no signal. Anything else, or this process being killed, leaves none.
+ * Runner mode: run the gate chain one step at a time (gate-steps.js), pass its
+ * output through while scanning it for infrastructure markers, and write a
+ * record of the attempt (run id, token, times, the chain's exit, the markers,
+ * the step that stopped it) only when every step it ran ended by itself. A
+ * forwarded signal, or this process being killed, leaves none. With
+ * `recordsBase`, each step's start and end go to the run's step records as
+ * they happen, so a tree that dies mid-step still names the step.
  */
-function runChainChild(root, sentinel, runId, token, waitGo = false) {
+function runChainChild(root, sentinel, runId, token, waitGo = false, recordsBase = null) {
     // With --wait-go the parent records this runner's identity before any work
     // starts, then creates <sentinel>.go: a chain too short for one process
     // snapshot is still journaled. A parent that never says go (it died, or it
@@ -283,32 +287,54 @@ function runChainChild(root, sentinel, runId, token, waitGo = false) {
         }
     }
     const startUtc = new Date().toISOString();
-    const opts = { cwd: root, stdio: ['inherit', 'pipe', 'pipe'], windowsHide: true,
-        env: { ...process.env, AUTODEV_GATE_RUN_ID: runId || '', AUTODEV_GATE_RUN_TOKEN: token === null ? '' : String(token) } };
-    // One command string with shell on Windows (npm is npm.cmd there, and an
-    // args array with shell:true is deprecated); no shell on POSIX, so a
-    // forwarded signal reaches npm itself.
-    const npm = process.platform === 'win32'
-        ? spawn(`npm run ${CHAIN_SCRIPT}`, { ...opts, shell: true })
-        : spawn('npm', ['run', CHAIN_SCRIPT], opts);
+    const env = { ...process.env, AUTODEV_GATE_RUN_ID: runId || '', AUTODEV_GATE_RUN_TOKEN: token === null ? '' : String(token) };
+    // The chain runs one step at a time (gate-steps.js), each step's start and
+    // end appended to the run's step records when a records base is given. A
+    // chain it cannot split runs whole as `npm run gate:chain`, one step.
+    let pkg = null;
+    try { pkg = JSON.parse(fs.readFileSync(path.join(root, 'package.json'), 'utf8')); } catch { /* the parent checked it; whole chain below */ }
+    const list = chainSteps(pkg);
+    const worktree = ident.canonicalPath(root);
+    let recordFault = false;
+    const record = recordsBase && runId
+        ? (e) => records.appendStep(recordsBase, runId, { ...e, token, worktree, runnerPid: process.pid })
+        : () => {};
     const scan = recovery.createScanner();
-    npm.stdout.on('data', (b) => { process.stdout.write(b); scan.feed(b); });
-    npm.stderr.on('data', (b) => { process.stderr.write(b); scan.feed(b); });
-    const forward = (sig) => { try { npm.kill(sig === 'SIGBREAK' ? 'SIGTERM' : sig); } catch { /* gone */ } };
+    // npm printed this header first when it ran the whole chain, so output
+    // before any step's own header is attributed to the chain, as it was.
+    scan.feed(Buffer.from(`> ${(pkg && pkg.name) || 'tree'}@${(pkg && pkg.version) || '0.0.0'} ${CHAIN_SCRIPT}\n`));
+    const run = gateSteps.runSteps({
+        root, steps: list, env, record,
+        onData: (b, stream) => { (stream === 'stderr' ? process.stderr : process.stdout).write(b); scan.feed(b); },
+        onRecordError: (e) => {
+            if (recordFault) return;
+            recordFault = true;
+            console.error(`${TAG} step records not written (${e.code || e.message}); a death mid-step will not name its step`);
+        },
+    });
     const signals = ['SIGINT', 'SIGTERM', 'SIGHUP'];
     if (process.platform === 'win32') signals.push('SIGBREAK');
-    for (const s of signals) process.on(s, () => forward(s));
-    npm.on('error', (e) => { console.error(`${TAG} could not start npm: ${e.message}`); process.exitCode = 2; });
-    npm.on('close', (code, signal) => {
-        if (typeof code === 'number' && !signal) {
-            const rec = { schema: 1, runId, token, originPid: process.ppid, runnerPid: process.pid, startUtc,
-                          endUtc: new Date().toISOString(), exit: code, signal: null, infra: scan.hits(), lastStep: scan.lastStep() };
-            try { fs.writeFileSync(sentinel, `${JSON.stringify(rec)}\n`); } catch { /* the parent reads a missing record as not finished */ }
-            process.exitCode = code;
-        } else {
+    for (const s of signals) process.on(s, () => run.kill(s === 'SIGBREAK' ? 'SIGTERM' : s));
+    run.done.then((r) => {
+        // A chain stopped by a forwarded signal, or a step that never started,
+        // did not finish: no record.
+        if (r.interrupted) { process.exitCode = 2; return; }
+        if (r.exit === null) {
+            console.error(`${TAG} could not start step ${r.failed.index} (${r.failed.step}): ${r.failed.error || 'no exit code'}`);
             process.exitCode = 2;
+            return;
         }
-    });
+        const rec = { schema: 1, runId, token, originPid: process.ppid, runnerPid: process.pid, startUtc,
+                      endUtc: new Date().toISOString(), exit: r.exit, signal: null, infra: scan.hits(), lastStep: scan.lastStep(),
+                      failedStep: r.failed ? { index: r.failed.index, step: r.failed.step, signal: r.failed.signal } : null };
+        try { fs.writeFileSync(sentinel, `${JSON.stringify(rec)}\n`); } catch { /* the parent reads a missing record as not finished */ }
+        process.exitCode = r.exit;
+    }, (e) => { console.error(`${TAG} the step launcher failed: ${e.message}`); process.exitCode = 2; });
+}
+
+/** The chain's steps, read through readGateChain(), or the whole chain as one npm step when it cannot be split. */
+function chainSteps(pkg) {
+    return gateSteps.splitChain(readGateChain(pkg)) || [`npm run ${CHAIN_SCRIPT}`];
 }
 
 const GO_WAIT_MS = 60000;
@@ -384,7 +410,7 @@ function main() {
         const sentinel = val('--sentinel');
         if (!sentinel) { console.error(`${TAG} --run-chain needs --sentinel FILE`); process.exitCode = 2; return; }
         const tok = val('--token');
-        runChainChild(root, sentinel, val('--run-id'), tok === null || tok === 'none' ? null : Number(tok), argv.includes('--wait-go'));
+        runChainChild(root, sentinel, val('--run-id'), tok === null || tok === 'none' ? null : Number(tok), argv.includes('--wait-go'), val('--records'));
         return;
     }
     const env = process.env;
@@ -541,6 +567,10 @@ function main() {
     const afterAttempt = async (outcome, rec) => {
         if (heartbeat) { clearInterval(heartbeat); heartbeat = null; }
         const v = verdict(outcome);
+        // A chain that did not finish names the step it was in, from the
+        // step records the runner appended as each step started and ended.
+        const lost = useLock && !v.finished ? recovery.lostStep(records.readSteps(base, runId)) : null;
+        if (lost) v.why = `${v.why}; ${lost.why}`;
         const after = await waitForDescendants();
         const lingering = after.live;
         if (lingering.length) keepLane = lingering;
@@ -553,7 +583,8 @@ function main() {
         const floor = cfg.config ? cfg.config.diskFloorBytes : recovery.DEFAULT_DISK_FLOOR;
         let c;
         try { c = await recovery.classify({ v, rec, root, diskFloorBytes: floor, env }); } catch (e) { c = { ...v, cause: null, why: `${v.why} (classification threw: ${e.message})` }; }
-        journal((j) => ({ ...j, attempts: [...(j.attempts || []), { attempt, token, exit: c.exit, finished: c.finished, why: c.why, cause: c.cause, record: rec }] }));
+        journal((j) => ({ ...j, attempts: [...(j.attempts || []), { attempt, token, exit: c.exit, finished: c.finished, why: c.why, cause: c.cause, record: rec,
+            lostStep: lost ? { index: lost.index, step: lost.step, pid: lost.pid, startUtc: lost.startUtc } : null }] }));
         const keptWhy = lingering.length ? `; the lane stays held by this run's record while ${lingering.length} process(es) of the chain run (${lingering.slice(0, 5).map((p) => p.pid).join(', ')})` : '';
         if (!c.cause || interrupted) { finishWith({ ...c, why: `${c.why}${keptWhy}` }); return; }
         log(`${TAG} attempt ${attempt} is INDETERMINATE: ${c.why}`);
@@ -602,7 +633,7 @@ function main() {
         // difference stays visible.
         const sentinel = path.join(os.tmpdir(), `gate-lock-${process.pid}-${Date.now()}.exit`);
         child = spawn(process.execPath, [__filename, '--run-chain', '--root', root, '--sentinel', sentinel,
-            '--run-id', runId, '--token', token === null ? 'none' : String(token), ...(useLock ? ['--wait-go'] : [])],
+            '--run-id', runId, '--token', token === null ? 'none' : String(token), ...(useLock ? ['--wait-go', '--records', base] : [])],
             { cwd: root, stdio: 'inherit', windowsHide: true });
         log(`${TAG} chain pid ${child.pid}: npm run ${CHAIN_SCRIPT}${useLock ? ` (run ${runId}, token ${token}, attempt ${attempt})` : ''}`);
         if (useLock) {

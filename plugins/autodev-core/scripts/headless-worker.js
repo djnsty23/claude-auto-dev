@@ -85,7 +85,8 @@ const USAGE = [
     'settle: read the last RESULT <CODE> line of the report and mark the record settled.',
     'settle --lost: settle a record whose supervisor died without an exit line, as result lost. Refused unless',
     '        the record started before this boot, or its pid is dead with no exit line. A record with an exit line',
-    '        takes plain settle. A lost record is its own result, never done, stopped or failed.',
+    '        takes plain settle. A lost record is its own result, never done, stopped or failed. When a gate it ran',
+    '        died with it, gateStep names the step that started and recorded no exit (gate-records.js step records).',
     'settle --unreported: settle a record whose worker exited without a RESULT <CODE> line, as result unreported.',
     '        Refused while the log has no exit line (that is --lost), while the report has a RESULT line, and while',
     '        <report dir>/<CODE>/<report name> has one (a report written into the scratch dir: move it, then settle).',
@@ -898,6 +899,25 @@ function settle(opts) {
     });
 }
 
+/**
+ * The gate step a lost worker's tree died in, or null: the newest step record
+ * (gate-records.js) for the worker's cwd that started after the worker did and
+ * recorded no exit. Read from the full-gate lock's records, at
+ * AUTODEV_GATE_LOCK_PATH when set. Never throws: a record nobody can read
+ * leaves the settle as it was.
+ */
+function lostGateStep(rec, env = process.env) {
+    try {
+        if (!rec.cwd) return null;
+        const records = require('./gate-records.js');
+        const ident = require('./gate-identity.js');
+        const base = path.resolve(env.AUTODEV_GATE_LOCK_PATH || path.join(os.homedir(), '.claude', 'autodev', 'locks', 'full-gate.lock'));
+        const since = Date.parse(rec.startedAt || '');
+        const hit = records.findOpenSteps(base, { worktree: ident.canonicalPath(rec.cwd), sinceMs: Number.isFinite(since) ? since : 0 })[0];
+        return hit ? { runId: hit.runId, index: hit.index, of: hit.of, step: hit.step, pid: hit.pid, startUtc: hit.startUtc } : null;
+    } catch { return null; }
+}
+
 /** `settle --lost` inside the ledger lock. Mutates `rec` only when the record is provably not running. */
 function settleLost(rec, code, exit) {
     if (exit !== null) fault('not-lost', `${rec.log} has CLAUDE_EXIT=${exit}, so the worker ended and was not lost. Settle it without --lost`);
@@ -909,12 +929,14 @@ function settleLost(rec, code, exit) {
     // A report that did get written keeps its sentence, so what the worker said is not lost with it.
     const reportText = readText(rec.report);
     const parsed = reportText === null ? null : parseResult(reportText, code);
+    // A gate the worker ran that died with it names the step it died in.
+    const gateStep = lostGateStep(rec);
     const settledAt = new Date().toISOString();
     Object.assign(rec, {
         state: 'settled', result: 'lost', reason, sentence: parsed ? parsed.sentence : null,
-        reportResult: parsed ? parsed.state : null, exit: null, settledAt,
+        reportResult: parsed ? parsed.state : null, exit: null, settledAt, gateStep,
     });
-    return { code, state: 'lost', reason, sentence: rec.sentence, reportResult: rec.reportResult, exit: null, report: rec.report, settledAt };
+    return { code, state: 'lost', reason, sentence: rec.sentence, reportResult: rec.reportResult, exit: null, report: rec.report, settledAt, gateStep };
 }
 
 /**
@@ -1007,5 +1029,5 @@ module.exports = {
     HEADLESS_NOTE, DENIED_NOTE, PROMPT_MAX, CODE_RE, placementNote, resultNote, scriptPlacement, otherResultCode, SCRUBBED_ENV, RETENTION_MS, SETTLED_RESULTS,
     askFiles, askNote, askState, scratchDirFor, priorRunFiles, moveAside, readLedger, settle, start,
     parseArgs, composePrompt, buildArgv, buildEnv, spawnPlan, resolveClaudeBin, exitCodeOf, parseResult,
-    livenessFromError, pidLiveness, pidImage, isSupervisorImage, supervisorLiveness, bootAt, pruneSettled, laterRuns, recordStatus, lostReason, run,
+    livenessFromError, pidLiveness, pidImage, isSupervisorImage, supervisorLiveness, bootAt, pruneSettled, laterRuns, recordStatus, lostReason, lostGateStep, run,
 };
