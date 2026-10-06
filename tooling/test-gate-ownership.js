@@ -35,6 +35,8 @@
  *   P21o any lock naming the pid is the caller's    -> a reused pid inherits a dead run's lane (S13)
  *   P22o iso7 formats an unparseable time           -> an odd creation time throws in the judgement (S13)
  *   P23o the POSIX probes answer with a fixed boot  -> a boot identity that no reboot changes (S13)
+ *   P24o a parent seen gone adopts later children   -> a stopped shell's orphan holds the lane (S14)
+ *   P25o the journal never records a process gone   -> the same, from the journal side (S14)
  *
  * The machine's real lock is never touched: every spawn sets
  * AUTODEV_GATE_LOCK_PATH to a temp directory.
@@ -417,6 +419,50 @@ async function s6ReusedPid(subject) {
     return [...rows, ...takeRows(subject, fx, 'S6 (pid reused by a later process with a child)', false)];
 }
 
+/**
+ * S14: a journaled chain process exits, its pid goes to a process that exits in
+ * turn, and that one's orphan (a tail left by a stopped shell) carries the
+ * reused pid as its parent. reusedAt sees no current holder, so only the time
+ * the journal first missed the parent stops the orphan from holding the lane.
+ * A synthetic snapshot: deterministic on every platform.
+ */
+function s14DeadParentOrphan(subject) {
+    const dir = path.dirname(subject);
+    const id = require(path.join(dir, 'gate-identity.js'));
+    const rec = require(path.join(dir, 'gate-records.js'));
+    const rows = [];
+    const T = (s) => `2026-01-01T00:00:${s}.0000000Z`;
+    const chainRoot = { pid: 900, startUtc: T('00') };
+    const kid = { pid: 100, ppid: 900, startUtc: T('01') };
+    const live = { pid: 101, ppid: 900, startUtc: T('02') };
+    const reusedKid = { pid: 102, ppid: 900, startUtc: T('02') };
+    const unreadable = { pid: 103, ppid: 900, startUtc: T('02') };
+    const snapOf = (...ps) => ({ ok: true, procs: new Map(ps.map((p) => [p.pid, p])) });
+    let j = rec.mergeDescendants([], [kid, live, reusedKid, unreadable], '2026-01-01T00:00:03.000Z', undefined,
+        snapOf(kid, live, reusedKid, unreadable));
+    rows.push(['S14: no journaled process is stamped while a snapshot shows each one running',
+        j.length === 4 && j.every((d) => !d.goneBy), JSON.stringify(j)]);
+    j = rec.mergeDescendants(j, [live], '2026-01-01T00:00:05.000Z', undefined,
+        snapOf(live, { pid: 102, ppid: 1, startUtc: T('04') }, { pid: 103, ppid: 900, startUtc: null }));
+    const by = (pid) => j.find((d) => d.pid === pid) || {};
+    rows.push(['S14: a journaled process absent from a later snapshot is stamped goneBy that time',
+        by(100).goneBy === '2026-01-01T00:00:05.000Z', JSON.stringify(by(100))]);
+    rows.push(['S14: one whose pid a later process holds is stamped with that holder\'s creation time',
+        by(102).goneBy === T('04'), JSON.stringify(by(102))]);
+    rows.push(['S14: one still running, or whose creation time cannot be read, carries no goneBy',
+        !by(101).goneBy && !by(103).goneBy, JSON.stringify([by(101), by(103)])]);
+    rows.push(['S14: without a snapshot nothing is stamped (the old record stays as it was)',
+        rec.mergeDescendants([{ ...kid, firstSeen: 'x', lastSeen: 'x' }], [], '2026-01-01T00:00:09.000Z').every((d) => !d.goneBy), '']);
+    const orphanOfOriginal = { pid: 300, ppid: 100, startUtc: T('04') };
+    const orphanOfReuser = { pid: 200, ppid: 100, startUtc: T('40') };
+    const procs = new Map([[300, orphanOfOriginal], [200, orphanOfReuser]]);
+    const snap = { ok: true, procs, children: new Map([[100, [orphanOfOriginal, orphanOfReuser]]]) };
+    const found = id.liveDescendants([chainRoot, ...j], snap).map((p) => p.pid).sort();
+    rows.push(['S14: an orphan created after its parent was seen gone is not the chain\'s', !found.includes(200), JSON.stringify(found)]);
+    rows.push(['S14: an orphan created before that is still the chain\'s', found.includes(300), JSON.stringify(found)]);
+    return rows;
+}
+
 /** S7: an owner recorded by its MSYS pid alone is alive while Git Bash still lists it. */
 async function s7Msys(subject, msys) {
     if (!msys.pid) return [['S7: an MSYS pid to test with', !WIN, msys.why]];
@@ -716,7 +762,7 @@ async function main() {
         S4: () => s4ArrivalSurvives(SUBJECT), S5: () => s5PreBoot(SUBJECT), S6: () => s6ReusedPid(SUBJECT),
         S7: () => s7Msys(SUBJECT, msys), S8: () => s8Descendants(SUBJECT, orphan), S9: () => s9Fence(SUBJECT),
         S10: () => s10Malformed(SUBJECT), S10b: () => s10bSemantic(SUBJECT), S11: () => s11Readers(SUBJECT), S12: () => s12Library(SUBJECT),
-        S13: () => s13Defaults(SUBJECT),
+        S13: () => s13Defaults(SUBJECT), S14: () => s14DeadParentOrphan(SUBJECT),
     };
     for (const [id, fn] of Object.entries(real)) if (want(id)) report(id, await fn());
 
@@ -783,6 +829,12 @@ async function main() {
                 ["source: 'sysctl kern.boottime' };", "source: 'sysctl kern.boottime', id: 'planted' };"],
                 ['    return null;\n}\n\nfunction posixSnapshot() {', "    return { id: 'planted', source: 'planted' };\n}\n\nfunction posixSnapshot() {"]],
             (s) => s13Identity(s).filter(([n]) => n.startsWith('S13 posix')), ['S13']],
+        ['P24o', 'a parent seen gone still adopts later children', 'gate-identity.js',
+            [['            if (Number.isFinite(goneMs) && Date.parse(c.startUtc) >= goneMs) continue;\n', '']],
+            (s) => s14DeadParentOrphan(s).filter(([n]) => n.includes('not the chain')), ['S14']],
+        ['P25o', 'the journal never records a process gone', 'gate-records.js',
+            [['            d.goneBy = later ? now.startUtc : nowIso;\n', '']],
+            (s) => s14DeadParentOrphan(s).filter(([n]) => n.includes('is stamped') || n.includes('not the chain')), ['S14']],
     ];
     for (const [id, what, file, edits, scenario, covers] of plants) {
         if (!want(id) && !covers.some(want)) continue;
