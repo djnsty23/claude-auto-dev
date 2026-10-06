@@ -145,7 +145,7 @@ try {
     const hrecs = [{ code: 's', startedAt: '2026-09-28T10:00:00Z', state: 'settled', result: 'done' }, { code: 's', startedAt: '2026-09-28T12:00:00Z', state: 'running' }];
     check('headlessRunOf takes the run with the recorded start', bj.headlessRunOf({ slug: 's', headless: { code: 's', startedAt: '2026-09-28T10:00:00Z' } }, hrecs).state === 'settled');
     check('headlessRunOf, with no recorded start, ignores a run older than the launch', bj.headlessRunOf({ slug: 's', launchedAt: '2026-09-28T11:59:30Z' }, hrecs).state === 'running');
-    check('done and stopped close as succeeded, the rest as failed', ['done', 'stopped'].every((r) => bj.runStatusOfHeadless(r) === 'succeeded') && ['failed', 'lost', 'unreported'].every((r) => bj.runStatusOfHeadless(r) === 'failed'));
+    check('done and stopped with zero exit close as succeeded, the rest as failed', ['done', 'stopped'].every((r) => bj.runStatusOfHeadless(r, 0) === 'succeeded') && ['failed', 'lost', 'unreported'].every((r) => bj.runStatusOfHeadless(r, 0) === 'failed'));
     const pMissing = bj.buildJudgePrompt({ taskId: 't', slug: 's', repo: '/x/r' }, { text: null, size: 0, cut: false }, null);
     check('a missing report is named in the judge prompt', pMissing.startsWith(bj.RUBRIC) && pMissing.includes('REPORT: missing') && pMissing.includes('BRIEF: not stored'));
     const pFull = bj.buildJudgePrompt({ taskId: 't', slug: 's', repo: '/x/r', runStatus: 'succeeded' }, { text: 'body\nRESULT s done: x\n', size: 9000, cut: true }, 'the brief');
