@@ -5,6 +5,7 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const { spawnSync } = require('node:child_process');
+const SUBJECT = path.resolve(__dirname, 'test-all.js');
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'runner-deadline-'));
 const env = { ...process.env, AUTODEV_TEST_SUITE_TIMEOUT_MS: '1000' };
 for (const key of Object.keys(env)) if (/^GIT_|^NODE_V8_COVERAGE$|^CLAUDE_CONFIG_DIR$|^AUTODEV_COVERAGE_STORE$/.test(key)) delete env[key];
@@ -13,7 +14,8 @@ const invoke = (file, args, extra = {}) => spawnSync(file, args, { cwd: tmp, env
 try {
   const dir = path.join(tmp, 'tooling');
   fs.mkdirSync(dir);
-  for (const name of ['test-all.js', 'suite-tmp.js', 'coverage-receipt.js']) fs.copyFileSync(path.join(__dirname, name), path.join(dir, name));
+  fs.copyFileSync(SUBJECT, path.join(dir, 'test-all.js'));
+  for (const name of ['suite-tmp.js', 'coverage-receipt.js']) fs.copyFileSync(path.join(__dirname, name), path.join(dir, name));
   fs.writeFileSync(path.join(dir, 'validate.js'), 'console.log("VALIDATED");\n');
   fs.writeFileSync(path.join(dir, 'test-a.js'), 'console.log("HANGING-CONTROL"); setTimeout(() => {}, 6000);\n');
   fs.writeFileSync(path.join(dir, 'test-b.js'), 'console.log("LATER-CONTROL");\n');
