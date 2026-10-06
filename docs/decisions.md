@@ -3,6 +3,26 @@
 Non-obvious choices, and where the work that implements them actually landed.
 One entry per decision, newest first.
 
+## 2026-10-06: a product gate proves a merge through a wrapper line, not its own format
+
+merge-lock.js accepted only a log ending in gate-lock's `verdict PASS (exit 0)`,
+which only this repo's gate prints. A product repo gates with its own runner,
+so a product PR had to be merged by hand, outside the per-repo lock.
+
+The receipt now also passes when its last closing line is
+`gate-receipt: exit 0`, written by a wrapper any repo can run:
+`{ git rev-parse HEAD; <gate>; echo "gate-receipt: exit $?"; }`, or the
+PowerShell form with `$LASTEXITCODE`. The wrapper, not each runner's summary
+table, carries the verdict, so merge-lock parses one line format and never
+learns a product's output. The run that line closes must start with the
+--head sha, nothing may follow it, and a gate-lock verdict inside it must be
+PASS: a red verdict under exit 0 means the exit was read through a pipe. Any
+other `gate-receipt:` line is red, an empty exit included.
+
+The harness rule is unchanged for a log with no `gate-receipt:` line. Reading
+the full-gate-queue run record instead was not taken: the queue records who
+ran a gate and where, not its verdict per commit.
+
 ## 2026-10-02: one full gate per merge, merged under a per-repo merge lock
 
 The merge bar was a full gate on the PR, then another on the merged tree after
