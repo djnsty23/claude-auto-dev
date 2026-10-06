@@ -32,4 +32,13 @@ try {
     assert.match(denied.stdout + denied.stderr, /EACCES/, 'discovery error is reported');
     console.log('PASS trigger inventory refuses unreadable directory beside a readable positive control');
   }
+  if (!which || which === 'tools') {
+    const clean = run(TOOL_SUBJECT, false, []);
+    assert.equal(clean.status, 0, clean.stdout + clean.stderr);
+    assert.match(clean.stdout, /2 skills scanned/, 'two skills positive control');
+    const denied = run(TOOL_SUBJECT, true, []);
+    assert.equal(denied.status, 2, 'partial directory discovery cannot pass the tool gate');
+    assert.match(denied.stdout + denied.stderr, /EACCES/, 'tool gate reports discovery failure');
+    console.log('PASS tool gate refuses unreadable directory beside a readable positive control');
+  }
 } finally { fs.rmSync(scratch, { recursive: true, force: true }); }
