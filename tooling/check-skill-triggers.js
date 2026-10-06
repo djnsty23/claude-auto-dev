@@ -32,9 +32,13 @@ const CONDITION_MARKERS = [
     'when ', 'before ', 'after ', 'if the', 'if you', 'triggers', 'trigger',
 ];
 
+const discoveryErrors = [];
 function walk(dir, out = []) {
     let entries;
-    try { entries = fs.readdirSync(dir, { withFileTypes: true }); } catch { return out; }
+    try { entries = fs.readdirSync(dir, { withFileTypes: true }); } catch (e) {
+        discoveryErrors.push({ directory: dir, code: e.code || 'unreadable' });
+        return out;
+    }
     for (const e of entries) {
         const p = path.join(dir, e.name);
         if (e.isDirectory()) walk(p, out);
@@ -86,9 +90,9 @@ const label = rows.filter((r) => !r.hasCondition);
 const long = rows.filter((r) => r.len > 320);
 
 const population = { files: files.length, described: rows.length };
-process.exitCode = files.length === 0 || rows.length !== files.length ? 2 : 0;
+process.exitCode = files.length === 0 || rows.length !== files.length || discoveryErrors.length ? 2 : 0;
 if (AS_JSON) {
-    console.log(JSON.stringify({ population, descriptionBytes, whenToUseBytes, rows }));
+    console.log(JSON.stringify({ population, descriptionBytes, whenToUseBytes, rows, discoveryErrors }));
 } else {
 console.log(`skill trigger audit — ${rows.length} skills with a description`);
 console.log(`description text: ${descriptionBytes} UTF-8 bytes on disk`);
@@ -105,7 +109,8 @@ const noWhen = rows.filter((r) => !r.hasWhenToUse);
 console.log(`\nno when_to_use field: ${noWhen.length} of ${rows.length}`);
 
 console.log(`population: ${rows.length} described of ${files.length} skill files`);
-if (process.exitCode) console.log('INDETERMINATE: missing, empty or partially described skill population.');
+for (const e of discoveryErrors) console.log(`NOT CHECKED: ${e.directory} (${e.code})`);
+if (process.exitCode) console.log('INDETERMINATE: missing, unreadable, empty or partially described skill population.');
 }
 
 if (SHOW_ALL && !AS_JSON) {
