@@ -160,6 +160,9 @@ function printTreeVerdict(v) {
 // bare FAIL for a run whose own stderr said `infrastructure: the checker did not
 // produce a verdict (ETIMEDOUT)`: somebody else's load handed over as a red
 // suite. A run that graded nothing is still not a run that passed.
+// An assigned exitCode is private until exit. Failure-looking stdout is triage
+// evidence, not a structured verdict, and success-looking stdout cannot pass
+// a suite killed before completion.
 function classify(res) {
   if (res.error && res.error.code === 'ETIMEDOUT') return { state: 'indet', reason: 'DID NOT FINISH: suite deadline exceeded (ETIMEDOUT)' };
   if (res.error) return { state: 'indet', reason: `DID NOT RUN: ${res.error.code || res.error.message}` };
@@ -373,10 +376,10 @@ async function main() {
   if (indeterminate) {
     console.log(
       '\nINDETERMINATE means no verdict: a suite did not run, was killed or refused (exit 2),\n' +
-      'or HEAD moved under the run. Its own output above names the cause. These are NOT\n' +
-      'evidence that anything is broken in the code under test, and on a loaded machine\n' +
-      'they are usually starvation rather than a regression. Re-run them alone on a quiet\n' +
-      'machine before attributing them to a change:\n' +
+      'or HEAD moved under the run. Output may contain assertion failures. Preserve and\n' +
+      'read that evidence for triage. A timeout alone does not establish why execution\n' +
+      'stopped, and stdout never supplies a completed exit verdict. Re-run alone before\n' +
+      'attributing the cutoff to a change:\n' +
       indetLabels.filter((l) => l !== 'tree-inert').map((l) => '  node tooling/' + l + '.js').join('\n')
     );
   }
