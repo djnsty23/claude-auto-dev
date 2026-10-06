@@ -4,7 +4,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
-const { spawnSync } = require('node:child_process');
+const { spawn, spawnSync } = require('node:child_process');
 const SUBJECT = path.resolve(__dirname, 'test-all.js');
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'runner-deadline-'));
 const env = { ...process.env, AUTODEV_TEST_SUITE_TIMEOUT_MS: '1000' };
@@ -16,7 +16,7 @@ try {
   const dir = path.join(tmp, 'tooling');
   fs.mkdirSync(dir);
   fs.copyFileSync(SUBJECT, path.join(dir, 'test-all.js'));
-  for (const name of ['suite-tmp.js', 'coverage-receipt.js']) fs.copyFileSync(path.join(__dirname, name), path.join(dir, name));
+  for (const name of ['suite-tmp.js', 'suite-process-tree.js', 'coverage-receipt.js']) fs.copyFileSync(path.join(__dirname, name), path.join(dir, name));
   fs.writeFileSync(path.join(dir, 'validate.js'), 'console.log("VALIDATED");\n');
   fs.writeFileSync(path.join(dir, 'test-a.js'), 'console.log("HANGING-CONTROL"); setTimeout(() => {}, 6000);\n');
   fs.writeFileSync(path.join(dir, 'test-b.js'), 'console.log("LATER-CONTROL");\n');
@@ -46,6 +46,13 @@ try {
   assert.match(failed.stdout, /FAIL\s+test-a/);
   assert.match(failed.stdout, /INDET\s+test-b/);
   console.log('PASS earlier failure is not downgraded by a later timeout');
+  fs.writeFileSync(path.join(dir, 'test-a.js'), 'setTimeout(() => {}, 6000);\n');
+  fs.writeFileSync(path.join(dir, 'test-b.js'), 'process.exitCode = 1;\n');
+  const reverse = run();
+  assert.equal(reverse.status, 1, 'later completed failure wins over earlier timeout');
+  assert.match(reverse.stdout, /INDET\s+test-a/);
+  assert.match(reverse.stdout, /FAIL\s+test-b/);
+  console.log('PASS later completed failure is not downgraded by earlier timeout');
   const invalid = run({ env: { ...env, AUTODEV_TEST_SUITE_TIMEOUT_MS: 'invalid' } });
   assert.equal(invalid.status, 2);
   assert.doesNotMatch(invalid.stdout, /=== test-/);
@@ -72,6 +79,58 @@ try {
     assert.match(held.stdout, code ? /FAIL\s+test-a/ : /PASS\s+test-a/);
     assert.doesNotMatch(held.stderr, /ETIMEDOUT/);
     console.log(`PASS completed exit ${code} with held pipes preserves verdict`);
+  }
+  const meta = path.join(tmp, 'tree.pid');
+  const beat = path.join(tmp, 'heartbeat.pid');
+  const leafPid = path.join(tmp, 'leaf.pid');
+  const leaf = `
+    const fs = require('fs'); let n = 0;
+    fs.writeFileSync(${JSON.stringify(leafPid)}, String(process.pid));
+    process.on('SIGTERM', () => {});
+    setInterval(() => fs.writeFileSync(${JSON.stringify(beat)}, String(++n)), 25);
+    setTimeout(() => process.exit(0), 12000);
+  `;
+  const middle = `
+    const g = require('child_process').spawn(process.execPath, ['-e', ${JSON.stringify(leaf)}],
+      { detached: true, stdio: 'inherit' }); g.unref();
+    process.on('SIGTERM', () => {});
+    setTimeout(() => process.exit(0), 12000);
+  `;
+  fs.writeFileSync(path.join(dir, 'test-a.js'), `
+    const fs = require('fs');
+    const g = require('child_process').spawn(process.execPath, ['-e', ${JSON.stringify(middle)}],
+      { detached: true, stdio: 'inherit', cwd: require('os').tmpdir() }); g.unref();
+    fs.writeFileSync(${JSON.stringify(meta)}, JSON.stringify({ owner: process.pid, pid: g.pid, root: require('os').tmpdir() }));
+    process.on('SIGTERM', () => {}); setInterval(() => {}, 1000);
+  `);
+  fs.writeFileSync(path.join(dir, 'test-b.js'), `
+    const fs = require('fs'); const m = JSON.parse(fs.readFileSync(${JSON.stringify(meta)}, 'utf8'));
+    const pids = [m.owner, m.pid, Number(fs.readFileSync(${JSON.stringify(leafPid)}, 'utf8'))];
+    const alive = pid => { try { process.kill(pid, 0); return true; } catch { return false; } };
+    const before = fs.readFileSync(${JSON.stringify(beat)}, 'utf8');
+    setTimeout(() => {
+      const changed = fs.readFileSync(${JSON.stringify(beat)}, 'utf8') !== before;
+      const live = pids.filter(alive); const removed = !fs.existsSync(m.root);
+      console.log('TREE-CANARY', JSON.stringify({ changed, live, removed }));
+      process.exitCode = changed || live.length || !removed ? 1 : 0;
+    }, 200);
+  `);
+  const stranger = spawn(process.execPath, ['-e', 'setTimeout(() => {}, 20000)'], { detached: true, stdio: 'ignore' });
+  stranger.unref();
+  let tree;
+  try {
+    tree = run();
+    assert.equal(tree.error, undefined, 'tree cleanup bounded below outer deadline');
+    assert.equal(tree.status, 2, 'timeout stays INDET with clean descendants: ' + tree.stdout + tree.stderr);
+    assert.match(tree.stdout, /TREE-CANARY {"changed":false,"live":\[\],"removed":true}/);
+    assert.match(tree.stdout, /PASS\s+test-b/);
+    assert.doesNotThrow(() => process.kill(stranger.pid, 0), 'unrelated process stays alive');
+    console.log('PASS detached child and grandchild stop before next suite and fixture removal, unrelated PID survives');
+  } finally {
+    const pids = [stranger.pid];
+    if (fs.existsSync(meta)) { const m = JSON.parse(fs.readFileSync(meta, 'utf8')); pids.push(m.owner, m.pid); }
+    if (fs.existsSync(leafPid)) pids.push(Number(fs.readFileSync(leafPid, 'utf8')));
+    for (const pid of pids) { try { process.kill(pid, 'SIGKILL'); } catch (e) { if (e.code !== 'ESRCH') throw e; } }
   }
 } finally {
   // Let Windows release the explicitly stopped fixture's cwd handle.

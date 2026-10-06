@@ -36,6 +36,7 @@ const { spawn, spawnSync } = require('child_process');
 const RUNNER = path.join(__dirname, 'test-all.js');
 const RECEIPT_LIB = path.join(__dirname, 'coverage-receipt.js');
 const SUITE_TMP = path.join(__dirname, 'suite-tmp.js');
+const SUITE_TREE = path.join(__dirname, 'suite-process-tree.js');
 const CENSUS = path.join(__dirname, 'find-untested-functions.js');
 const receipts = require('./coverage-receipt.js');
 
@@ -76,7 +77,7 @@ function fixture(spec) {
     const tooling = path.join(root, TOOL_DIR);
     fs.mkdirSync(tooling, { recursive: true });
     fs.mkdirSync(path.join(root, 'plugins', 'fxr', 'scripts'), { recursive: true });
-    for (const src of [RUNNER, RECEIPT_LIB, SUITE_TMP]) fs.copyFileSync(src, path.join(tooling, path.basename(src)));
+    for (const src of [RUNNER, RECEIPT_LIB, SUITE_TMP, SUITE_TREE]) fs.copyFileSync(src, path.join(tooling, path.basename(src)));
     fs.writeFileSync(path.join(tooling, 'validate' + '.js'), "console.log('validate ok');\n");
     for (const [name, body] of Object.entries(spec.suites || {})) fs.writeFileSync(path.join(tooling, name), body);
     for (const [name, body] of Object.entries(spec.plugins || {})) fs.writeFileSync(path.join(root, 'plugins', 'fxr', 'scripts', name), body);
