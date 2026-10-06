@@ -272,7 +272,12 @@ function takeLock(stateDir, now = Date.now()) {
             }
         }
         return { ok: false, reason: 'another tick holds the lock' };
-    } finally { fs.rmdirSync(claim); }
+    } finally {
+        try { fs.rmdirSync(claim); } catch {
+            // Cleanup failure denies acquisition without releasing the lock.
+            return { ok: false, reason: 'acquisition claim cleanup failed, manual review required' };
+        }
+    }
 }
 
 // ---------------------------------------------------------------- close
