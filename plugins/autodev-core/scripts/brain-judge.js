@@ -243,20 +243,36 @@ function breaker({ clockDir, stateDir, now = Date.now() }) {
 
 function takeLock(stateDir, now = Date.now()) {
     const lock = path.join(stateDir, 'lock.json');
+    const claim = lock + '.claim';
     fs.mkdirSync(stateDir, { recursive: true });
-    for (let attempt = 0; attempt < 2; attempt++) {
-        try {
-            fs.writeFileSync(lock, JSON.stringify({ pid: process.pid, at: new Date(now).toISOString() }), { flag: 'wx' });
-            return { ok: true, release: () => { try { fs.unlinkSync(lock); } catch { /* already gone */ } } };
-        } catch (e) {
-            if (e.code !== 'EEXIST') return { ok: false, reason: `${lock}: ${e.code || e.message}` };
-            let age = null;
-            try { age = now - fs.statSync(lock).mtimeMs; } catch { age = null; }
-            if (age === null || age <= TICK_LOCK_STALE_MS) return { ok: false, reason: 'another tick holds the lock' };
-            try { fs.unlinkSync(lock); } catch { /* another tick took it over first */ }
-        }
+    // Serialize acquisition and stale recovery so two reclaimers cannot remove
+    // a newly acquired lock. An interrupted claim stays unavailable for review.
+    try { fs.mkdirSync(claim); } catch (e) {
+        return { ok: false, reason: e.code === 'EEXIST' ? 'another tick holds the acquisition claim' : `${claim}: ${e.code || e.message}` };
     }
-    return { ok: false, reason: 'another tick holds the lock' };
+    const token = crypto.randomUUID();
+    try {
+        for (let attempt = 0; attempt < 2; attempt++) {
+            try {
+                fs.writeFileSync(lock, JSON.stringify({ pid: process.pid, at: new Date(now).toISOString(), token }), { flag: 'wx' });
+                return { ok: true, release: () => {
+                    try { if (JSON.parse(fs.readFileSync(lock, 'utf8')).token === token) fs.unlinkSync(lock); } catch { /* gone or not ours */ }
+                } };
+            } catch (e) {
+                if (e.code !== 'EEXIST') return { ok: false, reason: `${lock}: ${e.code || e.message}` };
+                let age = null;
+                try { age = now - fs.statSync(lock).mtimeMs; } catch { age = null; }
+                if (age === null || age <= TICK_LOCK_STALE_MS) return { ok: false, reason: 'another tick holds the lock' };
+                let owner;
+                try { owner = JSON.parse(fs.readFileSync(lock, 'utf8')); } catch { owner = null; }
+                if (!owner || !Number.isInteger(owner.pid) || owner.pid <= 0 || hw.pidLiveness(owner.pid) !== 'dead') {
+                    return { ok: false, reason: 'another tick holds the lock, its stale owner is not provably gone' };
+                }
+                try { fs.unlinkSync(lock); } catch { /* another tick took it over first */ }
+            }
+        }
+        return { ok: false, reason: 'another tick holds the lock' };
+    } finally { fs.rmdirSync(claim); }
 }
 
 // ---------------------------------------------------------------- close
