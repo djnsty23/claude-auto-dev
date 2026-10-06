@@ -644,13 +644,13 @@ function exitCodeOf(logText) {
 }
 
 /**
- * `alive` or `dead` from a `process.kill(pid, 0)` error. ONLY ESRCH means dead:
+ * `alive`, `dead` or `unknown` from a `process.kill(pid, 0)` error. ONLY ESRCH means dead:
  * EPERM is a process that exists and belongs to someone else, and a classifier
  * that reads it as dead would report a foreign worker as gone.
  */
 function livenessFromError(err) {
     if (!err) return 'alive';
-    return err.code === 'ESRCH' ? 'dead' : 'alive';
+    return err.code === 'ESRCH' ? 'dead' : err.code === 'EPERM' ? 'alive' : 'unknown';
 }
 
 function pidLiveness(pid, probe) {
@@ -691,14 +691,14 @@ function isSupervisorImage(rec, seen) {
 /**
  * `alive`, `dead` or `reused` for a record's supervisor pid. `reused` is a pid
  * that answers kill(pid, 0) while another image holds it. An image that cannot
- * be read leaves the answer `alive`: not knowing is not proof the supervisor
- * is gone.
+ * be read leaves the answer `unknown`. Retaining a record on uncertainty does
+ * not prove that its supervisor is running.
  */
 function supervisorLiveness(rec, { probe, image = pidImage } = {}) {
     const l = pidLiveness(rec.pid, probe);
     if (l !== 'alive') return l;
     const seen = image(rec.pid);
-    return seen && !isSupervisorImage(rec, seen) ? 'reused' : 'alive';
+    return !seen ? 'unknown' : !isSupervisorImage(rec, seen) ? 'reused' : 'alive';
 }
 
 /** The LAST `RESULT <code> <state>: <sentence>` line for this exact code, or null. */
@@ -904,7 +904,7 @@ function settleLost(rec, code, exit) {
     const reason = lostReason(rec, bootAt());
     if (!reason) {
         fault('not-lost', `${code} has no exit line but is not provably stopped: it started after this boot and pid ${rec.pid} `
-            + `${Number.isInteger(rec.pid) && rec.pid > 0 ? 'is alive' : 'was never recorded'}. Wait for its exit line`);
+            + `${Number.isInteger(rec.pid) && rec.pid > 0 ? 'is not provably gone' : 'was never recorded'}. Wait for its exit line`);
     }
     // A report that did get written keeps its sentence, so what the worker said is not lost with it.
     const reportText = readText(rec.report);
@@ -934,8 +934,8 @@ function settleUnreported(rec, code, exit) {
     const boot = bootAt();
     const started = Date.parse(rec.startedAt || '');
     const thisBoot = !(Number.isFinite(boot) && Number.isFinite(started) && started < boot);
-    if (thisBoot && supervisorLiveness(rec) === 'alive') {
-        fault('still-running', `${rec.log} has an exit line, but the supervisor pid ${rec.pid} is alive, so that line can belong to an `
+    if (thisBoot && !['dead', 'reused'].includes(supervisorLiveness(rec))) {
+        fault('still-running', `${rec.log} has an exit line, but the supervisor pid ${rec.pid} is not provably gone, so that line can belong to an `
             + 'earlier run appended to the same log. Settle once the supervisor has ended');
     }
     const reportText = readText(rec.report);
