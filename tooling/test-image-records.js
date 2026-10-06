@@ -47,24 +47,33 @@ function linearWork(file) {
   let readBytes = 0, concatBytes = 0, visitedBytes = 0;
   const measuredFs = Object.create(fs);
   measuredFs.readSync = (...args) => { const n = fs.readSync(...args); readBytes += n; return n; };
+  const instrument = b => {
+    b.lastIndexOf = function(value, at) {
+      const found = Buffer.prototype.lastIndexOf.call(this, value, at);
+      visitedBytes += (at === undefined ? this.length - 1 : at) - found;
+      return found;
+    };
+    return b;
+  };
   const measuredBuffer = {
-    alloc(n) {
-      const b = Buffer.alloc(n);
-      b.lastIndexOf = function(value, at) {
-        const found = Buffer.prototype.lastIndexOf.call(this, value, at);
-        visitedBytes += (at === undefined ? this.length - 1 : at) - found;
-        return found;
-      };
-      return b;
+    alloc(n) { return instrument(Buffer.alloc(n)); },
+    concat(parts) {
+      concatBytes += parts.reduce((n, b) => n + b.length, 0);
+      return instrument(Buffer.concat(parts));
     },
-    concat(parts) { concatBytes += parts.reduce((n, b) => n + b.length, 0); return Buffer.concat(parts); },
   };
   const context = vm.createContext({ fs: measuredFs, Buffer: measuredBuffer, timeLeft: () => 1 });
   vm.runInContext(source.slice(start, end) + '\nthis.scan = latestUserMessage;', context);
   assert.equal(context.scan(file)?.role, 'user', 'work control reaches current user');
   assert.ok(readBytes <= 16 * 1024 * 1024, 'scan read cap');
-  assert.ok(concatBytes <= readBytes, `linear record assembly copied ${concatBytes} bytes for ${readBytes} read`);
-  assert.ok(visitedBytes <= readBytes, `delimiter visits ${visitedBytes} bounded by ${readBytes} read`);
+  // Evaluate both bounds even when one fails, so the mutation records prove
+  // each canary independently rather than stopping at the first assertion.
+  const errors = [];
+  try { assert.ok(concatBytes <= readBytes, `linear record assembly copied ${concatBytes} bytes for ${readBytes} read`); }
+  catch (e) { errors.push(e); }
+  try { assert.ok(visitedBytes <= readBytes, `delimiter visits ${visitedBytes} bounded by ${readBytes} read`); }
+  catch (e) { errors.push(e); }
+  if (errors.length) throw new AggregateError(errors, 'linear assembly and delimiter work bounds');
   console.log(`PASS linear work: ${readBytes} read, ${concatBytes} copied, ${visitedBytes} delimiter visits`);
   helperCases++;
 }
