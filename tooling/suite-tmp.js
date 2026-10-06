@@ -193,6 +193,8 @@ function spawnSuite(file, args, options, opts) {
             if (child.pid === undefined) finish();
         });
         child.on('exit', (code, signal) => {
+            // Exit settles execution. Pipe holders have a separate drain grace.
+            if (timer) clearTimeout(timer);
             res.status = code;
             res.signal = signal;
             graceTimer = setTimeout(() => {
