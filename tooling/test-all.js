@@ -165,6 +165,7 @@ function printTreeVerdict(v) {
 // a suite killed before completion.
 function classify(res) {
   if (res.error && res.error.code === 'ETIMEDOUT') return { state: 'indet', reason: 'DID NOT FINISH: suite deadline exceeded (ETIMEDOUT)' };
+  if (res.error && res.error.code === 'EPROCESS_TREE') return { state: 'indet', reason: `suite exited ${res.status}, cleanup failed (EPROCESS_TREE)` };
   if (res.error) return { state: 'indet', reason: `DID NOT RUN: ${res.error.code || res.error.message}` };
   if (res.signal) return { state: 'indet', reason: `terminated by signal ${res.signal} before completing` };
   if (res.status === 2) return { state: 'indet', reason: 'exited 2, a refusal or indeterminate result, not a verdict' };
