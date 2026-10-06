@@ -35,6 +35,13 @@ const repoRoot = path.resolve(scriptsDir, '..');
 // Extra flags to pass to each child node process (none needed on Node 22+).
 const CHILD_FLAGS = [];
 
+// A stuck suite must not hold the remaining population and its receipt forever.
+// A timeout is INDETERMINATE, never a pass or proof of a product defect.
+const timeoutRaw = process.env.AUTODEV_TEST_SUITE_TIMEOUT_MS;
+const SUITE_TIMEOUT_MS = timeoutRaw === undefined ? 600000 : Number(timeoutRaw);
+const timeoutValid = (timeoutRaw === undefined || /^\d+$/.test(timeoutRaw))
+  && Number.isSafeInteger(SUITE_TIMEOUT_MS) && SUITE_TIMEOUT_MS >= 1000 && SUITE_TIMEOUT_MS <= 3600000;
+
 // A SUITE NEVER INHERITS THE OPERATOR'S PROFILE. claude-paths.configDir() reads
 // CLAUDE_CONFIG_DIR before HOME, so a suite that fakes HOME and spreads
 // process.env into its child still points that child at the REAL config dir
@@ -55,6 +62,7 @@ const USAGE = 'usage: node tooling/test-all.js [--serial] [--no-receipt]\n'
   + 'Runs every tooling/test-*.js suite, then validate.js, and checks the run left the tree alone.\n'
   + '--serial      ignore tooling/test-all-pool.js and run one suite at a time\n'
   + '--no-receipt  collect no coverage and publish no receipt (an inherited NODE_V8_COVERAGE is kept)\n'
+  + 'AUTODEV_TEST_SUITE_TIMEOUT_MS: per-suite deadline, default 600000 ms (1000 to 3600000)\n'
   + 'Exit 0 all passed, 1 anything failed, 2 nothing failed but something gave no verdict.';
 
 // A mutation sweep (find-vacuous-assertions.js) OVERWRITES its subject in place,
@@ -153,6 +161,7 @@ function printTreeVerdict(v) {
 // produce a verdict (ETIMEDOUT)`: somebody else's load handed over as a red
 // suite. A run that graded nothing is still not a run that passed.
 function classify(res) {
+  if (res.error && res.error.code === 'ETIMEDOUT') return { state: 'indet', reason: 'DID NOT FINISH: suite deadline exceeded (ETIMEDOUT)' };
   if (res.error) return { state: 'indet', reason: `DID NOT RUN: ${res.error.code || res.error.message}` };
   if (res.signal) return { state: 'indet', reason: `terminated by signal ${res.signal} before completing` };
   if (res.status === 2) return { state: 'indet', reason: 'exited 2, a refusal or indeterminate result, not a verdict' };
@@ -216,6 +225,7 @@ async function runOneUnguarded(run, item, opt) {
       env,
       stdio: ['inherit', 'pipe', 'pipe'],
       windowsHide: true,
+      timeout: SUITE_TIMEOUT_MS,
     }, { label: item.label, onStdout: tee(process.stdout), onStderr: tee(process.stderr) });
     const ms = Date.now() - t0;
     if (logFd !== null) fs.closeSync(logFd);
@@ -261,6 +271,10 @@ async function runSerial(items, runOne) {
 }
 
 async function main() {
+  if (!timeoutValid) {
+    console.error('AUTODEV_TEST_SUITE_TIMEOUT_MS must be an integer from 1000 to 3600000. No suite ran.');
+    return 2;
+  }
   if (argv.includes('--help')) { console.log(USAGE); return 0; }
   const unknown = argv.filter((a) => !['--serial', '--no-receipt'].includes(a));
   if (unknown.length) { console.error('unknown argument(s): ' + unknown.join(' ') + '\n' + USAGE); return 2; }
