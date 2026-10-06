@@ -406,9 +406,20 @@ s.listen(${port},'127.0.0.1',()=>setTimeout(()=>s.close(),400));`;
         const root = fs.mkdtempSync(path.join(TMP, 'e2e-'));
         const tdir = path.join(root, 'tooling');
         fs.mkdirSync(tdir);
-        for (const f of fs.readdirSync(TOOLING)) {
-            if (/^(test-all\.js|test-all-pool\.js|coverage-receipt\.js|suite-tmp\.js|cpu-.*\.js)$/.test(f)) fs.copyFileSync(path.join(TOOLING, f), path.join(tdir, f));
+        // The copy set follows the runner's own local requires, so a helper added
+        // to test-all.js or anything it loads cannot go missing from the fixture.
+        const copySet = new Set();
+        const pending = ['test-all.js', 'test-all-pool.js'];
+        while (pending.length) {
+            const f = pending.pop();
+            if (copySet.has(f)) continue;
+            copySet.add(f);
+            const src = fs.readFileSync(path.join(TOOLING, f), 'utf8');
+            for (const m of src.matchAll(/require\(\s*['"]\.\/([\w.-]+\.js)['"]\s*\)/g)) pending.push(m[1]);
         }
+        for (const f of fs.readdirSync(TOOLING)) if (/^cpu-.*\.js$/.test(f)) copySet.add(f);
+        check('e2e: the fixture copies every helper the runner requires', copySet.has('suite-tmp.js') && copySet.has('coverage-receipt.js'));
+        for (const f of copySet) fs.copyFileSync(path.join(TOOLING, f), path.join(tdir, f));
         // Each suite holds a marker file from its first line until 300 ms AFTER its
         // output, so a validator that starts while any suite still runs sees one
         // and fails: this measures completion, not the order of printed headers.
