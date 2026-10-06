@@ -1,5 +1,31 @@
 # Changelog
 
+## [8.183.0]
+
+### Gate lock and suite runner
+
+- gate-lock adopts no orphan created after its parent exited, and two
+  frontier batches created in one second get distinct ids.
+- The suite runner bounds each suite without reporting a timeout as a pass,
+  keeps a completed exit while its pipes drain, stops owned descendants
+  before fixture cleanup, keeps failure evidence when a suite times out and
+  learns a suite's identity from its live process handle.
+- merge-lock accepts a product gate's receipt through a wrapper exit line.
+
+### Image transcript records
+
+- Image records are assembled in linear work, complete current records are
+  inspected, and string metadata is skipped when selecting prompt images.
+
+### Smaller fixes
+
+- Executable session environment programs are preserved.
+- Stale reference exemptions are scoped to their statements.
+- Skill description bytes are reported without prompt cost claims.
+- Queue hook notes are isolated from the operator profile.
+- Generated rule loading guidance is explicit, and the harness frontier
+  experiments are preregistered.
+
 ## [8.182.0]
 
 ### Eight advisory security-gate rules learned from shipped fixes
