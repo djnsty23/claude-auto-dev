@@ -271,8 +271,8 @@ function headlessRunOf(rec, headlessRecords) {
     return same.filter((h) => launched !== null && ms(h.startedAt) !== null && ms(h.startedAt) >= launched - 60 * 1000).pop() || null;
 }
 
-/** done and stopped ended the run normally (the verdict judges its content); failed, lost and unreported did not. */
-function runStatusOfHeadless(result) { return result === 'done' || result === 'stopped' ? 'succeeded' : 'failed'; }
+/** A normal report and a recorded zero exit are both required for success. */
+function runStatusOfHeadless(result, exit) { return exit === 0 && (result === 'done' || result === 'stopped') ? 'succeeded' : 'failed'; }
 
 function closeStep(ctx) {
     const { mode, p, out, state } = ctx;
@@ -301,7 +301,7 @@ function closeStep(ctx) {
             continue;
         }
         if (h.state !== 'settled') { waiting++; continue; }
-        const runStatus = runStatusOfHeadless(h.result);
+        const runStatus = runStatusOfHeadless(h.result, h.exit);
         const detail = { taskId: rec.taskId, slug: rec.slug, result: h.result, runStatus, sentence: String(h.sentence || '').slice(0, 200) };
         if (mode === 'dry') {
             closed++;
