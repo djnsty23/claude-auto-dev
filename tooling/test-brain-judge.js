@@ -134,7 +134,7 @@ try {
     check('a second tick is refused while it is held', bj.takeLock(sd).ok === false);
     l1.release();
     check('control: released, it can be taken again', (() => { const l = bj.takeLock(sd); if (l.ok) l.release(); return l.ok; })());
-    fs.writeFileSync(path.join(sd, 'lock.json'), '{}');
+    fs.writeFileSync(path.join(sd, 'lock.json'), JSON.stringify({ pid: 2147483646 }));
     const oldT = new Date(Date.now() - 20 * 60000);
     fs.utimesSync(path.join(sd, 'lock.json'), oldT, oldT);
     check('a lock older than ten minutes is taken over', (() => { const l = bj.takeLock(sd); if (l.ok) l.release(); return l.ok; })());
