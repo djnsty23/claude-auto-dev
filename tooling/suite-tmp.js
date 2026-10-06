@@ -45,6 +45,7 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 const { spawnSync } = require('child_process');
+const { trackTree } = require('./suite-process-tree.js');
 
 const PREFIX = 'adsuite';
 const TMP_KEYS = ['TEMP', 'TMP', 'TMPDIR'];
@@ -154,14 +155,39 @@ function spawnSuite(file, args, options, opts) {
     return new Promise((resolve) => {
         const res = { status: null, signal: null, error: undefined, pid: undefined, tmpRoot: dir, tmpRemoved: null, stdioHeld: false };
         let settled = false;
+        let finishing = false;
         let timer = null;
         let graceTimer = null;
-        const finish = () => {
-            if (settled) return;
+        let tree = null;
+        let shutdown = null;
+        const releasePipes = () => {
+            for (const s of [child.stdin, child.stdout, child.stderr]) { if (s) s.destroy(); }
+            if (res.treeCleanupError) {
+                try { child.kill('SIGKILL'); } catch { /* already gone or inaccessible */ }
+                child.unref();
+            }
+        };
+        const terminateTree = () => {
+            if (!shutdown) shutdown = tree.terminate().catch(e => {
+                res.treeCleanupError = e.message;
+                log(`[${label}] owned tree cleanup incomplete: ${e.message}`);
+                if (!res.error && !(res.status > 0 && res.status !== 2)) {
+                    e.code = 'EPROCESS_TREE';
+                    res.error = e;
+                }
+            });
+            return shutdown;
+        };
+        const finish = async () => {
+            if (settled || finishing) return;
+            finishing = true;
+            if (shutdown) await shutdown;
             settled = true;
             if (timer) clearTimeout(timer);
             if (graceTimer) clearTimeout(graceTimer);
-            if (dir) {
+            if (tree) tree.stop();
+            // An incomplete shutdown cannot authorize deleting a live owner's fixtures.
+            if (dir && !res.treeCleanupError) {
                 const r = removeSuiteTmp(dir, o.rm);
                 res.tmpRemoved = r.ok;
                 if (!r.ok) log(`[${label}] temp root not removed (${r.code}): ${dir}`);
@@ -169,6 +195,7 @@ function spawnSuite(file, args, options, opts) {
             resolve(res);
         };
         let child;
+        const started = Date.now();
         try {
             child = spawn(file, a, spawnOpts);
         } catch (e) {
@@ -177,6 +204,7 @@ function spawnSuite(file, args, options, opts) {
             return;
         }
         res.pid = child.pid;
+        if (child.pid !== undefined) tree = trackTree(child.pid, started, Date.now());
         if (child.stdout && o.onStdout) child.stdout.on('data', o.onStdout);
         if (child.stderr && o.onStderr) child.stderr.on('data', o.onStderr);
         if (timeout > 0) {
@@ -184,7 +212,10 @@ function spawnSuite(file, args, options, opts) {
                 const e = new Error(`spawn ${file} ETIMEDOUT`);
                 e.code = 'ETIMEDOUT';
                 res.error = e;
-                try { child.kill('SIGTERM'); } catch { /* already gone */ }
+                terminateTree().then(() => {
+                    releasePipes();
+                    finish();
+                });
             }, timeout);
         }
         child.on('error', (e) => {
@@ -195,12 +226,15 @@ function spawnSuite(file, args, options, opts) {
         child.on('exit', (code, signal) => {
             // Exit settles execution. Pipe holders have a separate drain grace.
             if (timer) clearTimeout(timer);
+            if (tree) tree.exited();
             res.status = code;
             res.signal = signal;
             graceTimer = setTimeout(() => {
                 res.stdioHeld = true;
-                for (const s of [child.stdout, child.stderr]) { if (s) s.destroy(); }
-                finish();
+                terminateTree().then(() => {
+                    releasePipes();
+                    finish();
+                });
             }, grace);
         });
         child.on('close', (code, signal) => {

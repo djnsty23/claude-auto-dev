@@ -72,6 +72,7 @@ const leaky = (name, exit) => [
     fs.mkdirSync(tooling);
     fs.copyFileSync(path.join(TOOLING, 'test-all.js'), path.join(tooling, 'test-all.js'));
     fs.copyFileSync(HELPER, path.join(tooling, 'suite-tmp.js'));
+    fs.copyFileSync(path.join(TOOLING, 'suite-process-tree.js'), path.join(tooling, 'suite-process-tree.js'));
     fs.copyFileSync(path.join(TOOLING, 'coverage-receipt.js'), path.join(tooling, 'coverage-receipt.js'));
     fs.writeFileSync(path.join(tooling, 'validate.js'), 'process.exit(0);\n');
     fs.writeFileSync(path.join(tooling, 'test-a-leak-pass.js'), leaky('a', 0));
