@@ -925,13 +925,33 @@ function latestSevenDay(c, account, running) {
     return best;
 }
 
+/**
+ * A batch id has one-second resolution, so two batches created in one second
+ * minted one id and the second overwrote the first's file. The file is claimed
+ * with a hard link, which fails on a name that exists, and a taken id moves to
+ * the next suffix: B-<stamp>, B-<stamp>-2, B-<stamp>-3.
+ */
 function createBatch(c, { tasks, variants, account, k, max, quietWaitMin = 0 }) {
-    const id = `B-${stamp()}`;
     const items = [];
     for (let rep = 1; rep <= k; rep++) for (const t of tasks) for (const v of variants) items.push({ task: t, variant: v, rep, state: 'queued', run: null, verdict: null });
-    const batch = { id, createdAt: new Date().toISOString(), account, max, budgetStop: c.budgetStop, quietWaitMin, items, state: 'running', loopPid: null };
-    writeJsonAtomic(batchFile(c, id), batch);
-    return batch;
+    const now = new Date();
+    fs.mkdirSync(path.join(c.data, 'batches'), { recursive: true });
+    for (let n = 1; n <= 100; n++) {
+        const id = n === 1 ? `B-${stamp(now)}` : `B-${stamp(now)}-${n}`;
+        const batch = { id, createdAt: now.toISOString(), account, max, budgetStop: c.budgetStop, quietWaitMin, items, state: 'running', loopPid: null };
+        const file = batchFile(c, id);
+        const tmp = `${file}.${process.pid}.tmp`;
+        fs.writeFileSync(tmp, JSON.stringify(batch, null, 2) + '\n');
+        try {
+            fs.linkSync(tmp, file);
+            return batch;
+        } catch (e) {
+            if (e.code !== 'EEXIST') throw e;
+        } finally {
+            fs.rmSync(tmp, { force: true });
+        }
+    }
+    throw new Error('no free batch id in 100 tries');
 }
 /**
  * With --quiet-wait, an item starts only when no gate, coverage run or full
