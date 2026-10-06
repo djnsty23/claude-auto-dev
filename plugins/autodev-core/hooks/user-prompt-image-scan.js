@@ -38,7 +38,8 @@ function fail(msg) {
 
 // Read complete JSONL records from the tail. A base64 image can exceed one
 // chunk, so keep its incomplete prefix as bytes until the record is complete.
-// The first user record decides even when its content is plain text.
+// The newest user record with array content decides. String-content metadata
+// records are skipped, preserving the prompt image selection rule.
 function latestUserMessage(transcriptPath) {
     const CHUNK_BYTES = 128 * 1024;
     const MAX_SCAN_BYTES = 16 * 1024 * 1024;
@@ -78,7 +79,7 @@ function latestUserMessage(transcriptPath) {
                 try { rec = JSON.parse(line); } catch { continue; }
                 if (timeLeft() <= 0) return null;
                 const msg = rec && (rec.message || rec);
-                if (msg && msg.role === 'user') return msg;
+                if (msg && msg.role === 'user' && Array.isArray(msg.content)) return msg;
             }
         }
         return null;

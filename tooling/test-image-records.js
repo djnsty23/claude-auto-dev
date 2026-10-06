@@ -102,7 +102,9 @@ try {
   check('multi-megabyte-current-row', [text, image(2 * 1024 * 1024)], true);
   check('large-assistant-tail', [image(4), { role: 'assistant', content: [{ type: 'text', text: 'x'.repeat(256 * 1024) }] }], true);
   check('newest-array-text-wins', [image(256 * 1024), text], false);
-  check('newest-string-text-wins', [image(4), { role: 'user', content: 'current plain text' }], false);
+  check('meta-string-after-image-skipped', [image(4), { role: 'user', content: 'meta record' }], true);
+  check('wrapped-meta-string-after-image-skipped', [image(4), { message: { role: 'user', content: 'meta record' } }], true);
+  check('meta-string-only-silent', [{ role: 'user', content: 'meta record' }], false);
   check('unicode-chunk-boundary', [image(256 * 1024), { role: 'assistant', content: [{ type: 'text', text: '\u754c'.repeat(50000) }] }], true);
   check('truncated-final-row', [image(256 * 1024)], true, '{"role":');
   check('scan-byte-limit', [image(4), { role: 'assistant', content: 'x'.repeat(17 * 1024 * 1024) }], false);
