@@ -156,3 +156,7 @@ repo, because a broken grep and a clean codebase produce the same text. Run each
 check against something you know is findable first, then report both the count of
 findings and the number of files scanned. If the scan did not run, say so. If it ran but its detector/control is
 unverified, report that limitation rather than falsely saying it never ran.
+
+## Detectors learned from shipped fixes
+
+`security-gate.js` carries eight advisory rules for classes found late in shipped products: `esm-inline-require`, `admin-no-role-check`, `sql-policy-initplan`, `sql-fk-unindexed`, `select-star`, `cron-fetch-no-timeout`, `backup-unbounded-read` and `uncached-stripe-list`. They warn and never block. Measured precision and the false positives already fixed: `docs/learned-rules.md`. Classes with no signature (int8 ids compared with `===`, sign-out that leaves client role state, a cron route open when its secret is unset) are in `core/references/learned-defaults.md`.

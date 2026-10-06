@@ -1,5 +1,17 @@
 # Changelog
 
+## [8.182.0]
+
+### Eight advisory security-gate rules learned from shipped fixes
+
+- security-gate.js gains esm-inline-require, admin-no-role-check,
+  sql-policy-initplan, sql-fk-unindexed, select-star, cron-fetch-no-timeout,
+  backup-unbounded-read and uncached-stripe-list. All warn and none blocks.
+  Precision and the false positives already fixed: docs/learned-rules.md.
+- core/references/learned-defaults.md lists the build defaults for these
+  classes and for the ones with no signature, linked from the core,
+  setup-project, spec, security, perf and standards skills.
+
 ## [8.181.0]
 
 ### One full gate per merge, under a per-repo merge lock

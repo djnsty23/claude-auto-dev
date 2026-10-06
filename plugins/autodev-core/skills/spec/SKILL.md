@@ -226,3 +226,7 @@ If the idea has no core loop you can name — "an AI platform for business", "a
 social app" — do not plan it. Say what is missing and ask for the one sentence
 that would fix it. A backlog generated from a vague idea is worse than none: it
 looks like progress and it commits the project to a shape nobody chose.
+
+## Design questions learned from shipped fixes
+
+Answer these in `SPEC.md` before building: who is allowed past each operator route and where the role lives (one store), which reads are public and cacheable, which third-party calls get a cache and a TTL, how a bulk send resumes after a restart, what bounds each stats and export query, and which counters would land on a row that readers also load. Full list and reasons: `core/references/learned-defaults.md`.

@@ -124,3 +124,7 @@ Zero violations across 4 files and zero across 400 are different results printed
 the same way. State the denominator. When a category returns nothing, confirm the
 pattern can match at all by running it against a file you know violates it —
 otherwise a typo'd pattern reports a clean codebase.
+
+## Standards learned from shipped fixes
+
+Zod parses every external payload, and int8 ids are coerced before any `===`. A fetch in a scheduled job carries an abort signal. An export pages through its table. An ES module imports statically. The gate's advisory rules enforce the signature-bearing ones, and `core/references/learned-defaults.md` lists the rest.
