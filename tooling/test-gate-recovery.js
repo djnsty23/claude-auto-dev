@@ -656,7 +656,7 @@ async function main() {
         ['P25', 'a receipt from before the attempt counts', 'tooling/gate-recovery.js',
             [[' || started < from || finished > to) {', ') {']], (s) => r20RunnerStale(s), ['R20']],
         ['P26', 'the runner writes the chain\'s output to a bare stream', 'tooling/gate-lock.js',
-            [['    npm.stdout.on(\'data\', (b) => { scan.feed(b); toStdout(b); });', '    npm.stdout.on(\'data\', (b) => { process.stdout.write(b); scan.feed(b); });']],
+            [["        onData: (b, stream) => { scan.feed(b); (stream === 'stderr' ? toStderr : toStdout)(b); },", "        onData: (b, stream) => { (stream === 'stderr' ? process.stderr : process.stdout).write(b); scan.feed(b); },"]],
             (s) => r22OutputFull(s), ['R22']],
         ['P27', 'the record sent over IPC is ignored', 'tooling/gate-lock.js',
             [['const rec = readSentinel(sentinel, runId, token) || sent;', 'const rec = readSentinel(sentinel, runId, token);']],

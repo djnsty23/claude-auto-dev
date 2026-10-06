@@ -412,8 +412,28 @@ function spendReadmission(file, worktree, head, max) {
     return { spent: true, count: next };
 }
 
+// ---------------------------------------------------------------------------
+// The step a dead attempt died in. tooling/gate-steps.js appends a start line
+// before each chain step runs and an end line when it ends
+// (gate-records.js readSteps). An attempt that did not finish and whose last
+// step has no end line died inside that step.
+// ---------------------------------------------------------------------------
+
+/**
+ * The step records' open step as { index, of, step, pid, startUtc, why }, or
+ * null when every recorded step ended or there are no records. `stepsRead` is
+ * gate-records.js readSteps(base, runId).
+ */
+function lostStep(stepsRead) {
+    if (!stepsRead || stepsRead.state !== 'ok' || !stepsRead.steps.length) return null;
+    const s = stepsRead.steps[stepsRead.steps.length - 1];
+    if (s.ended) return null;
+    return { index: s.index, of: s.of, step: s.step, pid: s.pid, startUtc: s.startUtc,
+             why: `step ${s.index}${s.of ? ` of ${s.of}` : ''} (${s.step}, pid ${s.pid}) started ${s.startUtc} and recorded no exit` };
+}
+
 module.exports = {
-    CRASH_EXITS, DEFAULT_DISK_FLOOR, createScanner, memoryEvents, commitHeadroom, diskFree, portState,
+    lostStep, CRASH_EXITS, DEFAULT_DISK_FLOOR, createScanner, memoryEvents, commitHeadroom, diskFree, portState,
     readRecoveryConfig, runsSuiteRunner, runnerRows, classify, sample, awaitClearance, counterFile, readmissionsSpent, spendReadmission,
 };
 
