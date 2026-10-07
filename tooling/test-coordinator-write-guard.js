@@ -894,6 +894,21 @@ expectSilentAllow('`git cherry-pick -n` is --no-commit, not a bypass', noRole('g
 expectSilentAllow('a shell comment carrying the flag is not a flag', noRole('git commit -m x # --no-verify'));
 expectSilentAllow('a heredoc body carrying the flag is argument text',
     noRole('cat <<EOF > notes.md\ngit push --no-verify origin main\nEOF'));
+// [measured 2026-10-07] a brief written with two heredocs asked, because the
+// flag sat on the THIRTEENTH body line. HEREDOC_RE ended an unterminated body
+// with `$`, which under the `m` flag is any line end, so the lazy body stopped
+// after one line and every later line was tokenised as shell. Every case above
+// had a one-line body. The shape below is the incident's, cut down.
+expectSilentAllow('a multi-line heredoc FORBIDDING the flag is prose, not a git call',
+    noRole("cat > brief.md <<'EOF'\nYou are working in a worktree.\n\n"
+        + '6. Commit with a conventional message (git commit -F <file>, never -m, never --amend, never --no-verify). Then push.\nEOF\n'
+        + "cat > brief2.md <<'EOF'\n4. One commit per fix (never -m, --amend or --no-verify).\nEOF\necho ok"));
+expectSilentAllow('  a body line that is a whole git call with the flag is still text',
+    noRole('cat <<EOF > notes.md\nfirst line\ngit push --no-verify origin main\nEOF'));
+expectAsk('  the real call AFTER a multi-line heredoc still asks',
+    noRole("cat > brief.md <<'EOF'\nline one\nnever --no-verify\nEOF\ngit push --no-verify origin HEAD"), /pre-push/);
+expectAsk('  and an unterminated heredoc swallows the rest, so the call BEFORE it still asks',
+    noRole("git commit -n -m x && cat <<'EOF' > notes.md\nnever --no-verify"), /commit-msg/);
 expectSilentAllow('a here-string carrying the flag is argument text', noRole('git commit -F - <<< "--no-verify"'));
 expectSilentAllow('a redirected echo of the flag is not a push', noRole('echo "git push --no-verify" > x.sh'));
 expectSilentAllow('grep -- for the flag is not using it', noRole("grep -rn -- '--no-verify' tooling/"));
