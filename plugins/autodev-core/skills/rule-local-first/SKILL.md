@@ -59,6 +59,27 @@ allows more than one gate at a time sets its lane count once with `lanes N`;
 every waiter then takes whichever lane frees first. `status` shows each lane's
 holder and queue.
 
+## The fast lane for a small candidate
+
+Where the operator's policy grants a fast lane, a candidate that is small and
+touches nothing sensitive runs lint, typecheck, test and build on the rebased
+tree instead of the full gate, with no queue. `fast-lane.js` decides it from
+the diff against the base, refuses with its reasons otherwise, and writes the
+receipt that `merge-lock.js` accepts:
+
+```bash
+node "${CLAUDE_PLUGIN_ROOT}/scripts/fast-lane.js" classify --repo-dir . --head "$(git rev-parse HEAD)"
+node "${CLAUDE_PLUGIN_ROOT}/scripts/fast-lane.js" run --repo-dir . --head "$(git rev-parse HEAD)" --out "${TMPDIR:-/tmp}/fast-lane.json"
+node "${CLAUDE_PLUGIN_ROOT}/scripts/merge-lock.js" merge --repo OWNER/NAME --pr N --head "$(git rev-parse HEAD)" --fast-lane-receipt "${TMPDIR:-/tmp}/fast-lane.json"
+```
+
+Write the receipt outside the checkout, or `run` refuses the next candidate as
+dirty. The limit and the sensitive patterns live in `fast-lane.js --help`. A
+product tightens them with an `autodevFastLane` key in its package.json, read
+at the base, so a candidate cannot loosen its own bar. Merge-lock classifies
+GitHub's diff again under the lock. An ineligible verdict means the full gate,
+not a retry.
+
 ## Launch an owned candidate
 
 For UI work, use the host's available supervised preview/browser capability.
