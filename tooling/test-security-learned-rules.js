@@ -225,6 +225,11 @@ const CASES = [
         'supabase/migrations/001_init.sql': 'create table public.songs (id uuid primary key);\ncreate table private.audit (id int);',
         'src/types/database.ts': 'export type Database = {\n  public: {\n    Tables: {\n      songs: {\n        Row: { id: string }\n      }\n    }\n  }\n}\n',
       },
+      // A types file compacted onto one line still names the table.
+      compacted: {
+        'supabase/migrations/001_init.sql': 'create table public.songs (id uuid primary key);',
+        'src/types/database.ts': 'export type Database = { public: { Tables: { songs: { Row: { id: string } } } } }\n',
+      },
       // No generated types at all: nothing to be stale against.
       noTypes: { 'supabase/migrations/001_init.sql': 'create table public.songs (id uuid primary key);' },
     },
