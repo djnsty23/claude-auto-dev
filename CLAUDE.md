@@ -49,6 +49,10 @@ The chain's exit status is a verdict on one step, not on thirteen.
   `origin/main`, commit, and run the gate once on that clean tree: `check:suites` grades HEAD in a
   private worktree and refuses a dirty tree. Merge with `plugins/autodev-core/scripts/merge-lock.js`,
   which takes the per-repo merge lock, refuses a base that moved, and reads the merged tree back.
+- **A product's small candidate can take the fast lane** where the operator's policy grants it:
+  `plugins/autodev-core/scripts/fast-lane.js run` classifies the diff (size and sensitive paths),
+  runs lint, typecheck, test and build, and writes a receipt that `merge-lock.js --fast-lane-receipt`
+  accepts after classifying GitHub's diff again. This repo always takes its own full gate.
 - **Do not touch the tree while it runs.** `test-all.js` fails `tree-inert` when a suite changes
   `git status` under a stable HEAD. A moved HEAD makes that row INDETERMINATE, so the run exits 2,
   or 1 when a suite also failed on its own. Draft in a scratchpad. `check:coverage` grades the receipt that `npm test` left and refuses (exit 2) one

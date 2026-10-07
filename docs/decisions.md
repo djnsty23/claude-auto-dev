@@ -3,6 +3,29 @@
 Non-obvious choices, and where the work that implements them actually landed.
 One entry per decision, newest first.
 
+## 2026-10-07: a small candidate merges on a fast-lane receipt, judged twice
+
+The operator's policy lets a small candidate that touches no auth, payments or
+migrations skip the full gate and run lint, typecheck, test and build instead.
+merge-lock.js accepted only a full gate log, so those merges went out as a
+bare `gh pr merge`, outside the per-repo lock.
+
+`plugins/autodev-core/scripts/fast-lane.js` classifies base..head and writes a
+JSON receipt naming the head, its tree, the verdict and each step's exit.
+merge-lock.js takes it as `--fast-lane-receipt` and judges it twice: the
+receipt must say eligible and green before the lock, and under the lock the
+receipt's tree must be GitHub's tree for the head and the classifier must say
+eligible for GitHub's own compare file list. The second judgement is the one
+that cannot be hand-edited, so a forged or stale verdict still meets the real
+diff.
+
+Fail-closed choices: a path pattern matches anywhere in the lower-cased path,
+so `author` reads as auth. A binary file, a changed package.json, a missing
+step script and an unreadable diff or config are ineligible or red. A
+product's `autodevFastLane` config in package.json is read at the BASE, so a
+candidate cannot loosen its own bar, and it can add patterns but never remove
+a default.
+
 ## 2026-10-06: a product gate proves a merge through a wrapper line, not its own format
 
 merge-lock.js accepted only a log ending in gate-lock's `verdict PASS (exit 0)`,
