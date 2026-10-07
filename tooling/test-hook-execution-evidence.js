@@ -317,6 +317,68 @@ const removeMutant = (file, orig, wrote) => {
     }
 };
 
+/* THE MUTATION PASSES RUN THE CHECKER ON THE TARGET HOOK ALONE.
+   `[measured 2026-10-07]` this suite took 12m45s standalone and blew the
+   test-all deadline under load. The profile: one checker pass runs every
+   candidate suite serially under coverage (41 suites, ~150s idle), and the suite
+   made three full passes. The baseline pass is the only execution-evidence gate
+   on the real population (validate runs --referenced-only), so it stays whole.
+   The two mutation passes grade the checker's verdict logic on ONE hook, and
+   the target is chosen one-to-one: no other suite executes it and its suite
+   executes nothing else. Dropping the other hooks therefore removes no evidence
+   about the target. It removes 40 unrelated suites whose flake would turn the
+   mutated verdict into exit 2 and leave the assertion UNRESOLVED.
+   The population is narrowed in the sandbox's hooks.json files, never in the
+   checker, so the checker under test runs its normal code path. The files are
+   swapped with the same rename-and-restore discipline as the suite mutants and
+   restored before any suite runs again. A control grades the narrowed
+   population: had narrowing removed the target too, the checker would refuse
+   with exit 1 on zero hooks, and "exits 1" would pass for the wrong reason. */
+const wiresTarget = (h, target) => {
+    const cmd = [h.command || '', ...(h.args || [])].join(' ');
+    const at = cmd.indexOf(target.name);
+    return at !== -1 && (at === 0 || !/[\w-]/.test(cmd[at - 1]));
+};
+const narrowPopulation = (target) => {
+    const installed = [];
+    try {
+        for (const plugin of fs.readdirSync(path.join(SANDBOX, 'plugins'))) {
+            const file = path.join(SANDBOX, 'plugins', plugin, 'hooks', 'hooks.json');
+            if (!fs.existsSync(file)) continue;
+            const json = JSON.parse(fs.readFileSync(file, 'utf8'));
+            const mine = plugin === target.plugin;
+            const hooks = {};
+            for (const [event, matchers] of Object.entries(json.hooks || {})) {
+                const kept = (matchers || [])
+                    .map((m) => ({ ...m, hooks: (m.hooks || []).filter((h) => mine && wiresTarget(h, target)) }))
+                    .filter((m) => m.hooks.length);
+                if (kept.length) hooks[event] = kept;
+            }
+            const narrowed = { ...json, hooks };
+            if (Array.isArray(json.modules)) {
+                narrowed.modules = json.modules.filter((m) =>
+                    mine && typeof m === 'string' && path.basename(m) === target.name);
+            }
+            const wrote = JSON.stringify(narrowed, null, 2) + '\n';
+            installed.push([file, installMutant(file, wrote), wrote]);
+        }
+    } catch (e) {
+        for (const [file, orig, wrote] of installed) removeMutant(file, orig, wrote);
+        throw e;
+    }
+    return () => { for (const [file, orig, wrote] of installed) removeMutant(file, orig, wrote); };
+};
+const runNarrowedChecker = (target, which, expect2 = false) => {
+    const restore = narrowPopulation(target);
+    let run;
+    try { run = runChecker(expect2); } finally { restore(); }
+    const rows = run.json?.wiredRows || [];
+    check(`control: the ${which} checker pass sees the target hook alone`,
+        rows.length > 0 && rows.every((r) => r.plugin === target.plugin && r.name === target.name),
+        `wired=${JSON.stringify(rows.map((r) => r.plugin + '/' + r.name))} error=${JSON.stringify(run.json?.error)}`);
+    return run;
+};
+
 const insertAfterShebang = (source, insertion) => {
     if (!source.startsWith('#!')) return `${insertion}\n${source}`;
     const lineEnd = source.indexOf('\n');
@@ -409,7 +471,7 @@ if (target) {
         check('control: the vacuous replacement exits 0 without loading its hook',
             vacuous.status === 0 && vacuous.signal === null && !vacuous.error,
             detail(vacuous));
-        mutatedCheck = runChecker();
+        mutatedCheck = runNarrowedChecker(target, 'vacuous-suite');
     } finally {
         if (vacuousOrig) removeMutant(targetSuite, vacuousOrig, vacuousWrote);
     }
@@ -463,7 +525,7 @@ if (target && targetSuite && original) {
             `dumps=${cov.dumps} expected=${cov.expected} `
             + `same-basename-urls=${cov.urls.length ? JSON.stringify(cov.urls) : 'NONE'} `
             + '(NONE means the hook never executed; a listed url means it ran and the paths compare unequal)');
-        failedSuiteCheck = runChecker(true);   // this call deliberately provokes exit 2
+        failedSuiteCheck = runNarrowedChecker(target, 'red-suite', true);   // this call deliberately provokes exit 2
     } finally {
         if (redOrig) removeMutant(targetSuite, redOrig, redWroteNow);
         fs.rmSync(coverageDir, { recursive: true, force: true });
