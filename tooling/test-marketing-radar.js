@@ -96,7 +96,9 @@ async function unit() {
   const strictCases = [
     ['creator-help', 'The report is under Analytics; use the date selector first.', true, false],
     ['creator-resource', 'Download the worksheet at https://example.com/worksheet', true, false],
+    ['creator-owned-help', 'Download my worksheet at https://example.com/worksheet', true, false],
     ['creator-promo', 'Book a FREE tracking audit at https://example.com/audit', true, true],
+    ['creator-owned-promo', 'Check out my new Meta Ads course and community at https://example.com/course', true, true],
     ['engagement', 'Subscribe for subscribe and check out my channel', false, true],
     ['contact-bait', 'Contact me on Telegram for guaranteed results', false, true],
     ...['exact-a', 'exact-b', 'exact-c'].map((id) =>
@@ -116,11 +118,11 @@ async function unit() {
     }, 'fixture', index));
   const strictFiltered = subject.filterCommentFeedback(strictComments);
   const excludedIds = new Set(strictFiltered.excluded.map((row) => row.id));
-  check('conservative filter matches all 18 labeled edge cases',
+  check('conservative filter matches all 20 labeled edge cases',
     strictCases.every(([id, , , shouldExclude]) => excludedIds.has(id) === shouldExclude)
-      && strictFiltered.retained.length === 12 && strictFiltered.excluded.length === 6);
+      && strictFiltered.retained.length === 13 && strictFiltered.excluded.length === 7);
   check('creator promotion, contact bait, engagement manipulation and exact repeats have separate counts',
-    strictFiltered.reasons['creator-promotion'] === 1
+    strictFiltered.reasons['creator-promotion'] === 2
       && strictFiltered.reasons['off-platform-promotion'] === 1
       && strictFiltered.reasons['engagement-manipulation'] === 1
       && strictFiltered.reasons['multi-author-duplicate'] === 3);
