@@ -229,13 +229,22 @@ if (memDB.isAvailable()) {
         ['write-uppercase', 'Write', {file_path:privacyProj+'/<PRIVATE>UPPER_DIR</PRIVATE>/public-read.ts'}, '', 'Created public-read.ts', 'New file: [REDACTED]/public-read.ts', ['UPPER_DIR'], true],
         ['edit-strings-before-clip', 'Edit', {file_path:path.join(privacyProj,'public-area','edited.ts'), old_string:'A<private>OLD_SECRET'+'x'.repeat(100)+'</private>OLD_TAIL', new_string:'B<private>NEW_SECRET'+'x'.repeat(100)+'</private>NEW_TAIL'}, 'A<private>RESULT_SECRET</private>', 'Modified edited.ts', 'A[REDACTED]OLD_TAIL → B[REDACTED]NEW_TAIL', ['OLD_SECRET','NEW_SECRET','RESULT_SECRET'], true],
     ];
+    const briefOnly = (out) => {
+        try {
+            const h = JSON.parse(out).hookSpecificOutput;
+            return !!h && h.hookEventName === 'PostToolUse' && typeof h.additionalContext === 'string';
+        } catch { return false; }
+    };
     for (const [label,tool,input,result,title,concept,secrets,redacted] of fixtures) {
         const before=readRows().length;
         const hook=privacyHook('memory-capture.js',{tool_name:tool,tool_input:input,tool_response:result});
         const rows=readRows(), row=rows.at(-1);
         check(`extraction ${label}: actual PostToolUse persists a row`, hook.status===0 && rows.length===before+1);
         check(`extraction ${label}: title and edit-derived concept survive`, !!row && row.title===title && row.concept===concept);
-        check(`extraction ${label}: nothing on stdout`, hook.stdout === '');
+        // stdout carries only the area brief, a PostToolUse additionalContext JSON,
+        // and the brief is built from stored rows, so the protected text stays out of it.
+        check(`extraction ${label}: stdout is empty or the area brief alone`, hook.stdout === '' || briefOnly(hook.stdout));
+        check(`extraction ${label}: protected text absent from stdout`, secrets.every(s=>!hook.stdout.includes(s)));
         const decoded= row ? [row.title,row.concept,...JSON.parse(row.source_files || '[]'),row.raw_data && JSON.parse(row.raw_data)].join('\n') : '';
         check(`extraction ${label}: protected text absent with positive redaction control`, !!row && secrets.every(s=>!decoded.includes(s)) && (!redacted || decoded.includes('[REDACTED]')));
     }
