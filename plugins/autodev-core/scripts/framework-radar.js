@@ -614,7 +614,8 @@ function commentFingerprint(text) {
 function creatorPromotion(text) {
   const hasLink = /https?:\/\/|www\.|\blink in (?:the )?(?:bio|description|comments)\b/i.test(text);
   const hasCallToAction = /\b(?:book|schedule|sign up|register|subscribe|buy|order|purchase|join|free audit|free trial|discount|coupon|consultation|contact me|dm me)\b/i.test(text);
-  return hasLink && hasCallToAction;
+  const hasOwnedCommercialOffer = /\b(?:check out|get|grab|download|join)\b[^.\n]{0,100}\b(?:my|our)\b[^.\n]{0,100}\b(?:course|community|academy|coaching|consultation|audit|service|training|newsletter|swipe file|template|offer)\b/i.test(text);
+  return hasLink && (hasCallToAction || hasOwnedCommercialOffer);
 }
 
 function filterCommentFeedback(comments) {
