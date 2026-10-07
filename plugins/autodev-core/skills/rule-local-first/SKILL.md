@@ -57,7 +57,10 @@ lanes when there are two or more, and nobody is preempted. Running the
 gate's steps one by one is still a full gate and still queues. A machine that
 allows more than one gate at a time sets its lane count once with `lanes N`;
 every waiter then takes whichever lane frees first. `status` shows each lane's
-holder and queue.
+holder and queue. Where the lane hours went is `node
+"${CLAUDE_PLUGIN_ROOT}/scripts/gate-cost.js" --days 7`: gates, median and p90
+hold, lane hours and re-runs of one head, per project, read from the release
+records beside the lock.
 
 ## Launch an owned candidate
 
