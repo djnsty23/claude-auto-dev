@@ -14,7 +14,16 @@ const fs = require('fs');
 const path = require('path');
 
 // Cooperative budget, checked between reads and after parsing each record.
-const DEADLINE_MS = 150;
+// AUTODEV_IMAGE_SCAN_DEADLINE_MS raises it for tooling/test-image-records.js,
+// which grades WHICH record is chosen, not how fast. [measured 2026-10-07]
+// with every core busy the 150 ms clock, started at module load, ran out
+// before stdin delivered a one-line transcript: 4 of 4 runs red, as on a
+// loaded windows-latest runner where the same SHA passed one run and failed
+// the other.
+const DEADLINE_MS = (() => {
+    const n = Number(process.env.AUTODEV_IMAGE_SCAN_DEADLINE_MS);
+    return Number.isInteger(n) && n > 0 && n <= 60000 ? n : 150;
+})();
 const started = Date.now();
 const timeLeft = () => DEADLINE_MS - (Date.now() - started);
 
