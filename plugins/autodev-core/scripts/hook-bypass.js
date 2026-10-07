@@ -66,8 +66,14 @@ const path = require('path');
  */
 const MAY_BYPASS = /no-verify|hookspath|(?:^|[\s"'=])-[A-Za-z]*n(?=[\s"']|$)/i;
 
-/** <<EOF / <<-EOF / <<'EOF' / <<"EOF" … up to a line that is the delimiter. */
-const HEREDOC_RE = /<<-?\s*(['"]?)([A-Za-z_][A-Za-z0-9_]*)\1[^\n]*\n[\s\S]*?(?:^[ \t]*\2[ \t]*$|$)/gm;
+/**
+ * <<EOF / <<-EOF / <<'EOF' / <<"EOF" … up to a line that is the delimiter, or
+ * to the END OF INPUT when none follows. `(?![\s\S])` and not `$`: under the
+ * `m` flag `$` is any line end, so the lazy body stopped after one line and a
+ * brief saying "never --no-verify" on its thirteenth line asked [measured
+ * 2026-10-07].
+ */
+const HEREDOC_RE = /<<-?\s*(['"]?)([A-Za-z_][A-Za-z0-9_]*)\1[^\n]*\n[\s\S]*?(?:^[ \t]*\2[ \t]*$|(?![\s\S]))/gm;
 
 /** Resolve a path argument the way the shell would hand it to git: `~` and `$HOME` expanded, then against `base`. */
 function resolvePath(base, raw) {
