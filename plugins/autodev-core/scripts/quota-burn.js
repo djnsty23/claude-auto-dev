@@ -37,11 +37,18 @@ const PROJECTS = path.join(CFG, 'projects');
 // Published per-MTok rates. Cache multipliers are applied to the INPUT rate:
 // read 0.1x, write 1.25x at the 5-minute TTL and 2x at the 1-hour TTL.
 // [verified 2026-08-28 against the claude-api skill's pricing tables]
+// `read` overrides the 0.1x read multiplier where the published read rate
+// differs from it. Haiku 5.5 is [measured 2026-10-08] from Claude Code's own
+// costUSD (costBasis "list"), not published.
 //
 // The 1h write multiplier is not decoration here: sessions on the 1-hour TTL pay
 // 2x on every cache write, and treating those as 1.25x understates a long
 // session's cost by a wide margin.
 const RATES = {
+    'claude-fable-5-1': { in: 10, out: 50, read: 0.25 },
+    'claude-opus-5-5': { in: 4, out: 20, read: 0.20 },
+    'claude-sonnet-5-5': { in: 2, out: 10, read: 0.20 },
+    'claude-haiku-5-5': { in: 0.10, out: 0.50, read: 0.01 },
     'claude-fable-5': { in: 10, out: 50 },
     'claude-mythos-5': { in: 10, out: 50 },
     'claude-opus-5': { in: 5, out: 25 },
@@ -63,6 +70,14 @@ const CACHE_WRITE_1H_MULT = 2;
 const MEASURE = 'response';
 
 /**
+ * A row claims a model only when the id equals it or adds a date suffix
+ * (claude-haiku-4-5-20251001). A bare prefix gave claude-opus-5-5 the Opus 5
+ * rate, and a family's next version is not the same price.
+ */
+const claims = (key, model) => model === key
+    || (model.startsWith(key) && /^-20\d+$/.test(model.slice(key.length)));
+
+/**
  * An UNKNOWN model is priced at the most expensive published rate, not skipped
  * and not zero. A tripwire that under-reports is worse than one that over-
  * reports: the first stays silent through the wall, the second cries early.
@@ -70,9 +85,8 @@ const MEASURE = 'response';
 function ratesFor(model, speed) {
     if (!model) return { rates: RATES['claude-fable-5'], known: false };
     if (speed === 'fast' && FAST_RATES[model]) return { rates: FAST_RATES[model], known: true };
-    if (RATES[model]) return { rates: RATES[model], known: true };
-    const prefix = Object.keys(RATES).find((k) => model.startsWith(k));
-    if (prefix) return { rates: RATES[prefix], known: true };
+    const key = Object.keys(RATES).find((k) => claims(k, model));
+    if (key) return { rates: RATES[key], known: true };
     return { rates: RATES['claude-fable-5'], known: false };
 }
 
@@ -115,7 +129,7 @@ function priceUsage(u, model) {
     const output = u.output_tokens || 0;
     const cost = (
         input * rates.in
-        + cacheRead * rates.in * CACHE_READ_MULT
+        + cacheRead * (rates.read ?? rates.in * CACHE_READ_MULT)
         + w5m * rates.in * CACHE_WRITE_5M_MULT
         + w1h * rates.in * CACHE_WRITE_1H_MULT
         + output * rates.out

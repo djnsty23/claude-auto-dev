@@ -7,5 +7,6 @@
   "BOX": { "model": "claude-opus-5-5", "effort": "xhigh", "note": "Brain seat: Opus at extra high" },
   "BSH": { "model": "claude-sonnet-5-5", "effort": "high", "note": "Brain seat: Sonnet at high" },
   "BSX": { "model": "claude-sonnet-5-5", "effort": "xhigh", "note": "Brain seat: Sonnet at extra high" },
-  "H0": { "model": "claude-haiku-4-5-20251001", "effort": null, "lanes": ["locate"], "note": "today's scout pin, locate lane only" }
+  "H0": { "model": "claude-haiku-4-5-20251001", "effort": null, "lanes": ["locate"], "note": "the historical scout pin before the haiku alias moved to 5.5, locate lane only" },
+  "H1": { "model": "claude-haiku-5-5", "effort": null, "lanes": ["locate"], "note": "the haiku alias since 2026-10-08" }
 }

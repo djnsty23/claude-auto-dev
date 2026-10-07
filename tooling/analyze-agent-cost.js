@@ -40,18 +40,24 @@ const ROOT = process.env.AGENT_COST_ROOT
 const MAIN_SAMPLE = Number(process.argv[2] || 8);
 
 // $/1M tokens. Keep in sync with the model table in the `claude-api` skill.
+// `read` overrides the 0.1x read multiplier. Haiku 5.5 is [measured 2026-10-08]
+// from Claude Code's own costUSD (costBasis "list"), not published.
 const PRICES = {
+    'claude-fable-5-1': { in: 10, out: 50, read: 0.25 }, 'claude-opus-5-5': { in: 4, out: 20, read: 0.20 },
+    'claude-sonnet-5-5': { in: 2, out: 10, read: 0.20 }, 'claude-haiku-5-5': { in: 0.10, out: 0.50, read: 0.01 },
     'claude-fable-5': { in: 10, out: 50 }, 'claude-mythos-5': { in: 10, out: 50 },
     'claude-opus-5': { in: 5, out: 25 }, 'claude-opus-4-8': { in: 5, out: 25 },
     'claude-opus-4-7': { in: 5, out: 25 }, 'claude-opus-4-6': { in: 5, out: 25 },
-    'claude-sonnet-5': { in: 3, out: 15 }, 'claude-sonnet-4-6': { in: 3, out: 15 },
+    'claude-sonnet-5': { in: 2, out: 10 }, 'claude-sonnet-4-6': { in: 3, out: 15 },
     'claude-haiku-4-5': { in: 1, out: 5 },
 };
 // Cache reads bill ~0.1x base input; writes 1.25x (5m TTL) or 2x (1h TTL).
 const READ_MULT = 0.1, W5_MULT = 1.25, W1H_MULT = 2.0;
 
-const priceOf = (m) => (m && (PRICES[m]
-    || PRICES[Object.keys(PRICES).find((k) => m.startsWith(k))])) || null;
+// A row claims a model only when the id equals it or adds a date suffix. A bare
+// prefix gave claude-opus-5-5 the Opus 5 rate.
+const priceOf = (m) => (m && PRICES[Object.keys(PRICES).find((k) => m === k
+    || (m.startsWith(k) && /^-20\d+$/.test(m.slice(k.length))))]) || null;
 
 const LAT_BUCKETS = [0, 25e3, 50e3, 100e3, 200e3, 400e3, Infinity];
 const bucketLabel = (i) => {
@@ -74,7 +80,7 @@ function addUsage(bin, u, model) {
     bin.reqs++; bin.in += inTok; bin.read += read; bin.w5 += w5; bin.w1h += w1h; bin.out += out;
     bin.prompts.push(inTok + read + (u.cache_creation_input_tokens || 0));
     if (p) {
-        bin.cost += (inTok * p.in + read * p.in * READ_MULT + w5 * p.in * W5_MULT
+        bin.cost += (inTok * p.in + read * (p.read ?? p.in * READ_MULT) + w5 * p.in * W5_MULT
             + w1h * p.in * W1H_MULT + out * p.out) / 1e6;
     }
 }
@@ -143,7 +149,8 @@ const med = (a) => { if (!a.length) return 0; const s = a.slice().sort((x, y) =>
 const pct = (a, p) => { if (!a.length) return null; const s = a.slice().sort((x, y) => x - y); return s[Math.min(s.length - 1, Math.floor((p / 100) * s.length))]; };
 const fmt = (n) => Math.round(n).toLocaleString('en-US');
 
-(async () => {
+// Behind require.main so test-quota-burn.js can grade the price table.
+if (require.main === module) (async () => {
     if (!fs.existsSync(ROOT)) {
         console.error(`\nNo transcript store at ${ROOT}`);
         console.error('Set AGENT_COST_ROOT to point at one.\n');
@@ -234,3 +241,4 @@ const fmt = (n) => Math.round(n).toLocaleString('en-US');
     }
     console.log('');
 })();
+module.exports = { priceOf, addUsage, blank };
