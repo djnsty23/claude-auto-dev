@@ -271,8 +271,11 @@ function main() {
     process.exitCode = fail ? 1 : 0;
 }
 
+// A throw is a FAIL, not exit 2: the usual cause is a subject that no longer
+// exports what the suite calls, which is exactly the defect a red must report.
 try { main(); } catch (e) {
+    console.log(`FAIL  the suite threw before finishing: ${e && e.message}`);
     console.error(`test-fast-lane: ${e && e.stack ? e.stack : e}`);
     try { fs.rmSync(root, { recursive: true, force: true }); } catch { /* best effort */ }
-    process.exitCode = 2;
+    process.exitCode = 1;
 }
