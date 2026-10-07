@@ -167,6 +167,7 @@ function scanFiles(files) {
   add(C.checkMigrations(sqlFiles));
   add(C.checkPolicyInitplan(sqlFiles));
   add(C.checkFkIndexes(sqlFiles));
+  add(C.checkTypesCoverage(sqlFiles, code.filter((p) => !C.isTestPath(p) && C.isSupabaseTypes(files.get(p))).map((p) => ({ path: p, text: files.get(p) }))));
 
   // Web apps: a package.json depending on a web framework needs a CSP somewhere at or under it.
   const apps = [];
@@ -209,6 +210,12 @@ function scanFiles(files) {
 
 // --------------------------------------------------------------- control
 
+/** The shape `supabase gen types typescript` writes, cut to one column per table. */
+function typesFile(tables) {
+  const entry = (t) => `      ${t}: {\n        Row: { id: number }\n        Insert: { id?: number }\n        Update: { id?: number }\n        Relationships: []\n      }`;
+  return `export type Json = string | number | boolean | null\n\nexport type Database = {\n  public: {\n    Tables: {\n${tables.map(entry).join('\n')}\n    }\n    Views: { [_ in never]: never }\n  }\n}\n`;
+}
+
 // Planted samples, assembled at runtime so no literal in this file matches a
 // secret format: the gate scans its own repo, and a push-protection scanner
 // would refuse a literal key even when it is fake.
@@ -233,6 +240,8 @@ function plantedSample() {
     'create policy mine on public.kids for select to authenticated using (auth.uid() = user_id);',
   ].join('\n'));
   files.set('lib/esm/pkg.mjs', "export const id = () => require('node:crypto').randomUUID();");
+  // Generated before 0002 added parents and kids, and never regenerated.
+  files.set('src/integrations/supabase/types.ts', typesFile(['notes']));
   files.set('src/db.ts', "export const all = () => supabase.from('t').select('*');");
   files.set('app/api/cron/tick/route.ts', "export async function GET() { await fetch('https://example.com/x'); return Response.json({}); }");
   files.set('app/api/backup/route.ts', "export async function GET() { const { data } = await sb.from('scans').select('id, code'); return Response.json(data); }");
@@ -283,6 +292,7 @@ function cleanSample() {
     'create policy mine2 on public.kids2 for select to authenticated using ((select auth.uid()) = user_id);',
   ].join('\n'));
   files.set('lib/esm/pkg.mjs', "import { randomUUID } from 'node:crypto';\nexport const id = () => randomUUID();");
+  files.set('src/integrations/supabase/types.ts', typesFile(['notes', 'parents2', 'kids2', 'a', 'b']));
   files.set('src/db.ts', "export const all = () => supabase.from('t').select('id, name');\nexport const n = () => supabase.from('t').select('*', { count: 'exact', head: true });");
   files.set('app/api/cron/tick/route.ts', "export async function GET() { const secret = process.env.CRON_SECRET; await fetch('https://example.com/x', { signal: AbortSignal.timeout(5000) }); return Response.json({}); }");
   files.set('app/api/backup/route.ts', "export async function GET() { await sb.auth.getUser(); const { data } = await sb.from('scans').select('id, code').range(0, 999); return Response.json(data); }");
