@@ -73,7 +73,12 @@ if (args[0] === 'api') {
     }
     if ((m = /\\/compare\\/([0-9a-f]{40})\\.\\.\\.([0-9a-f]{40})$/.exec(p))) {
         const behind = st.contains ? (st.contains[m[2]] === m[1] ? 0 : 1) : st.behindBy;
-        out({ behind_by: behind, ahead_by: 1 });
+        out({ behind_by: behind, ahead_by: 1, files: st.files });
+        return;
+    }
+    if ((m = /\\/contents\\/package\\.json\\?ref=([0-9a-f]{40})$/.exec(p))) {
+        if (typeof st.basePkg !== 'string') { process.stderr.write('gh: Not Found (HTTP 404)\\n'); process.exitCode = 1; return; }
+        out({ encoding: 'base64', content: Buffer.from(st.basePkg).toString('base64') });
         return;
     }
     if ((m = /\\/commits\\/([0-9a-f]{40})$/.exec(p))) { out({ sha: m[1], commit: { tree: { sha: st.trees[m[1]] } } }); return; }
@@ -372,6 +377,93 @@ async function main() {
         const touched = calls('productred').length;
         check('B14. a product gate\'s red wrapper receipt is refused before gh or the lock is touched',
             no.exit === 1 && touched === 0 && /ends with "gate-receipt: exit 1"/.test(no.err) && lockGone(), detail(no));
+    }
+
+    {
+        // F. The fast-lane receipt. Each receipt and file list is written by
+        // hand here, not by fast-lane.js, so a change to its writer or its
+        // classifier cannot move these fixtures with it.
+        const green = {
+            kind: 'autodev-fast-lane-receipt', version: 1, head: HEAD, tree: TREE,
+            base: { ref: 'origin/main', sha: BASE0 },
+            classifier: { eligible: true, changedLines: 12, maxLines: 100, files: 2, reasons: [] },
+            steps: [
+                { step: 'lint', script: 'lint', command: 'npm run lint', exit: 0, ms: 5 },
+                { step: 'typecheck', script: 'typecheck', command: 'npm run typecheck', exit: 0, ms: 5 },
+                { step: 'test', script: 'test', command: 'npm run test', exit: 0, ms: 5 },
+                { step: 'build', script: 'build', command: 'npm run build', exit: 0, ms: 5 },
+            ],
+            exit: 0, finishedAt: '2026-10-07T00:00:00.000Z',
+        };
+        const smallFiles = [
+            { filename: 'src/components/Footer.tsx', status: 'modified', additions: 8, deletions: 2, changes: 10, patch: '@@' },
+            { filename: 'README.md', status: 'modified', additions: 2, deletions: 0, changes: 2, patch: '@@' },
+        ];
+        let n = 0;
+        const receipt = (over) => {
+            const file = path.join(root, `fast-${++n}.json`);
+            fs.writeFileSync(file, JSON.stringify({ ...green, ...over }));
+            return file;
+        };
+        const runFast = (file, who, state = {}, extra = []) => {
+            const r = spawnSync(process.execPath, [SUBJECT, 'merge', '--repo', REPO, '--pr', '7', '--head', HEAD, '--fast-lane-receipt', file, ...extra],
+                { encoding: 'utf8', env: env(writeState({ files: smallFiles, ...state }), who), timeout: 120000, windowsHide: true });
+            return { exit: r.status, out: r.stdout || '', err: r.stderr || '' };
+        };
+        const merges = (who) => calls(who).filter((c) => c.what.startsWith('pr merge')).length;
+
+        const ok = runFast(receipt({}), 'fl-green');
+        check('F1. a green fast-lane receipt on an eligible GitHub diff merges through the lock',
+            ok.exit === 0 && merges('fl-green') === 1 && /fast lane: 12 changed lines in 2 file\(s\)/.test(ok.out)
+            && /matches the proved tree/.test(ok.out) && lockGone(), detail(ok));
+
+        const redSteps = green.steps.map((s) => (s.step === 'test' ? { ...s, exit: 1 } : s));
+        const pre = [
+            ['a red test step', receipt({ steps: redSteps }), /test exited 1/],
+            ['a missing build step', receipt({ steps: green.steps.slice(0, 3) }), /has no build step/],
+            ['an ineligible verdict', receipt({ classifier: { eligible: false, reasons: ['src/auth/x.ts matches the sensitive pattern auth'] } }), /classifier said ineligible \(src\/auth/],
+            ['another head', receipt({ head: sha('f') }), /proves f{40}, not head/],
+            ['a red run exit', receipt({ exit: 1 }), /the run exited 1/],
+            ['a gate log in place of JSON', RECEIPT, /as JSON/],
+        ];
+        const preOut = pre.map(([label, file, re], i) => {
+            const r = runFast(file, `fl-pre${i}`);
+            return { label, ok: r.exit === 1 && calls(`fl-pre${i}`).length === 0 && re.test(r.err) && lockGone(), r };
+        });
+        check('F2. a fast-lane receipt with a red step, a missing step, an ineligible verdict, another head, a red exit or no JSON is refused before gh or the lock',
+            preOut.every((x) => x.ok), preOut.filter((x) => !x.ok).map((x) => `${x.label}: ${detail(x.r)}`).join(' | '));
+
+        const both = runFast(receipt({}), 'fl-both', {}, ['--gate-receipt', RECEIPT]);
+        check('F3. --gate-receipt and --fast-lane-receipt together are refused before gh',
+            both.exit === 1 && calls('fl-both').length === 0 && /not both/.test(both.err), detail(both));
+
+        const tree = runFast(receipt({ tree: sha('9') }), 'fl-tree');
+        check('F4. a receipt for another tree is refused under the lock, before any merge',
+            tree.exit === 1 && merges('fl-tree') === 0 && /proves tree 9{40}, but/.test(tree.err) && lockGone(), detail(tree));
+
+        // GitHub's diff decides, whatever the receipt's classifier said.
+        const gh = [
+            ['an auth path', [{ filename: 'app/api/auth/callback.ts', status: 'modified', additions: 3, deletions: 1, changes: 4, patch: '@@' }], /matches the sensitive pattern auth/],
+            ['101 lines', [{ filename: 'src/a.ts', status: 'modified', additions: 100, deletions: 1, changes: 101, patch: '@@' }], /101 changed lines, over the 100-line limit/],
+            ['a migration', [{ filename: 'supabase/migrations/0042_add.sql', status: 'added', additions: 4, deletions: 0, changes: 4, patch: '@@' }], /matches the sensitive pattern migration/],
+            ['a binary file', [{ filename: 'public/logo.png', status: 'modified', additions: 0, deletions: 0, changes: 0 }], /has no line count/],
+            ['a rename out of billing', [{ filename: 'src/lib/money.ts', previous_filename: 'src/billing/money.ts', status: 'renamed', additions: 0, deletions: 0, changes: 0 }], /billing\/money\.ts matches the sensitive pattern billing/],
+            ['no file list', undefined, /the diff could not be read/],
+        ];
+        const ghOut = gh.map(([label, files, re], i) => {
+            const r = runFast(receipt({}), `fl-gh${i}`, { files });
+            return { label, ok: r.exit === 1 && merges(`fl-gh${i}`) === 0 && re.test(r.err) && lockGone(), r };
+        });
+        check('F5. an eligible receipt is refused when GitHub\'s own diff has an auth path, 101 lines, a migration, a binary, a rename out of billing or no file list',
+            ghOut.every((x) => x.ok), ghOut.filter((x) => !x.ok).map((x) => `${x.label}: ${detail(x.r)}`).join(' | '));
+
+        const strict = runFast(receipt({}), 'fl-cfg', { basePkg: JSON.stringify({ autodevFastLane: { maxLines: 5, sensitive: ['^readme'] } }) });
+        check('F6. the base package.json config is read through GitHub: a 5-line limit and an extra pattern refuse a 12-line diff touching README.md',
+            strict.exit === 1 && merges('fl-cfg') === 0 && /12 changed lines, over the 5-line limit/.test(strict.err)
+            && /README\.md matches the sensitive pattern autodevFastLane\.sensitive \^readme/.test(strict.err), detail(strict));
+        const broken = runFast(receipt({}), 'fl-cfgbad', { basePkg: '{ not json' });
+        check('F7. an unreadable base package.json refuses the fast lane rather than reading as no config',
+            broken.exit === 1 && merges('fl-cfgbad') === 0 && /config at main .* is unreadable/.test(broken.err), detail(broken));
     }
 
     // -----------------------------------------------------------------------

@@ -12,6 +12,8 @@
  *
  *   node merge-lock.js merge --repo OWNER/NAME --pr N --head SHA --gate-receipt FILE
  *                            [--wait-timeout-ms N]
+ *   node merge-lock.js merge --repo OWNER/NAME --pr N --head SHA --fast-lane-receipt FILE
+ *                            [--wait-timeout-ms N]
  *   node merge-lock.js status --repo OWNER/NAME
  *   node merge-lock.js --help
  *
@@ -65,6 +67,15 @@
  * A receipt is text, so a hand-written one passes. It stops an honest mistake
  * (merging an ungated or red head), not a forgery.
  *
+ * THE FAST-LANE RECEIPT, in place of --gate-receipt, is the JSON that
+ * `fast-lane.js run` writes after lint, typecheck, test and build on a small
+ * candidate. Before the lock it must name --head, say eligible, and record
+ * every step at exit 0. With the lock held, after the behind_by check, it
+ * must also name the tree GitHub holds for --head, and the classifier runs
+ * again on GitHub's own base...head file list, with the autodevFastLane
+ * config read from package.json at the base. Either disagreeing refuses: the
+ * candidate takes the full gate.
+ *
  * EXIT. 0 merged and the merged tree matches the proved tree. 1 refused (bad
  * arguments, receipt, PR state, head or base mismatch, GitHub refused the
  * merge) or merged with a different tree. 2 indeterminate: gh could not be run
@@ -95,6 +106,7 @@ const path = require('path');
 const { spawnSync } = require('child_process');
 
 const queue = require(path.join(__dirname, 'full-gate-queue.js'));
+const fastLane = require(path.join(__dirname, 'fast-lane.js'));
 
 const TAG = 'merge-lock:';
 const SHA_RE = /^[0-9a-f]{40}$/;
@@ -342,7 +354,42 @@ function release(lockPath, log) {
 // The merge, run while the lock is held.
 // ---------------------------------------------------------------------------
 
-async function mergeHeld({ repo, pr, head, env, log, readbackMs, pollMs }) {
+/** package.json text at a commit through the contents API, null when there is none. */
+function pkgAtRemote(repo, sha, env) {
+    const r = runGh(['api', `repos/${repo}/contents/package.json?ref=${sha}`], env);
+    if (!r.ok && /HTTP 404|Not Found/i.test(r.stderr)) return null;
+    if (!r.ok) throw unsure(`reading package.json at ${sha}: ${r.error ? `could not run gh (${r.error})` : `gh exited ${r.status}`}`);
+    try {
+        const j = JSON.parse(r.stdout);
+        if (j.encoding !== 'base64' || typeof j.content !== 'string') throw new Error('no base64 content');
+        return Buffer.from(j.content, 'base64').toString('utf8');
+    } catch (e) {
+        throw unsure(`reading package.json at ${sha}: ${e.message}`);
+    }
+}
+
+/**
+ * The fast lane, judged on what GitHub will merge: the receipt's tree is the
+ * head's tree, and the classifier says eligible for GitHub's own diff.
+ */
+function checkFastLane({ repo, baseRef, base, head, cmp, provedTree, receipt, env, log }) {
+    if (String(receipt.tree).toLowerCase() !== provedTree) {
+        throw refuse(`the fast-lane receipt proves tree ${receipt.tree}, but ${head} has tree ${provedTree} on GitHub`);
+    }
+    let config;
+    const text = pkgAtRemote(repo, base.sha, env);
+    try { config = fastLane.parseConfig(text); } catch (e) {
+        throw refuse(`the autodevFastLane config at ${baseRef} ${base.sha} is unreadable (${e.message}); run the full gate`);
+    }
+    const v = fastLane.classify(fastLane.filesFromCompare(cmp), config);
+    if (!v.eligible) {
+        throw refuse(`${baseRef}...${head} is not eligible for the fast lane on GitHub's diff: ${v.reasons.join('; ')}. Run the full gate`);
+    }
+    log(`${TAG} fast lane: ${v.changedLines} changed lines in ${v.files} file(s) against ${baseRef}, limit ${v.maxLines}; `
+        + `steps green on tree ${provedTree.slice(0, 12)}`);
+}
+
+async function mergeHeld({ repo, pr, head, env, log, readbackMs, pollMs, fastReceipt = null }) {
     const view = ghJson(['pr', 'view', String(pr), '--repo', repo, '--json', 'headRefOid,baseRefName,state'],
         `reading ${repo}#${pr}`, env);
     if (view.state !== 'OPEN') throw refuse(`${repo}#${pr} is ${view.state}, not OPEN`);
@@ -359,6 +406,7 @@ async function mergeHeld({ repo, pr, head, env, log, readbackMs, pollMs }) {
         throw refuse(`${head} is ${cmp.behind_by} commit(s) behind ${baseRef} at ${base.sha}. Rebase onto origin/${baseRef} and gate that tree again`);
     }
     const provedTree = commitTree(repo, head, env);
+    if (fastReceipt) checkFastLane({ repo, baseRef, base, head, cmp, provedTree, receipt: fastReceipt, env, log });
     log(`${TAG} ${repo}#${pr}: head ${head} contains ${baseRef} at ${base.sha.slice(0, 7)}; merging`);
 
     const m = runGh(['pr', 'merge', String(pr), '--repo', repo, '--rebase', '--match-head-commit', head], env);
@@ -399,8 +447,11 @@ async function mergeHeld({ repo, pr, head, env, log, readbackMs, pollMs }) {
 // ---------------------------------------------------------------------------
 
 function parseArgs(argv) {
-    const out = { cmd: null, repo: null, pr: null, head: null, receipt: null, timeoutMs: null, help: false, bad: null };
-    const takes = { '--repo': 'repo', '--pr': 'pr', '--head': 'head', '--gate-receipt': 'receipt', '--wait-timeout-ms': 'timeoutMs' };
+    const out = { cmd: null, repo: null, pr: null, head: null, receipt: null, fastLane: null, timeoutMs: null, help: false, bad: null };
+    const takes = {
+        '--repo': 'repo', '--pr': 'pr', '--head': 'head', '--gate-receipt': 'receipt',
+        '--fast-lane-receipt': 'fastLane', '--wait-timeout-ms': 'timeoutMs',
+    };
     for (let i = 0; i < argv.length; i++) {
         const a = argv[i];
         if (a === '--help' || a === '-h') { out.help = true; continue; }
@@ -420,6 +471,7 @@ function parseArgs(argv) {
 
 function help() {
     console.log('usage: node merge-lock.js merge --repo OWNER/NAME --pr N --head SHA --gate-receipt FILE [--wait-timeout-ms N]');
+    console.log('       node merge-lock.js merge --repo OWNER/NAME --pr N --head SHA --fast-lane-receipt FILE [--wait-timeout-ms N]');
     console.log('       node merge-lock.js status --repo OWNER/NAME');
     console.log('');
     console.log('Merges one PR under a per-repo lock (<home>/.claude/autodev/locks/merge-<owner>__<name>.lock),');
@@ -431,6 +483,9 @@ function help() {
     console.log('A receipt from any repo\'s gate (the gate command last, never piped):');
     console.log(`  bash: ${WRAPPER_BASH}`);
     console.log(`  pwsh: ${WRAPPER_PWSH}`);
+    console.log('A small candidate can pass --fast-lane-receipt instead, the JSON that fast-lane.js run writes. It');
+    console.log('must name --head and its tree on GitHub, record lint, typecheck, test and build at exit 0, and');
+    console.log('GitHub\'s own diff must classify eligible too.');
     console.log('Exit 0 merged with the proved tree, 1 refused or a different tree, 2 indeterminate.');
     console.log('env: AUTODEV_GH_BIN (default gh), AUTODEV_MERGE_LOCK_POLL_MS, AUTODEV_MERGE_LOCK_READBACK_MS');
 }
@@ -460,8 +515,16 @@ async function main() {
     if (!SHA_RE.test(head)) return fail(1, '--head must be the full 40-character commit sha');
     const timeoutMs = args.timeoutMs === null ? DEFAULT_TIMEOUT_MS : Number(args.timeoutMs);
     if (!Number.isFinite(timeoutMs) || timeoutMs < 0) return fail(1, '--wait-timeout-ms must be a number of milliseconds');
-    const why = receiptProblem(args.receipt, head);
-    if (why) return fail(1, why);
+    if (args.receipt && args.fastLane) return fail(1, 'pass --gate-receipt or --fast-lane-receipt, not both');
+    let fastReceipt = null;
+    if (args.fastLane) {
+        const f = fastLane.receiptProblem(args.fastLane, head);
+        if (f.problem) return fail(1, f.problem);
+        fastReceipt = f.receipt;
+    } else {
+        const why = receiptProblem(args.receipt, head);
+        if (why) return fail(1, why);
+    }
 
     const pollMs = Math.max(50, Number(env.AUTODEV_MERGE_LOCK_POLL_MS) || 3000);
     const readbackMs = Math.max(0, Number(env.AUTODEV_MERGE_LOCK_READBACK_MS) || 60000);
@@ -475,7 +538,7 @@ async function main() {
         if (!got) return fail(2, `lock ${path.basename(lockPath)} not taken within ${timeoutMs} ms; nothing was merged`);
         state.held = true;
         log(`${TAG} lock taken: ${lockPath} (pid ${process.pid})`);
-        await mergeHeld({ repo: args.repo, pr, head, env, log, readbackMs, pollMs });
+        await mergeHeld({ repo: args.repo, pr, head, env, log, readbackMs, pollMs, fastReceipt });
     } catch (e) {
         if (e instanceof Stop) return fail(e.exit, e.message);
         return fail(2, `internal error (${e && e.message}); read ${args.repo}#${pr} before retrying`);
