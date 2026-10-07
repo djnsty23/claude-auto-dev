@@ -317,7 +317,8 @@ function checkTypesCoverage(migrations, types) {
     for (const [, apply] of events.sort((a, b) => a[0] - b[0])) apply();
   }
   const typed = new Set();
-  for (const { text } of types) for (const m of text.matchAll(/^\s*["']?(\w+)["']?\s*:\s*\{/gm)) typed.add(m[1].toLowerCase());
+  // A key opens a line, or follows `{`, `;` or `,` in a types file compacted onto fewer lines.
+  for (const { text } of types) for (const m of text.matchAll(/(?:^|[{;,])\s*["']?(\w+)["']?\s*:\s*\{/gm)) typed.add(m[1].toLowerCase());
   const where = types.map((t) => t.path).join(', ');
   const out = [];
   for (const [name, at] of tables) {
