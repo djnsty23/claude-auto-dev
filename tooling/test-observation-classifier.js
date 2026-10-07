@@ -121,6 +121,31 @@ eq('isProjectFile: the project root itself', isProjectFile(PROJ, PROJ), true);
 eq('isProjectFile: sibling dir sharing a prefix is outside',
   isProjectFile(PROJ + '-sibling/a.js', PROJ), false);
 eq('isProjectFile: empty path', isProjectFile('', PROJ), false);
+eq('isProjectFile: a non-string path is outside, not a throw', isProjectFile(42, PROJ), false);
+eq('isProjectFile: a file named ..env.local is inside', isProjectFile(inProj('..env.local'), PROJ), true);
+eq('isProjectFile: the parent directory itself is outside', isProjectFile(path.dirname(PROJ), PROJ), false);
+{
+  // The payload cwd is the session's current directory. After a cd into a
+  // subdirectory of a repo, the repo root still bounds the project.
+  const repo = fs.mkdtempSync(path.join(os.tmpdir(), 'obs-cls-repo-'));
+  fs.mkdirSync(path.join(repo, '.git'));
+  fs.mkdirSync(path.join(repo, 'src', 'deep'), { recursive: true });
+  const sub = path.join(repo, 'src', 'deep');
+  eq('isProjectFile: cwd in a repo subdirectory, edit at the repo root is inside',
+    isProjectFile(path.join(repo, 'package.json'), sub), true);
+  eq('isProjectFile: cwd in a repo subdirectory, a sibling of the repo is outside',
+    isProjectFile(repo + '-sibling/a.js', sub), false);
+  const o = classifyObservation('Write', { file_path: path.join(repo, 'package.json') }, '', { cwd: sub });
+  eq('classify: the concept shows the path from the repo root', o && o.concept, 'New file: package.json');
+  // Control: without .git the cwd itself bounds the project, as before.
+  const bare = fs.mkdtempSync(path.join(os.tmpdir(), 'obs-cls-bare-'));
+  fs.mkdirSync(path.join(bare, 'src'));
+  eq('isProjectFile: control, no .git, the parent of cwd is outside',
+    isProjectFile(path.join(bare, 'package.json'), path.join(bare, 'src')), false);
+  eq('classify: a non-string file_path is null, not a throw',
+    classifyObservation('Write', { file_path: 7 }, '', { cwd: repo }), null);
+  try { fs.rmSync(repo, { recursive: true, force: true }); fs.rmSync(bare, { recursive: true, force: true }); } catch {}
+}
 eq('isProjectFile: backslash path with an excluded fragment',
   isProjectFile('C:\\u\\proj\\scratchpad\\x.js', undefined), false);
 

@@ -919,10 +919,9 @@ if (require.main === module) {
             `memory-db.js ${cmd}: arguments look swapped — "${args[2]}" is a directory and "${args[1]}" is not.\n` +
             `Usage: node memory-db.js ${cmd} <projectPath> <query>\n`
         );
-        process.exit(1);
-    }
-
-    try {
+        // exitCode, not exit(): a pipe is asynchronous and exit() can cut the message.
+        process.exitCode = 1;
+    } else try {
     switch (cmd) {
         case 'stats':
             console.log(JSON.stringify(api.getStats(projectPath), null, 2));
