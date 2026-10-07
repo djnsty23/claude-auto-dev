@@ -179,129 +179,243 @@ const whyFailed = (r) => {
         : (typeof lastWords === 'function' ? lastWords(r, 300) : 'it printed no FAIL line');
 };
 
-if (!referencedOnly) {
-    for (const [suiteName] of referenced) {
-        const covDir = fs.mkdtempSync(path.join(os.tmpdir(), 'hookcov-'));
-        let r;
-        try {
-            r = runBudgeted(process.execPath, [path.join(TOOLING, suiteName)], {
-                cwd: ROOT,
-                encoding: 'utf8',
-                windowsHide: true,
-                // Hosted Windows runners can take a little over two minutes
-                // when the same commit has push and pull_request jobs running.
-                // A timeout is infrastructure, so leave enough headroom to
-                // distinguish a slow evidence producer from a failed one.
-                // Under concurrent load this fixed budget is what turned a
-                // healthy run indeterminate, so a blown one is retried once at
-                // a contention-scaled budget; the cap keeps it below the 900s
-                // ceiling the acceptance suite gives this whole checker.
-                timeout: 180000,
-                maxTimeout: 600000,
-                env: { ...process.env, NODE_V8_COVERAGE: covDir, AUTODEV_HOOKCHECK_CHILD: '1' },
-            });
-            if (r.error || r.status !== 0) {
-                // Sol's round-3 contract, and it corrected this block's first
-                // wording ("its coverage still counts, its verdict does not").
-                // A failed evidence producer makes its evidence untrustworthy:
-                // the run's coverage is DISCARDED, and the overall result is
-                // INDETERMINATE (exit 2) - distinct from exit 1, which asserts
-                // a proven gap. Its canary proves the discard is real: the
-                // forced-red suite still emits coverage, so a checker that
-                // "discarded" nothing would show the hook covered.
-                failedSuites.push(suiteName + ' exited '
-                    + (r.error ? String(r.error.code || r.error.message) : r.status)
-                    + ' - coverage from this run is DISCARDED, result is indeterminate'
-                    + ' · ' + whyFailed(r));
-                continue;
-            }
-            let dumps = [];
-            try { dumps = fs.readdirSync(covDir).filter((f) => f.endsWith('.json')); } catch { /* none */ }
-            for (const d of dumps) {
-                let cov;
-                try { cov = JSON.parse(fs.readFileSync(path.join(covDir, d), 'utf8')); } catch { continue; }
-                for (const script of cov.result || []) {
-                    if (!script.url || !script.url.startsWith('file://')) continue;
-                    let p;
-                    try { p = fold(path.resolve(fileURLToPath(script.url))); } catch { continue; }
-                    const hook = hookByPath.get(p);
-                    if (!hook) continue;
-                    // Keyed by FULL FILE PATH, not basename (Sol's round-4
-                    // warning): two plugins wiring the same hook filename would
-                    // otherwise cross-populate - one file's coverage marking
-                    // both rows executed.
-                    if (!executedBy.has(hook.file)) executedBy.set(hook.file, new Set());
-                    executedBy.get(hook.file).add(suiteName);
-                }
-            }
-        } finally {
-            fs.rmSync(covDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+// WHICH CANDIDATES MAY OVERLAP is the decision tooling/suite-isolation.json
+// already records for test-all, read through test-all-pool.js so there is one
+// writer of that rule. A candidate runs in parallel only when its entry says
+// "parallel" AND its bytes still hash to the reviewed value. Every other
+// candidate runs ALONE, one at a time, on this thread, exactly as before: a
+// suite that touches the real profile, the shared .git, a lock or the repo
+// never overlaps anything. A mutated suite (the acceptance test's vacuous and
+// red fixtures) no longer matches its hash, so it always runs alone.
+//
+// `[measured 2026-10-07]` 11 of the 41 candidates are reviewed parallel and
+// take ~31s of a ~148s serial pass on an idle machine.
+//
+// A parallel candidate runs in a worker thread that calls the same
+// runBudgeted(), so its timeout, its contention-scaled retry and its result
+// fields are the serial path's. The worker sends back only plain fields, and
+// a worker that dies before reporting is a failed producer (exit 2), never a
+// silent pass.
+//
+// AUTODEV_HOOKCHECK_POOL sets how many run at once: default 4, at most 8, and
+// 0 or 1 means every candidate runs serially. An unreadable manifest or a
+// broken test-all-pool.js also means serial, and the reason is reported in the
+// JSON `pool.note`: the verdict is the same either way, only slower.
+const POOL_ENV = 'AUTODEV_HOOKCHECK_POOL';
+const POOL_DEFAULT = 4;
+const POOL_MAX = 8;
+const poolPlan = (candidates) => {
+    const raw = process.env[POOL_ENV];
+    let size = POOL_DEFAULT;
+    let note = null;
+    if (raw !== undefined && raw !== '') {
+        if (/^\d+$/.test(String(raw).trim())) size = Math.min(POOL_MAX, Number(String(raw).trim()));
+        else { size = 1; note = `${POOL_ENV}=${JSON.stringify(raw)} is not a whole number; every candidate runs serial`; }
+    }
+    if (size <= 1) return { size: 1, parallel: [], note };
+    try {
+        const pool = require('./test-all-pool.js');
+        if (typeof pool.loadManifest !== 'function' || typeof pool.classify !== 'function') {
+            throw new Error('it does not export loadManifest() and classify()');
+        }
+        const manifest = pool.loadManifest(path.join(TOOLING, pool.MANIFEST_FILE || 'suite-isolation.json'));
+        if (manifest.error) return { size: 1, parallel: [], note: manifest.error };
+        const parallel = pool.classify(candidates.map((s) => ({ label: s.replace(/\.js$/, '') })), manifest.suites, TOOLING)
+            .filter((c) => c.mode === 'parallel').map((c) => c.item.label + '.js');
+        return { size, parallel, note };
+    } catch (e) {
+        return { size: 1, parallel: [], note: `test-all-pool.js is unusable (${e.message}); every candidate runs serial` };
+    }
+};
+
+const WORKER_SRC = [
+    "const { parentPort, workerData: w } = require('worker_threads');",
+    'let r;',
+    'try { r = require(w.helper).runBudgeted(w.command, w.args, w.opts); }',
+    "catch (e) { r = { status: null, signal: null, pid: 0, stdout: '', stderr: '', error: e }; }",
+    'parentPort.postMessage({ status: r.status, signal: r.signal, pid: r.pid, stdout: r.stdout, stderr: r.stderr,',
+    '    error: r.error ? { code: r.error.code, message: r.error.message } : null,',
+    '    budgetMs: r.budgetMs, attempts: r.attempts, factor: r.factor });',
+].join('\n');
+const runInWorker = (command, args, opts) => new Promise((resolve) => {
+    const { Worker } = require('worker_threads');
+    const lost = (why) => ({ status: null, signal: null, pid: 0, stdout: '', stderr: '',
+        error: Object.assign(new Error(why), { code: 'EWORKER' }) });
+    let settled = false;
+    const done = (r) => { if (!settled) { settled = true; resolve(r); } };
+    let w;
+    try {
+        w = new Worker(WORKER_SRC, { eval: true,
+            workerData: { helper: path.join(__dirname, 'spawn-budget.js'), command, args, opts } });
+    } catch (e) { done(lost('worker did not start: ' + e.message)); return; }
+    w.once('message', (m) => done(Object.assign(m, {
+        error: m.error ? Object.assign(new Error(m.error.message), { code: m.error.code }) : undefined,
+    })));
+    w.once('error', (e) => done(lost('worker failed: ' + (e && e.message))));
+    w.once('exit', (code) => done(lost('worker exited ' + code + ' before reporting')));
+});
+
+const suiteOpts = (covDir) => ({
+    cwd: ROOT,
+    encoding: 'utf8',
+    windowsHide: true,
+    // Hosted Windows runners can take a little over two minutes
+    // when the same commit has push and pull_request jobs running.
+    // A timeout is infrastructure, so leave enough headroom to
+    // distinguish a slow evidence producer from a failed one.
+    // Under concurrent load this fixed budget is what turned a
+    // healthy run indeterminate, so a blown one is retried once at
+    // a contention-scaled budget; the cap keeps it below the 900s
+    // ceiling the acceptance suite gives this whole checker.
+    timeout: 180000,
+    maxTimeout: 600000,
+    env: { ...process.env, NODE_V8_COVERAGE: covDir, AUTODEV_HOOKCHECK_CHILD: '1' },
+});
+
+// One candidate's result, folded into the evidence. Results are folded in
+// candidate order after every run has finished, so failedSuites reads the same
+// whichever way the runs were scheduled.
+const fold1 = (suiteName, r, covDir) => {
+    if (r.error || r.status !== 0) {
+        // Sol's round-3 contract, and it corrected this block's first
+        // wording ("its coverage still counts, its verdict does not").
+        // A failed evidence producer makes its evidence untrustworthy:
+        // the run's coverage is DISCARDED, and the overall result is
+        // INDETERMINATE (exit 2) - distinct from exit 1, which asserts
+        // a proven gap. Its canary proves the discard is real: the
+        // forced-red suite still emits coverage, so a checker that
+        // "discarded" nothing would show the hook covered.
+        failedSuites.push(suiteName + ' exited '
+            + (r.error ? String(r.error.code || r.error.message) : r.status)
+            + ' - coverage from this run is DISCARDED, result is indeterminate'
+            + ' · ' + whyFailed(r));
+        return;
+    }
+    let dumps = [];
+    try { dumps = fs.readdirSync(covDir).filter((f) => f.endsWith('.json')); } catch { /* none */ }
+    for (const d of dumps) {
+        let cov;
+        try { cov = JSON.parse(fs.readFileSync(path.join(covDir, d), 'utf8')); } catch { continue; }
+        for (const script of cov.result || []) {
+            if (!script.url || !script.url.startsWith('file://')) continue;
+            let p;
+            try { p = fold(path.resolve(fileURLToPath(script.url))); } catch { continue; }
+            const hook = hookByPath.get(p);
+            if (!hook) continue;
+            // Keyed by FULL FILE PATH, not basename (Sol's round-4
+            // warning): two plugins wiring the same hook filename would
+            // otherwise cross-populate - one file's coverage marking
+            // both rows executed.
+            if (!executedBy.has(hook.file)) executedBy.set(hook.file, new Set());
+            executedBy.get(hook.file).add(suiteName);
         }
     }
+};
+
+const execute = async () => {
+    const candidates = [...referenced.keys()];
+    const plan = poolPlan(candidates);
+    const overlap = new Set(plan.parallel);
+    const covDirs = new Map();
+    const got = new Map();
+    try {
+        for (const s of candidates) covDirs.set(s, fs.mkdtempSync(path.join(os.tmpdir(), 'hookcov-')));
+        for (const s of candidates.filter((c) => !overlap.has(c))) {
+            got.set(s, runBudgeted(process.execPath, [path.join(TOOLING, s)], suiteOpts(covDirs.get(s))));
+        }
+        const queue = candidates.filter((c) => overlap.has(c));
+        const lane = async () => {
+            while (queue.length) {
+                const s = queue.shift();
+                got.set(s, await runInWorker(process.execPath, [path.join(TOOLING, s)], suiteOpts(covDirs.get(s))));
+            }
+        };
+        await Promise.all(Array.from({ length: Math.min(plan.size, queue.length) }, lane));
+        for (const s of candidates) fold1(s, got.get(s), covDirs.get(s));
+    } finally {
+        for (const d of covDirs.values()) fs.rmSync(d, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+    }
+    return plan;
+};
+
+// Everything after the evidence phase: the rows, the report and the exit code.
+function finish(plan) {
+    const rows = wired.map((h) => ({
+        ...h,
+        // `covering` is EXECUTION evidence. `referencedBy` is the static candidate
+        // list, reported so a reader can see the two disagree — a referenced-but-
+        // never-executed hook is precisely the audit's vacuous-suite case.
+        covering: [...(executedBy.get(h.file) || [])].sort(),
+        referencedBy: [...referenced.entries()]
+            .filter(([, hooks]) => hooks.has(h.name)).map(([s]) => s).sort(),
+    }));
+
+    // In referenced-only mode the verdict basis is the static reference, and the
+    // output must say so - "referenced" is a weaker claim than "executed", and
+    // conflating them is the original F5 defect.
+    const untested = rows.filter((r) =>
+        (referencedOnly ? r.referencedBy : r.covering).length === 0);
+    const indeterminate = !referencedOnly && failedSuites.length > 0;
+
+    if (asJson) {
+        console.log(JSON.stringify({
+            mode: referencedOnly ? 'referenced-only' : 'execution',
+            wired: rows.length,
+            suitesExecuted: referencedOnly ? 0 : referenced.size,
+        pool: plan,
+            failedSuites,
+            wiredRows: rows,
+            untested,
+        }, null, 2));
+        process.exit(indeterminate ? 2 : (untested.length ? 1 : 0));
+    }
+
+    if (referencedOnly) {
+        console.log(`\n${rows.length} wired hook(s) · STATIC PRECHECK ONLY · `
+            + `${rows.length - untested.length} referenced by a suite · ${untested.length} referenced by nothing`);
+        console.log('(execution evidence is NOT established in this mode - '
+            + 'test-hook-execution-evidence.js gates that)\n');
+    } else {
+        console.log(`\n${rows.length} wired hook(s) · ${referenced.size} candidate suite(s) executed under coverage · `
+            + `${rows.length - untested.length} EXECUTED by a suite · ${untested.length} with no execution evidence\n`);
+        if (plan.parallel.length) console.log(`(${plan.parallel.length} reviewed-parallel candidate(s) ran up to ${plan.size} at a time)\n`);
+        if (plan.note) console.log(`(pool: ${plan.note})\n`);
+    }
+    for (const w of failedSuites) console.log('  [FAIL] ' + w);
+
+    if (indeterminate) {
+        console.log('\nOne or more evidence producers FAILED. Their coverage is discarded and');
+        console.log('this result is INDETERMINATE - fix the failing suite(s) and re-run.');
+        console.log('An indeterminate check must never read as a pass or as a proven gap.\n');
+        process.exit(2);
+    }
+
+    if (!untested.length) {
+        console.log(referencedOnly
+            ? 'Every wired hook is referenced by at least one suite.\n'
+            : 'Every wired hook was actually loaded by at least one suite run.\n');
+        process.exit(0);
+    }
+
+    console.log('Wired into production, executed by nothing:\n');
+    for (const r of untested) {
+        const lines = fs.readFileSync(r.file, 'utf8').split('\n').length;
+        const ref = r.referencedBy.length
+            ? `referenced by ${r.referencedBy.join(', ')} without ever loading it — a path literal is not a test`
+            : 'referenced by nothing';
+        console.log(`  ✗ ${r.plugin}/hooks/${r.name}  (${lines} lines, ${r.event}) — ${ref}`);
+    }
+    console.log('\nThese run on real sessions. A hook with no execution evidence is not a gap in');
+    console.log('coverage — it is production code nobody has ever asserted anything about.\n');
+    process.exit(1);
 }
 
-const rows = wired.map((h) => ({
-    ...h,
-    // `covering` is EXECUTION evidence. `referencedBy` is the static candidate
-    // list, reported so a reader can see the two disagree — a referenced-but-
-    // never-executed hook is precisely the audit's vacuous-suite case.
-    covering: [...(executedBy.get(h.file) || [])].sort(),
-    referencedBy: [...referenced.entries()]
-        .filter(([, hooks]) => hooks.has(h.name)).map(([s]) => s).sort(),
-}));
-
-// In referenced-only mode the verdict basis is the static reference, and the
-// output must say so - "referenced" is a weaker claim than "executed", and
-// conflating them is the original F5 defect.
-const untested = rows.filter((r) =>
-    (referencedOnly ? r.referencedBy : r.covering).length === 0);
-const indeterminate = !referencedOnly && failedSuites.length > 0;
-
-if (asJson) {
-    console.log(JSON.stringify({
-        mode: referencedOnly ? 'referenced-only' : 'execution',
-        wired: rows.length,
-        suitesExecuted: referencedOnly ? 0 : referenced.size,
-        failedSuites,
-        wiredRows: rows,
-        untested,
-    }, null, 2));
-    process.exit(indeterminate ? 2 : (untested.length ? 1 : 0));
+// An exception in the execution phase is a run that could not measure:
+// exit 2, never the 1 that asserts a proven gap.
+if (referencedOnly) finish(null);
+else {
+    execute().then(finish, (e) => {
+        console.error('the execution phase failed: ' + ((e && (e.stack || e.message)) || e));
+        process.exit(2);
+    });
 }
-
-if (referencedOnly) {
-    console.log(`\n${rows.length} wired hook(s) · STATIC PRECHECK ONLY · `
-        + `${rows.length - untested.length} referenced by a suite · ${untested.length} referenced by nothing`);
-    console.log('(execution evidence is NOT established in this mode - '
-        + 'test-hook-execution-evidence.js gates that)\n');
-} else {
-    console.log(`\n${rows.length} wired hook(s) · ${referenced.size} candidate suite(s) executed under coverage · `
-        + `${rows.length - untested.length} EXECUTED by a suite · ${untested.length} with no execution evidence\n`);
-}
-for (const w of failedSuites) console.log('  [FAIL] ' + w);
-
-if (indeterminate) {
-    console.log('\nOne or more evidence producers FAILED. Their coverage is discarded and');
-    console.log('this result is INDETERMINATE - fix the failing suite(s) and re-run.');
-    console.log('An indeterminate check must never read as a pass or as a proven gap.\n');
-    process.exit(2);
-}
-
-if (!untested.length) {
-    console.log(referencedOnly
-        ? 'Every wired hook is referenced by at least one suite.\n'
-        : 'Every wired hook was actually loaded by at least one suite run.\n');
-    process.exit(0);
-}
-
-console.log('Wired into production, executed by nothing:\n');
-for (const r of untested) {
-    const lines = fs.readFileSync(r.file, 'utf8').split('\n').length;
-    const ref = r.referencedBy.length
-        ? `referenced by ${r.referencedBy.join(', ')} without ever loading it — a path literal is not a test`
-        : 'referenced by nothing';
-    console.log(`  ✗ ${r.plugin}/hooks/${r.name}  (${lines} lines, ${r.event}) — ${ref}`);
-}
-console.log('\nThese run on real sessions. A hook with no execution evidence is not a gap in');
-console.log('coverage — it is production code nobody has ever asserted anything about.\n');
-process.exit(1);

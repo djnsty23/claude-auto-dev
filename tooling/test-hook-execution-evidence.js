@@ -240,12 +240,13 @@ const infra = (r, what, expect2 = false) => {
 // culprit had to be re-derived by hand. A count with no members
 // (rule-gate-integrity 4). The JSON still parses on a 2, so the names are read
 // out of the same result and attached to the infrastructure line.
-const runChecker = (expect2 = false) => {
+const runChecker = (expect2 = false, env = {}) => {
     // Compared AFTER the call, so the names are attached to the entry THIS call
     // pushed and never to one left by an earlier run.
     const before = indeterminate.length;
     const result = infra(runBudgeted(process.execPath, [CHECK, '--json'], {
         cwd: SANDBOX,
+        env: { ...process.env, ...env },
         encoding: 'utf8',
         windowsHide: true,
         // Must exceed the checker's per-suite timeout. GitHub's hosted Windows
@@ -368,10 +369,10 @@ const narrowPopulation = (target) => {
     }
     return () => { for (const [file, orig, wrote] of installed) removeMutant(file, orig, wrote); };
 };
-const runNarrowedChecker = (target, which, expect2 = false) => {
+const runNarrowedChecker = (target, which, expect2 = false, env = {}) => {
     const restore = narrowPopulation(target);
     let run;
-    try { run = runChecker(expect2); } finally { restore(); }
+    try { run = runChecker(expect2, env); } finally { restore(); }
     const rows = run.json?.wiredRows || [];
     check(`control: the ${which} checker pass sees the target hook alone`,
         rows.length > 0 && rows.every((r) => r.plugin === target.plugin && r.name === target.name),
@@ -419,7 +420,9 @@ const rawCoverageEvidence = (coverageDir, file) => {
     return { found, expected, dumps: dumps.length, urls: [...urls] };
 };
 
-const baseline = runChecker();
+// An empty AUTODEV_HOOKCHECK_POOL is the default pool size, so the baseline
+// exercises the pooled path whatever the caller's environment says.
+const baseline = runChecker(false, { AUTODEV_HOOKCHECK_POOL: '' });
 check(unresolved('control: the committed hook checker has a parseable green baseline',
     baseline.result, baseline.json?.failedSuites),
     baseline.result.status === 0 && baseline.json?.wiredRows?.length > 0,
@@ -494,7 +497,15 @@ if (target && mutatedCheck) {
         detail(mutatedCheck.result));
 }
 
+// THE POOL IS EXERCISED, not only configured. The checker runs reviewed-parallel
+// candidates in worker threads (find-untested-hooks.js, AUTODEV_HOOKCHECK_POOL).
+// A baseline whose pool ran nothing would leave the worker path ungated.
+check('control: the baseline ran reviewed-parallel candidates in the checker\'s pool',
+    baseline.json?.pool?.size > 1 && baseline.json.pool.parallel?.length > 0 && !baseline.json.pool.note,
+    `pool=${JSON.stringify(baseline.json?.pool)}`);
+
 let failedSuiteCheck = null;
+let pooledRedCheck = null;
 // A line only the forced-red suite prints, so the checker's report can be
 // graded on carrying the REASON a producer failed and not only its exit code.
 const plantedFail = 'planted-red-' + crypto.randomBytes(4).toString('hex');
@@ -525,7 +536,24 @@ if (target && targetSuite && original) {
             `dumps=${cov.dumps} expected=${cov.expected} `
             + `same-basename-urls=${cov.urls.length ? JSON.stringify(cov.urls) : 'NONE'} `
             + '(NONE means the hook never executed; a listed url means it ran and the paths compare unequal)');
-        failedSuiteCheck = runNarrowedChecker(target, 'red-suite', true);   // this call deliberately provokes exit 2
+        // Both calls deliberately provoke exit 2. The first is the serial path.
+        failedSuiteCheck = runNarrowedChecker(target, 'red-suite', true, { AUTODEV_HOOKCHECK_POOL: '1' });
+        // The second runs the same red producer inside a pool worker. The mutant's
+        // bytes match no review, so it is marked parallel in the SANDBOX manifest
+        // only, which is safe because the narrowed pass runs this one suite.
+        const manifestFile = path.join(SANDBOX, 'tooling', 'suite-isolation.json');
+        const doc = JSON.parse(fs.readFileSync(manifestFile, 'utf8'));
+        const suiteName = path.basename(targetSuite);
+        doc.suites[suiteName] = {
+            ...(doc.suites[suiteName] || { reason: 'acceptance fixture: the forced-red target, run in the pool' }),
+            isolation: 'parallel',
+            sha256: crypto.createHash('sha256').update(Buffer.from(redSrc, 'utf8')).digest('hex'),
+        };
+        const manifestWrote = JSON.stringify(doc, null, 2) + '\n';
+        const manifestOrig = installMutant(manifestFile, manifestWrote);
+        try {
+            pooledRedCheck = runNarrowedChecker(target, 'pooled red-suite', true, { AUTODEV_HOOKCHECK_POOL: '' });
+        } finally { removeMutant(manifestFile, manifestOrig, manifestWrote); }
     } finally {
         if (redOrig) removeMutant(targetSuite, redOrig, redWroteNow);
         fs.rmSync(coverageDir, { recursive: true, force: true });
@@ -537,24 +565,30 @@ if (target && targetSuite && original) {
         detail(restored));
 }
 
-if (target && failedSuiteCheck) {
-    const failedRow = (failedSuiteCheck.json?.wiredRows || [])
+const gradeFailedCandidate = (run, how) => {
+    const failedRow = (run.json?.wiredRows || [])
         .find((row) => row.name === target.name);
-    check('coverage from a failed candidate suite is discarded',
+    check(`coverage from a failed candidate suite is discarded${how}`,
         !failedRow?.covering?.includes(target.covering[0])
-            && (failedSuiteCheck.json?.untested || []).some((row) => row.name === target.name),
-        `covering=${JSON.stringify(failedRow?.covering)} untested=${JSON.stringify((failedSuiteCheck.json?.untested || []).map((row) => row.name))}`);
-    check('a failed candidate suite makes check:hooks exit 2',
-        failedSuiteCheck.result.status === 2 && failedSuiteCheck.result.signal === null
-            && !failedSuiteCheck.result.error,
-        detail(failedSuiteCheck.result));
+            && (run.json?.untested || []).some((row) => row.name === target.name),
+        `covering=${JSON.stringify(failedRow?.covering)} untested=${JSON.stringify((run.json?.untested || []).map((row) => row.name))}`);
+    check(`a failed candidate suite makes check:hooks exit 2${how}`,
+        run.result.status === 2 && run.result.signal === null && !run.result.error,
+        detail(run.result));
     // `[measured 2026-09-24]` a gate log read "exited 1" and nothing else, and
     // the suite then passed ten standalone runs, so the reason was gone for good.
-    const entry = (failedSuiteCheck.json?.failedSuites || [])
-        .find((s) => s.startsWith(path.basename(targetSuite) + ' '));
-    check('a failed candidate carries its own FAIL line, not only its exit code',
+    const entry = (run.json?.failedSuites || [])
+        .find((e) => e.startsWith(path.basename(targetSuite) + ' '));
+    check(`a failed candidate carries its own FAIL line, not only its exit code${how}`,
         !!entry && entry.includes(plantedFail),
         `entry=${JSON.stringify(entry)}`);
+};
+if (target && failedSuiteCheck) gradeFailedCandidate(failedSuiteCheck, '');
+if (target && pooledRedCheck) {
+    check('control: the pooled red-suite pass ran its producer in a pool worker',
+        (pooledRedCheck.json?.pool?.parallel || []).includes(path.basename(targetSuite)),
+        `pool=${JSON.stringify(pooledRedCheck.json?.pool)}`);
+    gradeFailedCandidate(pooledRedCheck, ' (pooled)');
 }
 
 let pass = 0;
