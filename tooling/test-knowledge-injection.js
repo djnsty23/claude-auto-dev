@@ -456,10 +456,11 @@ if (!memDB.isAvailable()) {
         cases.push(['a trivial Bash event is handled too', bashTrivial.status === 0]);
         cases.push(['  and it too emits zero bytes on stdout', (bashTrivial.stdout || '') === '']);
         cases.push(['  and zero bytes on stderr', (bashTrivial.stderr || '') === '']);
-        // A Read carries a file_path, so the area brief may legitimately print to
-        // stderr on the first touch of an area; stdout must still be empty, since
-        // anything there lands in the model's context.
-        cases.push(['a Read tool event emits zero bytes on stdout', (read.stdout || '') === '']);
+        // A Read carries a file_path, so the first touch of an area may print the
+        // area brief, which reaches the model as stdout JSON (see ctx above).
+        // Anything else on stdout would land in the model's context unasked.
+        cases.push(['a Read tool event prints nothing on stdout but the area brief',
+            (read.stdout || '') === '' || ctx(read) !== '']);
     }
 
     // ---- line 160 CANNOT be reached from here, and here is why ----

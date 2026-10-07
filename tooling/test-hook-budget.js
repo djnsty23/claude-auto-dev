@@ -179,8 +179,6 @@ const DECISIONS = {
     'plugins/autodev-memory/hooks/memory-session-start.js': OPEN(
         'memory is context, and a session starts without it; the memory it injects is keyed on the cwd, so bad input may still get it',
         INFORMS()),
-    'plugins/autodev-memory/hooks/memory-prompt-capture.js': OPEN(
-        'a capture that fails loses one memory, never the prompt'),
     'plugins/autodev-memory/hooks/memory-capture.js': OPEN(
         'a capture that fails loses one memory, never the tool result'),
     'plugins/autodev-memory/hooks/memory-session-end.js': OPEN(
