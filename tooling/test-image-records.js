@@ -8,7 +8,10 @@ const { spawnSync } = require('node:child_process');
 const vm = require('node:vm');
 const HOOK = path.resolve(__dirname, '..', 'plugins/autodev-core/hooks/user-prompt-image-scan.js');
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'image-records-'));
-const env = { ...process.env, CLAUDE_PLUGIN_OPTION_IMAGE_SCAN: 'true' };
+// The cases grade which record the hook picks, so its 150 ms budget is raised
+// under the 10 s spawn cap: on a loaded runner the default ran out before a
+// one-line transcript arrived. postParseDeadline below drives the budget itself.
+const env = { ...process.env, CLAUDE_PLUGIN_OPTION_IMAGE_SCAN: 'true', AUTODEV_IMAGE_SCAN_DEADLINE_MS: '8000' };
 const image = n => ({ role: 'user', content: [{ type: 'image', source: { type: 'base64', data: 'A'.repeat(n) } }] });
 const text = { role: 'user', content: [{ type: 'text', text: 'current question' }] };
 let cases = 0;
