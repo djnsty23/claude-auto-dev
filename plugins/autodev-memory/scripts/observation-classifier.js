@@ -27,6 +27,7 @@
 // directory (the memory file IS the memory; a row saying it was written is not).
 
 const fs = require('fs');
+const os = require('os');
 const path = require('path');
 const { stringifyPrivate } = require('./private-redaction');
 
@@ -60,17 +61,37 @@ function realpathOr(p) {
     return p;
 }
 
+// The project a cwd belongs to: the nearest ancestor holding `.git`, else the
+// cwd itself. The payload's cwd is the session's CURRENT directory, so after a
+// `cd src` an edit to the root package.json would otherwise read as outside the
+// project and be dropped. The walk stops below the home directory, so a dotfiles
+// repo at home never swallows every project under it.
+function projectRoot(cwd) {
+    const start = realpathOr(cwd);
+    const home = realpathOr(os.homedir());
+    let dir = start;
+    for (let i = 0; i < 64; i++) {
+        if (dir === home) break;
+        if (fs.existsSync(path.join(dir, '.git'))) return dir;
+        const parent = path.dirname(dir);
+        if (parent === dir) break;
+        dir = parent;
+    }
+    return start;
+}
+
 // True when the file belongs to the project the hook is running in. A relative
 // path is taken as project-relative. With no cwd the location cannot be judged,
 // so only the fragment exclusions apply.
 function isProjectFile(filePath, cwd) {
-    if (!filePath) return false;
-    const norm = String(filePath).replace(/\\/g, '/').toLowerCase();
+    if (!filePath || typeof filePath !== 'string') return false;
+    const norm = filePath.replace(/\\/g, '/').toLowerCase();
     if (EXCLUDED_FRAGMENTS.some((f) => norm.includes(f))) return false;
     if (!cwd || !path.isAbsolute(filePath)) return true;
-    const rel = path.relative(realpathOr(cwd), realpathOr(filePath));
+    const rel = path.relative(projectRoot(cwd), realpathOr(filePath));
     if (!rel) return true;
-    return !rel.startsWith('..') && !path.isAbsolute(rel);
+    // `..` as a whole first segment, so a file named `..env.local` stays inside.
+    return rel !== '..' && !rel.startsWith('..' + path.sep) && !path.isAbsolute(rel);
 }
 
 /**
@@ -95,11 +116,11 @@ function classifyObservation(toolName, toolInput, toolResult, context) {
 
     const cwd = context && typeof context === 'object' ? context.cwd : undefined;
     const filePath = (toolInput && (toolInput.file_path || toolInput.path)) || '';
-    if (!isProjectFile(filePath, cwd)) return null;
+    if (typeof filePath !== 'string' || !isProjectFile(filePath, cwd)) return null;
 
     const fileName = path.basename(filePath);
     const shown = cwd && path.isAbsolute(filePath)
-        ? path.relative(realpathOr(cwd), realpathOr(filePath)).replace(/\\/g, '/')
+        ? path.relative(projectRoot(cwd), realpathOr(filePath)).replace(/\\/g, '/')
         : filePath;
 
     if (toolName === 'Write') {
