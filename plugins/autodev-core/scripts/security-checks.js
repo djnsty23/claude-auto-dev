@@ -38,7 +38,8 @@ const RULES = {
   'ext-sender-unchecked': { severity: 'error', what: 'An extension worker handles messages without checking the sender.' },
   'ext-content-origin': { severity: 'error', what: 'An extension content script trusts window messages without checking origin.' },
   'ext-broad-hosts': { severity: 'warn', what: 'The extension asks for every site.' },
-  'esm-inline-require': { severity: 'warn', what: 'A Node builtin is loaded with require() inside an ES module, where require does not exist.' },
+  'esm-inline-require': { severity: 'warn', what: 'A module is loaded with require() inside an ES module, where require does not exist.' },
+  'supabase-types-stale': { severity: 'warn', what: 'A migration creates a public table that the generated Supabase types file never mentions.' },
   'sql-policy-initplan': { severity: 'warn', what: 'A policy calls auth.uid() or an is_admin() style function per row instead of once per statement.' },
   'sql-fk-unindexed': { severity: 'warn', what: 'A foreign key column has no index that leads with it.' },
   'admin-no-role-check': { severity: 'warn', what: 'An admin page or route shows no server-side role check, only (at most) a sign-in check.' },
@@ -279,6 +280,54 @@ function checkMigrations(files) {
   return out;
 }
 
+/** A generated Supabase types file: `export type Database` with a Tables map. */
+const SUPABASE_TYPES = /\bexport\s+(?:type|interface)\s+Database\b[\s\S]{0,400}?\bTables\s*:\s*\{/;
+const isSupabaseTypes = (text) => SUPABASE_TYPES.test(text);
+
+/**
+ * A table a migration creates and the generated types never mention: code that
+ * reads it is typed against nothing (`never`, or `any` behind a cast), so the
+ * build passes while every column name in that code goes unchecked. The live
+ * set follows the history the way checkMigrations does, so a dropped table is
+ * not owed a type and a renamed one is owed its new name.
+ * migrations: [{ path, text }] in apply order. types: [{ path, text }].
+ */
+function checkTypesCoverage(migrations, types) {
+  if (!migrations.length || !types.length) return [];
+  const tables = new Map();
+  const TABLE = /create\s+table\s+(?:if\s+not\s+exists\s+)?(?:"?(\w+)"?\.)?"?(\w+)"?\s*\(/gi;
+  const DROP = /drop\s+table\s+(?:if\s+exists\s+)?((?:(?:"?public"?\.)?"?\w+"?\s*,\s*)*(?:"?public"?\.)?"?\w+"?)/gi;
+  const RENAME = /alter\s+table\s+(?:if\s+exists\s+)?(?:only\s+)?(?:"?public"?\.)?"?(\w+)"?\s+rename\s+to\s+"?(\w+)"?/gi;
+  for (const { path, text } of migrations) {
+    const sql = text.replace(/--[^\n]*/g, (c) => ' '.repeat(c.length));
+    // Applied in file order, so a table dropped and re-created in one file stays.
+    const events = [];
+    for (const m of sql.matchAll(TABLE)) {
+      if ((m[1] || 'public').toLowerCase() !== 'public') continue;
+      events.push([m.index, () => tables.set(m[2].toLowerCase(), { path, line: lineAt(sql, m.index) })]);
+    }
+    for (const m of sql.matchAll(DROP)) events.push([m.index, () => { for (const t of m[1].split(',')) tables.delete(bare(t)); }]);
+    for (const m of sql.matchAll(RENAME)) {
+      events.push([m.index, () => {
+        const at = tables.get(m[1].toLowerCase());
+        tables.delete(m[1].toLowerCase());
+        if (at) tables.set(m[2].toLowerCase(), at);
+      }]);
+    }
+    for (const [, apply] of events.sort((a, b) => a[0] - b[0])) apply();
+  }
+  const typed = new Set();
+  for (const { text } of types) for (const m of text.matchAll(/^\s*["']?(\w+)["']?\s*:\s*\{/gm)) typed.add(m[1].toLowerCase());
+  const where = types.map((t) => t.path).join(', ');
+  const out = [];
+  for (const [name, at] of tables) {
+    if (typed.has(name)) continue;
+    out.push(finding('supabase-types-stale', at.path, at.line, `Table public.${name} is created here but ${where} never mention${types.length > 1 ? '' : 's'} it.`,
+      'Regenerate the types (supabase gen types typescript) into that file and commit them with the migration.'));
+  }
+  return out;
+}
+
 // --------------------------------------------------------------- web source
 
 const SINKS = [
@@ -357,7 +406,16 @@ function checkBackground(path, text) {
 // a build red.
 
 const NODE_BUILTINS = 'assert|buffer|child_process|cluster|crypto|dns|events|fs|http|http2|https|net|os|path|perf_hooks|querystring|readline|stream|string_decoder|timers|tls|url|util|vm|worker_threads|zlib';
-const BUILTIN_REQUIRE = new RegExp(`(?<![\\w.$])require\\s*\\(\\s*(['"\`])(?:node:)?(?:${NODE_BUILTINS})(?:/[\\w/]+)?\\1\\s*\\)`, 'g');
+const BUILTIN = new RegExp(`^(?:node:)?(?:${NODE_BUILTINS})(?:/[\\w/]+)?$`);
+// Any literal specifier, not only a builtin: `require('stripe')` and
+// `require('./sso')` throw the same ReferenceError in an ES module. The first
+// version of this rule took builtins only, the shape of the 2026-10-05
+// analytics fix (nine `require('node:crypto')` calls), and was silent on the
+// package and relative forms of the same defect.
+const ANY_REQUIRE = /(?<![\w.$])require\s*\(\s*(['"`])([^'"`\n]+)\1\s*\)/g;
+// The file brings its own `require`: the createRequire bridge, a local binding,
+// or a `typeof require` guard written to run under both module systems.
+const OWN_REQUIRE = /\bcreateRequire\b|\b(?:const|let|var|function)\s+require\b|\btypeof\s+require\b/;
 
 /** Comments blanked to spaces, offsets kept. Only whole-line // comments, so a URL in a string survives. */
 function blankComments(text) {
@@ -370,10 +428,17 @@ function blankComments(text) {
  * with it throws on first call, long after the build passed.
  */
 function checkEsmRequire(path, text, isEsm) {
-  if (!isEsm || /\bcreateRequire\b/.test(text)) return [];
-  const hits = [...blankComments(text).matchAll(BUILTIN_REQUIRE)];
+  // A tool config (tailwind, postcss, vite) is loaded by its tool, which
+  // supplies require (jiti). `[measured 2026-10-07]` 2 of 7 new hits over 16
+  // local repos were tailwind.config.ts plugin lists, and both work.
+  if (!isEsm || OWN_REQUIRE.test(text) || /(^|\/)[^/]+\.config\.[cm]?[jt]s$/.test(path)) return [];
+  const hits = [...blankComments(text).matchAll(ANY_REQUIRE)];
   if (!hits.length) return [];
-  return [finding('esm-inline-require', path, lineAt(text, hits[0].index), `${hits.length} require() call(s) of a Node builtin inside an ES module.`, "Use a top-level `import ... from 'node:...'`.")];
+  const names = [...new Set(hits.map((h) => h[2]))];
+  const builtins = names.every((n) => BUILTIN.test(n));
+  return [finding('esm-inline-require', path, lineAt(text, hits[0].index),
+    `${hits.length} require() call(s) inside an ES module (${names.slice(0, 4).join(', ')}${names.length > 4 ? ', ...' : ''}), where require is not defined.`,
+    builtins ? "Use a top-level `import ... from 'node:...'`." : 'Use a top-level `import`, or `await import()` where the load must stay lazy.')];
 }
 
 const WRAPPED_CALL = /\(\s*select\s+[\w."]+\s*\([^()]*\)\s*(?:as\s+\w+\s*)?\)/gi;
@@ -765,6 +830,8 @@ module.exports = {
   checkManifest,
   checkBackground,
   checkEsmRequire,
+  isSupabaseTypes,
+  checkTypesCoverage,
   checkPolicyInitplan,
   checkFkIndexes,
   checkAdminTree,

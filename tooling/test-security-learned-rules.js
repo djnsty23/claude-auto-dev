@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 'use strict';
-// Suite for the eight advisory rules the gate learned from a round of
+// Suite for the advisory rules the gate learned from a round of
 // security and performance fixes. Each rule gets three arms, all driven through
 // the real CLI as a subprocess over a temp git repo:
 //   bad     the defect as it was written, shrunk to a fixture. Must fire.
@@ -165,6 +165,70 @@ const CASES = [
     // A retrieve by id is a single object, not a list.
     scope: { 'lib/revenue.ts': "export const one = (id: string) => stripe.charges.retrieve(id);" },
   },
+  // `fires` and `silent` carry any further named arms.
+  {
+    rule: 'esm-inline-require',
+    // The package form of the 2026-10-05 analytics defect, as a local repo
+    // still ships it: a try/catch turns the ReferenceError into a silent
+    // fallback, so the validator is never installed and nothing says so.
+    bad: {
+      'api/package.json': '{"type":"module"}',
+      'api/src/middleware/openapi-validator.ts': 'export function install(app: App) {\n  try {\n    const OpenApiValidator = require("express-openapi-validator");\n    app.use(OpenApiValidator.middleware({ apiSpec: "openapi.yaml" }));\n  } catch {\n    // not installed\n  }\n}',
+    },
+    good: {
+      'api/package.json': '{"type":"module"}',
+      'api/src/middleware/openapi-validator.ts': 'export async function install(app: App) {\n  try {\n    const { default: OpenApiValidator } = await import("express-openapi-validator");\n    app.use(OpenApiValidator.middleware({ apiSpec: "openapi.yaml" }));\n  } catch {\n    // not installed\n  }\n}',
+    },
+    fires: {
+      // A relative module throws the same way as a package.
+      relative: { 'package.json': '{"type":"module"}', 'src/routes/sso.ts': "export const login = () => require('../lib/oidc').start();" },
+    },
+    silent: {
+      // Tailwind loads its config through jiti, which supplies require.
+      toolConfig: { 'package.json': '{"type":"module"}', 'tailwind.config.ts': "export default { plugins: [require('tailwindcss-animate')] };" },
+      // Written to run under both module systems.
+      typeofGuard: { 'package.json': '{"type":"module"}', 'lib/load.js': "export const load = () => (typeof require === 'function' ? require('./x.cjs') : null);" },
+    },
+  },
+  {
+    rule: 'supabase-types-stale',
+    // The shape of a local repo: types generated in an early migration's era,
+    // later migrations adding tables that routes query untyped.
+    bad: {
+      'supabase/migrations/001_init.sql': 'create table public.songs (id uuid primary key);',
+      'supabase/migrations/010_add_playlists.sql': 'create table if not exists public.playlists (\n  id uuid primary key,\n  user_id uuid not null\n);',
+      // RLS and grants, so the only finding left to block or not is this rule's.
+      'supabase/migrations/099_secure.sql': 'alter table public.songs enable row level security;\nalter table public.playlists enable row level security;\ngrant select on all tables in schema public to authenticated;',
+      'src/types/database.ts': 'export type Database = {\n  public: {\n    Tables: {\n      songs: {\n        Row: { id: string }\n      }\n    }\n  }\n}\n',
+    },
+    good: {
+      'supabase/migrations/001_init.sql': 'create table public.songs (id uuid primary key);',
+      'supabase/migrations/010_add_playlists.sql': 'create table if not exists public.playlists (\n  id uuid primary key,\n  user_id uuid not null\n);',
+      'src/types/database.ts': 'export type Database = {\n  public: {\n    Tables: {\n      playlists: {\n        Row: { id: string; user_id: string }\n      }\n      songs: {\n        Row: { id: string }\n      }\n    }\n  }\n}\n',
+    },
+    fires: {
+      // Renamed after the types were generated: the old key no longer covers it.
+      renamed: {
+        'supabase/migrations/001_init.sql': 'create table public.songs (id uuid primary key);\nalter table public.songs enable row level security;\ngrant select on public.songs to authenticated;\nalter table public.songs rename to tracks;',
+        'src/types/database.ts': 'export type Database = {\n  public: {\n    Tables: {\n      songs: {\n        Row: { id: string }\n      }\n    }\n  }\n}\n',
+      },
+    },
+    silent: {
+      // A dropped table is owed no type.
+      dropped: {
+        'supabase/migrations/001_init.sql': 'create table public.songs (id uuid primary key);\ncreate table public.tmp_import (id int);',
+        'supabase/migrations/002_cleanup.sql': 'drop table if exists public.tmp_import;',
+        'src/types/database.ts': 'export type Database = {\n  public: {\n    Tables: {\n      songs: {\n        Row: { id: string }\n      }\n    }\n  }\n}\n',
+      },
+      // Another schema is not in the public types.
+      otherSchema: {
+        'supabase/migrations/001_init.sql': 'create table public.songs (id uuid primary key);\ncreate table private.audit (id int);',
+        'src/types/database.ts': 'export type Database = {\n  public: {\n    Tables: {\n      songs: {\n        Row: { id: string }\n      }\n    }\n  }\n}\n',
+      },
+      // No generated types at all: nothing to be stale against.
+      noTypes: { 'supabase/migrations/001_init.sql': 'create table public.songs (id uuid primary key);' },
+    },
+  },
 ];
 
 for (const c of CASES) {
@@ -178,6 +242,8 @@ for (const c of CASES) {
   for (const k of ['tableFk', 'alterFk']) {
     if (c[k]) arm(c.rule, k, c[k], true);
   }
+  for (const [k, files] of Object.entries(c.fires || {})) arm(c.rule, k, files, true);
+  for (const [k, files] of Object.entries(c.silent || {})) arm(c.rule, k, files, false);
 }
 
 // The control runs on every invocation and must still hold with the new rules.
@@ -190,5 +256,5 @@ if (failures.length) {
   console.error(`FAIL  ${failures.length} of ${passed + failures.length} assertions\n  - ${failures.join('\n  - ')}`);
   process.exitCode = 1;
 } else {
-  console.log(`PASS  ${passed} assertions: eight learned rules, bad, good, mutant and scope arms through the CLI.`);
+  console.log(`PASS  ${passed} assertions: ${new Set(CASES.map((c) => c.rule)).size} learned rules, bad, good, mutant and scope arms through the CLI.`);
 }

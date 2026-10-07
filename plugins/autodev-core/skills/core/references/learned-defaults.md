@@ -10,6 +10,7 @@ need a decision at design time, so they live here. `docs/learned-rules.md` holds
 
 | Class | Rule | Default to build in |
 |---|---|---|
+| Migration table missing from the generated Supabase types | `supabase-types-stale` | Regenerate the types in the same commit as the migration that creates the table. Code that reads a table the types do not know is typed against nothing. |
 | Inline `require` in an ES module | `esm-inline-require` | Static `import` at the top. `createRequire` only when a CJS-only package forces it. A build that targets a new module system re-greps for `require(` first. |
 | Admin or operator route with no server-side role check | `admin-no-role-check` | One layout per operator tree (`admin`, `debug`, `workers`, `internal`, `staff`) that checks the role on the server and returns not-found, never a redirect that leaks the route. Each page and route handler also checks, so a moved file stays closed. Hiding a nav link is not a gate. |
 | RLS policy calling `auth.uid()` or a role helper per row | `sql-policy-initplan` | Write `(select auth.uid())` and `(select public.has_role(...))` in every policy. The planner then evaluates once per query, not once per row. |
