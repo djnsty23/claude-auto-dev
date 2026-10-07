@@ -168,6 +168,55 @@ const block = (id, usage) =>
     check('fast mode is priced at its premium rate', near(j.windowCost, 50), j.windowCost);
 }
 
+// ------------------------------------------------- the current model family
+
+// Every id a session can run today, with its rate per MTok: input, output,
+// cache read. Both price tables must resolve each one KNOWN at exactly this
+// rate. A new model id goes here first, and the suite fails until both tables
+// carry it. Haiku 5.5 is [measured 2026-10-08] from Claude Code's own costUSD
+// (costBasis "list"), the other three are published.
+const CURRENT_MODELS = {
+    'claude-opus-5-5': [4, 20, 0.20],
+    'claude-sonnet-5-5': [2, 10, 0.20],
+    'claude-fable-5-1': [10, 50, 0.25],
+    'claude-haiku-5-5': [0.10, 0.50, 0.01],
+};
+
+{
+    const burn = require(SUBJECT);
+    const agentCost = require(path.resolve(__dirname, 'analyze-agent-cost.js'));
+    const M = 1e6;
+    const tables = {
+        'quota-burn': (model, u) => { const p = burn.priceUsage(u, model); return { cost: p.cost, known: p.known }; },
+        'analyze-agent-cost': (model, u) => {
+            const bin = agentCost.blank();
+            agentCost.addUsage(bin, u, model);
+            return { cost: bin.cost, known: !!agentCost.priceOf(model) };
+        },
+    };
+    for (const [table, price] of Object.entries(tables)) {
+        for (const [model, [rin, rout, rread]] of Object.entries(CURRENT_MODELS)) {
+            const i = price(model, { input_tokens: M });
+            const o = price(model, { output_tokens: M });
+            const r = price(model, { cache_read_input_tokens: M });
+            check(`${table}: ${model} resolves known at ${rin}/${rout}/${rread}`,
+                i.known && near(i.cost, rin) && near(o.cost, rout) && near(r.cost, rread),
+                JSON.stringify({ i, o, r }));
+        }
+        // THE DEFECT THIS GUARDS: a prefix match gave claude-opus-5-5 the
+        // Opus 5 rate and claude-haiku-5-5 the Fable rate.
+        const dated = price('claude-haiku-4-5-20251001', { output_tokens: M });
+        check(`${table}: a dated id takes its base row`, dated.known && near(dated.cost, 5), JSON.stringify(dated));
+        const sibling = price('claude-opus-5-9', { output_tokens: M });
+        check(`${table}: claude-opus-5-9 is not claimed by claude-opus-5`, !sibling.known, JSON.stringify(sibling));
+    }
+    const s5 = tables['analyze-agent-cost']('claude-sonnet-5', { output_tokens: M });
+    check('analyze-agent-cost: claude-sonnet-5 at its published $10 output', near(s5.cost, 10), JSON.stringify(s5));
+    const unknown = burn.ratesFor('claude-opus-5-9');
+    check('an unknown sibling keeps the fail-loud Fable rate', !unknown.known && unknown.rates.out === 50,
+        JSON.stringify(unknown));
+}
+
 // ------------------------------------------------ one API response, one price
 
 {
