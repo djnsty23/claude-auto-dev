@@ -25,7 +25,8 @@
  * EACH STEP runs as npm would run it: in the tree's root, with the tree's
  * node_modules/.bin first on PATH. On POSIX it is spawned without a shell
  * (no step this accepts needs one), so a forwarded signal reaches the step
- * itself. On Windows it runs through the shell, where `npm` is `npm.cmd`.
+ * itself. On Windows it runs through the shell, where `npm` is `npm.cmd`, so
+ * the pid a step record carries there is that cmd.exe, the step's parent.
  */
 'use strict';
 

@@ -106,6 +106,12 @@ async function waitFor(pred, ms, what) {
     return false;
 }
 
+/**
+ * The recorded pid is the step's own on POSIX, which spawns it without a
+ * shell. On Windows the step runs through cmd.exe (npm is npm.cmd there), so
+ * the recorded pid is that shell, the step's parent.
+ */
+const isStepPid = (recorded, step) => (WIN ? Number.isInteger(recorded) && recorded > 0 : recorded === step);
 const pidOf = (fx, name) => { try { return Number(fs.readFileSync(path.join(fx.dir, `step-${name}.pid`), 'utf8')); } catch { return null; } };
 const runIdOf = (out) => { const m = /run (\S+) token/.exec(out); return m ? m[1] : null; };
 const runnerPidOf = (out) => { const m = /chain pid (\d+)/.exec(out); return m ? Number(m[1]) : null; };
@@ -136,7 +142,7 @@ async function t1Green(subject) {
         ['T1: a green chain exits 0 with verdict PASS', r.code === 0 && /verdict PASS \(exit 0\)/.test(r.out), detail],
         ['T1: three steps recorded, in chain order', JSON.stringify(names) === JSON.stringify(['node step.js a 0 0', 'node step.js b 0 0', 'node step.js c 0 0']), detail],
         ['T1: every step recorded its end with exit 0', s.steps.length === 3 && s.steps.every((x) => x.ended && x.exit === 0 && x.signal === null), detail],
-        ['T1: each record carries the step\'s own pid and "of 3"', s.steps.length === 3 && ['a', 'b', 'c'].every((n, i) => s.steps[i].pid === pidOf(fx, n) && s.steps[i].of === 3), detail],
+        ['T1: each record carries the step\'s own pid and "of 3"', s.steps.length === 3 && ['a', 'b', 'c'].every((n, i) => isStepPid(s.steps[i].pid, pidOf(fx, n)) && s.steps[i].of === 3), detail],
         ['T1: no record line is torn', s.bad === 0, detail],
     ];
 }
@@ -176,7 +182,7 @@ async function t3TreeKilled(subject) {
         ['T3: step b was running when the tree was killed', up && step !== null, detail],
         ['T3: step a recorded its end, exit 0', s.steps.length >= 1 && s.steps[0].ended && s.steps[0].exit === 0, detail],
         ['T3: step b has a start record and no end record', s.steps.length === 2 && s.steps[1].step === 'node step.js b 0 30000' && !s.steps[1].ended, detail],
-        ['T3: the open record carries step b\'s own pid', Boolean(open) && open.pid === step, detail],
+        ['T3: the open record carries step b\'s own pid', Boolean(open) && isStepPid(open.pid, step), detail],
         ['T3: gate-recovery lostStep names step 2 of 3', Boolean(lost) && /^step 2 of 3 \(node step\.js b 0 30000, pid \d+\) started .+ and recorded no exit$/.test(lost.why), lost && lost.why],
         ['T3: findOpenSteps finds it by worktree', found.length === 1 && found[0].runId === runId && found[0].index === 2, JSON.stringify(found)],
         ['T3: findOpenSteps finds nothing for another worktree', records.findOpenSteps(fx.lockPath, { worktree: ident.canonicalPath(fx.lockDir), sinceMs: 0 }).length === 0, ''],
@@ -195,7 +201,7 @@ async function t4RunnerKilled(subject) {
     return [
         ['T4: the runner was killed while step b ran', up, detail],
         ['T4: the wrapper exits 2, INDETERMINATE, as before', r.code === 2 && /verdict INDETERMINATE \(exit 2\), the chain did NOT finish/.test(r.out), detail],
-        ['T4: its verdict names the step the chain died in', new RegExp(`step 2 of 3 \\(node step\\.js b 0 30000, pid ${step}\\) started \\S+ and recorded no exit`).test(r.out), detail],
+        ['T4: its verdict names the step the chain died in', new RegExp(`step 2 of 3 \\(node step\\.js b 0 30000, pid ${WIN ? '\\d+' : step}\\) started \\S+ and recorded no exit`).test(r.out), detail],
     ];
 }
 
@@ -228,7 +234,7 @@ async function t5SettleLost(subject) {
     return [
         ['T5: the gate was killed mid step b', up && step !== null, run.out],
         ['T5: settle --lost settles the record as lost', Boolean(json && json.ok && v.state === 'lost'), detail],
-        ['T5: and names the gate step its worker died in', Boolean(v && v.gateStep && v.gateStep.step === 'node step.js b 0 30000' && v.gateStep.index === 2 && v.gateStep.pid === step), detail],
+        ['T5: and names the gate step its worker died in', Boolean(v && v.gateStep && v.gateStep.step === 'node step.js b 0 30000' && v.gateStep.index === 2 && isStepPid(v.gateStep.pid, step)), detail],
         ['T5: the ledger keeps the gate step', (() => { try { const g = JSON.parse(fs.readFileSync(ledger, 'utf8')).records[0].gateStep; return Boolean(g && g.index === 2); } catch { return false; } })(), ''],
     ];
 }
