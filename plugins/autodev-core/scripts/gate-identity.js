@@ -32,8 +32,20 @@
  * judged by its processes, not by its boot. Git's `ps -W` maps MSYS pids to
  * native ones (its PID and WINPID columns).
  *
+ * POSIX PROBES. `ps -A -o pid=,ppid=,lstart=` lists the processes, and
+ * /proc/stat's btime or sysctl's kern.boottime gives the boot. Windows keeps a
+ * process's ParentProcessId after that parent exits. POSIX does not: the kernel
+ * hands an orphan to init or a subreaper, so a dead owner's children no longer
+ * name it. Each POSIX snapshot therefore remembers, per boot, the process that
+ * created each process it saw (pid and creation time) in a lineage file
+ * (AUTODEV_GATE_LINEAGE_PATH, default `autodev-gate-lineage-<uid>.json` in the
+ * temp directory). A later snapshot indexes a re-parented process under that
+ * creator, as Windows would. A link is used only for its exact creator, so a
+ * later process at a reused pid adopts nobody. A process re-parented before any
+ * snapshot saw its creator stays invisible, like any unobserved ancestry.
+ *
  *   node gate-identity.js --help
- *   node gate-identity.js snapshot   # prints this machine's boot and process count, read-only
+ *   node gate-identity.js snapshot   # prints this machine's boot and process count (POSIX also refreshes the lineage file)
  */
 'use strict';
 
@@ -118,6 +130,102 @@ function windowsSnapshot() {
     return { ok: true, boot: { id: `${host}|${normaliseTime(parsed.boot)}`, source: 'Win32_OperatingSystem.LastBootUpTime' }, ...indexProcs(list) };
 }
 
+// ---------------------------------------------------------------------------
+// POSIX lineage: the process that created each process, remembered per boot,
+// because the kernel re-parents an orphan to init or a subreaper.
+// ---------------------------------------------------------------------------
+
+const LINEAGE_SCHEMA = 1;
+const LINEAGE_MAX_BYTES = 16 * 1024 * 1024;
+const LINEAGE_KEY = /^\d+\|\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d\.\d{7}Z$/;
+
+function lineagePath() {
+    if (process.env.AUTODEV_GATE_LINEAGE_PATH) return process.env.AUTODEV_GATE_LINEAGE_PATH;
+    const uid = typeof process.getuid === 'function' ? process.getuid() : 'user';
+    return path.join(os.tmpdir(), `autodev-gate-lineage-${uid}.json`);
+}
+
+/**
+ * The links remembered in `bootId`: Map('pid|startUtc' -> { ppid, ppidStartUtc }).
+ * Only a regular file this user owns is read. Anything else is no memory.
+ */
+function readLineage(file, bootId) {
+    const links = new Map();
+    try {
+        const st = fs.lstatSync(file);
+        if (!st.isFile() || st.size > LINEAGE_MAX_BYTES) return links;
+        if (typeof process.getuid === 'function' && st.uid !== process.getuid()) return links;
+        const doc = JSON.parse(fs.readFileSync(file, 'utf8'));
+        if (!doc || doc.schema !== LINEAGE_SCHEMA || doc.bootId !== bootId || !doc.links || typeof doc.links !== 'object') return links;
+        for (const [key, v] of Object.entries(doc.links)) {
+            if (!LINEAGE_KEY.test(key) || !Array.isArray(v) || !Number.isInteger(v[0]) || v[0] <= 0 || !LINEAGE_KEY.test(`${v[0]}|${v[1]}`)) continue;
+            links.set(key, { ppid: v[0], ppidStartUtc: v[1] });
+        }
+    } catch { /* absent or unreadable: no memory */ }
+    return links;
+}
+
+function sameLinks(a, b) {
+    if (a.size !== b.size) return false;
+    for (const [key, v] of a) {
+        const w = b.get(key);
+        if (!w || w.ppid !== v.ppid || w.ppidStartUtc !== v.ppidStartUtc) return false;
+    }
+    return true;
+}
+
+/** Best-effort: without the memory a re-parented process is judged as it was before. */
+function writeLineage(file, bootId, links) {
+    let tmp = null;
+    try {
+        fs.mkdirSync(path.dirname(file), { recursive: true });
+        const out = {};
+        for (const [key, v] of links) out[key] = [v.ppid, v.ppidStartUtc];
+        const name = `${file}.${process.pid}.${crypto.randomBytes(6).toString('hex')}.tmp`;
+        fs.writeFileSync(name, `${JSON.stringify({ schema: LINEAGE_SCHEMA, bootId, links: out })}\n`, { flag: 'wx', mode: 0o600 });
+        tmp = name;
+        fs.renameSync(tmp, file);
+        tmp = null;
+    } catch { /* the next snapshot writes it again */ } finally {
+        if (tmp) { try { fs.unlinkSync(tmp); } catch { /* gone */ } }
+    }
+}
+
+/**
+ * Applies the remembered `links` to one listing and refreshes them. A process
+ * whose remembered creator is not its parent now was re-parented after that
+ * creator exited: it is listed under the creator, with `parentStartUtc` saying
+ * which process at that pid it was. Returns { list, links }, the links pruned
+ * to processes in this listing. Pure.
+ */
+function rememberLineage(list, links) {
+    const byPid = new Map(list.map((p) => [p.pid, p]));
+    const out = [];
+    const kept = new Map();
+    for (const p of list) {
+        const key = p.startUtc ? `${p.pid}|${p.startUtc}` : null;
+        const was = key ? links.get(key) : null;
+        const parent = byPid.get(p.ppid);
+        const parentStart = parent ? parent.startUtc : null;
+        if (was && !(was.ppid === p.ppid && was.ppidStartUtc === parentStart)) {
+            out.push({ ...p, ppid: was.ppid, parentStartUtc: was.ppidStartUtc });
+            kept.set(key, was);
+            continue;
+        }
+        out.push(p);
+        if (key && p.ppid > 1 && parentStart) kept.set(key, { ppid: p.ppid, ppidStartUtc: parentStart });
+    }
+    return { list: out, links: kept };
+}
+
+/** Applies the lineage memory in `file` to one listing and keeps it current. Returns the listing. */
+function refreshLineage(list, bootId, file = lineagePath()) {
+    const before = readLineage(file, bootId);
+    const lineage = rememberLineage(list, before);
+    if (!sameLinks(before, lineage.links)) writeLineage(file, bootId, lineage.links);
+    return lineage.list;
+}
+
 function posixBoot() {
     try {
         const stat = fs.readFileSync('/proc/stat', 'utf8');
@@ -144,7 +252,7 @@ function posixSnapshot() {
         if (m) list.push({ pid: Number(m[1]), ppid: Number(m[2]), startUtc: iso7(Date.parse(m[3])) });
     }
     if (!list.length) return { ok: false, why: 'ps listed no process' };
-    return { ok: true, boot, ...indexProcs(list) };
+    return { ok: true, boot, ...indexProcs(refreshLineage(list, boot.id)) };
 }
 
 let cachedSnapshot = null;
@@ -300,7 +408,9 @@ function identityOf(pid, { snap = null, boot = null } = {}) {
  * pid adopts nobody: not even the console host every new process gets. A
  * record carrying goneBy (gate-records.js mergeDescendants) adopts nobody
  * created after that time either, which covers a later holder that has
- * exited in turn and left an orphan of its own.
+ * exited in turn and left an orphan of its own. A
+ * child listed with `parentStartUtc` (POSIX lineage) names its creator
+ * exactly, and counts only for that creator.
  */
 function liveDescendants(roots, snap) {
     const found = new Map();
@@ -316,6 +426,7 @@ function liveDescendants(roots, snap) {
         const goneMs = r.goneBy ? Date.parse(r.goneBy) : NaN;
         for (const c of snap.children.get(r.pid) || []) {
             if (!c.startUtc || c.startUtc < r.startUtc || c.pid === r.pid) continue;
+            if (c.parentStartUtc && c.parentStartUtc !== r.startUtc) continue;
             if (reusedAt && c.startUtc >= reusedAt) continue;
             // Created after a snapshot already showed the parent gone: the pid's later
             // holder made it, and that holder has exited too, so reusedAt cannot tell.
@@ -472,7 +583,7 @@ function pathKey(canonical) {
 module.exports = {
     runPowerShell, snapshot, forgetSnapshot, bootIdentity, parsePsW, msysTable, forgetMsys, identityOf,
     liveDescendants, recordLive, recordUnreadable, judgeExecution, canonicalPath, repoIdentity, normaliseOrigin, pathKey,
-    normaliseTime, iso7, posixBoot, posixSnapshot,
+    normaliseTime, iso7, posixBoot, posixSnapshot, lineagePath, readLineage, rememberLineage, refreshLineage,
 };
 
 if (require.main === module) {
@@ -481,6 +592,6 @@ if (require.main === module) {
         if (!s.ok) { console.error(`gate-identity: no snapshot: ${s.why}`); process.exitCode = 2; }
         else console.log(`gate-identity: boot ${s.boot.id.split('|')[1]} (${s.boot.source}), ${s.procs.size} processes`);
     } else {
-        console.log('usage: node gate-identity.js [snapshot]\n\nA library for full-gate-queue.js and tooling/gate-lock.js: boot identity,\nprocess snapshots, MSYS pid mapping and repository identity. "snapshot"\nprints the boot time and the process count, read-only.');
+        console.log('usage: node gate-identity.js [snapshot]\n\nA library for full-gate-queue.js and tooling/gate-lock.js: boot identity,\nprocess snapshots, MSYS pid mapping and repository identity. "snapshot"\nprints the boot time and the process count. On POSIX it also refreshes\nthe lineage file (AUTODEV_GATE_LINEAGE_PATH).');
     }
 }

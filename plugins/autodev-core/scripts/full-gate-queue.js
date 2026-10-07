@@ -113,6 +113,7 @@
  *   AUTODEV_GATE_CLASS=product|harness take and wait's declared class (it can only demote; default product)
  *   AUTODEV_GATE_SNAPSHOT_MAX_AGE_MS=N how long a process snapshot is reused (default 30000)
  *   AUTODEV_GATE_BOOT_CACHE=FILE       where this boot's identity is cached (default beside lane 1)
+ *   AUTODEV_GATE_LINEAGE_PATH=FILE     POSIX: each process's creator, per boot (default autodev-gate-lineage-<uid>.json in temp)
  *   AUTODEV_GATE_LANES=N               lane count, over the lanes file (default 1)
  *   AUTODEV_GATE_LOCK_PATH=FILE        lane 1's lock (default <home>/.claude/autodev/locks/full-gate.lock)
  *   AUTODEV_GATE_LOCK_POLL_MS=N        wait's poll interval (default 5000)
