@@ -32,6 +32,7 @@ const mapped = p => typeof p === 'string' && (path.resolve(p) === root || path.r
   ? path.join(scratch, path.relative(root, p)) : p
 fs.readdirSync = (dir, ...args) => {
   dir = mapped(dir)
+  if (typeof dir !== 'string') return directory(dir, ...args)
   if (path.resolve(dir) === scratch && mode === 'empty') return []
   if (path.resolve(dir) === hidden && mode === 'directory') throw denied()
   return directory(dir, ...args)
