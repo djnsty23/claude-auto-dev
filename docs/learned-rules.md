@@ -1,6 +1,6 @@
 # Learned rules: measured precision
 
-Eight advisory rules in `plugins/autodev-core/scripts/security-checks.js`, wired in `security-gate.js`.
+Nine advisory rules in `plugins/autodev-core/scripts/security-checks.js`, wired in `security-gate.js`.
 All are `warn`: they print, they do not change the exit code. Build-time defaults for the same classes
 and for the ones with no signature are in `plugins/autodev-core/skills/core/references/learned-defaults.md`.
 
@@ -38,6 +38,19 @@ report per file.
   `admin`, `debug`, `workers`, `internal` and `staff`.
 - `uncached-stripe-list` missed a REST helper form (`stripeApi('prices?...')`) in `lib` files. Scope and
   pattern widened, and a cache marker suppresses it.
+
+## Widened 2026-10-07, measured over 16 local repositories
+
+Old is the 8.182.0 gate, new is this tree, both over the same checkouts.
+
+| Rule | Old | New | Read |
+|---|---|---|---|
+| `esm-inline-require` | 6 files | 9 files | The 6 are unchanged. The 3 new ones are package `require` calls inside `try` blocks in a `"type": "module"` API run under tsx, where `require` is not defined (tsx 4.21 probe: `require is not defined`). Each catch turns the error into a silent fallback: no-op metrics, no tracing, no OpenAPI request validation. |
+| `supabase-types-stale` | new | 8 tables in 2 repos | 7 tables in one generated `database.ts` (5 of them queried by API routes) and 1 in another, used by edge functions. Each is a table the code reads with no column types. |
+
+The first widened run also flagged 2 `tailwind.config.ts` plugin lists. Tailwind loads its config
+through jiti, which supplies `require`, so `*.config.*` files are now out of scope. Result after the
+change: 0 of 2.
 
 ## Open census at current heads
 
