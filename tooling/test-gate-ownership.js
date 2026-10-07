@@ -37,9 +37,12 @@
  *   P23o the POSIX probes answer with a fixed boot  -> a boot identity that no reboot changes (S13)
  *   P24o a parent seen gone adopts later children   -> a stopped shell's orphan holds the lane (S14)
  *   P25o the journal never records a process gone   -> the same, from the journal side (S14)
+ *   P26o a snapshot forgets a re-parented creator   -> a dead owner's orphan is taken over (S8 on POSIX, S15)
+ *   P27o a remembered link counts for any process at its pid -> a reused pid's orphan keeps a dead lane (S15)
  *
- * The machine's real lock is never touched: every spawn sets
- * AUTODEV_GATE_LOCK_PATH to a temp directory.
+ * The machine's real lock and lineage memory are never touched: every spawn
+ * sets AUTODEV_GATE_LOCK_PATH to a temp directory, and the suite points
+ * AUTODEV_GATE_LINEAGE_PATH at a temp file before its first snapshot.
  */
 'use strict';
 
@@ -677,6 +680,102 @@ function s13Identity(subject) {
 const s13Defaults = (subject) => [...s13Records(subject), ...s13Handover(subject), ...s13Identity(subject)];
 
 /**
+ * S15: POSIX lineage. A process the kernel re-parented after its creator
+ * exited is listed under that creator. A remembered link counts only for the
+ * exact process it names, links are pruned to listed processes, and a POSIX
+ * snapshot keeps this boot's links in its lineage file. The pure rows run on
+ * every platform.
+ */
+function s15Lineage(subject) {
+    const id = require(path.join(path.dirname(subject), 'gate-identity.js'));
+    const rows = [];
+    const boot = { id: 'host|2026-01-01T00:00:00.0000000Z' };
+    const t = (s) => `2026-01-01T00:00:${String(s).padStart(2, '0')}.0000000Z`;
+    const msys = { ok: true, byMsys: new Map(), ambiguous: new Set() };
+    const snapOf = (list) => {
+        const procs = new Map(list.map((p) => [p.pid, p]));
+        const children = new Map();
+        for (const p of list) { if (!children.has(p.ppid)) children.set(p.ppid, []); children.get(p.ppid).push(p); }
+        return { ok: true, boot, procs, children };
+    };
+    const judge = (owner, list) => attempt(() => id.judgeExecution({ owner: { ...owner, bootId: boot.id }, snap: snapOf(list), boot, msys }));
+    const init = { pid: 1, ppid: 0, startUtc: t(0) };
+
+    // The owner (pid 40, created at 1 s) started pid 50 at 2 s and exited. The kernel gave 50 to init.
+    const orphan = attempt(() => id.rememberLineage([init, { pid: 50, ppid: 1, startUtc: t(2) }],
+        new Map([[`50|${t(2)}`, { ppid: 40, ppidStartUtc: t(1) }]])));
+    const listed = orphan && orphan.list ? orphan.list.find((p) => p.pid === 50) : null;
+    const j1 = orphan && orphan.list ? judge({ pid: 40, startUtc: t(1) }, orphan.list) : null;
+    rows.push(['S15 lineage: a process re-parented after its creator exited is listed under it, and keeps the dead creator\'s lane',
+        Boolean(listed) && listed.ppid === 40 && listed.parentStartUtc === t(1) && Boolean(j1) && j1.alive === true, JSON.stringify({ listed, j1 })]);
+
+    // Pid 40 was reused at 5 s by a process that started pid 60 at 6 s and exited too.
+    const reused = attempt(() => id.rememberLineage([init, { pid: 60, ppid: 1, startUtc: t(6) }],
+        new Map([[`60|${t(6)}`, { ppid: 40, ppidStartUtc: t(5) }]])));
+    const j2 = reused && reused.list ? judge({ pid: 40, startUtc: t(1) }, reused.list) : null;
+    rows.push(['S15 lineage: a link remembered under a later process at the pid adopts nothing for the earlier one',
+        Boolean(j2) && j2.alive === false, JSON.stringify(j2)]);
+
+    // A parent that still runs stays the parent. A link for a process no longer listed is dropped.
+    const kept = attempt(() => id.rememberLineage([init, { pid: 40, ppid: 1, startUtc: t(1) }, { pid: 50, ppid: 40, startUtc: t(2) }],
+        new Map([[`50|${t(2)}`, { ppid: 40, ppidStartUtc: t(1) }], [`70|${t(3)}`, { ppid: 41, ppidStartUtc: t(1) }]])));
+    const kid = kept && kept.list ? kept.list.find((p) => p.pid === 50) : null;
+    const keys = kept && kept.links ? [...kept.links.keys()] : null;
+    rows.push(['S15 lineage: a running parent stays the parent, and links name only listed processes',
+        Boolean(kid) && kid.ppid === 40 && kid.parentStartUtc === undefined && JSON.stringify(keys) === JSON.stringify([`50|${t(2)}`]),
+        JSON.stringify({ kid, keys })]);
+
+    // The file, on every platform: one listing remembers a creator, a later one lists the orphan under it,
+    // and another boot, or a path that is not a regular file, reads nothing.
+    const dir = mkTemp('gown-lineage-');
+    const store = path.join(dir, 'store.json');
+    const first = attempt(() => id.refreshLineage([init, { pid: 40, ppid: 1, startUtc: t(1) }, { pid: 50, ppid: 40, startUtc: t(2) }], boot.id, store));
+    const stored = id.readLineage(store, boot.id);
+    const later = attempt(() => id.refreshLineage([init, { pid: 50, ppid: 1, startUtc: t(2) }], boot.id, store));
+    const moved = Array.isArray(later) ? later.find((p) => p.pid === 50) : null;
+    const elsewhere = id.readLineage(store, 'host|2020-01-01T00:00:00.0000000Z').size + id.readLineage(dir, boot.id).size;
+    const named = attempt(() => id.lineagePath());
+    rows.push(['S15 lineage: the lineage file carries a creator from one listing to the next, for this boot only',
+        Array.isArray(first) && JSON.stringify([...stored]) === JSON.stringify([[`50|${t(2)}`, { ppid: 40, ppidStartUtc: t(1) }]])
+            && Boolean(moved) && moved.ppid === 40 && moved.parentStartUtc === t(1) && elsewhere === 0
+            && named === process.env.AUTODEV_GATE_LINEAGE_PATH,
+        JSON.stringify({ stored: [...stored], moved, elsewhere, named })]);
+
+    // A POSIX snapshot writes this boot's links, and another boot reads none of them.
+    const file = path.join(mkTemp('gown-lineage-'), 'lineage.json');
+    const prev = process.env.AUTODEV_GATE_LINEAGE_PATH;
+    process.env.AUTODEV_GATE_LINEAGE_PATH = file;
+    let snap;
+    try { snap = attempt(() => id.posixSnapshot()); } finally { setLineagePath(prev); }
+    if (WIN) {
+        rows.push(['S15 lineage: on Windows the POSIX snapshot writes no lineage file', !fs.existsSync(file), `exists=${fs.existsSync(file)}`]);
+    } else {
+        const ok = Boolean(snap) && snap.ok === true;
+        const mine = ok ? id.readLineage(file, snap.boot.id) : new Map();
+        const other = id.readLineage(file, 'host|2020-01-01T00:00:00.0000000Z');
+        const me = ok ? snap.procs.get(process.pid) : null;
+        rows.push(['S15 lineage: a POSIX snapshot keeps this boot\'s links, this process\'s among them, and another boot reads none',
+            Boolean(me) && mine.size > 0 && (me.ppid <= 1 || mine.has(`${process.pid}|${me.startUtc}`)) && other.size === 0,
+            JSON.stringify({ ok, why: snap && snap.why, size: mine.size, other: other.size, me })]);
+    }
+    return rows;
+}
+
+/** Runs `fn` against a copy of the suite's lineage file: a mutant reads what the real run remembered and writes apart from it. */
+async function apartLineage(fn) {
+    const real = process.env.AUTODEV_GATE_LINEAGE_PATH;
+    const copy = path.join(mkTemp('gown-lineage-'), 'lineage.json');
+    try { fs.copyFileSync(real, copy); } catch { /* nothing remembered yet */ }
+    process.env.AUTODEV_GATE_LINEAGE_PATH = copy;
+    try { return await fn(); } finally { setLineagePath(real); }
+}
+
+function setLineagePath(p) {
+    if (p === undefined) delete process.env.AUTODEV_GATE_LINEAGE_PATH;
+    else process.env.AUTODEV_GATE_LINEAGE_PATH = p;
+}
+
+/**
  * S11: the readers the reaper imports see what admission wrote: lane locks with
  * their meta, tickets, and leases; a lease renewal from another run is refused.
  * `subject` is a full-gate-queue.js whose siblings are the libraries to load.
@@ -750,6 +849,7 @@ function expectRed(id, what, rows) {
 async function main() {
     const only = process.env.GATE_OWNERSHIP_ONLY ? process.env.GATE_OWNERSHIP_ONLY.split(',') : null;
     const want = (id) => !only || only.includes(id);
+    setLineagePath(path.join(mkTemp('gown-lineage-'), 'lineage.json'));
     const msys = await msysSleeper();
     freshSnap();
     const op = await parentWithOrphan();
@@ -763,6 +863,7 @@ async function main() {
         S7: () => s7Msys(SUBJECT, msys), S8: () => s8Descendants(SUBJECT, orphan), S9: () => s9Fence(SUBJECT),
         S10: () => s10Malformed(SUBJECT), S10b: () => s10bSemantic(SUBJECT), S11: () => s11Readers(SUBJECT), S12: () => s12Library(SUBJECT),
         S13: () => s13Defaults(SUBJECT), S14: () => s14DeadParentOrphan(SUBJECT),
+        S15: () => s15Lineage(SUBJECT),
     };
     for (const [id, fn] of Object.entries(real)) if (want(id)) report(id, await fn());
 
@@ -835,6 +936,13 @@ async function main() {
         ['P25o', 'the journal never records a process gone', 'gate-records.js',
             [['            d.goneBy = later ? now.startUtc : nowIso;\n', '']],
             (s) => s14DeadParentOrphan(s).filter(([n]) => n.includes('is stamped') || n.includes('not the chain')), ['S14']],
+        ['P26o', 'a snapshot forgets the creator of a re-parented process', 'gate-identity.js',
+            [['        if (was && !(was.ppid === p.ppid && was.ppidStartUtc === parentStart)) {', '        if (false) {']],
+            async (s) => [...s15Lineage(s).filter(([n]) => n.startsWith('S15 lineage: a process re-parented')),
+                ...(WIN ? [] : await apartLineage(() => s8Descendants(s, orphan)))], ['S8', 'S15']],
+        ['P27o', 'a remembered link counts for any process at its pid', 'gate-identity.js',
+            [['            if (c.parentStartUtc && c.parentStartUtc !== r.startUtc) continue;\n', '']],
+            (s) => s15Lineage(s).filter(([n]) => n.startsWith('S15 lineage: a link remembered')), ['S15']],
     ];
     for (const [id, what, file, edits, scenario, covers] of plants) {
         if (!want(id) && !covers.some(want)) continue;
