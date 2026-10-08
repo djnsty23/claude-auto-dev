@@ -810,7 +810,7 @@ try {
         check('24. status without --json names a lost record as settledAs=lost with its reason',
             /PREDEAD pid=\d+ process=unknown exit=- result=none settled=true settledAs=lost \(started .* before this boot/.test(human) && !/EXITED[^\n]*settledAs=lost/.test(human), human.slice(0, 400));
         const usage = hw(['--help']).stdout;
-        check('24. the usage text lists settle --lost and says when it refuses', usage.includes('settle --code <CODE> [--lost]') && /settle --lost: [\s\S]*Refused unless/.test(usage));
+        check('24. the usage text lists settle --lost and says when it refuses', usage.includes('settle --code <CODE> [--started-at <iso>] [--lost]') && /settle --lost: [\s\S]*Refused unless/.test(usage));
     }
 
     // ------------------------------------------------------------ 24b. settle --unreported
@@ -897,7 +897,7 @@ try {
             /NOREPORT pid=\d+ process=exited exit=0 result=none settled=true settledAs=unreported \(exited 0 and /.test(human) && !/HASLINE[^\n]*settledAs=unreported/.test(human), human.slice(0, 400));
         const usage = hw(['--help']).stdout;
         check('24b. the usage text lists settle --unreported and says when it refuses',
-            usage.includes('settle --code <CODE> [--lost] [--unreported]') && /settle --unreported: [\s\S]*Refused while/.test(usage));
+            usage.includes('settle --code <CODE> [--started-at <iso>] [--lost] [--unreported]') && /settle --unreported: [\s\S]*Refused while/.test(usage));
     }
 
     // ------------------------------------------------------------ 24c. a report written into the scratch dir
@@ -1055,6 +1055,53 @@ try {
         check('24d. settle --unreported refuses while the supervisor pid is alive, since the exit line can be an earlier run\'s',
             live.exit === 1 && live.json && live.json.error.code === 'still-running' && arec('LIVEAPPEND').state === 'running', live.stdout.slice(0, 240));
         check('24d. a scratch copy older than the run is not a misplaced report', !!aby.OLDSCRATCH && aby.OLDSCRATCH.misplacedReport === null && aby.OLDSCRATCH.result === 'none');
+    }
+
+    // ------------------------------------------------------------ 24e. settle --started-at names one run
+    // `[measured 2026-10-08]` the Brain clock settles by code AND startedAt, and
+    // refused to act while settle could only take the newest unsettled record of
+    // a code: with two runs of one code, it would have closed the wrong one.
+    {
+        const dir = path.join(ROOT, 'T24e');
+        const ledger = path.join(dir, 'ledger.json');
+        const older = new Date(Date.now() - 2 * 3600 * 1000).toISOString();
+        const newer = new Date(Date.now() - 3600 * 1000).toISOString();
+        const mk = (code, startedAt, tag, extra = {}) => {
+            const rec = { code, pid: null, startedAt, log: path.join(dir, `${code}-${tag}.log`), report: path.join(dir, `${code}-${tag}.report.md`), promptFile: PROMPT, configDir: null, model: null, permissionMode: 'default', state: 'running', ...extra };
+            write(rec.log, 'noise\nCLAUDE_EXIT=0\n');
+            write(rec.report, `RESULT ${code} done: the ${tag} run.\n`);
+            return rec;
+        };
+        const records = [
+            mk('TWICE', older, 'older'),
+            mk('TWICE', newer, 'newer'),
+            mk('DONE', older, 'done', { state: 'settled', result: 'done', settledAt: newer }),
+        ];
+        write(ledger, JSON.stringify({ version: 1, records }, null, 2) + '\n');
+        const recs = () => JSON.parse(read(ledger)).records;
+
+        const named = hw(['settle', '--code', 'TWICE', '--started-at', older, '--ledger', ledger]);
+        const [o, n] = recs().filter((r) => r.code === 'TWICE');
+        check('24e. settle --started-at settles the OLDER of two unsettled runs of one code and leaves the newer running',
+            named.exit === 0 && named.json && named.json.ok && o.state === 'settled' && o.sentence === 'the older run.' && n.state === 'running', named.stdout.slice(0, 200));
+        const unknown = hw(['settle', '--code', 'TWICE', '--started-at', '2001-01-01T00:00:00.000Z', '--ledger', ledger]);
+        check('24e. an unknown startedAt is refused unknown-record and settles nothing',
+            unknown.exit === 1 && unknown.json && !unknown.json.ok && unknown.json.error.code === 'unknown-record' && recs()[1].state === 'running', unknown.stdout.slice(0, 200));
+        const twice = hw(['settle', '--code', 'TWICE', '--started-at', older, '--ledger', ledger]);
+        check('24e. naming a run that is already settled is refused already-settled, never the newer run instead',
+            twice.exit === 1 && twice.json && !twice.json.ok && twice.json.error.code === 'already-settled' && recs()[1].state === 'running', twice.stdout.slice(0, 200));
+        const settledDone = hw(['settle', '--code', 'DONE', '--started-at', older, '--ledger', ledger]);
+        check('24e. a code whose only record is settled is refused already-settled when named by startedAt',
+            settledDone.exit === 1 && settledDone.json && settledDone.json.error.code === 'already-settled', settledDone.stdout.slice(0, 200));
+        const bare = hw(['settle', '--code', 'TWICE', '--started-at', '--ledger', ledger]);
+        check('24e. --started-at with no value is a usage error, not a settle of some record',
+            bare.exit === 1 && bare.json && !bare.json.ok && /usage/.test(bare.json.error.code) && recs()[1].state === 'running', bare.stdout.slice(0, 200));
+        const plain = hw(['settle', '--code', 'TWICE', '--ledger', ledger]);
+        check('24e. control: without --started-at, settle still takes the newest unsettled record',
+            plain.exit === 0 && plain.json && plain.json.ok && recs()[1].state === 'settled' && recs()[1].sentence === 'the newer run.', plain.stdout.slice(0, 200));
+        const help = hw(['--help']);
+        check('24e. --help carries the settle line with --code and --started-at, which is how the Brain clock detects support',
+            /settle --code <CODE> \[--started-at <iso>\]/.test(help.stdout), help.stdout.slice(0, 120));
     }
 
     // ------------------------------------------------------------ 25. a worker asks by file and keeps working

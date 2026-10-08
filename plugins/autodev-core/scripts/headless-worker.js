@@ -47,7 +47,7 @@
  *        [--plugin-dir <dir>]
  *   node headless-worker.js supervise --code <CODE> --log <file> --prompt-file <md> ...   (internal)
  *   node headless-worker.js status [--code <CODE>] [--ledger <file>] [--json]
- *   node headless-worker.js settle --code <CODE> [--lost] [--unreported] [--ledger <file>] [--json]
+ *   node headless-worker.js settle --code <CODE> [--started-at <iso>] [--lost] [--unreported] [--ledger <file>] [--json]
  *   node headless-worker.js selftest
  * Output: {"ok":true,"value":{...}} exit 0; {"ok":false,"error":{"code","message"}} exit 1.
  *
@@ -68,7 +68,7 @@ const USAGE = [
     '            [--plugin-dir <dir>]',
     '       node headless-worker.js supervise ... (internal: the detached child that owns claude)',
     '       node headless-worker.js status [--code <CODE>] [--ledger <file>] [--json]',
-    '       node headless-worker.js settle --code <CODE> [--lost] [--unreported] [--ledger <file>] [--json]',
+    '       node headless-worker.js settle --code <CODE> [--started-at <iso>] [--lost] [--unreported] [--ledger <file>] [--json]',
     '       node headless-worker.js selftest',
     'start: spawn a detached supervisor that runs `claude -p` and appends CLAUDE_EXIT=<code> to the log.',
     '       The caller may exit at once; the result is the report file plus that exit line.',
@@ -90,6 +90,8 @@ const USAGE = [
     '        Refused while the log has no exit line (that is --lost), while the report has a RESULT line, and while',
     '        <report dir>/<CODE>/<report name> has one (a report written into the scratch dir: move it, then settle).',
     '        An unreported record is its own result, never done, stopped or failed.',
+    'settle --started-at <iso>: settle exactly the record of that code with that startedAt. Refused as unknown-record',
+    '        when no record matches and already-settled when it is settled. Without it, the newest unsettled record.',
     'ask:    a worker asks by writing <report dir>/<CODE>/ask.json and keeps working. status shows ask=open',
     '        until answer.json lands beside it. No worker exits to ask.',
     'rerun:  a later record at the same code supersedes an earlier one. The earlier one reads ask=superseded, and',
@@ -195,7 +197,7 @@ function fault(code, message) { const e = new Error(message || code); e.publicCo
 function parseArgs(argv) {
     const out = { _: [] };
     const flags = ['help', 'dry-run', 'json', 'lost', 'unreported', 'dev'];
-    const known = ['_', ...flags, 'code', 'prompt-file', 'log', 'report', 'config-dir', 'model', 'effort',
+    const known = ['_', ...flags, 'code', 'started-at', 'prompt-file', 'log', 'report', 'config-dir', 'model', 'effort',
         'permission-mode', 'cwd', 'claude-bin', 'ledger', 'plugin-dir'];
     for (let i = 0; i < argv.length; i++) {
         const a = argv[i];
@@ -867,8 +869,21 @@ function settle(opts) {
     const code = requireCode(opts);
     const file = path.resolve(opts.ledger || defaultLedger());
     return withLedger(file, (ledger) => {
-        const rec = ledger.records.filter((r) => r.code === code && isUnsettled(r)).pop();
-        if (!rec) fault('unknown-code', `no unsettled record for ${code} in ${file}`);
+        // --started-at names one run, so a caller holding an older record of a
+        // reused code settles that run and never the newest one by accident.
+        const at = opts['started-at'];
+        if (at !== undefined && (typeof at !== 'string' || Number.isNaN(Date.parse(at)))) {
+            fault('usage', '--started-at needs the record\'s startedAt, an ISO time');
+        }
+        let rec;
+        if (at !== undefined) {
+            rec = ledger.records.find((r) => r.code === code && r.startedAt === at);
+            if (!rec) fault('unknown-record', `no record for ${code} started at ${at} in ${file}`);
+            if (!isUnsettled(rec)) fault('already-settled', `the ${code} run started at ${at} is already settled`);
+        } else {
+            rec = ledger.records.filter((r) => r.code === code && isUnsettled(r)).pop();
+            if (!rec) fault('unknown-code', `no unsettled record for ${code} in ${file}`);
+        }
         const logText = readText(rec.log);
         const exit = logText === null ? null : exitCodeOf(logText);
         if (opts.lost && opts.unreported) fault('usage', '--lost and --unreported name different endings: a worker with no exit line, and one that exited without a RESULT line. Pass one');
