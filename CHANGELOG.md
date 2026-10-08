@@ -1,5 +1,30 @@
 # Changelog
 
+## [8.184.0]
+
+### Headless workers and the Brain
+
+- `headless-worker.js settle --started-at <iso>` settles exactly one run of a
+  code, and refuses an unknown or already-settled run. The Brain clock needs
+  it to settle finished and dead records.
+- `unattended-worker.js launch` takes `--model` and `--effort` and records
+  what ran. Every command refuses a flag it does not read.
+- Brain closes a run as succeeded only after a zero exit, reports the state
+  it observed for unsettled workers, keeps unknown process identities, and
+  holds tick locks until their owner is provably gone.
+
+### Gates and checks
+
+- gate-lock keeps supervising when its output write hits ENOSPC.
+- The skill tool declaration gate refuses incomplete selftests, unreadable
+  skills and incomplete trigger discovery.
+- The private-names check catches a home path ending at a word boundary.
+- Hook evidence mutation passes and untested-hook discovery run faster.
+
+### Cost
+
+- The 5.5 model family is priced at its own rates.
+
 ## [8.183.0]
 
 ### Gate lock and suite runner
