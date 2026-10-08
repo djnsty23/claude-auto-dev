@@ -86,7 +86,7 @@
  *        [--after <task id>[,<task id>]] [--base origin/main] [--task-id <id>] [--title <text>]
  *        [--model <id>] [--effort <level>] [--permission-mode <mode>] [--config-dir <dir>] [--ledger <file>]
  *   node unattended-worker.js ready [--max-concurrent 2] [--max-per-hour 2] [--ledger <file>]
- *   node unattended-worker.js launch --task-id <id> [--dry-run] [--headless-worker <file>] [--claude-bin <path>] [--dev] [--ledger <file>]
+ *   node unattended-worker.js launch --task-id <id> [--model <id>] [--effort <level>] [--dry-run] [--headless-worker <file>] [--claude-bin <path>] [--dev] [--ledger <file>]
  *   node unattended-worker.js verdict --task-id <id> --decision accept|follow-up|escalate --reason <text> [--by judge|brain|operator] [--ledger <file>]
  * Output: {"ok":true,"value":{...}} exit 0; {"ok":false,"error":{"code","message"}} exit 1.
  */
@@ -116,12 +116,15 @@ const USAGE = [
     '       node unattended-worker.js enqueue --repo <dir> --slug <topic> --brief-file <md> --return <address> [--after <id>[,<id>]]',
     '            [--base origin/main] [--task-id <id>] [--title <text>] [--model <id>] [--effort <level>] [--permission-mode <mode>] [--config-dir <dir>] [--ledger <file>]',
     '       node unattended-worker.js ready [--max-concurrent 2] [--max-per-hour 2] [--ledger <file>]',
-    '       node unattended-worker.js launch --task-id <id> [--dry-run] [--headless-worker <file>] [--claude-bin <path>] [--dev] [--ledger <file>]',
+    '       node unattended-worker.js launch --task-id <id> [--model <id>] [--effort <level>] [--dry-run] [--headless-worker <file>] [--claude-bin <path>] [--dev] [--ledger <file>]',
     '       node unattended-worker.js verdict --task-id <id> --decision accept|follow-up|escalate --reason <text> [--by judge|brain|operator] [--ledger <file>]',
     'retire: close a composed or queued record whose task never ran, freeing its slug and task id.',
     'enqueue: queue a brief for the headless channel. The slug is at most 24 characters: it becomes the headless code.',
     'ready: queued tasks whose dependencies were accepted, within the concurrency and per-hour caps.',
     'launch: the only command that starts anything. It re-runs the brief checks and calls headless-worker.js start.',
+    '        --model and --effort override the values enqueue stored, and the record keeps what ran. With neither,',
+    '        a task queued without --model runs on the CLI default model.',
+    'Every command refuses a flag it does not read, so a flag never goes silently unused.',
     'verdict: a judge verdict never replaces an existing one; --by brain or operator does.',
     'The scheduled-task path starts nothing and deletes nothing: the coordinator makes those MCP calls.',
     `Default ledger: ${path.join('~', '.claude', 'autodev', 'unattended-workers.json')}`,
@@ -572,7 +575,12 @@ function launch(opts) {
             const files = { prompt: path.join(scratch, 'PROMPT.md'), pointer: path.join(scratch, 'POINTER.md'), log: path.join(scratch, 'worker.log') };
             fs.writeFileSync(files.prompt, prompt);
             fs.writeFileSync(files.pointer, pointerPrompt(files.prompt));
-            const args = headlessArgs(rec, files, opts);
+            // --model and --effort on launch override the queued values, and the
+            // record keeps what the worker actually ran on.
+            const launchOpts = { ...(rec.launch || {}) };
+            if (opts.model) launchOpts.model = opts.model;
+            if (opts.effort) launchOpts.effort = opts.effort;
+            const args = headlessArgs({ ...rec, launch: launchOpts }, files, opts);
             const spawnedAt = Date.now();
             const r = spawnSync(process.execPath, args, { encoding: 'utf8', timeout: LAUNCH_TIMEOUT_MS, windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] });
             let h = parseHeadless(r);
@@ -581,7 +589,7 @@ function launch(opts) {
             if (dry) return { ledger: ledgerFile, dryRun: true, taskId: rec.taskId, files, headless: h.value };
             const at = new Date().toISOString();
             Object.assign(rec, {
-                state: 'started', startedAt: at, launchedAt: at,
+                state: 'started', startedAt: at, launchedAt: at, launch: launchOpts,
                 promptSha256: crypto.createHash('sha256').update(prompt).digest('hex'),
                 headless: { code: rec.slug, pid: h.value.supervisorPid || null, log: files.log, ledger: h.value.ledger || null,
                     startedAt: (h.value.record && h.value.record.startedAt) || null, version: (h.value.record && h.value.record.version) || null },
@@ -625,10 +633,28 @@ function applyVerdict(rec, { decision, reason, by = 'brain', at = new Date().toI
     return { applied: true, previous };
 }
 
+// The flags each command reads. `[measured 2026-10-08]` launch accepted --model
+// and dropped it, so a worker the caller had pinned started on the default.
+const COMMAND_FLAGS = {
+    brief: ['repo', 'slug', 'brief-file', 'return', 'report', 'base', 'task-id', 'title', 'ledger'],
+    enqueue: ['repo', 'slug', 'brief-file', 'return', 'after', 'base', 'task-id', 'title', 'model', 'effort', 'permission-mode', 'config-dir', 'ledger'],
+    launch: ['task-id', 'model', 'effort', 'dry-run', 'headless-worker', 'claude-bin', 'dev', 'ledger'],
+    record: ['task-id', 'session', 'ledger'],
+    settle: ['task-id', 'run-status', 'report-read', 'ledger'],
+    deleted: ['task-id', 'ledger'],
+    retire: ['task-id', 'reason', 'ledger'],
+    verdict: ['task-id', 'decision', 'reason', 'by', 'ledger'],
+    ready: ['max-concurrent', 'max-per-hour', 'ledger'],
+    status: ['task-id', 'ledger'],
+};
+
 function run(argv) {
     const opts = parseArgs(argv);
     if (opts.help) return { help: true };
     const cmd = opts._[0];
+    const reads = COMMAND_FLAGS[cmd];
+    const unread = reads ? Object.keys(opts).filter((k) => k !== '_' && !reads.includes(k)) : [];
+    if (unread.length) fault('usage', `${cmd} does not read ${unread.map((k) => '--' + k).join(', ')}, so it would go unused`);
     if (cmd === 'brief') return brief(opts);
     if (cmd === 'enqueue') return enqueue(opts);
     if (cmd === 'launch') return launch(opts);

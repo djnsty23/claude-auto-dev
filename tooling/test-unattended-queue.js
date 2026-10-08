@@ -134,6 +134,21 @@ try {
     check('the headless code is the slug, so the RESULT line both scripts read is one line', dv && dv.headless.code === 'guide-a');
     check('the worker gets bypassPermissions from the queued record', /--permission-mode bypassPermissions/.test(argvText), argvText.slice(0, 200));
     check('launch --dry-run leaves the ledger byte-identical', fs.readFileSync(ledger, 'utf8') === before);
+    // `[measured 2026-10-08]` launch took --model and dropped it: the worker
+    // started on the CLI default while the caller believed it had pinned one.
+    const pinned = val(cli(['launch', '--task-id', 'worker-guide-a', '--dry-run', '--dev', '--claude-bin', fakeWorker, '--model', 'm-9', '--effort', 'low', '--ledger', ledger]));
+    const pinnedArgv = pinned ? pinned.headless.argv.join(' ') : '';
+    check('launch --model and --effort reach the headless argv, overriding the queued values', /--model m-9/.test(pinnedArgv) && /--effort low/.test(pinnedArgv), pinnedArgv.slice(0, 300));
+    check('and a dry run with them still leaves the ledger byte-identical', fs.readFileSync(ledger, 'utf8') === before);
+    const viaJudge = cli(['launch', '--task-id', 'worker-guide-a', '--dry-run', '--dev', '--claude-bin', fakeWorker, '--headless-worker', HEADLESS, '--ledger', ledger]);
+    check('control: every flag brain-judge passes to launch is accepted', viaJudge.status === 0, viaJudge.stdout.slice(0, 200));
+    check('a flag a command never reads is refused as usage, never ignored: status --model',
+        code(cli(['status', '--model', 'm', '--ledger', ledger])) === 'usage');
+    const stray = cli(['launch', '--task-id', 'worker-guide-a', '--repo', repo, '--dry-run', '--ledger', ledger]);
+    check('launch --repo is refused and names the flag, since the record already holds the repo',
+        code(stray) === 'usage' && /--repo/.test(stray.json.error.message), stray.stdout.slice(0, 200));
+    check('ready --task-id and settle --dev are refused the same way',
+        code(cli(['ready', '--task-id', 'x', '--ledger', ledger])) === 'usage' && code(cli(['settle', '--task-id', 'x', '--run-status', 'running', '--dev', '--ledger', ledger])) === 'usage');
     const promptFile = path.join(path.dirname(r1.report), 'PROMPT.md');
     const prompt = fs.existsSync(promptFile) ? fs.readFileSync(promptFile, 'utf8') : '';
     check('the composed prompt opens with STEP 0 and carries the brief', prompt.startsWith('STEP 0') && prompt.includes('MISSION. Add a guide.'));
@@ -167,11 +182,12 @@ try {
     // =======================================================================
     // 5. launch: a real supervisor, a fake claude, a report and an exit line.
     // =======================================================================
-    const live = cli(['launch', '--task-id', 'worker-guide-a', '--dev', '--claude-bin', fakeWorker, '--ledger', ledger]);
+    const live = cli(['launch', '--task-id', 'worker-guide-a', '--model', 'm-live', '--dev', '--claude-bin', fakeWorker, '--ledger', ledger]);
     const lr = val(live) && val(live).record;
     check('control: with the branch gone, launch starts the worker', live.status === 0 && lr && lr.state === 'started', live.stdout.slice(0, 300));
     check('a launched record names its headless run and clears the launch error', lr && lr.headless && lr.headless.code === 'guide-a' && Number.isInteger(lr.headless.pid) && !lr.lastLaunchError);
     check('launch stamps launchedAt, which the per-hour cap counts', lr && typeof lr.launchedAt === 'string');
+    check('a live launch with --model records the model it ran on in the ledger', lr && lr.launch && lr.launch.model === 'm-live' && recOf('worker-guide-a').launch.model === 'm-live', JSON.stringify(lr && lr.launch));
     const logFile = lr ? lr.headless.log : '';
     let exited = false;
     for (let i = 0; i < 100 && !exited; i++) { exited = fs.existsSync(logFile) && /CLAUDE_EXIT=0/.test(fs.readFileSync(logFile, 'utf8')); if (!exited) sleep(200); }
