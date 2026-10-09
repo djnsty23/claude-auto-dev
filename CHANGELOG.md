@@ -1,5 +1,43 @@
 # Changelog
 
+## [8.185.0]
+
+### Gates and merges
+
+- `merge-lock.js` accepts a fast-lane receipt for a small candidate that
+  touches no auth, payments or migrations.
+- `gate-lock` records each gate step's start and end as it happens, and
+  `gate-cost` reports the lane hours each project's full gates held.
+- `test-fast-lane` reports a throw as a failure, not an indeterminate exit 2.
+- `check-pr-ready` flags assertions a code-changing PR removes from its tests.
+- `unattended-worker.js` refuses an accept when a pinned acceptance test changed.
+- `check-coverage` re-measures the Linux floor at 44.
+
+### Security gate
+
+- Flags any `require()` in an ES module, and tables the Supabase types file
+  never mentions. Reads table keys from a compacted types file.
+- `hook-bypass` ends an unterminated heredoc at end of input, not end of line.
+
+### Sessions and cleanup
+
+- `session-sweep --preserve-local` archives local-only files before a worktree
+  goes, and SAFE is tightened.
+- `worktree-residue` treats build-output names as regenerable only at the
+  worktree root.
+
+### Memory
+
+- Capture records project edits only. The prompt-capture hook is removed, the
+  project is bounded by its repo root, and the CLI refuses swapped arguments.
+
+### Skills
+
+- `validate` fails a SKILL.md over 500 lines, or a skill file it never links.
+  The four oversized SKILL.md files moved detail to references, and every
+  long reference opens with a contents list.
+- The stack skills say how to install what remotion, stripe and supabase need.
+
 ## [8.184.0]
 
 ### Headless workers and the Brain
