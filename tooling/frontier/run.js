@@ -108,7 +108,15 @@ function writeJsonAtomic(file, value) {
     fs.mkdirSync(path.dirname(file), { recursive: true });
     const tmp = `${file}.${process.pid}.tmp`;
     fs.writeFileSync(tmp, JSON.stringify(value, null, 2) + '\n');
-    fs.renameSync(tmp, file);
+    // A reader can briefly deny replacement on Windows. Keep the staged data
+    // and retry sharing contention, while unrelated write errors still propagate.
+    for (let attempt = 0; ; attempt++) {
+        try { fs.renameSync(tmp, file); return; }
+        catch (e) {
+            if (!['EPERM', 'EBUSY'].includes(e.code) || attempt >= 7) throw e;
+            sleepMs(10 * (2 ** attempt));
+        }
+    }
 }
 function sha(text) { return crypto.createHash('sha256').update(text).digest('hex').slice(0, 16); }
 function sleepMs(ms) { Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms); }

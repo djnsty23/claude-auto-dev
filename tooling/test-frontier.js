@@ -29,6 +29,8 @@ const RUN = path.resolve(__dirname, 'frontier', 'run.js');
 const FRONTIER = path.resolve(__dirname, 'frontier', 'frontier.js');
 const R = require(RUN);
 const F = require(FRONTIER);
+const { waitForState } = require('./frontier-wait.js');
+const runMeasurements = [];
 
 // Real path: on macOS the tmpdir is /var/folders, a worker's process.cwd() reads
 // /private/var/folders, and case 42 compares the two.
@@ -171,10 +173,29 @@ function run(args, extra = {}, timeout = 120000) {
     return { exit: r.status, json, stdout: r.stdout, stderr: r.stderr };
 }
 function startAndFinish(task, variant, mode, extra = {}, waitSec = 60) {
+    const started = performance.now();
     const s = run(['run', '--task', task, '--variant', variant, '--account', 'testacct'], Object.assign({ FAKE_MODE: mode }, extra));
     if (!s.json || !s.json.ok) return { start: s, row: null };
     const f = run(['finish', '--run', s.json.value.run, '--wait-sec', String(waitSec)], extra, (waitSec + 60) * 1000);
+    if (f.json && f.json.ok) runMeasurements.push(performance.now() - started);
     return { start: s, row: f.json && f.json.ok ? f.json.value : null, finish: f };
+}
+function batchDone(id) {
+    if (typeof id !== 'string') throw new Error('batch start returned no id');
+    const file = path.join(DATA, 'batches', String(id) + '.json');
+    const initial = readJson(file);
+    const items = initial && initial.items ? Math.max(1, initial.items.length) : 1;
+    try {
+    const result = waitForState(() => readJson(file), f => f && f.state !== 'running',
+        runMeasurements.map(ms => ms * items));
+    process.stdout.write('  batch wait: ' + JSON.stringify({ id, elapsedMs: Math.round(result.elapsedMs), budgetMs: result.budgetMs, samples: runMeasurements.length, items }) + '\n');
+    return result.value;
+    } catch (e) {
+        const last = readJson(file);
+        const staged = last && readJson(file + '.' + last.loopPid + '.tmp');
+        if (staged) e.message += ', unpublished=' + JSON.stringify(staged);
+        throw e;
+    }
 }
 function rows() {
     try { return fs.readFileSync(path.join(DATA, 'runs.jsonl'), 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l)); } catch { return []; }
@@ -439,8 +460,7 @@ function cliCases(shas) {
     check('55. a run reporting 95% of the week records it', hot.row && hot.row.budget.sevenDay === 0.95, hot.row && hot.row.budget);
     const b = run(['batch', '--tasks', 'TX', '--variants', 'V0,V1', '--account', 'testacct']);
     const bid = b.json && b.json.value && b.json.value.batch;
-    let bf = null;
-    for (let i = 0; i < 80; i++) { bf = readJson(path.join(DATA, 'batches', `${bid}.json`)); if (bf && bf.state !== 'running') break; sleep(250); }
+    const bf = batchDone(bid);
     check('56. a batch over the budget stop starts nothing and says stopped-budget', bf && bf.state === 'stopped-budget' && bf.items.every((i) => i.state === 'queued'), bf || b.json || b.stderr);
 
     // a batch under budget runs both items, two at a time, and records both rows
@@ -449,8 +469,7 @@ function cliCases(shas) {
     const before = rows().length;
     const b2 = run(['batch', '--tasks', 'TX', '--variants', 'V0,V1', '--account', 'testacct'], { FAKE_MODE: 'fix' });
     const bid2 = b2.json && b2.json.value && b2.json.value.batch;
-    let bf2 = null;
-    for (let i = 0; i < 240; i++) { bf2 = readJson(path.join(DATA, 'batches', `${bid2}.json`)); if (bf2 && bf2.state !== 'running') break; sleep(250); }
+    const bf2 = batchDone(bid2);
     check('58. a detached batch runs to done and writes a row per item', bf2 && bf2.state === 'done' && bf2.items.every((i) => i.verdict === 'pass') && rows().length === before + 2, bf2 || b2.json || b2.stderr);
     const st = run(['status']);
     check('59. status lists the batches and the row count', st.json && st.json.ok && st.json.value.batches.length === 2 && st.json.value.rows === rows().length, st.json && st.json.value);
@@ -466,14 +485,9 @@ function cliCases(shas) {
         [cool.row && cool.row.load, loaded.row && loaded.row.load, batchRows.map((r) => r.load)]);
 
     // --quiet-wait: a batch holds its item while a peer suite runs, then starts it anyway at the limit
-    const batchDone = (id, polls) => {
-        let f = null;
-        for (let i = 0; i < polls; i++) { f = readJson(path.join(DATA, 'batches', `${id}.json`)); if (f && f.state !== 'running') break; sleep(250); }
-        return f;
-    };
     const rowOf = (f) => f && f.items[0] && rows().find((r) => r.run === f.items[0].run);
     const bt = run(['batch', '--tasks', 'TX', '--variants', 'V1', '--account', 'testacct', '--quiet-wait', '0.02'], { FAKE_MODE: 'fix', FRONTIER_PROCESS_LIST: LOADED_PS });
-    const bft = batchDone(bt.json && bt.json.value && bt.json.value.batch, 240);
+    const bft = batchDone(bt.json && bt.json.value && bt.json.value.batch);
     const rt = rowOf(bft);
     check('62. under a peer suite, --quiet-wait 0.02 holds past its limit, starts anyway and records the row as loaded, timed out and naming the job',
         bft && bft.state === 'done' && bft.quietWaitMin === 0.02 && rt && rt.load.class === 'loaded' && rt.load.quietWait
@@ -484,13 +498,14 @@ function cliCases(shas) {
     fs.copyFileSync(LOADED_PS, DYN_PS);
     const bq = run(['batch', '--tasks', 'TX', '--variants', 'V1', '--account', 'testacct', '--quiet-wait', '5'], { FAKE_MODE: 'fix', FRONTIER_PROCESS_LIST: DYN_PS });
     const bqid = bq.json && bq.json.value && bq.json.value.batch;
-    let held = null;
-    for (let i = 0; i < 80 && !(held && held.waitingOn); i++) { held = readJson(path.join(DATA, 'batches', `${bqid}.json`)); sleep(250); }
+    const held = waitForState(() => readJson(path.join(DATA, 'batches', `${bqid}.json`)),
+        f => f && f.waitingOn, runMeasurements).value;
     const stq = run(['status']);
     const stBatch = stq.json && stq.json.ok && stq.json.value.batches.find((x) => x.id === bqid);
-    sleep(1200);
+    waitForState(() => readJson(path.join(DATA, 'batches', `${bqid}.json`)),
+        f => f && f.waitingOn && Date.parse(f.updatedAt) - Date.parse(f.waitingSince) >= 1000, runMeasurements);
     fs.copyFileSync(QUIET_PS, DYN_PS);
-    const bfq = batchDone(bqid, 240);
+    const bfq = batchDone(bqid);
     const rq = rowOf(bfq);
     check('63. while a peer suite runs the batch holds its item and says what it waits on, in the batch file and in status',
         held && held.waitingOn && held.waitingOn.join() === 'test-all.js@peer-wt' && held.items[0].state === 'queued'
@@ -500,7 +515,7 @@ function cliCases(shas) {
         && rq.load.quietWait.timedOut === false && rq.load.quietWait.waitedSec >= 1, [bfq && bfq.state, rq && rq.load]);
 
     const bare = run(['batch', '--tasks', 'TX', '--variants', 'V1', '--account', 'testacct', '--quiet-wait'], { FAKE_MODE: 'fix' });
-    const bfb = batchDone(bare.json && bare.json.value && bare.json.value.batch, 240);
+    const bfb = batchDone(bare.json && bare.json.value && bare.json.value.batch);
     const rb = rowOf(bfb);
     const junk = run(['batch', '--tasks', 'TX', '--variants', 'V1', '--account', 'testacct', '--quiet-wait', 'soon']);
     check('65. a bare --quiet-wait means 10 minutes and a quiet machine starts at once, and a non-number is a usage error',
@@ -521,7 +536,7 @@ function cliCases(shas) {
     });
     const dup = run(['batch', '--tasks', 'TX', '--variants', 'V1', '--account', 'testacct'], { FAKE_MODE: 'fix' });
     const dupId = dup.json && dup.json.value && dup.json.value.batch;
-    const bfd = batchDone(dupId, 240);
+    const bfd = batchDone(dupId);
     const intact = planted.every((p) => { try { return fs.readFileSync(p.file, 'utf8') === p.text; } catch { return false; } });
     check('66. a batch created in the second of an existing batch takes a suffix and leaves the other file whole',
         typeof dupId === 'string' && /^B-[0-9]{8}-[0-9]+$/.test(dupId) && planted.some((p) => dupId.startsWith(`${p.id}-`))
