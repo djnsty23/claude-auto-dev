@@ -1,0 +1,25 @@
+Windows MSYS fixture failure, captured 2026-10-10
+Baseline revision: 3dcb3cb1249556dd143cf23781a836e355f9375f
+Environment: native Windows host, Node v24.15.0, Git 2.54.0.windows.1.
+Inherited PATH contains Git cmd, but not Git usr/bin. No production change.
+
+Exact targeted replay in the baseline acceptance worktree:
+GATE_OWNERSHIP_ONLY=S7,P6 node tooling/test-gate-ownership.js
+Exit 1, 0 passed, 2 failed:
+FAIL S7: an MSYS pid to test with
+FAIL P6: an MSYS pid to plant against
+
+Independent child controls, using bash from git --exec-path's installation:
+A gate command: echo $$; for i in $(seq 1 300); do sleep 1; done
+Result: PID printed, exit 0, stderr seq: command not found; process already gone.
+A merge command: echo $$; sleep 25
+Result: PID printed, exit 127, stderr sleep: command not found; process already gone.
+Neither dead shell occurs in ps -W, as expected.
+
+Controls with a live bash held by an explicit utility path or a builtin loop:
+The unchanged gate-identity.msysTable maps its MSYS PID to its native PID.
+The unchanged full-gate-queue.isAlive returns true for its MSYS PID.
+The unchanged judgeExecution retains the live owner with an MSYS-only record.
+
+Root cause: the fixture exits before the ownership check. PID publication alone
+was being treated as proof of a live shell. Production detection is working.
