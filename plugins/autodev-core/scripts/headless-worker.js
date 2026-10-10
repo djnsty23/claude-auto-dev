@@ -91,6 +91,10 @@ const USAGE = [
     '        Refused while the log has no exit line (that is --lost), while the report has a RESULT line, and while',
     '        <report dir>/<CODE>/<report name> has one (a report written into the scratch dir: move it, then settle).',
     '        An unreported record is its own result, never done, stopped or failed.',
+    'settle, auth-refused: an ended run whose LAST stream-json result event is a refused login (Not logged in,',
+    '        Invalid API key, an expired OAuth token, subscription access disabled) settles, plain or --unreported,',
+    '        as result auth-refused with that text as its reason, unless a report holds a RESULT line. It is its own',
+    '        result, never done, stopped, failed or unreported: the worker never ran. status shows authRefused first.',
     'settle --started-at <iso>: settle exactly the record of that code with that startedAt. Refused as unknown-record',
     '        when no record matches and already-settled when it is settled. Without it, the newest unsettled record.',
     'ask:    a worker asks by writing <report dir>/<CODE>/ask.json and keeps working. status shows ask=open',
@@ -106,9 +110,30 @@ const PROMPT_MAX = 8000;
 const RESULT_STATES = ['done', 'stopped', 'failed'];
 // What a SETTLED record's `result` field can hold: a RESULT line's state, or
 // `lost` for a record settled by `settle --lost`, or `unreported` for one settled
-// by `settle --unreported`. Kept apart from RESULT_STATES on purpose: neither is
-// ever parsed from a report, so a worker cannot claim one.
-const SETTLED_RESULTS = [...RESULT_STATES, 'lost', 'unreported'];
+// by `settle --unreported`, or `auth-refused` for a run whose login was refused.
+// Kept apart from RESULT_STATES on purpose: none is ever parsed from a report,
+// so a worker cannot claim one.
+const SETTLED_RESULTS = [...RESULT_STATES, 'lost', 'unreported', 'auth-refused'];
+// `[measured 2026-10-10]` two workers ran about 50 minutes, then every turn of
+// `claude -p` ended in a stream-json `result` event whose text was the first
+// pattern below, and the supervisor wrote CLAUDE_EXIT=1. They settled as plain
+// unreported, nothing said the LOGIN was the cause, and the next queued worker
+// would have started into the same refusal. A fresh `claude -p` answered the
+// same in under 5 s. A run that could not run is not a worker that failed, so
+// such a run settles as `auth-refused`. The other four are sibling shapes of the
+// same failure `[stated 2026-10-10]`, not yet seen in a log here. Each pattern is
+// anchored at the start of the result text: a worker's own summary that mentions
+// a subscription or an API key in prose is not a refusal.
+const AUTH_REFUSAL_PATTERNS = [
+    { id: 'subscription-disabled', re: /^Your organization has disabled Claude subscription access for Claude Code\b/ },
+    { id: 'not-logged-in', re: /^Not logged in\b/ },
+    { id: 'invalid-api-key', re: /^Invalid API key\b/ },
+    { id: 'oauth-expired', re: /^OAuth token has expired\b/ },
+    { id: 'run-login', re: /^Please run \/login\b/ },
+];
+const AUTH_REASON_MAX = 300;
+// The settled results the harness writes, never a worker: each carries a reason.
+const NOT_FROM_REPORT = SETTLED_RESULTS.filter((r) => !RESULT_STATES.includes(r));
 const SCRUBBED_ENV = ['CLAUDECODE', 'CLAUDE_CODE_ENTRYPOINT', 'CLAUDE_CODE_SSE_PORT'];
 const LOCK_STALE_MS = 60 * 1000;
 const LOCK_WAIT_MS = 5000;
@@ -704,6 +729,30 @@ function supervisorLiveness(rec, { probe, image = pidImage } = {}) {
     return !seen ? 'unknown' : !isSupervisorImage(rec, seen) ? 'reused' : 'alive';
 }
 
+/** `{ id, text }` when a result event's text is a refused login, or null. */
+function matchAuthRefusal(text) {
+    if (typeof text !== 'string') return null;
+    const t = text.trim();
+    const hit = AUTH_REFUSAL_PATTERNS.find((p) => p.re.test(t));
+    return hit ? { id: hit.id, text: t.slice(0, AUTH_REASON_MAX) } : null;
+}
+
+/**
+ * The refusal in the LAST stream-json `result` event of a log, or null. Only the
+ * last one counts: a run refused once that then worked is not refused. A line is
+ * parsed only when it carries `"type":"result"` unescaped, so a long log is not
+ * parsed whole, and a result quoted inside a message string never counts.
+ */
+function authRefusal(logText) {
+    let last = null;
+    for (const line of String(logText || '').split(/\r?\n/)) {
+        if (!line.startsWith('{') || !line.includes('"type":"result"')) continue;
+        let j; try { j = JSON.parse(line); } catch { continue; }
+        if (j && j.type === 'result') last = j;
+    }
+    return last ? matchAuthRefusal(last.result) : null;
+}
+
 /** The LAST `RESULT <code> <state>: <sentence>` line for this exact code, or null. */
 function parseResult(reportText, code) {
     const re = new RegExp(`^RESULT\\s+${code.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\s+(${RESULT_STATES.join('|')}):\\s*(.+)$`, 'gm');
@@ -784,12 +833,16 @@ function recordStatus(rec, boot = bootAt(), image = pidImage, records = null) {
     // itself rather than being folded into a known one.
     const settled = rec.state === 'settled';
     const settledAs = settled ? (SETTLED_RESULTS.includes(rec.result) ? rec.result : `unrecognised:${rec.result}`) : null;
+    // An exited run not yet settled says whether its login was refused, so a
+    // reader can tell "could not run" from "left no report" before settle does.
+    const refusal = !settled && exit !== null && logText !== null ? authRefusal(logText) : null;
     return {
         code: rec.code, pid: rec.pid, startedAt: rec.startedAt, process: processState, exit,
         result, sentence, resultCodeFound, reportExists: reportText !== null, reportStale, misplacedReport: misplaced, settled, settledAs,
         version: rec.version || null, dev: rec.dev === true,
         lostReason: settledAs === 'lost' ? (rec.reason || null) : null,
-        settleReason: settledAs === 'lost' || settledAs === 'unreported' ? (rec.reason || null) : null,
+        settleReason: NOT_FROM_REPORT.includes(settledAs) ? (rec.reason || null) : null,
+        authRefused: refusal ? refusal.text : null,
         log: ownLog, report: ownReport, cwd: rec.cwd || null,
         supersededBy: later.length ? later[later.length - 1].startedAt || null : null,
         ...(later.length ? { ask: 'superseded', question: null, askFile: null, answerFile: null } : askState(rec)),
@@ -833,7 +886,8 @@ function statusLines(value) {
     for (const r of value.records) {
         lines.push(`${r.code} pid=${r.pid} process=${r.process} exit=${r.exit === null ? '-' : r.exit} `
             + `result=${r.result}${r.resultCodeFound ? ` (RESULT line found for a different code: ${r.resultCodeFound})` : ''}`
-            + `${r.misplacedReport ? ` (report written into the scratch dir: ${r.misplacedReport})` : ''} settled=${r.settled}${r.settledAs === 'lost' || r.settledAs === 'unreported' ? ` settledAs=${r.settledAs} (${r.settleReason})` : ''}`
+            + `${r.misplacedReport ? ` (report written into the scratch dir: ${r.misplacedReport})` : ''} settled=${r.settled}${NOT_FROM_REPORT.includes(r.settledAs) ? ` settledAs=${r.settledAs} (${r.settleReason})` : ''}`
+            + `${r.authRefused ? ` authRefused (${r.authRefused})` : ''}`
             + `${r.ask !== 'none' ? ` ask=${r.ask}` : ''}${r.supersededBy ? ` supersededBy=${r.supersededBy}` : ''} version=${r.version || '-'}${r.dev ? '(dev)' : ''}${r.sentence ? ` : ${r.sentence}` : ''}`);
     }
     return lines.join('\n') + '\n';
@@ -889,17 +943,26 @@ function settle(opts) {
         const exit = logText === null ? null : exitCodeOf(logText);
         if (opts.lost && opts.unreported) fault('usage', '--lost and --unreported name different endings: a worker with no exit line, and one that exited without a RESULT line. Pass one');
         if (opts.lost) return settleLost(rec, code, exit);
-        if (opts.unreported) return settleUnreported(rec, code, exit);
+        // Read only once the run has ended: a refusal is a claim about how it ended.
+        const refusal = exit === null ? null : authRefusal(logText);
+        if (opts.unreported) return settleUnreported(rec, code, exit, refusal);
         if (exit === null) {
             fault('not-exited', `${rec.log} has no CLAUDE_EXIT line yet, so the worker is running or its supervisor never wrote one. `
                 + 'A supervisor killed by a reboot or a kill never writes it, and settle --lost settles such a record once it is provably not running');
         }
         const reportText = readText(rec.report);
-        if (reportText !== null && writtenBefore(rec.report, rec.startedAt)) fault('stale-report', staleHint(rec));
+        // A stale report is an earlier run's word, so this run's refusal is still the answer.
+        if (reportText !== null && writtenBefore(rec.report, rec.startedAt)) {
+            if (refusal) return settleAuthRefused(rec, code, exit, refusal);
+            fault('stale-report', staleHint(rec));
+        }
         const parsed = reportText === null ? null : parseResult(reportText, code);
         if (!parsed) {
             const other = reportText === null ? null : otherResultCode(reportText, code);
             const moved = other ? null : misplacedReport(rec);
+            // A RESULT line anywhere means the worker ran and wrote: that is corrected
+            // or moved, never buried under a refusal.
+            if (refusal && !other && !moved) return settleAuthRefused(rec, code, exit, refusal);
             fault('no-result', (reportText === null
                 ? `${rec.report} does not exist`
                 : other
@@ -963,7 +1026,7 @@ function settleLost(rec, code, exit) {
  * result. It never guesses a worker's word: a report with a RESULT line for this
  * code takes plain settle, and one naming another code must be corrected first.
  */
-function settleUnreported(rec, code, exit) {
+function settleUnreported(rec, code, exit, refusal = null) {
     if (exit === null) {
         fault('not-exited', `${rec.log} has no CLAUDE_EXIT line, so the worker has not provably ended. `
             + 'settle --lost settles a record whose supervisor died without one');
@@ -976,7 +1039,10 @@ function settleUnreported(rec, code, exit) {
             + 'earlier run appended to the same log. Settle once the supervisor has ended');
     }
     const reportText = readText(rec.report);
-    if (reportText !== null && writtenBefore(rec.report, rec.startedAt)) fault('stale-report', staleHint(rec));
+    if (reportText !== null && writtenBefore(rec.report, rec.startedAt)) {
+        if (refusal) return settleAuthRefused(rec, code, exit, refusal);
+        fault('stale-report', staleHint(rec));
+    }
     if (reportText !== null && parseResult(reportText, code)) {
         fault('has-result', `${rec.report} has a RESULT ${code} line. Settle it without --unreported`);
     }
@@ -987,12 +1053,25 @@ function settleUnreported(rec, code, exit) {
         fault('no-result', `RESULT line found for a different code: ${rec.report} ends RESULT ${other}, and this record's code is ${code}. `
             + `Correct that line to RESULT ${code} done|stopped|failed: <sentence>, then settle again`);
     }
+    if (refusal) return settleAuthRefused(rec, code, exit, refusal);
     const reason = reportText === null
         ? `exited ${exit} and ${rec.report} does not exist`
         : `exited ${exit} and ${rec.report} has no RESULT ${code} line`;
     const settledAt = new Date().toISOString();
     Object.assign(rec, { state: 'settled', result: 'unreported', reason, sentence: null, exit, settledAt });
     return { code, state: 'unreported', reason, sentence: null, exit, report: rec.report, settledAt };
+}
+
+/**
+ * Settle an ended run whose last result event was a refused login, inside the
+ * ledger lock. Its own result, never done, stopped, failed or unreported: the
+ * worker never ran, so the brief is untouched, and a run started on the same
+ * login meets the same refusal. The reason is the refusal text as claude printed it.
+ */
+function settleAuthRefused(rec, code, exit, refusal) {
+    const settledAt = new Date().toISOString();
+    Object.assign(rec, { state: 'settled', result: 'auth-refused', reason: refusal.text, authPattern: refusal.id, sentence: null, exit, settledAt });
+    return { code, state: 'auth-refused', reason: refusal.text, pattern: refusal.id, sentence: null, exit, report: rec.report, settledAt };
 }
 
 /** The liveness classifier over the shapes a real kill(pid, 0) can return. */
@@ -1042,6 +1121,7 @@ if (require.main === module) {
 
 module.exports = {
     HEADLESS_NOTE, DENIED_NOTE, PROMPT_MAX, CODE_RE, placementNote, resultNote, scriptPlacement, otherResultCode, SCRUBBED_ENV, RETENTION_MS, SETTLED_RESULTS,
+    AUTH_REFUSAL_PATTERNS, matchAuthRefusal, authRefusal, resolveConfigDir,
     askFiles, askNote, askState, scratchDirFor, priorRunFiles, moveAside, readLedger, settle, start,
     parseArgs, composePrompt, buildArgv, buildEnv, spawnPlan, resolveClaudeBin, exitCodeOf, parseResult,
     livenessFromError, pidLiveness, pidImage, isSupervisorImage, supervisorLiveness, bootAt, pruneSettled, laterRuns, recordStatus, lostReason, lostGateStep, run,
