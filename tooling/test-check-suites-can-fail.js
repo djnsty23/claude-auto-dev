@@ -170,17 +170,21 @@ const sweepDirsFor = (pid) => fs.readdirSync(os.tmpdir())
 // The pair cache (shadow by default) writes its entries under a private
 // directory, never the operator's home cache: fixture pairs are not real ones.
 const PAIR_CACHE_DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'suites-red-evidence-cache-'));
-function runSweep(dir, exit2IsVerdict) {
+let evidenceRun = 0;
+function runSweep(dir, exit2IsVerdict, extraEnv = {}) {
+    const evidenceDir = path.join(PAIR_CACHE_DIR, 'evidence-' + (++evidenceRun));
     const r = sb.runBudgeted(process.execPath, [path.join(dir, 'tooling', path.basename(SWEEP))], {
         cwd: dir, encoding: 'utf8', timeout: BUDGET_MS, windowsHide: true, input: '',
-        env: Object.assign({}, process.env, { AUTODEV_SUITE_CACHE_DIR: PAIR_CACHE_DIR }),
+        env: Object.assign({}, process.env, { AUTODEV_SUITE_CACHE_DIR: PAIR_CACHE_DIR, AUTODEV_SWEEP_EVIDENCE_DIR: evidenceDir }, extraEnv),
     });
     if (sb.classify(r, exit2IsVerdict ? 'exit2' : undefined) !== 'verdict') {
         infra++;
         console.log('INDETERMINATE  sweep run produced no verdict: ' + sb.reason(r) + ' ' + sb.lastWords(r, 300));
         return null;
     }
-    return { code: r.status, all: (r.stdout || '') + '\n' + (r.stderr || '') };
+    const evidence = fs.existsSync(evidenceDir) ? fs.readdirSync(evidenceDir)
+        .filter(f => f.endsWith('.json')).map(f => JSON.parse(fs.readFileSync(path.join(evidenceDir, f), 'utf8'))) : [];
+    return { code: r.status, all: (r.stdout || '') + '\n' + (r.stderr || ''), evidence };
 }
 
 const dirs = [PAIR_CACHE_DIR];
@@ -300,7 +304,60 @@ try {
         const leaked = ['G-PASS.', 'G-FAIL.'].filter((s) => r.all.includes(s));
         check('red: the green suite in the same run prints nothing extra', leaked.length === 0,
             'printed: ' + leaked.join(', '));
+        const suiteEvidence = r.evidence.find(e => e.label === 'test-planted-red.js' && e.phase === 'baseline');
+        const validatorEvidence = r.evidence.find(e => e.label === 'validate.js' && e.phase === 'baseline');
+        check('red: full suite evidence retains the early line and uncut long line',
+            suiteEvidence && suiteEvidence.status === 3 && suiteEvidence.stdout.includes('R-OUT-001.')
+            && suiteEvidence.stdout.includes('x'.repeat(20000)) && suiteEvidence.stderr.includes('R-ERR-3.'));
+        check('red: validator owns a separate evidence record',
+            validatorEvidence && validatorEvidence.status === 1 && validatorEvidence.stderr.includes('V-RED-ERR-1.'));
     }
+
+    // Plant contention only at the sweep's status boundary. Other git operations
+    // and the clean control still use real git in the private worktree.
+    const preload = path.join(PAIR_CACHE_DIR, 'status-plant.cjs');
+    fs.writeFileSync(preload, `
+const cp = require('child_process');
+const fs = require('fs');
+const marker = process.env.STATUS_PLANT_MARKER;
+const hit = (cmd, args, opts) => /git(?:\\.exe)?$/.test(cmd) && args.includes('status')
+  && String(opts.cwd).includes('check-suites-wt-') && fs.existsSync(marker);
+const spawn = cp.spawnSync;
+cp.spawnSync = function(cmd, args, opts) {
+  if (hit(cmd, args, opts) && (process.env.STATUS_PLANT_ALWAYS || !args.includes('--no-optional-locks')))
+    return { status: 128, stdout: '', stderr: 'STATUS-LOCK-PLANT', signal: null };
+  return spawn.apply(this, arguments);
+};
+const exec = cp.execSync;
+cp.execSync = function(cmd, opts) {
+  if (String(cmd).startsWith('git status') && hit('git', ['status'], opts))
+    throw new Error('STATUS-LOCK-PLANT');
+  return exec.apply(this, arguments);
+};
+`);
+    const statusMarker = path.join(PAIR_CACHE_DIR, 'status-ready');
+    const contention = makeRepo('status', {
+        'VERSION': '1.0.0\n', 'tooling/validate.js': GREEN_VALIDATE,
+        'plugins/demo/subject.js': SUBJECT,
+        'tooling/test-planted-green.js': `require('fs').writeFileSync(${JSON.stringify(statusMarker)}, 'ready');\n` + GREEN_SUITE,
+    });
+    dirs.push(contention);
+    const statusRun = runSweep(contention, true, {
+        NODE_OPTIONS: [process.env.NODE_OPTIONS, '--require=' + JSON.stringify(preload)].filter(Boolean).join(' '),
+        STATUS_PLANT_MARKER: statusMarker,
+    });
+    check('status: populated control executed before the lock plant', fs.existsSync(statusMarker));
+    check('status: optional index writes cannot abort the private sweep', statusRun && statusRun.code === 0,
+        statusRun && statusRun.all.slice(-1200));
+    const unreadable = runSweep(contention, true, {
+        NODE_OPTIONS: [process.env.NODE_OPTIONS, '--require=' + JSON.stringify(preload)].filter(Boolean).join(' '),
+        STATUS_PLANT_MARKER: statusMarker, STATUS_PLANT_ALWAYS: '1',
+    });
+    check('status: a real read failure stays INDETERMINATE with a completed summary',
+        unreadable && unreadable.code === 2 && unreadable.all.includes('INDETERMINATE')
+        && unreadable.all.includes('suite(s)') && !unreadable.all.includes('UNCAUGHT'), unreadable && unreadable.all.slice(-1200));
+    check('status: failed git reads retain their own stderr and exit status',
+        unreadable && unreadable.evidence.some(e => e.label === 'git status' && e.status === 128 && e.stderr === 'STATUS-LOCK-PLANT'));
 } finally {
     for (const d of dirs) {
         try { fs.rmSync(d, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 }); } catch { /* temp root */ }

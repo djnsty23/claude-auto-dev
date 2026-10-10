@@ -96,7 +96,7 @@ function runAll(fx, args, opts) {
     const o = opts || {};
     return spawnSync(process.execPath, [path.join(fx.tooling, 'test-all.js'), ...(args || [])], {
         cwd: fx.root, encoding: 'utf8', timeout: o.timeout || 180000, maxBuffer: 64 * 1024 * 1024, windowsHide: true,
-        env: cleanEnv({ AUTODEV_COVERAGE_STORE: fx.store }),
+        env: cleanEnv({ AUTODEV_COVERAGE_STORE: fx.store, ...o.env }),
     });
 }
 const out = (r) => (r.stdout || '') + (r.stderr || '');
@@ -171,7 +171,22 @@ async function main() {
             const rc = readReceipt(fx);
             const o = rc && rc.outcomes.find((x) => x.label === 'test-b-fails');
             check('3. the receipt keeps the failure as a failure', rc && rc.verdict === 'fail' && o && o.state === 'fail', rc && rc.outcomes);
+            const ownLog = o && fs.readFileSync(path.join(rc.runDir, o.log), 'utf8');
+            check('3. the failed suite log retains its own exit diagnostic',
+                ownLog && /state=fail status=1/.test(ownLog), ownLog);
         }
+    }
+
+    {
+        const fx = fixture({ suites: { 'test-timeout.js': "console.log('TIMEOUT-CONTROL'); setInterval(() => {}, 1000);\n" } });
+        const r = runAll(fx, ['--serial'], { env: { AUTODEV_TEST_SUITE_TIMEOUT_MS: '1000' } });
+        const rc = readReceipt(fx);
+        const result = rc && rc.outcomes.find(x => x.label === 'test-timeout');
+        const ownLog = result && fs.readFileSync(path.join(rc.runDir, result.log), 'utf8');
+        check('timeout control exits INDETERMINATE and preserves child output',
+            r.status === 2 && ownLog && ownLog.includes('TIMEOUT-CONTROL'), out(r));
+        check('timeout diagnostic lives in the timed-out suite log',
+            ownLog && /state=indet/.test(ownLog) && /ETIMEDOUT/.test(ownLog), ownLog);
     }
 
     // --- 4. shared vs per-suite coverage give the same census ------------------
