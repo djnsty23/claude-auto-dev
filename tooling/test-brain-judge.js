@@ -94,7 +94,7 @@ const fakeJudge = path.join(scratch, 'fake-judge.js');
 fs.writeFileSync(fakeJudge, [
     "const fs = require('fs'); let input = '';",
     "process.stdin.on('data', (d) => { input += d; }).on('end', () => {",
-    "  if (process.env.FAKE_JUDGE_ARGV) fs.writeFileSync(process.env.FAKE_JUDGE_ARGV, JSON.stringify({ argv: process.argv.slice(2), input, cwd: process.cwd() }));",
+    "  if (process.env.FAKE_JUDGE_ARGV) fs.writeFileSync(process.env.FAKE_JUDGE_ARGV, JSON.stringify({ argv: process.argv.slice(2), input, cwd: process.cwd(), cfg: process.env.CLAUDE_CONFIG_DIR || null }));",
     "  const mode = process.env.FAKE_JUDGE || '';",
     "  if (mode === 'error') { process.stdout.write(JSON.stringify({ type: 'result', is_error: true, subtype: 'error_max_turns', total_cost_usd: 0.01 })); return; }",
     "  const decision = /FAKE-ESCALATE/.test(input) ? 'escalate' : /FAKE-FOLLOWUP/.test(input) ? 'follow-up' : 'accept';",
@@ -109,7 +109,7 @@ try {
     // =======================================================================
     const sd = path.join(scratch, 'pure-state');
     fs.mkdirSync(sd);
-    check('an absent switch file reads dry for both steps', JSON.stringify(bj.readSwitch(sd)) === JSON.stringify({ judge: 'dry', start: 'dry', source: 'default' }));
+    check('an absent switch file reads dry for both steps', JSON.stringify(bj.readSwitch(sd)) === JSON.stringify({ judge: 'dry', start: 'dry', source: 'default', judgeConfigDir: null }));
     fs.writeFileSync(path.join(sd, 'switch.json'), '{not json');
     check('an unreadable switch file reads off for both steps', bj.readSwitch(sd).judge === 'off' && bj.readSwitch(sd).start === 'off');
     fs.writeFileSync(path.join(sd, 'switch.json'), JSON.stringify({ judge: 'LIVE', start: 'live' }));
@@ -318,6 +318,22 @@ try {
     const one = judge(['judge', '--task-id', 'worker-old-one', '--judge-bin', fakeJudge]);
     check('judge --task-id judges one record and logs it as manual', one.value && one.value.decision === 'follow-up' && judge(['log', '--limit', '1']).value.judgements[0].mode === 'manual');
     check('judge refuses a record that has not finished', judge(['judge', '--task-id', 'worker-loop-c', '--judge-bin', fakeJudge]).code === 'bad-state');
+    // The judge logs in where the switch points it: the default login can be refused while another account works.
+    const judgeCfg = path.join(scratch, 'judge-cfg');
+    fs.mkdirSync(judgeCfg);
+    const cfgArgv = path.join(scratch, 'judge-cfg-argv.json');
+    const sw1 = judge(['switch', '--config-dir', judgeCfg]);
+    check('switch --config-dir records the judge\'s config dir and keeps both modes', sw1.value && sw1.value.switch.judgeConfigDir === path.resolve(judgeCfg)
+        && sw1.value.switch.judge === sw1.value.previous.judge && sw1.value.switch.start === sw1.value.previous.start, sw1.stdout.slice(0, 300));
+    judge(['judge', '--task-id', 'worker-old-one', '--judge-bin', fakeJudge], { FAKE_JUDGE_ARGV: cfgArgv });
+    check('the judge runs with CLAUDE_CONFIG_DIR set to the switch\'s config dir', fs.existsSync(cfgArgv) && JSON.parse(fs.readFileSync(cfgArgv, 'utf8')).cfg === path.resolve(judgeCfg));
+    check('switch refuses a config dir that does not exist', judge(['switch', '--config-dir', path.join(scratch, 'no-such-cfg')]).code === 'config-dir-missing'
+        && bj.readSwitch(stateDir).judgeConfigDir === path.resolve(judgeCfg));
+    const sw2 = judge(['switch', '--config-dir', 'default']);
+    fs.rmSync(cfgArgv);
+    judge(['judge', '--task-id', 'worker-old-one', '--judge-bin', fakeJudge], { FAKE_JUDGE_ARGV: cfgArgv });
+    check('control: --config-dir default clears it, and the judge runs on the default login again',
+        sw2.value && sw2.value.switch.judgeConfigDir === null && fs.existsSync(cfgArgv) && JSON.parse(fs.readFileSync(cfgArgv, 'utf8')).cfg === null, sw2.stdout.slice(0, 300));
     check('log refuses a zero limit', judge(['log', '--limit', '0']).code === 'usage');
 
     const stateFile = path.join(stateDir, 'state.json');
@@ -420,6 +436,20 @@ try {
     check('a later run that succeeded lifts the hold, and the queued task would start', /^start \(dry\): 1 ready/.test(startLine(tc)), startLine(tc));
     plant({ code: 'auth-d', startedAt: new Date(Date.now() - 90000).toISOString(), result: 'auth-refused', reason: 'Not logged in · Please run /login', exit: 1 });
     check('control: a refused run that started BEFORE the success does not hold start', /^start \(dry\): 1 ready/.test(startLine(aTick())));
+    // Each config dir is its own login: a refusal on the default does not hold a task that logs in elsewhere.
+    plant({ code: 'auth-e', startedAt: new Date(Date.now() - 10000).toISOString(), result: 'auth-refused', reason: INCIDENT, exit: 1 });
+    const otherCfg = path.join(ad, 'other-cfg');
+    fs.mkdirSync(otherCfg, { recursive: true });
+    const qo = uw(['enqueue', '--repo', repo, '--slug', 'auth-other', '--brief-file', briefFile, '--return', 'brain', '--config-dir', otherCfg, '--ledger', aLedger]);
+    const te = aTick();
+    const lines = (t) => (t.value ? t.value.lines : []);
+    const wouldStart = (t) => (t.value ? t.value.events : []).filter((e) => e.type === 'judge.would-start').map((e) => e.key);
+    check('a refusal on the default login holds only the tasks that log in there: the other account\'s task would start',
+        qo.status === 0 && /^start \(dry\): 1 ready/.test(startLine(te)) && lines(te).some((l) => /^start \(dry\): worker-auth-next held: .*auth-e/.test(l))
+            && wouldStart(te).includes('worker-auth-other') && !wouldStart(te).includes('worker-auth-next'), `${qo.status} | ${lines(te).join(' | ')} | ${wouldStart(te).join(',')}`);
+    plant({ code: 'auth-f', startedAt: new Date(Date.now() - 5000).toISOString(), result: 'auth-refused', reason: INCIDENT, exit: 1, configDir: 'other-cfg' });
+    const tf = aTick();
+    check('control: once the other account is refused too, nothing starts and the line says so', /^start \(dry\): held, nothing starts: /.test(startLine(tf)), startLine(tf));
     fs.writeFileSync(aHeadless, '{torn');
     const tt = aTick();
     check('an unreadable headless ledger holds start, since a refusal in it cannot be ruled out', /^start \(dry\): held, nothing starts: .*could not be read/.test(startLine(tt)) && tt.status === 0, startLine(tt));
