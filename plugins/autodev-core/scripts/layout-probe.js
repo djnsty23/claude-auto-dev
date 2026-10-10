@@ -141,12 +141,19 @@ function harvest(opt) {
         // position is static, so its own position alone cannot say it rides
         // with the viewport.
         var pinnedBy = null;
+        var pinnedBox = null;
         for (var an = el; an && an.nodeType === 1; an = an.parentElement) {
             var ap = an === el ? cs.position : getComputedStyle(an).position;
-            if (ap === 'fixed' || ap === 'sticky') { pinnedBy = ap; break; }
+            if (ap === 'fixed' || ap === 'sticky') { pinnedBy = ap; pinnedBox = boxOf(an.getBoundingClientRect()); break; }
         }
         return {
             pinnedBy: pinnedBy,
+            // Where the pinned box sits at this scroll position. A short bar
+            // pinned to the viewport BOTTOM covers the next lines of the page
+            // at rest, and the reader scrolls them out from under it: the
+            // sticky-action pattern. The analyzer needs its edge and height to
+            // tell that bar from a pinned box parked over content.
+            pinnedBox: pinnedBox,
             bgAlpha: r4(alphaOf(cs.backgroundColor)),
             hasBgImage: cs.backgroundImage !== 'none',
             hasBackdrop: bf !== 'none',
@@ -196,6 +203,27 @@ function harvest(opt) {
         var area = vw * vh;
         if (area > 0 && (r.width * r.height) / area >= 0.8) return 'full-viewport';
         return null;
+    }
+
+    // Why a text element is laid out but painted nowhere, or null. The body of
+    // a closed <details> keeps real layout boxes (content-visibility: hidden
+    // skips its paint, not its geometry), so its glyph rects run past any
+    // clipping card around it. `[measured 2026-10-10]` on a real admin that was
+    // 10 CLIPPED-TEXT findings about words no reader can see. The summary of a
+    // closed details element is rendered and is checked as usual.
+    function unrendered(el) {
+        for (var a = el.parentElement, prev = el; a; prev = a, a = a.parentElement) {
+            if (a.tagName === 'DETAILS' && !a.open && !(prev.tagName === 'SUMMARY' && prev.parentElement === a)) return 'details-closed';
+        }
+        if (el.checkVisibility && !el.checkVisibility({ contentVisibilityAuto: true, visibilityProperty: true })) return 'not-rendered';
+        return null;
+    }
+
+    // An exemption is a reviewed attribute in the product's source:
+    // data-unslop-ok="TEXT-OCCLUDED CLIPPED-TEXT" on the text or an ancestor.
+    function okOf(el) {
+        var holder = el.closest ? el.closest('[data-unslop-ok]') : null;
+        return holder ? holder.getAttribute('data-unslop-ok').split(/[\s,]+/).filter(Boolean) : [];
     }
 
     // -------------------------------------------------------- viewport block
@@ -415,6 +443,7 @@ function harvest(opt) {
                             opacity: pf.opacity,
                             position: pf.position,
                             pinnedBy: pf.pinnedBy,
+                            pinnedBox: pf.pinnedBox,
                             modal: modalKind(cand, vw, vh),
                         };
                         if (occ.modal && !modalSeen) modalSeen = occ.modal;
@@ -438,6 +467,8 @@ function harvest(opt) {
                 sel: selPath(te),
                 scrollY: scrollY,
                 controlAncestor: controlAncestor(te),
+                unrendered: unrendered(te),
+                ok: okOf(te),
                 text: own.trim().slice(0, 80),
                 glyphRects: visible.slice(0, 6).map(boxOf),
                 glyphRectCount: glyphRects.length,

@@ -90,6 +90,10 @@ const DEFAULTS = {
     // Share of a text run's glyph boxes that must fall outside a clipping
     // container before the text counts as cut off.
     clipMinFraction: 0.25,
+    // A sticky or fixed bar on the viewport's bottom edge no taller than this
+    // share of the viewport is a sticky action bar. What it covers at rest is
+    // the next lines of a page that scrolls, not a layout with no clearance.
+    bottomBarMaxFraction: 0.25,
 
     // ---- component rules, judged from snapshot.components (harvestComponents)
     // A row of controls whose heights, centres, border widths, radii or
@@ -274,6 +278,14 @@ function analyse(snapshot, options) {
         scrollableClip: 0,
         controlLabel: 0,
         inconclusiveSamples: 0,
+        // Text the probe found laid out but painted nowhere (a closed
+        // <details> body, content-visibility: hidden), per text check.
+        notRendered: 0,
+        // Text whose occluders were all a short bar pinned to the viewport
+        // bottom, on a page that scrolls.
+        bottomBar: 0,
+        // data-unslop-ok on the text or an ancestor, per text check.
+        markedOk: 0,
     };
 
     // --- item 6, first half: does the document scroll sideways at all?
@@ -401,6 +413,10 @@ function analyse(snapshot, options) {
         // FRACTION, because a fully hidden label and a paragraph entirely
         // inside a clipping panel are both 100%. What the text IS decides it.
         if (t.controlAncestor) { exempt.controlLabel++; continue; }
+        // Words painted nowhere are not cut off: nobody could read them with
+        // or without the clip. The probe records why (layout-probe.js).
+        if (t.unrendered) { exempt.notRendered++; continue; }
+        if ((t.ok || []).includes(CODES.CLIPPED_TEXT)) { exempt.markedOk++; continue; }
         const ca = el.clipAncestor;
         const ancEl = ca.i != null ? elements[ca.i] : null;
         const clipsX = CLIPS.has(ca.overflowX);
@@ -444,7 +460,21 @@ function analyse(snapshot, options) {
     // covering element actually paints, and whether it is above or below in
     // paint order.
     const modal = snapshot.modalSeen || null;
+    const scrolls = vp.scrollHeight > vp.clientHeight + T.overflowTolerancePx;
+    // A short bar pinned to the viewport's bottom edge: the sticky-action
+    // pattern. `[measured 2026-10-10]` on a real admin a sticky save bar
+    // covered the form under it at scroll 0 on every settings page, and that
+    // form scrolls out from under it. Only on a page that scrolls: a bar over
+    // the last words of a page that cannot move them is a real defect.
+    const bottomBar = (o) => {
+        const pb = o.pinnedBox;
+        return scrolls && !!pb && (PINNED.has(o.position) || PINNED.has(o.pinnedBy)) &&
+            pb.b >= vp.clientHeight - T.overflowTolerancePx &&
+            pb.h <= T.bottomBarMaxFraction * vp.clientHeight;
+    };
     for (const t of texts) {
+        if (t.unrendered) { exempt.notRendered++; continue; }
+        if ((t.ok || []).includes(CODES.TEXT_OCCLUDED)) { exempt.markedOk++; continue; }
         // A sample where the text itself was not hit proves nothing either way:
         // the point may be inside an ancestor while the glyphs there were cut
         // away by a clipping container, in which case the words are not painted
@@ -456,6 +486,7 @@ function analyse(snapshot, options) {
         const samples = usable;
         if (!samples.length) continue;
 
+        let underBar = 0;
         const covered = samples.filter((s) => {
             const o = s.occluder;
             if (!o) return false;
@@ -478,8 +509,10 @@ function analyse(snapshot, options) {
             // 10 ranked findings were text scrolled under that header.
             // pinnedBy is the nearest fixed or sticky box at or above the hit.
             if ((PINNED.has(o.position) || PINNED.has(o.pinnedBy)) && (t.scrollY || 0) > 0) return false;
+            if (bottomBar(o)) { underBar++; return false; }
             return true;
         });
+        if (!covered.length && underBar) { exempt.bottomBar++; continue; }
         if (!covered.length) {
             // Distinguish "nothing over it" from "something over it that does
             // not paint" - the transparent click-catcher case.
@@ -635,11 +668,18 @@ function analyseComponents(snapshot, T) {
         return childrenOf(e).some((c) => subtreeHasText(c, depth - 1));
     };
     const onScreen = (b) => b.r > 0 && b.l < cw;
+    // Interactive itself or within a few unboxed-or-boxed levels: a framed
+    // wrapper around a native input is the control the reader sees.
+    const pressable = (e, depth) => {
+        if (e.ia) return true;
+        if (depth <= 0) return false;
+        return childrenOf(e).some((c) => pressable(c, depth - 1));
+    };
 
     const findings = [];
     const exempt = {
         markedOk: 0, consistentGroup: 0, selectedSegment: 0, pillRadius: 0, narrowAccent: 0, barTrack: 0,
-        rail: 0, fullBleed: 0, inlineLink: 0, wrappedByTarget: 0, disabled: 0,
+        rail: 0, fullBleed: 0, inlineLink: 0, wrappedByTarget: 0, disabled: 0, notInteractive: 0,
     };
     const population = {
         recorded: comp.recorded, considered: comp.considered, droppedForCap: comp.droppedForCap,
@@ -685,12 +725,20 @@ function analyseComponents(snapshot, T) {
             }));
             if (line) line.push(it); else lines.push([it]);
         }
-        for (const line of lines) {
-            if (line.length < 2) continue;
-            line.sort((a, b) => a.box.l - b.box.l);
+        for (const whole of lines) {
+            if (whole.length < 2) continue;
+            whole.sort((a, b) => a.box.l - b.box.l);
+            // The ROW-* rules compare CONTROLS: something the reader presses.
+            // A framed status chip is boxed and inside the size band, but a
+            // 22px "Active" pill beside a 44px button is a label beside a
+            // button, not two buttons built differently. `[measured
+            // 2026-10-10]` most of 39 ROW findings on a real admin were that
+            // pair. GLUED-CONTROLS below still reads the whole line.
+            const line = whole.filter((c) => pressable(c, 3));
+            exempt.notInteractive += whole.length - line.length;
             population.rowLines++;
-            population.rowItems += line.length;
-            const okOn = [root, ...line];
+            population.rowItems += whole.length;
+            const okOn = [root, ...whole];
             const view = line.map((c) => ({
                 sel: c.sel, h: c.box.h, cy: r2(c.box.t + c.box.h / 2), frame: frameOf(c),
                 radius: Math.max(...c.br), padX: r2(c.pad[3]), painted: paintedOf(c),
@@ -747,9 +795,9 @@ function analyseComponents(snapshot, T) {
             // segment selected differs in fill only, and its segments are
             // square where they join; two rounded controls that collide are
             // not joined, so they still fire.
-            for (let k = 0; k + 1 < line.length; k++) {
-                const a = line[k];
-                const b = line[k + 1];
+            for (let k = 0; k + 1 < whole.length; k++) {
+                const a = whole[k];
+                const b = whole[k + 1];
                 const gap = b.box.l - a.box.r;
                 if (!(gap > -1 && gap < T.gluedGapPx)) continue;
                 const sameShape = Math.abs(a.box.h - b.box.h) <= 1 && frameOf(a) === frameOf(b);

@@ -53,6 +53,8 @@ function plan(layout) {
         for (const w of WIDTHS) list.push([`${page}-${w}`, `/${page}.html`, w]);
     }
     for (const p of PLANTS) list.push([`plant-${p}-390`, `/components-clean.html?plant=${p}`, 390]);
+    // Three measured false-positive classes, each beside its true positive.
+    list.push(['false-positives-390', '/false-positives.html', 390]);
     return list;
 }
 
