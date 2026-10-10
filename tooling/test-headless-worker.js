@@ -1104,6 +1104,110 @@ try {
             /settle --code <CODE> \[--started-at <iso>\]/.test(help.stdout), help.stdout.slice(0, 120));
     }
 
+    // ------------------------------------------------------------ 24f. a refused login settles as auth-refused
+    // `[measured 2026-10-10]` two workers ran about 50 minutes, then every turn
+    // ended in a stream-json result event refusing the login, and the supervisor
+    // wrote CLAUDE_EXIT=1. They settled as plain unreported and nothing named the
+    // login. One planted log per pattern, each through the real script, plus
+    // negatives built from the same refusal text, so a pass is not a matcher that
+    // fires on any mention of a subscription.
+    {
+        const dir = path.join(ROOT, 'T24f');
+        const ledger = path.join(dir, 'ledger.json');
+        const dead = runBudgeted(process.execPath, ['-e', 'process.exit(0)'], { encoding: 'utf8', timeout: 20000 });
+        const now = new Date().toISOString();
+        const INCIDENT = 'Your organization has disabled Claude subscription access for Claude Code · Use an Anthropic API key instead, or ask your admin to enable access';
+        const FIXTURES = {
+            'subscription-disabled': INCIDENT,
+            'not-logged-in': 'Not logged in · Please run /login',
+            'invalid-api-key': 'Invalid API key · Please run /login',
+            'oauth-expired': 'OAuth token has expired. Please obtain a new token or refresh your existing token.',
+            'run-login': 'Please run /login to sign in again.',
+        };
+        const ev = (o) => JSON.stringify(o);
+        const init = ev({ type: 'system', subtype: 'init', session_id: 's1', cwd: dir, model: 'm' });
+        const result = (text, isError = true) => ev({ type: 'result', subtype: 'success', is_error: isError, num_turns: 1, result: text, session_id: 's1' });
+        const said = (text) => ev({ type: 'assistant', message: { content: [{ type: 'text', text }] } });
+        const mk = (code, lines, { exit = 1, reportText = null, staleReport = false } = {}) => {
+            const rec = { code, pid: dead.pid, startedAt: now, log: path.join(dir, code + '.log'), report: path.join(dir, code + '.report.md'), promptFile: PROMPT, configDir: null, model: null, permissionMode: 'default', state: 'running' };
+            write(rec.log, [init, ...lines, ...(exit === null ? [] : [`CLAUDE_EXIT=${exit}`])].join('\n') + '\n');
+            if (reportText !== null) write(rec.report, reportText);
+            if (staleReport) { const old = new Date(Date.now() - 3600 * 1000); fs.utimesSync(rec.report, old, old); }
+            return rec;
+        };
+        const ids = Object.keys(FIXTURES);
+        const codeOf = (id) => ('AR-' + id).slice(0, 24);
+        const records = [
+            ...ids.map((id) => mk(codeOf(id), [said('working on it'), result(FIXTURES[id])])),
+            mk('AR-UNREP', [result(INCIDENT)]),
+            mk('AR-STALE', [result(INCIDENT)], { reportText: 'RESULT AR-STALE done: an earlier run.\n', staleReport: true }),
+            mk('AR-HASLINE', [result(INCIDENT)], { reportText: 'RESULT AR-HASLINE done: it wrote its report first.\n' }),
+            mk('AR-NOEXIT', [result(INCIDENT)], { exit: null }),
+            // Planted negatives: the incident text in prose, a refusal followed by a run that worked, and a quoted one.
+            mk('NEG-PROSE', [result(`Done. The settings page banner read "${INCIDENT}", and I documented it.`, false)], { exit: 0 }),
+            mk('NEG-PROSE-U', [result(`Checked the subscription notice: ${INCIDENT}`, false)], { exit: 0 }),
+            mk('NEG-EARLIER', [result(INCIDENT), said('retrying'), result('All three steps done and verified.', false)], { exit: 0 }),
+            mk('NEG-QUOTED', [said(result(INCIDENT))], { exit: 0 }),
+        ];
+        write(ledger, JSON.stringify({ version: 1, records }, null, 2) + '\n');
+        const recOf = (code) => JSON.parse(read(ledger)).records.find((r) => r.code === code) || null;
+        const { AUTH_REFUSAL_PATTERNS } = require(SCRIPT);
+        check('24f. control: the exported pattern list has one fixture here per pattern, and the dead pid is real',
+            AUTH_REFUSAL_PATTERNS.length === ids.length && AUTH_REFUSAL_PATTERNS.every((p) => ids.includes(p.id)) && Number.isInteger(dead.pid), AUTH_REFUSAL_PATTERNS.map((p) => p.id).join());
+
+        const pre = hw(['status', '--ledger', ledger, '--json']);
+        const preBy = Object.fromEntries((pre.json ? pre.json.value.records : []).map((r) => [r.code, r]));
+        check('24f. before settle, status names the refusal on an exited run and on no planted negative',
+            !!preBy['AR-UNREP'] && preBy['AR-UNREP'].authRefused === INCIDENT && ['NEG-PROSE', 'NEG-EARLIER', 'NEG-QUOTED'].every((c) => preBy[c] && preBy[c].authRefused === null)
+                && preBy['AR-NOEXIT'] && preBy['AR-NOEXIT'].authRefused === null, JSON.stringify(preBy['AR-UNREP'] || null).slice(0, 240));
+
+        for (const id of ids) {
+            const code = codeOf(id);
+            const r = hw(['settle', '--code', code, '--ledger', ledger]);
+            const v = r.json && r.json.ok ? r.json.value : null;
+            const rec = recOf(code);
+            check(`24f. plain settle files ${id} as auth-refused, with the refusal text as its reason and the pattern that matched`,
+                r.exit === 0 && !!v && v.state === 'auth-refused' && v.reason === FIXTURES[id] && v.pattern === id && v.exit === 1
+                    && rec.state === 'settled' && rec.result === 'auth-refused' && rec.reason === FIXTURES[id] && rec.authPattern === id, r.stdout.slice(0, 240));
+        }
+        const un = hw(['settle', '--code', 'AR-UNREP', '--unreported', '--ledger', ledger]);
+        check('24f. settle --unreported files a refused run as auth-refused, never unreported',
+            un.exit === 0 && un.json && un.json.ok && un.json.value.state === 'auth-refused' && recOf('AR-UNREP').result === 'auth-refused' && recOf('AR-UNREP').reason === INCIDENT, un.stdout.slice(0, 240));
+        const stale = hw(['settle', '--code', 'AR-STALE', '--ledger', ledger]);
+        check('24f. a stale report is an earlier run\'s word, so the refusal settles the run instead of stale-report',
+            stale.exit === 0 && stale.json && stale.json.ok && stale.json.value.state === 'auth-refused', stale.stdout.slice(0, 240));
+        const has = hw(['settle', '--code', 'AR-HASLINE', '--ledger', ledger]);
+        check('24f. a report with this run\'s RESULT line is the worker\'s word and wins over the refusal',
+            has.exit === 0 && has.json && has.json.ok && has.json.value.state === 'done' && recOf('AR-HASLINE').result === 'done', has.stdout.slice(0, 240));
+        const noexit = hw(['settle', '--code', 'AR-NOEXIT', '--ledger', ledger]);
+        check('24f. a refusal with no exit line is not an ended run: plain settle still refuses not-exited',
+            noexit.exit === 1 && noexit.json && noexit.json.error.code === 'not-exited' && recOf('AR-NOEXIT').state === 'running', noexit.stdout.slice(0, 240));
+
+        const prose = hw(['settle', '--code', 'NEG-PROSE', '--ledger', ledger]);
+        check('24f. planted negative: a normal result quoting the refusal in prose is NOT auth-refused (plain settle refuses no-result)',
+            prose.exit === 1 && prose.json && prose.json.error.code === 'no-result' && recOf('NEG-PROSE').state === 'running', prose.stdout.slice(0, 240));
+        const proseU = hw(['settle', '--code', 'NEG-PROSE-U', '--unreported', '--ledger', ledger]);
+        check('24f. planted negative: a result mentioning "subscription" in prose settles --unreported as unreported',
+            proseU.exit === 0 && proseU.json && proseU.json.ok && proseU.json.value.state === 'unreported' && recOf('NEG-PROSE-U').result === 'unreported', proseU.stdout.slice(0, 240));
+        const earlier = hw(['settle', '--code', 'NEG-EARLIER', '--unreported', '--ledger', ledger]);
+        check('24f. planted negative: a refusal followed by a result that worked reads the LAST result, so unreported',
+            earlier.exit === 0 && earlier.json && earlier.json.ok && earlier.json.value.state === 'unreported', earlier.stdout.slice(0, 240));
+        const quoted = hw(['settle', '--code', 'NEG-QUOTED', '--unreported', '--ledger', ledger]);
+        check('24f. planted negative: a result event quoted inside a message is not a result event, so unreported',
+            quoted.exit === 0 && quoted.json && quoted.json.ok && quoted.json.value.state === 'unreported', quoted.stdout.slice(0, 240));
+
+        const st = hw(['status', '--ledger', ledger, '--json']);
+        const by = Object.fromEntries((st.json ? st.json.value.records : []).map((r) => [r.code, r]));
+        check('24f. status --json reports settledAs auth-refused with the refusal as settleReason, and no lostReason',
+            !!by['AR-UNREP'] && by['AR-UNREP'].settledAs === 'auth-refused' && by['AR-UNREP'].settleReason === INCIDENT && by['AR-UNREP'].lostReason === null
+                && by['NEG-PROSE-U'].settledAs === 'unreported', JSON.stringify(by['AR-UNREP'] || null).slice(0, 240));
+        const human = hw(['status', '--ledger', ledger]).stdout;
+        check('24f. status without --json names it settledAs=auth-refused with the refusal text',
+            human.includes('AR-UNREP pid=') && /AR-UNREP [^\n]*settledAs=auth-refused \(Your organization has disabled/.test(human) && !/NEG-PROSE-U[^\n]*auth-refused/.test(human), human.slice(0, 300));
+        const usage = hw(['--help']).stdout;
+        check('24f. the usage text says a refused login settles as auth-refused, plain or --unreported', /settle, auth-refused: /.test(usage) && /its own\s+result, never done, stopped, failed or unreported/.test(usage.replace(/\n\s+/g, ' ')));
+    }
+
     // ------------------------------------------------------------ 25. a worker asks by file and keeps working
     // `[measured 2026-09-22]` workers asked by exiting, so every question cost a
     // relaunch. The prompt must name ask.json and answer.json in the scratch
