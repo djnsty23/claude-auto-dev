@@ -303,9 +303,16 @@ function git(cwd, args) {
   return r.error || r.signal || r.status !== 0 ? null : r.stdout.trim();
 }
 
+// The JS realpath keeps an 8.3 short name (C:\Users\RUNNER~1), while git prints
+// the long one, so a worktree under a short TEMP never matched its own toplevel
+// and every row read git-unreadable. The native call expands short names.
+function realPath(p) {
+  return process.platform === 'win32' ? fs.realpathSync.native(p) : fs.realpathSync(p);
+}
+
 function samePath(a, b) {
   const normalize = (p) => {
-    const real = fs.realpathSync(p);
+    const real = realPath(p);
     return process.platform === 'win32' ? real.toLowerCase() : real;
   };
   return normalize(a) === normalize(b);
@@ -325,7 +332,7 @@ function worktreeIdentity(dir) {
       if (parent.status === 128 && !parent.error && !parent.signal && /not a git repository/.test(parent.stderr)) return 'leftover';
       if (!answered(parent, [0])) return 'unreadable';
       const top = parent.stdout.trim();
-      const rel = path.relative(top, fs.realpathSync(dir)).replace(/\\/g, '/');
+      const rel = path.relative(realPath(top), realPath(dir)).replace(/\\/g, '/');
       if (!rel || rel === '..' || rel.startsWith('../') || path.isAbsolute(rel)) return 'invalid';
       const tracked = gitRun(top, ['ls-files', '-z', '--', rel]);
       if (!answered(tracked, [0])) return 'unreadable';
@@ -419,10 +426,10 @@ function preserveLocal(s, all, files) {
     };
     if (within(path.resolve(wt), archiveDir)) throw new Error('archive directory is inside the worktree');
     fs.mkdirSync(archiveDir, { recursive: true, mode: 0o700 });
-    if (within(fs.realpathSync(wt), fs.realpathSync(archiveDir))) throw new Error('archive directory resolves inside the worktree');
+    if (within(realPath(wt), realPath(archiveDir))) throw new Error('archive directory resolves inside the worktree');
     const common = identity === 'linked' ? git(wt, ['rev-parse', '--git-common-dir']) : null;
     if (identity === 'linked' && !common) throw new Error('repository identity unreadable');
-    const repo = common ? fs.realpathSync(path.resolve(wt, common)) : fs.realpathSync(repoDirOf(s) || path.dirname(wt));
+    const repo = common ? realPath(path.resolve(wt, common)) : realPath(repoDirOf(s) || path.dirname(wt));
     const repoHash = createHash('sha256').update(process.platform === 'win32' ? repo.toLowerCase() : repo).digest('hex').slice(0, 10);
     const stamp = new Date().toISOString().replace(/[-:.]/g, '');
     const archive = path.join(archiveDir, path.basename(wt) + '-' + repoHash + '-' + stamp + '-' + randomBytes(4).toString('hex') + '.tgz');
