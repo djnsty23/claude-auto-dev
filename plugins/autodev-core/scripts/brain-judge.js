@@ -75,7 +75,7 @@ const USAGE = [
     '       node brain-judge.js judge --task-id <id> [--judge-bin <path>]',
     '       node brain-judge.js backfill [--limit 10] [--since <iso>] [--judge-bin <path>]',
     '       node brain-judge.js compare',
-    '       node brain-judge.js switch [--judge off|dry|live] [--start off|dry|live]',
+    '       node brain-judge.js switch [--judge off|dry|live] [--start off|dry|live] [--config-dir <dir>|default]',
     '       node brain-judge.js log [--limit 20]',
     '       node brain-judge.js probe [--worker-bin <path>] [--config-dir <dir>]',
     '       every command: [--state-dir <dir>] [--ledger <file>] [--headless-ledger <file>] [--clock-dir <dir>]',
@@ -212,10 +212,11 @@ function writeJson(file, value) {
 /** The kill switch. Absent: dry for both. Unreadable or an unknown mode: off, because a guessed live is the costly mistake. */
 function readSwitch(stateDir) {
     const raw = readJson(path.join(stateDir, 'switch.json'), null);
-    if (raw === null) return { judge: 'dry', start: 'dry', source: 'default' };
-    if (!raw || typeof raw !== 'object') return { judge: 'off', start: 'off', source: 'unreadable' };
+    if (raw === null) return { judge: 'dry', start: 'dry', source: 'default', judgeConfigDir: null };
+    if (!raw || typeof raw !== 'object') return { judge: 'off', start: 'off', source: 'unreadable', judgeConfigDir: null };
     const pick = (v) => (MODES.includes(v) ? v : 'off');
-    return { judge: pick(raw.judge), start: pick(raw.start), source: 'file', at: raw.at || null };
+    const judgeConfigDir = typeof raw.judgeConfigDir === 'string' && raw.judgeConfigDir ? raw.judgeConfigDir : null;
+    return { judge: pick(raw.judge), start: pick(raw.start), source: 'file', at: raw.at || null, judgeConfigDir };
 }
 
 /** A step is live only when both keys say so: the switch file and the caller's --live. */
@@ -336,20 +337,29 @@ function authRefusedKeys(records, ledgers, defaultLedger) {
     return keys;
 }
 
+/** The config dir a task's run will log in with, as the headless ledger names it: its basename, null for the default. */
+function cfgKey(raw) {
+    if (!raw) return null;
+    try { return path.basename(hw.resolveConfigDir(String(raw))); } catch { return path.basename(String(raw)); }
+}
+
 /** The probes `probe` logged, oldest first. */
 function readProbes(stateDir) { const r = readJsonl(path.join(stateDir, 'probes.jsonl')); return r ? r.rows : []; }
 
 /**
  * Why start must wait on a refused login, or null. The newest settled run that
  * was refused holds start until a settled run started after it succeeded, or a
- * probe on the same config dir passed after it settled. An unreadable headless
+ * probe on the same config dir passed after it settled. Each config dir is its
+ * own login, so the hold is per config dir: cfg is the basename the headless
+ * ledger records, null for the default. An unreadable headless
  * ledger holds start too: a refusal in it cannot be ruled out.
  */
-function authHold(ledgers, probes) {
+function authHold(ledgers, probes, cfg = null) {
     const runs = [];
     for (const [file, recs] of ledgers) {
         if (recs instanceof Error) return { line: `${file} could not be read (${recs.publicCode || recs.code || 'error'}), so a refused login cannot be ruled out` };
-        for (const r of recs) if (r.state === 'settled') runs.push(r);
+        // A login belongs to one config dir: a refusal or a success on another account says nothing about this one.
+        for (const r of recs) if (r.state === 'settled' && (r.configDir || null) === cfg) runs.push(r);
     }
     const refused = runs.filter((r) => r.result === 'auth-refused' && ms(r.startedAt) !== null)
         .sort((a, b) => ms(a.startedAt) - ms(b.startedAt)).pop();
@@ -357,7 +367,6 @@ function authHold(ledgers, probes) {
     const since = ms(refused.startedAt);
     if (runs.some((r) => ms(r.startedAt) > since && runStatusOfHeadless(r.result, r.exit) === 'succeeded')) return null;
     const settled = ms(refused.settledAt) ?? since;
-    const cfg = refused.configDir || null;
     if (probes.some((pr) => pr.passed === true && ms(pr.at) !== null && ms(pr.at) > settled && (pr.configDir || null) === cfg)) return null;
     return {
         run: { code: refused.code, startedAt: refused.startedAt, reason: refused.reason || null, configDir: cfg },
@@ -510,13 +519,13 @@ function reportPathOf(rec, reportsDir) {
 }
 
 /** Run the judge for one record. Tool-less, capped in turns and dollars, prompt on stdin. */
-function judgeRecord(rec, { judgeBin, model = JUDGE_MODEL, cwd, reportsDir }) {
+function judgeRecord(rec, { judgeBin, model = JUDGE_MODEL, cwd, reportsDir, configDir = null }) {
     const file = reportPathOf(rec, reportsDir);
     const report = file ? tailText(file, REPORT_TAIL_BYTES) : { text: null, size: 0, cut: false };
     const brief = rec.briefFile ? headText(rec.briefFile, BRIEF_HEAD_BYTES) : null;
     const prompt = buildJudgePrompt(rec, report, brief);
     const plan = hw.spawnPlan(judgeArgv(hw.resolveClaudeBin(judgeBin || 'claude'), model));
-    const { env } = hw.buildEnv(process.env, { code: 'brain-judge', configDir: null });
+    const { env } = hw.buildEnv(process.env, { code: 'brain-judge', configDir });
     const started = Date.now();
     fs.mkdirSync(cwd, { recursive: true });
     const r = spawnSync(plan.command, plan.args, { input: prompt, encoding: 'utf8', timeout: JUDGE_TIMEOUT_MS, windowsHide: true, env, cwd, maxBuffer: 16 * 1024 * 1024 });
@@ -612,7 +621,7 @@ function judgeAndLog(rec, mode, ctx, source) {
     const { p, out } = ctx;
     const at = new Date().toISOString();
     const key = judgementKey(rec);
-    const j = judgeRecord(rec, { judgeBin: ctx.opts['judge-bin'], model: ctx.opts.model || JUDGE_MODEL, cwd: p.state, reportsDir: p.reports });
+    const j = judgeRecord(rec, { judgeBin: ctx.opts['judge-bin'], model: ctx.opts.model || JUDGE_MODEL, cwd: p.state, reportsDir: p.reports, configDir: readSwitch(p.state).judgeConfigDir });
     appendJsonl(path.join(p.state, 'runs.jsonl'), { at, key, taskId: rec.taskId, source, ok: j.ok, error: j.error || null, costUsd: j.costUsd ?? null, turns: j.turns ?? null, durationMs: j.durationMs });
     if (!j.ok) {
         out.events.push({ type: 'judge.error', key, detail: { taskId: rec.taskId, slug: rec.slug, error: j.error, costUsd: j.costUsd ?? null } });
@@ -636,9 +645,22 @@ function startStep(ctx) {
     const { mode, p, out, br, state } = ctx;
     if (mode === 'off') { out.lines.push('start: off'); return; }
     if (br.open) { out.lines.push(`start: BREAKER OPEN: ${br.reasons.join('; ')}`); return; }
-    const hold = authHold(headlessLedgers(ctx), readProbes(p.state));
-    if (hold) { out.lines.push(`start (${mode}): held, nothing starts: ${hold.line}`); return; }
-    const plan = uw.planStarts(ctx.records, { now: ctx.now, maxConcurrent: START_MAX_CONCURRENT, maxPerHour: START_MAX_PER_HOUR });
+    const ledgers = headlessLedgers(ctx);
+    const probes = readProbes(p.state);
+    const holds = new Map();
+    const holdFor = (cfg) => { if (!holds.has(cfg)) holds.set(cfg, authHold(ledgers, probes, cfg)); return holds.get(cfg); };
+    // A held task leaves the plan before slots are handed out, so it cannot starve a task whose login works.
+    const held = new Map();
+    for (const r of ctx.records) {
+        if (r.state !== 'queued') continue;
+        const h = holdFor(cfgKey(r.launch && r.launch.configDir));
+        if (h) held.set(r.taskId, h);
+    }
+    const queued = ctx.records.filter((r) => r.state === 'queued').length;
+    const allHeld = queued ? held.size === queued && held.values().next().value : holdFor(null);
+    if (allHeld) { out.lines.push(`start (${mode}): held, nothing starts: ${allHeld.line}`); return; }
+    const planRecords = ctx.records.map((r) => (held.has(r.taskId) ? { ...r, state: 'held' } : r));
+    const plan = uw.planStarts(planRecords, { now: ctx.now, maxConcurrent: START_MAX_CONCURRENT, maxPerHour: START_MAX_PER_HOUR });
     out.lines.push(`start (${mode}): ${plan.ready.length} ready, ${plan.pending.length} waiting on a dependency, ${plan.blocked.length} blocked, `
         + `${plan.capped.length} over the cap; ${plan.running} running, ${plan.launchedLastHour} launched in the last hour`);
     for (const b of plan.blocked) {
@@ -648,6 +670,7 @@ function startStep(ctx) {
         state.reported[k] = b.reason;
         out.events.push({ type: 'judge.start-blocked', key: b.taskId, detail: b });
     }
+    for (const [id, h] of held) out.lines.push(`start (${mode}): ${id} held: ${h.line}`);
     for (const taskId of plan.ready) {
         if (mode === 'dry') {
             const k = `would:${taskId}`;
@@ -858,9 +881,18 @@ function probeArgv(bin) {
 function setSwitch(opts) {
     const p = pathsFor(opts);
     for (const k of ['judge', 'start']) if (opts[k] !== undefined && !MODES.includes(opts[k])) fault('usage', `--${k} must be one of ${MODES.join(', ')}`);
-    if (opts.judge === undefined && opts.start === undefined) return { switch: readSwitch(p.state) };
+    if (opts.judge === undefined && opts.start === undefined && opts['config-dir'] === undefined) return { switch: readSwitch(p.state) };
     const current = readSwitch(p.state);
-    const next = { judge: opts.judge || current.judge, start: opts.start || current.start, at: new Date().toISOString() };
+    let judgeConfigDir = current.judgeConfigDir;
+    if (opts['config-dir'] !== undefined) {
+        const raw = String(opts['config-dir']);
+        judgeConfigDir = raw === 'default' ? null : hw.resolveConfigDir(raw);
+        // A judge pointed at a directory with no login fails every run, and the breaker would read that as the clock failing.
+        if (judgeConfigDir && !(fs.existsSync(judgeConfigDir) && fs.statSync(judgeConfigDir).isDirectory())) {
+            fault('config-dir-missing', `--config-dir resolved to ${judgeConfigDir}, which is not a directory, so the judge would have no login`);
+        }
+    }
+    const next = { judge: opts.judge || current.judge, start: opts.start || current.start, ...(judgeConfigDir ? { judgeConfigDir } : {}), at: new Date().toISOString() };
     writeJson(path.join(p.state, 'switch.json'), next);
     return { switch: readSwitch(p.state), previous: current };
 }
