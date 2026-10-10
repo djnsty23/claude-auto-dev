@@ -31,7 +31,8 @@
  *           as escalate, so one bad report cannot hold the queue or keep spending.
  *   start   the queued tasks unattended-worker.js planStarts calls ready, at
  *           most START_MAX_CONCURRENT running and START_MAX_PER_HOUR an hour,
- *           each through unattended-worker.js launch.
+ *           each through unattended-worker.js launch. Nothing starts while the
+ *           newest settled headless run was refused its login (see authHold).
  *
  * THE KILL SWITCH. `switch.json` in the state directory holds a mode for judge
  * and start, off, dry or live. An absent file means dry for both, and an
@@ -76,11 +77,15 @@ const USAGE = [
     '       node brain-judge.js compare',
     '       node brain-judge.js switch [--judge off|dry|live] [--start off|dry|live]',
     '       node brain-judge.js log [--limit 20]',
+    '       node brain-judge.js probe [--worker-bin <path>] [--config-dir <dir>]',
     '       every command: [--state-dir <dir>] [--ledger <file>] [--headless-ledger <file>] [--clock-dir <dir>]',
     'tick: close settled headless runs, judge finished ones, start ready queued work. The Brain clock runs it.',
     'switch: the kill switch. A step is live only when the switch says live AND tick gets --live.',
     '        An absent switch file means dry for both steps, an unreadable one means off for both.',
     'judge and backfill judge for real and log the verdict; neither writes it to the ledger, nor counts toward tick\'s caps.',
+    'auth-refused: when the newest settled headless run was refused its login, tick starts nothing and judges no run',
+    '        that was refused, until a later run succeeds or probe passes on that config dir after it settled.',
+    'probe: one tool-less claude -p on the workers\' login, logged to probes.jsonl; a refusal or failure exits 1.',
     'Output: {"ok":true,"value":{...}} exit 0; {"ok":false,"error":{"code","message"}} exit 1.',
     'compare: the logged verdicts against what the Brain did next. The Brain side is inferred.',
 ].join('\n') + '\n';
@@ -108,6 +113,9 @@ const REPORT_TAIL_BYTES = 8 * 1024;
 const BRIEF_HEAD_BYTES = 3 * 1024;
 const TICK_LOCK_STALE_MS = 10 * 60 * 1000;
 const SUCCESSOR_WINDOW_MS = 24 * HOUR_MS;
+// `[measured 2026-10-10]` a refused `claude -p` answered in under 5 s; a minute covers a slow login that works.
+const PROBE_TIMEOUT_MS = 60 * 1000;
+const PROBE_PROMPT = 'Reply with the single word OK.';
 // A retry is the same topic with a counter: vistek-paste-files-2, autodev-train-0927b, vistek-train2.
 const STEM_RE = /(?:-?\d+[a-z]?|-[a-z])$/;
 const VERDICT_SCHEMA = {
@@ -141,7 +149,7 @@ function parseArgs(argv) {
     const out = { _: [] };
     const flags = ['help', 'live', 'dev'];
     const known = ['_', ...flags, 'state-dir', 'ledger', 'headless-ledger', 'clock-dir', 'judge-bin', 'worker-bin', 'headless-worker',
-        'task-id', 'limit', 'since', 'judge', 'start', 'model', 'budget-sec'];
+        'task-id', 'limit', 'since', 'judge', 'start', 'model', 'budget-sec', 'config-dir'];
     for (let i = 0; i < argv.length; i++) {
         const a = argv[i];
         if (a === '--help' || a === '-h' || a === 'help') { out.help = true; continue; }
@@ -300,6 +308,64 @@ function headlessRunOf(rec, headlessRecords) {
 /** A normal report and a recorded zero exit are both required for success. */
 function runStatusOfHeadless(result, exit) { return exit === 0 && (result === 'done' || result === 'stopped') ? 'succeeded' : 'failed'; }
 
+// ---------------------------------------------------------------- a refused login
+// `[measured 2026-10-10]` two headless workers were refused their login after
+// about 50 minutes (headless-worker.js AUTH_REFUSAL_PATTERNS), and this start
+// step would have launched the next queued worker into the same refusal. A run
+// settled auth-refused therefore holds every start until a later run succeeds
+// or `probe` passes on that login, and it is never judged: it never ran.
+
+/** Every headless ledger the tick can see: the default one and each a record names. Read once each. */
+function headlessLedgers(ctx) {
+    const files = new Set([ctx.p.headlessLedger]);
+    for (const r of ctx.records) if (r.headless && r.headless.ledger) files.add(path.resolve(r.headless.ledger));
+    const out = new Map();
+    for (const f of files) { try { out.set(f, hw.readLedger(f).records); } catch (e) { out.set(f, e); } }
+    return out;
+}
+
+/** The judgement keys of finished records whose headless run settled auth-refused. */
+function authRefusedKeys(records, ledgers, defaultLedger) {
+    const keys = new Set();
+    for (const rec of records) {
+        if (rec.channel !== 'headless' || !uw.FINISHED.includes(rec.state)) continue;
+        const runs = ledgers.get(path.resolve((rec.headless && rec.headless.ledger) || defaultLedger));
+        const h = Array.isArray(runs) ? headlessRunOf(rec, runs) : null;
+        if (h && h.state === 'settled' && h.result === 'auth-refused') keys.add(judgementKey(rec));
+    }
+    return keys;
+}
+
+/** The probes `probe` logged, oldest first. */
+function readProbes(stateDir) { const r = readJsonl(path.join(stateDir, 'probes.jsonl')); return r ? r.rows : []; }
+
+/**
+ * Why start must wait on a refused login, or null. The newest settled run that
+ * was refused holds start until a settled run started after it succeeded, or a
+ * probe on the same config dir passed after it settled. An unreadable headless
+ * ledger holds start too: a refusal in it cannot be ruled out.
+ */
+function authHold(ledgers, probes) {
+    const runs = [];
+    for (const [file, recs] of ledgers) {
+        if (recs instanceof Error) return { line: `${file} could not be read (${recs.publicCode || recs.code || 'error'}), so a refused login cannot be ruled out` };
+        for (const r of recs) if (r.state === 'settled') runs.push(r);
+    }
+    const refused = runs.filter((r) => r.result === 'auth-refused' && ms(r.startedAt) !== null)
+        .sort((a, b) => ms(a.startedAt) - ms(b.startedAt)).pop();
+    if (!refused) return null;
+    const since = ms(refused.startedAt);
+    if (runs.some((r) => ms(r.startedAt) > since && runStatusOfHeadless(r.result, r.exit) === 'succeeded')) return null;
+    const settled = ms(refused.settledAt) ?? since;
+    const cfg = refused.configDir || null;
+    if (probes.some((pr) => pr.passed === true && ms(pr.at) !== null && ms(pr.at) > settled && (pr.configDir || null) === cfg)) return null;
+    return {
+        run: { code: refused.code, startedAt: refused.startedAt, reason: refused.reason || null, configDir: cfg },
+        line: `the newest settled headless run ${refused.code} (started ${refused.startedAt}${cfg ? `, config dir ${cfg}` : ''}) was refused its login: `
+            + `"${String(refused.reason || '').slice(0, 200)}". A claude -p probe must pass first: node brain-judge.js probe${cfg ? ` --config-dir ~/${cfg}` : ''}`,
+    };
+}
+
 function closeStep(ctx) {
     const { mode, p, out, state } = ctx;
     // A record names the headless ledger its run was started in; read each one once.
@@ -331,7 +397,8 @@ function closeStep(ctx) {
             const observed = hw.recordStatus(h, hw.bootAt(), undefined, headless);
             const detail = { taskId: rec.taskId, slug: rec.slug, process: observed.process,
                 exit: observed.exit, ask: observed.ask,
-                lostReason: observed.exit === null ? hw.lostReason(h, hw.bootAt()) : null };
+                lostReason: observed.exit === null ? hw.lostReason(h, hw.bootAt()) : null,
+                ...(observed.authRefused ? { authRefused: observed.authRefused } : {}) };
             const signature = JSON.stringify(detail);
             if (state.reported[`pending:${key}`] !== signature) {
                 state.reported[`pending:${key}`] = signature;
@@ -340,7 +407,8 @@ function closeStep(ctx) {
             continue;
         }
         const runStatus = runStatusOfHeadless(h.result, h.exit);
-        const detail = { taskId: rec.taskId, slug: rec.slug, result: h.result, runStatus, sentence: String(h.sentence || '').slice(0, 200) };
+        const detail = { taskId: rec.taskId, slug: rec.slug, result: h.result, runStatus, sentence: String(h.sentence || '').slice(0, 200),
+            ...(h.result === 'auth-refused' ? { reason: String(h.reason || '').slice(0, 200) } : {}) };
         if (mode === 'dry') {
             closed++;
             if (state.reported[`would-close:${key}`]) continue;
@@ -476,9 +544,13 @@ function judgeStep(ctx) {
     if (br.judgeOpen) { out.lines.push(`judge: BREAKER OPEN: ${br.judgeOpen}`); return; }
     const runs = readJsonl(path.join(p.state, 'runs.jsonl'));
     const lastHour = tickRuns(runs ? runs.rows : []).filter((r) => ms(r.at) !== null && now - ms(r.at) < HOUR_MS).length;
-    const todo = judgeCandidates(ctx.records, new Set(latest.keys()), ctx.sinceMs);
+    const all = judgeCandidates(ctx.records, new Set(latest.keys()), ctx.sinceMs);
+    // A run whose login was refused never worked: there is nothing to judge, so nothing is spent on it.
+    const refused = authRefusedKeys(ctx.records, headlessLedgers(ctx), p.headlessLedger);
+    const todo = all.filter((r) => !refused.has(judgementKey(r)));
     const room = Math.max(0, Math.min(JUDGE_PER_TICK, JUDGE_PER_HOUR - lastHour));
-    out.lines.push(`judge (${mode}): ${todo.length} awaiting a verdict, ${lastHour} judge runs in the last hour, room for ${room}`);
+    out.lines.push(`judge (${mode}): ${todo.length} awaiting a verdict, ${lastHour} judge runs in the last hour, room for ${room}`
+        + `${all.length > todo.length ? `, ${all.length - todo.length} skipped: their login was refused, so the run never worked` : ''}`);
     for (const rec of todo.slice(0, room)) {
         if (ctx.left() < JUDGE_TIMEOUT_MS) { out.lines.push(`judge: deferred to the next tick, ${Math.round(ctx.left() / 1000)} s left of the budget`); break; }
         judgeAndLog(rec, mode, ctx, 'tick');
@@ -564,6 +636,8 @@ function startStep(ctx) {
     const { mode, p, out, br, state } = ctx;
     if (mode === 'off') { out.lines.push('start: off'); return; }
     if (br.open) { out.lines.push(`start: BREAKER OPEN: ${br.reasons.join('; ')}`); return; }
+    const hold = authHold(headlessLedgers(ctx), readProbes(p.state));
+    if (hold) { out.lines.push(`start (${mode}): held, nothing starts: ${hold.line}`); return; }
     const plan = uw.planStarts(ctx.records, { now: ctx.now, maxConcurrent: START_MAX_CONCURRENT, maxPerHour: START_MAX_PER_HOUR });
     out.lines.push(`start (${mode}): ${plan.ready.length} ready, ${plan.pending.length} waiting on a dependency, ${plan.blocked.length} blocked, `
         + `${plan.capped.length} over the cap; ${plan.running} running, ${plan.launchedLastHour} launched in the last hour`);
@@ -728,7 +802,8 @@ function backfill(opts) {
     const keys = new Set((judged ? judged.rows : []).map((j) => j.key));
     const sinceMs = opts.since ? ms(opts.since) : null;
     if (opts.since && sinceMs === null) fault('usage', '--since must be an ISO date');
-    const todo = records.filter((r) => uw.FINISHED.includes(r.state) && r.runStatus && !r.verdict && !keys.has(judgementKey(r)))
+    const refused = authRefusedKeys(records, headlessLedgers({ p, records }), p.headlessLedger);
+    const todo = records.filter((r) => uw.FINISHED.includes(r.state) && r.runStatus && !r.verdict && !keys.has(judgementKey(r)) && !refused.has(judgementKey(r)))
         .filter((r) => sinceMs === null || (ms(r.startedAt) !== null && ms(r.startedAt) >= sinceMs))
         .slice(0, limitOpt(opts, 10));
     const ctx = { opts, p, out: { lines: [], events: [] } };
@@ -747,6 +822,37 @@ function judgeOne(opts) {
     const ctx = { opts, p, out: { lines: [], events: [] } };
     const j = judgeAndLog(rec, 'manual', ctx, 'manual');
     return { taskId: rec.taskId, ...j };
+}
+
+/**
+ * One tool-less `claude -p` on the workers' login, logged to probes.jsonl. A
+ * pass after a refused run settled lifts the start hold for that config dir.
+ * A refusal or any other failure exits 1 and is logged too, so the log is the
+ * whole history of the login.
+ */
+function probe(opts) {
+    const p = pathsFor(opts);
+    const configDir = opts['config-dir'] ? hw.resolveConfigDir(opts['config-dir']) : null;
+    const plan = hw.spawnPlan(probeArgv(hw.resolveClaudeBin(opts['worker-bin'] || 'claude')));
+    const { env } = hw.buildEnv(process.env, { code: 'brain-judge-probe', configDir });
+    fs.mkdirSync(p.state, { recursive: true });
+    const r = spawnSync(plan.command, plan.args, { input: PROBE_PROMPT, encoding: 'utf8', timeout: PROBE_TIMEOUT_MS, windowsHide: true, env, cwd: p.state });
+    let doc = null;
+    try { doc = JSON.parse(String(r.stdout || '').trim().split(/\r?\n/).pop()); } catch { doc = null; }
+    const text = doc && typeof doc.result === 'string' ? doc.result.trim().slice(0, 300) : null;
+    const refusal = hw.matchAuthRefusal(text);
+    const passed = !r.error && r.status === 0 && !!doc && doc.is_error !== true && !refusal;
+    const row = { at: new Date().toISOString(), passed, exit: r.status, error: r.error ? (r.error.code || 'spawn-failed') : null,
+        refused: refusal ? refusal.text : null, text, configDir: configDir ? path.basename(configDir) : null };
+    appendJsonl(path.join(p.state, 'probes.jsonl'), row);
+    if (refusal) fault('auth-refused', `the probe was refused its login: "${refusal.text}"`);
+    if (!passed) fault('probe-failed', `the probe did not pass: ${row.error || `exit ${r.status}`}${text ? `, "${text.slice(0, 120)}"` : ', no result'}`);
+    return { probe: row };
+}
+
+function probeArgv(bin) {
+    return [bin, '-p', '--output-format', 'json', '--tools', '', '--strict-mcp-config', '--setting-sources', '',
+        '--max-turns', '1', '--no-session-persistence'];
 }
 
 function setSwitch(opts) {
@@ -775,6 +881,7 @@ function run(argv) {
     if (cmd === 'backfill') return backfill(opts);
     if (cmd === 'compare') return compare(opts);
     if (cmd === 'switch') return setSwitch(opts);
+    if (cmd === 'probe') return probe(opts);
     if (cmd === 'log') return showLog(opts);
     fault('usage', cmd ? `unknown command ${cmd}` : 'a command is required');
 }
@@ -794,5 +901,6 @@ if (require.main === module) {
 module.exports = {
     parseArgs, readSwitch, effectiveMode, reportPathOf, breaker, takeLock, headlessRunOf, runStatusOfHeadless, buildJudgePrompt, judgeArgv,
     parseJudgeOutput, judgeCandidates, revealedDecision, stem, readJsonl, run, pruneReported, tickRuns, writeVerdict, VERDICT_SCHEMA, RUBRIC,
+    authHold, authRefusedKeys, probeArgv,
     JUDGE_PER_TICK, JUDGE_PER_HOUR, JUDGE_FAILS_PER_RECORD, START_MAX_CONCURRENT, START_MAX_PER_HOUR,
 };
