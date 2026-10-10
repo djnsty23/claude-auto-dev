@@ -283,7 +283,9 @@ function headlessSource(s) {
             key: `headless-worker:${rec.code}:${rec.startedAt}`, source, kind: 'headless-worker', code: rec.code,
             title: clip((readText(rec.promptFile) || '').split('\n').find((l) => l.trim()) || rec.code, 90),
             project: project(cwd), cwd, account: rec.configDir || 'default', model: rec.model || (init && init.model) || null,
-            process: st.process, exit: st.exit, result: st.settled ? `${st.result} (settled)` : st.result, progress: lastActivity(st.log),
+            // A run whose login was refused says so: its report says nothing, and "none" read as a worker that left no report.
+            process: st.process, exit: st.exit, progress: lastActivity(st.log),
+            result: st.settled ? `${st.settledAs === 'auth-refused' ? st.settledAs : st.result} (settled)` : st.authRefused ? 'auth-refused' : st.result,
             lastAt: Math.max(mtime(st.log) || 0, mtime(st.report) || 0, ts(rec.startedAt) || 0) || null,
             pr: lastPr(reportText), question: st.ask === 'open' || st.ask === 'unreadable' ? question(st.askFile, st.answerFile) : null,
             live: st.process === 'running', answered: st.ask === 'answered', pid: rec.pid, session: init && init.session, settled: st.settled,
@@ -480,7 +482,7 @@ function actionsFor(r, s) {
     const a = [];
     if (r.question && r.answerFile) a.push('answer');
     if (r.source === 'headless-worker') {
-        if (r.process === 'exited' && !r.settled && /^(done|stopped|failed)$/.test(r.result)) a.push('settle');
+        if (r.process === 'exited' && !r.settled && /^(done|stopped|failed|auth-refused)$/.test(r.result)) a.push('settle');
         // A worker that finished its brief has nothing to continue, so relaunch is offered only
         // for one that stopped, failed, never reported, or was asked and has now been answered.
         if (!r.superseded && r.process !== 'running' && (!/^done\b/.test(r.result) || r.answered)) a.push('relaunch');
