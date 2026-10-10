@@ -28,7 +28,8 @@
  *      every commit was rebased in (the change is in the base already).
  *   4. It is idle: no transcript of any profile for this path, and none of its
  *      git admin files (HEAD, index, logs/HEAD), was written within the idle
- *      window (--idle-hours, 24 by default).
+ *      window (--idle-hours, 24 by default). logs/HEAD is dated by its newest
+ *      entry, because `git gc` rewrites the file without anyone working there.
  *   5. No lane lock, ticket or lease of the full gate names it, and no running
  *      process has its path in the command line (reap-build-output.js asks the
  *      same three questions before it deletes a `.next`).
@@ -212,6 +213,24 @@ function landed(rc, w) {
     return { reason: `not landed: ${missing} of its ${lines.length} commits have no equivalent in ${rc.base}, and no merged or closed pull request is at this HEAD` };
 }
 
+/**
+ * The newest entry time written inside a reflog, in ms, or null when no line
+ * parses. A reflog's mtime is not activity: `git gc` expires reflogs, and that
+ * rewrites logs/HEAD of every linked worktree of the repo. [measured 2026-10-10]
+ * free-disk ran gc just before this reaper, so 180 of 415 worktrees read as
+ * written minutes ago, and no run removed any of them.
+ */
+function reflogMs(file) {
+    let text;
+    try { text = fs.readFileSync(file, 'utf8'); } catch { return null; }
+    let ms = null;
+    for (const line of text.split('\n')) {
+        const m = /^[0-9a-f]+ [0-9a-f]+ .*> (\d+) [+-]\d{4}(?:\t|\r?$)/.exec(line);
+        if (m) ms = Math.max(ms === null ? 0 : ms, Number(m[1]) * 1000);
+    }
+    return ms;
+}
+
 /** The newest write that says someone works here, and where it was: { ms, source, why }. */
 function lastActivity(w, env) {
     const adm = git(w.dir, ['rev-parse', '--absolute-git-dir']);
@@ -220,7 +239,12 @@ function lastActivity(w, env) {
     let ms = 0;
     let source = null;
     for (const f of ['HEAD', 'index', path.join('logs', 'HEAD')]) {
-        try { const t = fs.statSync(path.join(admin, f)).mtimeMs; if (t > ms) { ms = t; source = `git ${f.replace(/\\/g, '/')}`; } } catch { /* absent */ }
+        const file = path.join(admin, f);
+        let t = null;
+        // A reflog with no parseable entry falls back to its mtime: unreadable keeps the worktree.
+        if (f !== 'HEAD' && f !== 'index') t = reflogMs(file);
+        if (t === null) { try { t = fs.statSync(file).mtimeMs; } catch { /* absent */ } }
+        if (t !== null && t > ms) { ms = t; source = `git ${f.replace(/\\/g, '/')}`; }
     }
     const tr = Math.max(residue.newestTranscriptMs(w.dir, env), residue.newestTranscriptMs(w.dir.replace(/\\/g, '/'), env));
     if (tr > ms) { ms = tr; source = 'a session transcript'; }
@@ -411,6 +435,6 @@ function main(argv = process.argv.slice(2), env = process.env) {
     return failed.length ? 1 : 0;
 }
 
-module.exports = { parseArgs, readPrs, defaultRef, repoContext, landed, lastActivity, parseStatusZ, residueReasons, judgeWorktree, assess, apply, main, DEFAULT_IDLE_HOURS };
+module.exports = { parseArgs, readPrs, defaultRef, repoContext, landed, reflogMs, lastActivity, parseStatusZ, residueReasons, judgeWorktree, assess, apply, main, DEFAULT_IDLE_HOURS };
 
 if (require.main === module) process.exitCode = main();
