@@ -4,7 +4,7 @@
 // component harvester (layout-probe.js harvestComponents) and the route sweep
 // (unslop-sweep.js).
 //
-// WHAT IT RUNS AGAINST. Twenty-one snapshots in
+// WHAT IT RUNS AGAINST. Twenty-two snapshots in
 // tooling/fixtures/layout/components/snapshots, captured from a REAL browser
 // by tooling/capture-component-fixtures.js through the sweep's own capture()
 // adapter. None is hand-written: a snapshot invented here would encode this
@@ -18,6 +18,8 @@
 //                     findings, with every exemption exercised
 //   plant-<rule>      the clean page with exactly one defect planted: its
 //                     rule fires and no other rule does
+//   false-positives   three classes a real sweep reported falsely, each
+//                     beside its true positive: only the true ones fire
 //
 // The browser half of the sweep is driven with a fake Playwright module, so
 // the route loop, redirects, sign-in, axe and pixel-diff bookkeeping run here
@@ -62,7 +64,7 @@ const TOUCH_RULES = [CODES.NO_GUTTER, CODES.TAP_TARGET];
 // ------------------------------------------------------------ fixtures are real
 
 const files = fs.existsSync(SNAPS) ? fs.readdirSync(SNAPS).filter((f) => f.endsWith('.json')) : [];
-check('21 component snapshots are committed (3 pages x 3 widths + 12 plants)', files.length === 21, files.length);
+check('22 component snapshots are committed (3 pages x 3 widths + 12 plants + false-positives)', files.length === 22, files.length);
 const shas = new Set();
 const probeShas = new Set();
 for (const f of files) {
@@ -96,7 +98,7 @@ for (const w of WIDTHS) {
     }
     const glued = r.findings.find((f) => f.code === CODES.GLUED_CONTROLS);
     check(`header-mess @${w}: the glued pair is the counter and the upgrade button`,
-        glued && /p\.counter/.test(glued.sel) && /a\.pro/.test(glued.sel), glued && glued.sel);
+        glued && /a\.counter/.test(glued.sel) && /a\.pro/.test(glued.sel), glued && glued.sel);
     const dbl = r.findings.find((f) => f.code === CODES.DOUBLE_BORDER);
     check(`header-mess @${w}: the double border is the avatar inside its ring`,
         dbl && /span\.avatar/.test(dbl.sel) && dbl.detail.kind === 'nested', dbl && dbl.sel);
@@ -147,6 +149,65 @@ for (const code of CHECKS.COMPONENT_CODES) {
     check(`${name}: GREEN, the unplanted page reports 0 ${code}`, clean.counts.components[CHECKS.COUNT_KEY[code]] === 0);
 }
 
+// ------------------------------------------------------------ measured false positives
+//
+// false-positives.html holds three classes a real admin sweep reported falsely
+// (2026-10-10), each beside a true positive of the same rule. Graded through
+// the gate CLI, the way a sweep consumes it. On the probe and checks before
+// this fix the same page reported FP1 twice, FP2 once and FP3 once.
+{
+    const FP = path.join(SNAPS, 'false-positives-390.json');
+    const run = spawnSync(process.execPath, [GATE, '--json', FP], { encoding: 'utf8' });
+    let page = null;
+    try { page = JSON.parse(run.stdout).pages[0].results[0]; } catch { /* asserted below */ }
+    check('false-positives: the gate CLI measured the page', run.status === 0 && page && page.status === 'MEASURED', run.stderr || run.stdout.slice(0, 300));
+    const fs_ = page ? page.findings : [];
+    const at = (code, id) => fs_.filter((f) => f.code === code && f.sel.includes('#' + id));
+    // The exact set: true positives fire, nothing else does.
+    check('false-positives: exactly CLIPPED-TEXT, TEXT-OCCLUDED and ROW-HEIGHT, each on its true positive',
+        fs_.length > 0 && fs_.every((f) =>
+            (f.code === CODES.CLIPPED_TEXT && f.sel.includes('#tp1')) ||
+            (f.code === CODES.TEXT_OCCLUDED && f.sel.includes('#tp2')) ||
+            (f.code === CODES.ROW_HEIGHT && f.sel.includes('#tp3'))),
+        fs_.map((f) => `${f.code} ${f.sel}`));
+    check('TP1: a visible paragraph cut off by a clipping panel is CLIPPED-TEXT', at(CODES.CLIPPED_TEXT, 'tp1').length === 1);
+    check('FP1: text in a closed <details> is not CLIPPED-TEXT', at(CODES.CLIPPED_TEXT, 'fp1').length === 0);
+    check('TP2: text under an opaque overlay that is not pinned is TEXT-OCCLUDED', at(CODES.TEXT_OCCLUDED, 'tp2').length >= 1);
+    check('FP2: a form under a sticky bottom action bar at scroll 0 is not TEXT-OCCLUDED', at(CODES.TEXT_OCCLUDED, 'fp2').length === 0);
+    check('OK2: data-unslop-ok="TEXT-OCCLUDED" exempts the same overlay', at(CODES.TEXT_OCCLUDED, 'ok2').length === 0);
+    check('TP3: a 32px and a 44px button in one row are ROW-HEIGHT', at(CODES.ROW_HEIGHT, 'tp3').length === 1);
+    check('FP3: a 22px status chip beside a 44px button is not ROW-*', fs_.filter((f) => /^ROW-/.test(f.code) && f.sel.includes('#fp3')).length === 0);
+
+    // Each negative reached the code it denies: the probe recorded the fact
+    // and the exemption fired, rather than the case never being sampled.
+    const snap = JSON.parse(fs.readFileSync(FP, 'utf8'));
+    const r = CHECKS.analyse(snap);
+    const fp1 = snap.text.filter((t) => /#fp1 > details > p/.test(t.sel));
+    check('FP1 reached the check: the probe sampled the details body and called it unrendered',
+        fp1.length >= 2 && fp1.every((t) => t.unrendered === 'details-closed'), fp1.map((t) => [t.sel, t.unrendered]));
+    const summary = snap.text.find((t) => /#fp1 > details > summary/.test(t.sel));
+    check('and the summary of that closed details is rendered', summary && summary.unrendered === null, summary);
+    check('FP1 counted as notRendered', r.counts.exempt.notRendered >= 2, r.counts.exempt);
+    const fp2 = snap.text.filter((t) => /#fp2/.test(t.sel) && t.scrollY === 0 &&
+        t.samples.some((s) => s.selfHit && s.occluder && s.occluder.pinnedBy === 'sticky'));
+    check('FP2 reached the check: form text at scroll 0 has the sticky bar above it, with its box',
+        fp2.length >= 1 && fp2.every((t) => t.samples.every((s) => !s.occluder || !s.occluder.pinnedBy || s.occluder.pinnedBox)), fp2.length);
+    check('FP2 counted as bottomBar', r.counts.exempt.bottomBar >= 1, r.counts.exempt);
+    check('OK2 counted as markedOk', r.counts.exempt.markedOk >= 1, r.counts.exempt);
+    check('FP3 reached the check: the chip was in a row line and left out as not interactive',
+        r.counts.components.exempt.notInteractive >= 1 && r.componentPopulation.rowLines >= 2, r.counts.components.exempt);
+
+    // The bottom-bar exemption is bounded: a bar over a quarter of the
+    // viewport, or on a page that cannot scroll, is still a defect.
+    const tall = CHECKS.analyse(snap, { bottomBarMaxFraction: 0.05 });
+    check('FP2 bound: a bar taller than bottomBarMaxFraction is reported again',
+        tall.findings.some((f) => f.code === CODES.TEXT_OCCLUDED && f.sel.includes('#fp2')), codesOf(tall));
+    const still = JSON.parse(JSON.stringify(snap));
+    still.viewport.scrollHeight = still.viewport.clientHeight;
+    check('FP2 bound: on a page that does not scroll the bar is reported again',
+        CHECKS.analyse(still).findings.some((f) => f.code === CODES.TEXT_OCCLUDED && f.sel.includes('#fp2')));
+}
+
 // ------------------------------------------------------------ knobs and exemptions
 
 {
@@ -161,7 +222,7 @@ for (const code of CHECKS.COMPONENT_CODES) {
 
     // data-unslop-ok on the element is the one exemption, and it is counted.
     const marked = JSON.parse(JSON.stringify(s));
-    const counter = marked.components.elements.find((e) => /p\.counter$/.test(e.sel));
+    const counter = marked.components.elements.find((e) => /a\.counter$/.test(e.sel));
     counter.ok = ['GLUED-CONTROLS'];
     const m = CHECKS.analyse(marked);
     check('data-unslop-ok="GLUED-CONTROLS" on the counter suppresses that finding', !codesOf(m).includes(CODES.GLUED_CONTROLS), codesOf(m));
@@ -224,7 +285,7 @@ const card = (entries) => SWEEP.scorecardOf(entries.map(([route, name, w, extra]
     check('a capture missing on one side is listed as unmeasured, not compared', un.unmeasured.length === 3 && un.rows.length === 0, un.unmeasured);
     const sc = SWEEP.scoreOf(CHECKS.analyse(load('header-mess-390')), { axe: 4, pixelDiffPct: 1.5 });
     check('a score row carries rule hits by id, axe, the overflow family and the pixel diff',
-        sc.rules['GLUED-CONTROLS'] === 1 && sc.axe === 4 && sc.ooc === 0 && sc.pixelDiffPct === 1.5 && sc.ruleHits === 12, sc);
+        sc.rules['GLUED-CONTROLS'] === 1 && sc.axe === 4 && sc.ooc === 0 && sc.pixelDiffPct === 1.5 && sc.ruleHits === 14, sc);
     check('an unmeasured capture scores null hits, never 0', SWEEP.scoreOf({ status: 'UNMEASURED', reason: 'x', findings: [] }).ruleHits === null);
     check('the compare table prints the verdict', /verdict: COUNTS/.test(SWEEP.printCompare(fwd)) && /NO-DROP/.test(SWEEP.printCompare(back)));
 }
