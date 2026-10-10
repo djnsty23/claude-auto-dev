@@ -8,7 +8,9 @@
   naive checker and are none. It must report zero findings at every width.
 
     a header row of consistent 44px controls, one of them a pill and one a
-      circular avatar (radius is compared only among non-pill controls)
+      circular avatar (radius is compared only among non-pill controls); the
+      ROW-* rules compare only what the reader presses, so the usage counter
+      the row plants resize and the account avatar are links
     a segmented button group: three controls touching, all one height and
       frame, square where they join, the last one selected and filled
       (GLUED-CONTROLS exempts a consistent group and a selected segment)
@@ -37,7 +39,7 @@
   .ctl{height:44px;display:inline-flex;align-items:center;padding:0 12px;border:1px solid #d4d4d4;border-radius:8px;background:#fff;color:#333;text-decoration:none;font-size:14px}
   .ctl.solid{background:#1d4ed8;border-color:#1d4ed8;color:#fff}
   .pill{border-radius:999px}
-  .avatar{width:44px;height:44px;border:1px solid #d4d4d4;border-radius:999px;display:grid;place-items:center;background:#f3f3f3;font-size:13px;margin-left:auto}
+  .avatar{text-decoration:none;color:inherit;width:44px;height:44px;border:1px solid #d4d4d4;border-radius:999px;display:grid;place-items:center;background:#f3f3f3;font-size:13px;margin-left:auto}
   main{max-width:960px;margin:0 auto;padding:24px 16px}
   section{position:relative;padding:16px 0 32px}
   .accent{position:absolute;left:50%;bottom:0;width:48px;height:4px;margin-left:-24px;background:#1d4ed8;border-radius:2px}
@@ -59,7 +61,7 @@
   .check{display:inline-flex;align-items:center;gap:8px;min-height:44px;min-width:44px;padding-right:8px}
 
   /* ---------------------------------------------------------- plants */
-  body.plant-row-height .bar .counter{height:36px}
+  body.plant-row-height .bar .counter{height:52px}
   body.plant-row-center .bar .counter{position:relative;top:6px}
   body.plant-row-border .bar .counter{border-width:2px}
   body.plant-row-radius .bar .counter{border-radius:2px}
@@ -87,9 +89,9 @@
 <header>
   <div class="bar">
     <a class="ctl" href="#">Home</a>
-    <p class="ctl counter" style="margin:0">2/5</p>
+    <a class="ctl counter" href="#">2/5</a>
     <a class="ctl solid" href="#">Upgrade</a>
-    <span class="avatar">A</span>
+    <a class="avatar" href="#" aria-label="Account">A</a>
   </div>
 </header>
 <main>

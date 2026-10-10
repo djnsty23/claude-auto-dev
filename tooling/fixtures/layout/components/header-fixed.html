@@ -19,9 +19,9 @@
   .menu span{display:block;width:16px;height:2px;background:#333;box-shadow:0 5px 0 #333,0 -5px 0 #333}
   .brand{font-weight:700;color:#111;text-decoration:none;display:inline-flex;align-items:center;min-height:44px}
   .right{display:flex;align-items:center;gap:8px}
-  .counter{margin:0;height:44px;display:flex;align-items:center;padding:0 12px;border:1px solid #d4d4d4;border-radius:8px;font-size:14px;color:#555}
+  .counter{margin:0;text-decoration:none;height:44px;display:flex;align-items:center;padding:0 12px;border:1px solid #d4d4d4;border-radius:8px;font-size:14px;color:#555}
   .pro{height:44px;display:flex;align-items:center;padding:0 12px;background:#7c3aed;color:#fff;border:1px solid #7c3aed;border-radius:8px;text-decoration:none;font-weight:600;font-size:14px}
-  .avatar{width:44px;height:44px;border:1px solid #d4d4d4;border-radius:999px;display:grid;place-items:center;background:#f3f3f3;font-size:13px}
+  .avatar{text-decoration:none;color:inherit;width:44px;height:44px;border:1px solid #d4d4d4;border-radius:999px;display:grid;place-items:center;background:#f3f3f3;font-size:13px}
   main{max-width:960px;margin:0 auto;padding:24px 16px}
 </style>
 </head><body>
@@ -31,9 +31,9 @@
     <button class="menu" aria-label="Menu"><span></span></button>
     <a class="brand" href="#">Brand</a>
     <div class="right">
-      <p class="counter">0/3</p>
+      <a class="counter" href="#">0/3</a>
       <a class="pro" href="#">Pro</a>
-      <span class="avatar">A</span>
+      <a class="avatar" href="#" aria-label="Account">A</a>
     </div>
   </div>
 </header>

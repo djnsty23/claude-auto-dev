@@ -40,7 +40,7 @@ finding, and overridable on `rendered-layout-gate.js` as `--<name> <n>`.
 
 | Rule | Fires when | Threshold |
 |---|---|---|
-| `ROW-HEIGHT` | controls in one flex or grid row differ in height | spread > `rowHeightTolPx` 2 |
+| `ROW-HEIGHT` | interactive controls in one flex or grid row differ in height (a status chip is not compared) | spread > `rowHeightTolPx` 2 |
 | `ROW-CENTER` | their vertical centres differ | spread > `rowCenterTolPx` 2 |
 | `ROW-BORDER` | framed controls in the row use different border or ring weights | spread > `rowBorderTolPx` 0.5 |
 | `ROW-RADIUS` | non-pill controls use different corner radii | spread > `rowRadiusTolPx` 2 |
@@ -57,7 +57,10 @@ finding, and overridable on `rendered-layout-gate.js` as `--<name> <n>`.
 Correct shapes that look like defects are exempt and **counted**: a segmented
 button group (consistent, or with one selected segment joined by square corners), a pill or avatar (radius), a centred accent
 (narrow), a progress fill (track), a horizontal rail, a full-bleed band, a link
-inside a sentence, a small control wrapped by a 44px label or parent. The only
+inside a sentence, a small control wrapped by a 44px label or parent, a
+non-interactive chip in a row of controls, text in a closed `<details>`, and
+text under a short sticky or fixed bar on the viewport bottom of a page that
+scrolls. The only
 way to exempt a real element is `data-unslop-ok="CODE ..."` in the product's
 source, reviewed like code and counted as `markedOk`.
 
