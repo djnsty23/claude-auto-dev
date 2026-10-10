@@ -143,8 +143,13 @@ async function msysSleeper() {
     const bash = gitUsrBin('bash.exe');
     if (!bash) return { pid: null, why: 'Git Bash not found' };
     const pidFile = path.join(mkTemp('gown-msys-'), 'pid');
-    const c = spawn(bash, ['-c', `echo $$ > '${pidFile.replace(/\\/g, '/')}'; for i in $(seq 1 300); do sleep 1; done`],
-        { stdio: 'ignore', windowsHide: true });
+    // Native Windows PATH need not include Git's utilities. Hold bash with a
+    // builtin on an open stdin pipe, so no sleep descendant can retain pipes.
+    const c = spawn(bash, ['-c', 'printf "%s\\n" "$$" > "$1"; read -r -t 600 _; :', 'msys-fixture',
+        pidFile.replace(/\\/g, '/')],
+        { stdio: ['pipe', 'ignore', 'pipe'], windowsHide: true });
+    let stderr = '';
+    c.stderr.on('data', (d) => { stderr += d; });
     trees.push(c);
     let text = '';
     for (let i = 0; i < 200 && !/\n/.test(text); i++) {
@@ -153,6 +158,7 @@ async function msysSleeper() {
     }
     const pid = Number(text.trim());
     if (!pid) return { pid: null, why: 'bash did not write its pid within 20 s' };
+    if (c.exitCode !== null) return { pid: null, why: `bash exited ${c.exitCode} before the probe: ${stderr.trim()}` };
     const t = spawnSync('tasklist', ['/FI', `PID eq ${pid}`, '/NH', '/FO', 'CSV'], { encoding: 'utf8', windowsHide: true });
     if (new RegExp(`^"[^"]*","${pid}"`, 'm').test(t.stdout || '')) return { pid: null, why: `MSYS pid ${pid} is also a live Windows pid` };
     ident.forgetMsys();

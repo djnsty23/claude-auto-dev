@@ -1,0 +1,31 @@
+Windows MSYS fixture repair, verified 2026-10-10
+Baseline revision: 3dcb3cb1249556dd143cf23781a836e355f9375f
+Scope: test fixtures only. Production process detection and assertions unchanged.
+
+Fixture lifecycle comparison, same native Windows environment:
+A: original seq/sleep commands publish a PID, then exit without a live owner.
+B: explicit sleep path holds a mapped owner, but a descendant retains pipes.
+C: Bash builtin read on an open stdin pipe holds a mapped owner without a child.
+Select C for fixture lifecycle. This is not a marketing-outcome experiment.
+Constants: same shell installation, PID translation, detector and assertions.
+Primary: live owner detected; guardrail: controller naturally exits after cleanup.
+Threshold: both fixture forms remain alive and mapped, cleanup exits zero.
+Failure signal: missing owner or retained pipes. Rollback: revert fixture repair.
+
+Final targeted acceptance:
+GATE_OWNERSHIP_ONLY=S7,P6 node tooling/test-gate-ownership.js
+Real exit 0, 4 passed, 0 failed. Planted detector defect still makes 2/2 checks red.
+node tooling/test-merge-lock.js
+Real exit 0, 39 passed, 0 failed; subject driven 44 times against a gh stub.
+node tooling/test-marketing-radar.js
+Real exit 0, 32 passed, 0 failed.
+node --check succeeds for both changed fixture files; git diff --check succeeds.
+
+Independent review repeated baseline (exit 1, 0/2) and final (exit 0, 4/0).
+Exact final command literals with PATH restricted to Windows/System32:
+Both live shells map correctly and pass unchanged production liveness checks.
+Cleanup controller naturally exits zero in 2.02 seconds.
+Reviewed ownership blob: 28901b6d89e2c761ff0a9b64f149083799144e2e
+Reviewed merge-lock blob: 59f4930ea13fae65d4d7e6f6f17e674aee20d3b6
+
+The full repository gate is a separate publication prerequisite, not claimed here.

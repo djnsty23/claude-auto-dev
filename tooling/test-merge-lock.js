@@ -559,15 +559,22 @@ async function main() {
             let shell = null;
             let msysPid = null;
             for (let tries = 0; tries < 3 && msysPid === null; tries++) {
-                shell = spawn(bashExe, ['-c', 'echo $$; sleep 25'], { windowsHide: true });
+                // A builtin on the open stdin pipe keeps bash alive even when
+                // native PATH lacks Git's utilities, without a child to leak.
+                shell = spawn(bashExe, ['-c', 'echo $$; read -r -t 60 _; :'], { windowsHide: true });
+                let shellError = '';
+                shell.stderr.on('data', (d) => { shellError += d; });
                 const got = await new Promise((res) => {
                     let buf = '';
                     shell.stdout.on('data', (d) => { buf += d; const m = /^(\d+)\s/.exec(buf); if (m) res(Number(m[1])); });
                     setTimeout(() => res(null), 10000);
                 });
                 const t = spawnSync('tasklist', ['/FI', `PID eq ${got}`, '/NH', '/FO', 'CSV'], { encoding: 'utf8', windowsHide: true });
-                if (got && !new RegExp(`"${got}"`).test(t.stdout || '')) msysPid = got;
-                else shell.kill();
+                if (got && shell.exitCode === null && !shellError && !new RegExp(`"${got}"`).test(t.stdout || '')) msysPid = got;
+                else {
+                    console.log(`      MSYS fixture was not ready: exit ${shell.exitCode}, ${shellError.trim() || 'pid unavailable or also native'}`);
+                    spawnSync('taskkill', ['/F', '/T', '/PID', String(shell.pid)], { stdio: 'ignore', windowsHide: true });
+                }
             }
             if (msysPid === null) {
                 fail++; failures.push('D2 setup');
@@ -576,7 +583,7 @@ async function main() {
                 fs.writeFileSync(LOCK, `${msysPid}\nmerge-lock.js merge ${REPO}#5 head y, started earlier\n`);
                 const r = runSync(writeState(), 'msys', ['--wait-timeout-ms', '1500']);
                 const still = fs.existsSync(LOCK) && fs.readFileSync(LOCK, 'utf8').startsWith(`${msysPid}\n`);
-                shell.kill();
+                spawnSync('taskkill', ['/F', '/T', '/PID', String(shell.pid)], { stdio: 'ignore', windowsHide: true });
                 check('D2. a live holder seen only by ps (an MSYS pid tasklist cannot list) is not reclaimed',
                     r.exit === 2 && still && /Held by pid/.test(r.out) && !calls('msys').length,
                     `MSYS pid ${msysPid}, Windows pid ${shell.pid}; ${detail(r)}`);
