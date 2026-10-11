@@ -283,6 +283,46 @@ try {
         check('  the prune still dropped the old lines and kept the send', got.every((g) => g.target !== 'local_OLD') && got.some((g) => g.messageId === 'MSG_TEST_Q1'), JSON.stringify(got.map((g) => g.messageId)));
         check('  the rewrite ran while holding the lock', seen === 'held', seen);
     }
+
+    // A live writer holding <ledger>.write-lock for 600 ms. The hook skips the
+    // write when the lock stays busy past its wait budget, silently and with
+    // exit 0, so a budget shorter than an ordinary I/O stall loses a send with
+    // no trace. That is how one of 20 concurrent sends went missing in a full
+    // gate run while a second gate shared the machine. The holder is a helper
+    // process: it takes the lock, starts the hook with its input from a file
+    // (a pipe would stay unflushed while the holder blocks), sleeps, releases,
+    // and reports how many rows landed.
+    {
+        const ledger = freshLedger();
+        fs.mkdirSync(path.dirname(ledger), { recursive: true });
+        const input = path.join(path.dirname(ledger), 'input.json');
+        fs.writeFileSync(input, JSON.stringify(payload(queuedText)), 'utf8');
+        const holder = path.join(path.dirname(ledger), 'holder.js');
+        fs.writeFileSync(holder, [
+            "'use strict';",
+            "const fs = require('fs');",
+            "const { spawn } = require('child_process');",
+            "const [hook, ledger, input] = process.argv.slice(2);",
+            "const lock = ledger + '.write-lock';",
+            "fs.writeFileSync(lock, JSON.stringify({ pid: process.pid, token: 'test-holder' }), { flag: 'wx' });",
+            "const child = spawn(process.execPath, [hook], { env: Object.assign({}, process.env, { AUTODEV_PEER_LEDGER: ledger }), stdio: [fs.openSync(input, 'r'), 'pipe', 'pipe'] });",
+            "let out = '';",
+            "child.stdout.on('data', (d) => { out += d; });",
+            "child.stderr.on('data', (d) => { out += d; });",
+            "Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 600);",
+            "fs.unlinkSync(lock);",
+            "child.on('exit', (code) => {",
+            "    let rows = 0;",
+            "    try { rows = fs.readFileSync(ledger, 'utf8').split('\\n').filter(Boolean).length; } catch { /* no ledger: zero rows */ }",
+            "    process.stdout.write(JSON.stringify({ code, out, rows }));",
+            "});",
+        ].join('\n') + '\n', 'utf8');
+        const r = spawnSync(process.execPath, [holder, HOOK, ledger, input], { encoding: 'utf8' });
+        let got = null;
+        try { got = JSON.parse(r.stdout); } catch { /* reported below */ }
+        check('fixture: the holder ran and reported', got !== null, 'exit ' + r.status + ', stdout ' + JSON.stringify((r.stdout || '').slice(0, 120)) + ', stderr ' + JSON.stringify((r.stderr || '').slice(0, 120)));
+        check('a send that waits 600 ms behind a live writer is still recorded', got !== null && got.code === 0 && got.out === '' && got.rows === 1, JSON.stringify(got));
+    }
 } finally {
     try { fs.rmSync(TMP, { recursive: true, force: true }); } catch { /* best effort */ }
 }

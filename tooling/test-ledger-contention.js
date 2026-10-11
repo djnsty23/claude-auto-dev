@@ -51,7 +51,7 @@ try {
         tool_input: { session_id: 'target', message: 'fixture' },
         tool_response: '(delivery: queued; message_id: probe)' });
     const runHook = (input) => spawnSync(process.execPath, [hook], {
-        input, encoding: 'utf8', timeout: 2000, windowsHide: true,
+        input, encoding: 'utf8', timeout: 4500, windowsHide: true,
         env: { ...process.env, AUTODEV_PEER_LEDGER: file },
     });
     fs.writeFileSync(file + '.write-lock', 'other owner');
@@ -60,7 +60,9 @@ try {
     assert.equal(blocked.error, undefined);
     assert.equal(blocked.status, 0);
     assert.equal(blocked.stdout + blocked.stderr, '');
-    assert.ok(performance.now() - start < 1500);
+    // The hook waits 2 s for a held lock, then skips. It must finish inside the
+    // 5 s timeout hooks.json gives it, with room for node startup.
+    assert.ok(performance.now() - start < 4000);
     assert.ok(!fs.existsSync(file), 'failed acquisition must skip append');
     assert.equal(fs.readFileSync(file + '.write-lock', 'utf8'), 'other owner');
     const ignored = runHook('{}');
