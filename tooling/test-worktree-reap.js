@@ -61,6 +61,9 @@ const ENV = { ...process.env, AUTODEV_REAP_PROJECTS_DIRS: PROJECTS, AUTODEV_REAP
 function age(main, wt, hours = 3) {
     const admin = g(wt, 'rev-parse', '--absolute-git-dir');
     const t = (Date.now() - hours * 3600000) / 1000;
+    // The reaper dates logs/HEAD by its entries, so the entries age with the file.
+    const log = path.join(admin, 'logs', 'HEAD');
+    try { fs.writeFileSync(log, fs.readFileSync(log, 'utf8').replace(/> \d+ ([+-]\d{4})/g, `> ${Math.floor(t)} $1`)); } catch { /* absent */ }
     for (const f of ['HEAD', 'index', path.join('logs', 'HEAD')]) { try { fs.utimesSync(path.join(admin, f), t, t); } catch { /* absent */ } }
 }
 
@@ -155,6 +158,12 @@ write(PRS, JSON.stringify([
     { number: 8, state: 'OPEN', headRefName: 'b/open', headRefOid: g(W.open, 'rev-parse', 'HEAD') },
 ]));
 for (const name of Object.keys(W)) if (name !== 'active') age(main, W[name]);
+// The nightly cleanup runs `git gc` before the reaper, and gc rewrites every
+// worktree's logs/HEAD. Every aged case below is judged after that rewrite.
+const gcLog = path.join(g(W.merge, 'rev-parse', '--absolute-git-dir'), 'logs', 'HEAD');
+const gcBefore = fs.statSync(gcLog).mtimeMs;
+g(main, 'gc', '--prune=now', '--quiet');
+const gcAfter = fs.statSync(gcLog).mtimeMs;
 const slugDir = residue.transcriptDirs(W.transcript, ENV)[0];
 write(path.join(slugDir, 'session.jsonl'), '{}\n');
 write(PROCS, JSON.stringify([{ pid: 1, ppid: 0, commandLine: 'idle', executablePath: '' },
@@ -180,6 +189,8 @@ console.log('Subject: worktree-reap.js removes a worktree only when its work lan
 
 const dry = run(['--repo', main, '--json', '--idle-hours', '1', '--no-fetch']);
 check('dry run exits 0 and prints JSON', dry.exit === 0 && dry.json !== null, dry.stderr || dry.stdout.slice(0, 300));
+check('git gc rewrote an aged worktree\'s logs/HEAD, so the idle check meets the rewrite', gcAfter > gcBefore && gcAfter > Date.now() - 3600000, `before ${gcBefore}, after ${gcAfter}`);
+check('reflogMs reads the newest entry time, not the file time', reaper.reflogMs(gcLog) !== null && reaper.reflogMs(gcLog) < Date.now() - 2 * 3600000, String(reaper.reflogMs(gcLog)));
 check('the main checkout is never a candidate', dry.json && !dry.json.worktrees.some((w) => path.resolve(w.path) === path.resolve(main)));
 check('every linked worktree is judged', dry.json && dry.json.worktrees.length === names.length, dry.json && dry.json.worktrees.length);
 
