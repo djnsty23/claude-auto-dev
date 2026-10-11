@@ -328,7 +328,13 @@ function probeMemory(prd) {
         + 'module.exports={isAvailable:()=>true,'
         + 'endSession:(id,s)=>fs.writeFileSync(process.env.PRD_CONTAINER_CAPTURE,JSON.stringify(s))};\n');
     fs.writeFileSync(path.join(root, 'scripts', 'session-carrier.js'),
-        'module.exports={read:()=>"sess-1",clear:()=>{},clearPrompt:()=>{}};\n');
+        'module.exports={read:()=>"sess-1",clear:()=>{}};\n');
+    // A stale stub is attributed to the real module by the V8 census. Require
+    // its actual exports to be a subset of the shipped collaborator contract.
+    const stub = require(path.join(root, 'scripts', 'session-carrier.js'));
+    const shipped = require(path.join(MEMORY, 'scripts', 'session-carrier.js'));
+    check('memory collaborator exports only shipped functions',
+        Object.keys(stub).every((name) => Object.hasOwn(shipped, name)));
     fs.writeFileSync(path.join(proj, 'prd.json'), JSON.stringify(prd));
 
     spawnSync(process.execPath, [HOOK_MEMEND], {
@@ -382,6 +388,8 @@ const show = (o) => (o === null ? 'NOTHING' : JSON.stringify(o));
 
 // ------------------------------------------------------------------- run
 
+const cases = [];
+const check = (label, ok) => cases.push([label, ok]);
 const results = [];
 for (const site of SITES) {
     const r = { site, live: false, vacuous: true, agrees: false };
@@ -394,9 +402,6 @@ for (const site of SITES) {
     r.agrees = eq(r.flat, r.nested);
     results.push(r);
 }
-
-const cases = [];
-const check = (label, ok) => cases.push([label, ok]);
 
 console.log('PROBE LIVENESS — can each probe tell two different FLAT files apart?');
 console.log('  (a probe that cannot is blind, and its agreement result means nothing)\n');
