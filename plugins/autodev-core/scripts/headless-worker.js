@@ -124,7 +124,10 @@ const SETTLED_RESULTS = [...RESULT_STATES, 'lost', 'unreported', 'auth-refused']
 // same failure `[stated 2026-10-10]`, not yet seen in a log here. Each pattern is
 // anchored at the start of the result text: a worker's own summary that mentions
 // a subscription or an API key in prose is not a refusal.
+// `[measured 2026-10-11]` an expired login whose refresh also failed answers a
+// `claude -p` with is_error, subtype `success`, $0 and the auth-failed text below.
 const AUTH_REFUSAL_PATTERNS = [
+    { id: 'auth-failed', re: /^Failed to authenticate\b/ },
     { id: 'subscription-disabled', re: /^Your organization has disabled Claude subscription access for Claude Code\b/ },
     { id: 'not-logged-in', re: /^Not logged in\b/ },
     { id: 'invalid-api-key', re: /^Invalid API key\b/ },

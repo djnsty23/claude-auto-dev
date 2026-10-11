@@ -29,6 +29,8 @@
  *           `claude -p` capped at JUDGE_MAX_TURNS turns and JUDGE_BUDGET_USD.
  *           A record the judge fails on JUDGE_FAILS_PER_RECORD times is logged
  *           as escalate, so one bad report cannot hold the queue or keep spending.
+ *           A judge run refused its login, or one that cost $0, never read the
+ *           record, so it does not count, and a refused login ends the step.
  *   start   the queued tasks unattended-worker.js planStarts calls ready, at
  *           most START_MAX_CONCURRENT running and START_MAX_PER_HOUR an hour,
  *           each through unattended-worker.js launch. Nothing starts while the
@@ -499,7 +501,13 @@ function parseJudgeOutput(r) {
     if (!doc || typeof doc !== 'object') return { ok: false, error: `unparseable-exit-${r.status}` };
     const cost = typeof doc.total_cost_usd === 'number' ? doc.total_cost_usd : null;
     const turns = typeof doc.num_turns === 'number' ? doc.num_turns : null;
-    if (doc.is_error) return { ok: false, error: `judge-error: ${String(doc.subtype || doc.result || 'is_error').slice(0, 120)}`, costUsd: cost, turns };
+    if (doc.is_error) {
+        // `[measured 2026-10-11]` a refused login reads is_error, subtype `success`, $0 and one turn, so the subtype names nothing.
+        const login = hw.matchAuthRefusal(doc.result);
+        if (login) return { ok: false, error: `judge-login-refused: ${login.text.slice(0, 120)}`, login: login.id, costUsd: cost, turns };
+        const what = doc.subtype && doc.subtype !== 'success' ? doc.subtype : (doc.result || doc.subtype || 'is_error');
+        return { ok: false, error: `judge-error: ${String(what).slice(0, 120)}`, costUsd: cost, turns };
+    }
     const v = doc.structured_output;
     if (!v || !uw.DECISIONS.includes(v.decision) || typeof v.reason !== 'string' || !v.reason.trim()) {
         return { ok: false, error: 'no-structured-verdict', costUsd: cost, turns };
@@ -562,9 +570,21 @@ function judgeStep(ctx) {
         + `${all.length > todo.length ? `, ${all.length - todo.length} skipped: their login was refused, so the run never worked` : ''}`);
     for (const rec of todo.slice(0, room)) {
         if (ctx.left() < JUDGE_TIMEOUT_MS) { out.lines.push(`judge: deferred to the next tick, ${Math.round(ctx.left() / 1000)} s left of the budget`); break; }
-        judgeAndLog(rec, mode, ctx, 'tick');
+        const j = judgeAndLog(rec, mode, ctx, 'tick');
+        if (j.login) { out.lines.push(loginLine(j)); break; }
     }
 }
+
+// Every other record would meet the same refused login, so the step stops at the first.
+const loginLine = (j) => `judge: stopped, the judge's login was refused (${j.login}); check it with \`brain-judge.js probe --config-dir <dir>\``;
+
+/**
+ * Whether a failed judge run counts toward JUDGE_FAILS_PER_RECORD. A refused
+ * login, or any run that cost $0, never reached the model, so it says nothing
+ * about the record. `[measured 2026-10-11]` six records were escalated as "the
+ * judge failed 2 times" on $0 login refusals logged as `judge-error: success`.
+ */
+const countsAgainstRecord = (r) => r.ok === false && !r.login && r.costUsd !== 0;
 
 // The pin check refuses an accept with these codes. The judge read only the
 // report, so a changed or unreadable pinned test goes to a person as escalate.
@@ -622,11 +642,12 @@ function judgeAndLog(rec, mode, ctx, source) {
     const at = new Date().toISOString();
     const key = judgementKey(rec);
     const j = judgeRecord(rec, { judgeBin: ctx.opts['judge-bin'], model: ctx.opts.model || JUDGE_MODEL, cwd: p.state, reportsDir: p.reports, configDir: readSwitch(p.state).judgeConfigDir });
-    appendJsonl(path.join(p.state, 'runs.jsonl'), { at, key, taskId: rec.taskId, source, ok: j.ok, error: j.error || null, costUsd: j.costUsd ?? null, turns: j.turns ?? null, durationMs: j.durationMs });
+    appendJsonl(path.join(p.state, 'runs.jsonl'), { at, key, taskId: rec.taskId, source, ok: j.ok, error: j.error || null, ...(j.login ? { login: j.login } : {}), costUsd: j.costUsd ?? null, turns: j.turns ?? null, durationMs: j.durationMs });
     if (!j.ok) {
-        out.events.push({ type: 'judge.error', key, detail: { taskId: rec.taskId, slug: rec.slug, error: j.error, costUsd: j.costUsd ?? null } });
+        out.events.push({ type: 'judge.error', key, detail: { taskId: rec.taskId, slug: rec.slug, error: j.error, ...(j.login ? { login: j.login } : {}), costUsd: j.costUsd ?? null } });
+        if (!countsAgainstRecord({ ok: false, login: j.login, costUsd: j.costUsd ?? null })) return j;
         const runs = readJsonl(path.join(p.state, 'runs.jsonl'));
-        const fails = (runs ? runs.rows : []).filter((r) => r.key === key && r.ok === false).length;
+        const fails = (runs ? runs.rows : []).filter((r) => r.key === key && countsAgainstRecord(r)).length;
         if (fails < JUDGE_FAILS_PER_RECORD) return j;
         // The judge cannot read this one. A person can: escalate, and the queue moves on.
         const reason = `the judge failed ${fails} times on this record, last: ${j.error}`;
@@ -830,11 +851,14 @@ function backfill(opts) {
         .filter((r) => sinceMs === null || (ms(r.startedAt) !== null && ms(r.startedAt) >= sinceMs))
         .slice(0, limitOpt(opts, 10));
     const ctx = { opts, p, out: { lines: [], events: [] } };
-    const results = todo.map((rec) => {
+    const results = [];
+    let stopped = null;
+    for (const rec of todo) {
         const j = judgeAndLog(rec, 'backfill', ctx, 'backfill');
-        return { taskId: rec.taskId, ok: j.ok, decision: j.decision || null, error: j.error || null, costUsd: j.costUsd ?? null };
-    });
-    return { judged: results.length, results };
+        results.push({ taskId: rec.taskId, ok: j.ok, decision: j.decision || null, error: j.error || null, costUsd: j.costUsd ?? null });
+        if (j.login) { stopped = loginLine(j); break; }
+    }
+    return { judged: results.length, results, ...(stopped ? { stopped } : {}) };
 }
 
 function judgeOne(opts) {
@@ -933,6 +957,6 @@ if (require.main === module) {
 module.exports = {
     parseArgs, readSwitch, effectiveMode, reportPathOf, breaker, takeLock, headlessRunOf, runStatusOfHeadless, buildJudgePrompt, judgeArgv,
     parseJudgeOutput, judgeCandidates, revealedDecision, stem, readJsonl, run, pruneReported, tickRuns, writeVerdict, VERDICT_SCHEMA, RUBRIC,
-    authHold, authRefusedKeys, probeArgv,
+    authHold, authRefusedKeys, probeArgv, countsAgainstRecord,
     JUDGE_PER_TICK, JUDGE_PER_HOUR, JUDGE_FAILS_PER_RECORD, START_MAX_CONCURRENT, START_MAX_PER_HOUR,
 };

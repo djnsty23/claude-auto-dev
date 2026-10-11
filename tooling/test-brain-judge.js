@@ -97,6 +97,9 @@ fs.writeFileSync(fakeJudge, [
     "  if (process.env.FAKE_JUDGE_ARGV) fs.writeFileSync(process.env.FAKE_JUDGE_ARGV, JSON.stringify({ argv: process.argv.slice(2), input, cwd: process.cwd(), cfg: process.env.CLAUDE_CONFIG_DIR || null }));",
     "  const mode = process.env.FAKE_JUDGE || '';",
     "  if (mode === 'error') { process.stdout.write(JSON.stringify({ type: 'result', is_error: true, subtype: 'error_max_turns', total_cost_usd: 0.01 })); return; }",
+    // The measured shape of a refused judge login, 2026-10-11, and a $0 API error beside it.
+    "  if (mode === 'login') { process.stdout.write(JSON.stringify({ type: 'result', is_error: true, subtype: 'success', total_cost_usd: 0, num_turns: 1, result: 'Failed to authenticate: OAuth session expired and could not be refreshed' })); return; }",
+    "  if (mode === 'apierror') { process.stdout.write(JSON.stringify({ type: 'result', is_error: true, subtype: 'success', total_cost_usd: 0, num_turns: 1, result: 'API Error: 529 Overloaded' })); return; }",
     "  const decision = /FAKE-ESCALATE/.test(input) ? 'escalate' : /FAKE-FOLLOWUP/.test(input) ? 'follow-up' : 'accept';",
     "  process.stdout.write(JSON.stringify({ type: 'result', is_error: false, num_turns: 1, total_cost_usd: 0.02, structured_output: { decision, reason: 'fake ' + decision, evidence: ['e1'] } }));",
     "});",
@@ -165,6 +168,15 @@ try {
     check('parseJudgeOutput reads a timeout', bj.parseJudgeOutput({ error: { code: 'ETIMEDOUT' } }).error === 'timeout');
     check('parseJudgeOutput reads unparseable output', /^unparseable/.test(bj.parseJudgeOutput({ status: 1, stdout: 'x' }).error));
     check('parseJudgeOutput reads a judge error and keeps its cost', (() => { const o = bj.parseJudgeOutput({ stdout: '{"is_error":true,"subtype":"error_max_turns","total_cost_usd":0.2}' }); return o.ok === false && o.costUsd === 0.2 && /max_turns/.test(o.error); })());
+    const refusedLogin = bj.parseJudgeOutput({ stdout: '{"is_error":true,"subtype":"success","total_cost_usd":0,"num_turns":1,"result":"Failed to authenticate: OAuth session expired and could not be refreshed"}' });
+    check('parseJudgeOutput names a refused login, not "judge-error: success"', refusedLogin.ok === false && refusedLogin.login === 'auth-failed' && /^judge-login-refused: Failed to authenticate/.test(refusedLogin.error), JSON.stringify(refusedLogin));
+    const apiErr = bj.parseJudgeOutput({ stdout: '{"is_error":true,"subtype":"success","total_cost_usd":0,"result":"API Error: 529 Overloaded"}' });
+    check('parseJudgeOutput reads the result text when the subtype is success', apiErr.error === 'judge-error: API Error: 529 Overloaded' && !apiErr.login, JSON.stringify(apiErr));
+    check('a judge mentioning a login in prose is not a refused login', !bj.parseJudgeOutput({ stdout: '{"is_error":true,"subtype":"error_max_turns","total_cost_usd":0.1,"result":"The report says: Failed to authenticate"}' }).login);
+    check('countsAgainstRecord: a costed failure counts, a refused login and the legacy $0 rows do not',
+        bj.countsAgainstRecord({ ok: false, costUsd: 0.01 }) && bj.countsAgainstRecord({ ok: false, error: 'timeout', costUsd: null })
+        && !bj.countsAgainstRecord({ ok: false, login: 'auth-failed', costUsd: 0 }) && !bj.countsAgainstRecord({ ok: false, error: 'judge-error: success', costUsd: 0 })
+        && !bj.countsAgainstRecord({ ok: true, costUsd: 0.02 }));
     check('parseJudgeOutput refuses a decision outside the three', bj.parseJudgeOutput({ stdout: '{"structured_output":{"decision":"merge","reason":"r","evidence":[]}}' }).error === 'no-structured-verdict');
     check('parseJudgeOutput reads a verdict', (() => { const o = bj.parseJudgeOutput({ stdout: '{"total_cost_usd":0.03,"num_turns":2,"structured_output":{"decision":"accept","reason":" ok ","evidence":["a",3]}}' }); return o.ok && o.decision === 'accept' && o.reason === 'ok' && o.evidence.join() === 'a' && o.turns === 2; })());
     const cands = bj.judgeCandidates([
@@ -256,6 +268,15 @@ try {
         const t8 = judge(['tick', ...liveArgs], { FAKE_JUDGE: 'error' });
         check('a judge error is an event and a failed run, and writes no verdict', types(t8).includes('judge.error') && !recOf('worker-loop-b').verdict
             && fs.readFileSync(path.join(stateDir, 'runs.jsonl'), 'utf8').trim().split('\n').pop().includes('"ok":false'));
+        // `[measured 2026-10-11]` two $0 login refusals escalated six records. Neither of these may count as the second failure.
+        // They run as backfill and manual: three errored TICK runs in a row open the judge breaker, which is right for a login streak.
+        const tl = judge(['backfill', '--judge-bin', fakeJudge], { FAKE_JUDGE: 'login' });
+        const lastRun = () => JSON.parse(fs.readFileSync(path.join(stateDir, 'runs.jsonl'), 'utf8').trim().split('\n').pop());
+        check('a refused judge login is logged as one, stops the backfill with the probe command, and writes no verdict', tl.value && tl.value.judged === 1
+            && !recOf('worker-loop-b').verdict && lastRun().login === 'auth-failed' && /^judge: stopped, the judge's login was refused \(auth-failed\).*probe --config-dir/.test(tl.value.stopped || ''), tl.stdout.slice(0, 400));
+        const ta = judge(['judge', '--task-id', 'worker-loop-b', '--judge-bin', fakeJudge], { FAKE_JUDGE: 'apierror' });
+        check('a $0 judge error is logged but is not a failure against the record', ta.value && ta.value.ok === false && !recOf('worker-loop-b').verdict
+            && lastRun().error === 'judge-error: API Error: 529 Overloaded', ta.stdout.slice(0, 400));
         const t8b = judge(['tick', ...liveArgs], { FAKE_JUDGE: 'error' });
         const fb = (t8b.value ? t8b.value.events : []).find((e) => e.type === 'judge.verdict');
         check('a record the judge fails on twice is escalated for a person, so it stops spending and holding the queue', fb && fb.detail.decision === 'escalate' && fb.detail.from === 'judge-failed'
