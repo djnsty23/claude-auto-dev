@@ -164,18 +164,25 @@ function panelItem(s) {
  * 2026-09-24]` 150 headless records since 09-21 wrote 0 asks, and 32 runs wrote 11.
  */
 function askItems() {
+    const configArgs = [];
+    for (let i = 0; i < argv.length; i++) {
+        if (argv[i] === '--config-dir') configArgs.push(argv[i], argv[++i] || '');
+        else if (argv[i].startsWith('--config-dir=')) configArgs.push(argv[i]);
+    }
+    const settings = fleetView.settings(fleetView.parseArgs(configArgs));
     let found;
-    try { found = fleetView.openAsks(fleetView.settings({})); } catch (e) {
+    try { found = fleetView.openAsks(settings); } catch (e) {
         return { items: [], sources: [`asks: COULD NOT READ (${e.message})`] };
     }
     const items = found.rows.map((r) => {
         let stamp = 'unknown';
         try { stamp = fs.statSync(r.askFile).mtime.toISOString(); } catch { /* removed since the read: 'unknown' still dedups */ }
         const n = r.question.options.length;
+        const name = r.configDir ? `${r.code} [${r.configDir}]` : r.code;
         return {
             key: 'ask:' + r.askFile, stamp, due: true,
-            title: `${r.code} is asking`, body: `${r.question.text}${n ? `  (${n} options)` : ''}`,
-            short: r.code, name: r.code,
+            title: `${name} is asking`, body: `${r.question.text}${n ? `  (${n} options)` : ''}`,
+            short: name, name,
         };
     });
     return { items, sources: found.sources.map((src) => src.population) };
@@ -343,6 +350,8 @@ function main() {
             '  node fleet-notify.js --dry          # print what WOULD fire, notify nothing',
             '  node fleet-notify.js --test         # fire one sample toast and exit',
             '  node fleet-notify.js --min-age 15   # minutes a panel waits before it toasts',
+            '  --config-dir <dir>                 # repeat to read worker asks from each account',
+            '  AUTODEV_FLEET_CONFIG_DIRS          # JSON array of dirs, overridden by flags',
             '',
             'AUTODEV_QUOTA_TRIPWIRE=off skips the quota tripwire.',
         ].join('\n'));

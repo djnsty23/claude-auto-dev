@@ -188,6 +188,7 @@ function envFor(home, extra = {}) {
         AUTODEV_FLEET_STATE: stateFile(home),
         AUTODEV_QUOTA_TRIPWIRE: fs.existsSync(quotaStub(home)) ? quotaStub(home) : 'off',
         AUTODEV_QUOTA_STATE: quotaState(home),
+        AUTODEV_FLEET_CONFIG_DIRS: '',
     }, extra);
 }
 
@@ -464,6 +465,32 @@ function run() {
         `marker=${JSON.stringify(readJson(markerFile(hQuiet)))}`);
 
     // =====================================================================
+    console.log('\n=== asks across two explicitly selected config dirs ===');
+    const multiA = makeHome('account-one');
+    const multiB = makeHome('account-two');
+    const dirA = path.join(multiA, '.claude');
+    const dirB = path.join(multiB, '.claude');
+    runAsk(multiA, 'shared-job', { question: 'First account?' });
+    runAsk(multiB, 'shared-job', { question: 'Second account?' });
+    const multiFlags = ['--config-dir', dirA, '--config-dir', dirB];
+    const multi = drive(multiA, 'count', multiFlags);
+    check('both accounts reach the existing notifier with their directory labels', multi.status === 0 && firedIn(multi) === 2
+        && [dirA, dirB].every((dir) => toastsIn(multi).some((t) => t.title.includes(dir))), summarise(multi));
+    const multiAgain = drive(multiA, 'count', multiFlags);
+    check('both account asks deduplicate on the next pass', multiAgain.status === 0 && firedIn(multiAgain) === 0
+        && (popIn(multiAgain) || {}).asking === 2, summarise(multiAgain));
+    const missingConfig = path.join(ROOT, 'missing-config');
+    fs.writeFileSync(stateFile(multiA), '{}');
+    const survivor = drive(multiA, 'real', ['--dry', '--config-dir', missingConfig, '--config-dir', dirB]);
+    check('an unreadable first config never hides the second ask', survivor.status === 0 && outOf(survivor).includes('Second account?'), summarise(survivor));
+    check('the marker names the unreadable config and the readable control', ((readJson(markerFile(multiA)) || {}).askSources || []).some((p) => p.includes(missingConfig) && /COULD NOT READ/.test(p))
+        && ((readJson(markerFile(multiA)) || {}).askSources || []).some((p) => p.includes(dirB) && /1 run/.test(p)), summarise(survivor));
+    const envMulti = drive(multiA, 'count', [], { AUTODEV_FLEET_CONFIG_DIRS: JSON.stringify([dirA, dirB]) });
+    check('the notifier also accepts the same env list', envMulti.status === 0 && (popIn(envMulti) || {}).asking === 2, summarise(envMulti));
+    const cliMulti = spawnSync(process.execPath, [SUBJECT, '--dry', ...multiFlags], { encoding: 'utf8', env: envFor(makeHome('cli-multi')), timeout: 30000 });
+    check('the real CLI dry run surfaces both asks without sending a toast', cliMulti.status === 0
+        && outOf(cliMulti).includes('First account?') && outOf(cliMulti).includes('Second account?'), summarise(cliMulti));
+
     console.log('\n=== a worker ask notifies once, and the page shows the same asks ===');
     // =====================================================================
     const hAsk = makeHome('asks');
