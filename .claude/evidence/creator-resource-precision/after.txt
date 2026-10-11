@@ -1,0 +1,53 @@
+Command: node tooling/test-marketing-radar.js
+Source: same test population, framework-radar.js commercial-offer matcher narrowed in this commit
+Environment: native Windows, Node 24.15.0, hermetic fixtures, 2026-10-11
+Result: 45 passed, 0 failed. Original: 41 passed, 4 failed. Blanket free-exemption alternative: 38 passed, 7 failed.
+Companion command: node tooling/test-framework-radar.js, 56 passed, 0 failed.
+Full gate and remote CI are separate pending verification, not established by these targeted suites.
+  ok   RSS parser keeps fresh official evidence and applies the cutoff
+  ok   RSS parser preserves category, URL and body evidence
+  ok   configurable markdown headings parse anchored date-based platform release notes
+  ok   markdown source versions are deduplicated before manifest review
+  ok   profile relevance terms rank marketing evidence ahead of unrelated agent evidence
+  ok   comment filter removes only independently pinned high-confidence patterns
+  ok   short ordinary praise is retained rather than guessed to be a bot
+  ok   ordinary discussion of an off-platform channel is not mislabeled as promotion
+  ok   conservative filter matches all 20 labeled edge cases
+  ok   creator promotion, contact bait, engagement manipulation and exact repeats have separate counts
+  ok   same-author repeats and near-exact discussion remain available for theme review
+  ok   resource boundary free-worksheet: retains useful free resource
+  ok   resource boundary free-template: retains useful free resource
+  ok   resource boundary free-swipe-file: retains useful free resource
+  ok   resource boundary free-guide: retains useful free resource
+  ok   resource boundary paid-template: excludes commercial promotion
+  ok   resource boundary premium-template: excludes commercial promotion
+  ok   resource boundary discount-template: excludes commercial promotion
+  ok   resource boundary affiliate-offer: excludes commercial promotion
+  ok   resource boundary free-audit: excludes commercial promotion
+  ok   resource boundary mixed-guide-offer: excludes commercial promotion
+  ok   resource boundary uses verified creator attribution for API and uploader shapes
+  ok   resource filtering preserves text, anonymized attribution, sampling lane and metadata
+  ok   resource retained and excluded accounting matches all independent labels exactly
+  ok   YouTube API comment seam samples both relevance and time lanes
+  ok   pinned-only API discovery skips search and fetches supplied video details
+  ok   yt-dlp comment seam bounds top and recent samples without replies
+  ok   marketing registry has its own state, output and relevance profile
+  ok   registry spans acquisition, measurement, SEO, CRM and email
+  ok   registry includes Meta, Google, TikTok and Microsoft platform evidence
+  ok   registry breadth floors are independent of the registry itself
+  ok   registry enables bounded top and recent audience feedback
+  ok   skill separates source incentive, evidence and verdict
+  ok   skill applies margin, human-sales and demand-type boundaries
+  ok   skill requires execution and A B C for every selected hypothesis
+  ok   scheduled mode cannot mutate live marketing systems
+  ok   skill rejects repeated significance peeking and Ads Library winner labels
+  ok   package exposes the marketing radar profile
+  ok   marketing profile collection exits zero and uses its console label
+  ok   profile selects its own default manifest filename
+  ok   manifest records the profile and cross-footed population
+  ok   manifest points to an anonymized, cross-footed local comment sample
+  ok   profile terms control balanced video ranking in the real CLI
+  ok   mark-reviewed follows the manifest state directory without another flag
+  ok   unavailable comment sample makes the exact manifest incomplete
+
+45 passed, 0 failed
