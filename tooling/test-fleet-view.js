@@ -53,7 +53,7 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const alive = (pid) => { try { process.kill(pid, 0); return true; } catch (e) { return e.code !== 'ESRCH'; } };
 
 function fv(args, env = {}) {
-    const r = runBudgeted(process.execPath, [SCRIPT, ...args], { encoding: 'utf8', cwd: ROOT, env: { ...process.env, HOME, USERPROFILE: HOME, APPDATA, LOCALAPPDATA, ...env }, timeout: 30000, maxTimeout: 120000 });
+    const r = runBudgeted(process.execPath, [SCRIPT, ...args], { encoding: 'utf8', cwd: ROOT, env: { ...process.env, HOME, USERPROFILE: HOME, APPDATA, LOCALAPPDATA, AUTODEV_FLEET_CONFIG_DIRS: '', ...env }, timeout: 30000, maxTimeout: 120000 });
     if (classify(r) === 'infrastructure') indeterminateCase('fv ' + args.slice(0, 2).join(' '), reason(r));
     let json = null;
     try { json = JSON.parse(String(r.stdout || '').trim().split('\n').pop()); } catch { /* human output */ }
@@ -66,10 +66,13 @@ write(FAKE, [
     'const ms = Number(process.env.FAKE_SLEEP_MS || 0);',
     "process.stdout.write(JSON.stringify({ type: 'system', subtype: 'init', cwd: process.cwd(), model: 'fake-model', session_id: 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee' }) + '\\n');",
     "process.stdout.write('PPID=' + process.ppid + '\\n');",
+    "process.stdout.write('CONFIG_DIR=' + (process.env.CLAUDE_CONFIG_DIR || '') + '\\n');",
     'setTimeout(() => process.exit(0), ms);',
 ].join('\n') + '\n');
 
 writeJson(path.join(HOME, '.claude.json'), { oauthAccount: { accountUuid: ACCT } });
+// A stale nested file must not override the default account's home-level metadata.
+writeJson(path.join(HOME, '.claude', '.claude.json'), { oauthAccount: { accountUuid: 'stale-nested-account' } });
 
 // runs/: one live asking run, one old finished run (outside the window), one old run still asking.
 const runDir = (job, stamp) => path.join(AUTODEV, 'runs', job, stamp);
@@ -138,7 +141,7 @@ function startServer(extra = []) {
     return new Promise((resolve) => {
         // stdin is a pipe the suite closes at the end, so the server exits normally
         // and V8 writes its coverage dump. A kill writes none on Windows.
-        const child = spawn(process.execPath, [SCRIPT, 'serve', '--port', '0', '--claude-bin', FAKE, '--until-stdin-closes', ...extra], { cwd: ROOT, env: { ...process.env, HOME, USERPROFILE: HOME, APPDATA, LOCALAPPDATA }, stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true });
+        const child = spawn(process.execPath, [SCRIPT, 'serve', '--port', '0', '--claude-bin', FAKE, '--until-stdin-closes', ...extra], { cwd: ROOT, env: { ...process.env, HOME, USERPROFILE: HOME, APPDATA, LOCALAPPDATA, AUTODEV_FLEET_CONFIG_DIRS: '' }, stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true });
         pids.push(child.pid);
         let out = ''; let err = '';
         // Three outcomes, kept apart. A listening line is a port. The subject EXITING
@@ -194,6 +197,81 @@ async function main() {
     const human = fv(['list']);
     check('2. list prints every population line before the rows', human.exit === 0 && human.stdout.split('\n').slice(0, 7).every((l) => /^(runs|headless-worker|unattended-worker|bg-runner|missions|desktop-sessions|desktop-routines):/.test(l)), human.stdout.slice(0, 600));
 
+    // Two accounts deliberately reuse a job code and stamp to expose key collisions.
+    const configA = path.join(HOME, '.claude');
+    const configB = path.join(ROOT, 'second account');
+    const askB = path.join(configB, 'autodev', 'runs', 'ask-job', path.basename(R1));
+    writeJson(path.join(askB, 'status.json'), { job: 'ask-job', state: 'finished', started: iso(H), finished: iso(H) });
+    writeJson(path.join(askB, 'ask.json'), { question: 'Second account choice?' });
+    const ledgerB = path.join(configB, 'autodev', 'headless-workers.json');
+    writeJson(ledgerB, { version: 1, records: [worker('B-STOPPED', { result: 'stopped', extra: { dev: true } })] });
+    writeJson(path.join(configB, 'autodev', 'unattended-workers.json'), { version: 1, records: [{ taskId: 'B-TASK', state: 'started', startedAt: iso(H) }] });
+    writeJson(path.join(configB, 'autodev', 'bg-runner.json'), { workers: [{ code: 'B-BG', state: 'running', startedAt: iso(H) }] });
+    const accountB = 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee';
+    writeJson(path.join(configB, '.claude.json'), { oauthAccount: { accountUuid: accountB } });
+    writeJson(path.join(APPDATA, 'Claude', 'claude-code-sessions', accountB, ORG, 'local_b.json'), { sessionId: 'local_b', title: 'Second desk', lastActivityAt: NOW });
+    const flags = ['--config-dir', configA, '--config-dir', configB];
+    const both = fv(['list', '--json', ...flags]);
+    const bothRows = both.json && both.json.rows || [];
+    const asks = bothRows.filter((r) => r.code === 'ask-job');
+    const labelFor = (dir) => dir === configA ? 'default' : path.basename(dir);
+    check('2. two config dirs show both asking runs with exact account labels', both.exit === 0 && asks.length === 2
+        && [configA, configB].every((dir) => asks.some((r) => r.account === labelFor(dir) && r.configDir === dir)), both.stdout);
+    check('2. every explicit config row names its directory and has a unique key', bothRows.length > 0
+        && bothRows.every((r) => flags.includes(r.configDir) && r.account === labelFor(r.configDir))
+        && new Set(bothRows.map((r) => r.key)).size === bothRows.length);
+    check('2. Desktop fixture rows carry exactly default and the second directory basename',
+        bothRows.find((r) => r.code === 'Desk session one')?.account === 'default'
+        && bothRows.find((r) => r.code === 'Second desk')?.account === path.basename(configB));
+    check('2. every second-account worker store and its Desktop session appear once', ['B-STOPPED', 'B-TASK', 'B-BG', 'Second desk'].every((code) =>
+        bothRows.filter((r) => r.code === code && r.configDir === configB).length === 1)
+        && bothRows.filter((r) => r.code === 'Desk session one').length === 1, both.stdout);
+    const bothHuman = fv(['list', ...flags]);
+    check('2. human output names both accounts on their asking rows', bothHuman.exit === 0 && [configA, configB].every((dir) =>
+        bothHuman.stdout.split('\n').some((line) => line.startsWith('ask-job  ') && line.split('  ')[2] === labelFor(dir))), bothHuman.stdout);
+    const defaultDesktop = fv(['list', '--json']);
+    check('2. an unmatched Desktop account is reported without guessing a config or printing a hash',
+        defaultDesktop.exit === 0 && defaultDesktop.json.rows.find((r) => r.code === 'Second desk')?.account === 'default (Desktop account mismatch)');
+    const envBoth = fv(['list', '--json'], { AUTODEV_FLEET_CONFIG_DIRS: JSON.stringify([configA, configB]) });
+    check('2. the env list reads the same two accounts', envBoth.exit === 0 && envBoth.json.rows.filter((r) => r.code === 'ask-job').length === 2, envBoth.stdout);
+    const missingDir = path.join(ROOT, 'missing account');
+    const fileDir = path.join(ROOT, 'not a directory');
+    write(fileDir, 'cannot read this as a config directory');
+    for (const badDir of [missingDir, fileDir]) {
+        const partial = fv(['list', '--json', '--config-dir', badDir, '--config-dir', configB]);
+        check('2. an unreadable config dir is named while the other account survives', partial.exit === 0 && partial.json
+            && partial.json.rows.some((r) => r.configDir === badDir && r.process === 'COULD-NOT-READ')
+            && partial.json.rows.some((r) => r.configDir === configB && r.question && r.question.text === 'Second account choice?'), partial.stdout);
+    }
+    const precedence = fv(['list', '--json', '--config-dir', configB], { AUTODEV_FLEET_CONFIG_DIRS: JSON.stringify([missingDir]) });
+    check('2. explicit flags override the environment list', precedence.exit === 0 && precedence.json.rows.every((r) => r.configDir === configB), precedence.stdout);
+    const invalid = fv(['list', '--json'], { AUTODEV_FLEET_CONFIG_DIRS: '{broken' });
+    check('2. a malformed env list is a usage error', invalid.exit === 1 && invalid.json && invalid.json.error.code === 'usage', invalid.stdout);
+
+    // Captured from the unchanged list entry point before multi-account support.
+    const base = path.join(ROOT, 'baseline');
+    const baseAd = path.join(base, '.claude', 'autodev');
+    const baseApp = path.join(base, 'appdata');
+    fs.mkdirSync(path.join(baseAd, 'runs'), { recursive: true });
+    fs.mkdirSync(path.join(baseApp, 'Claude', 'claude-code-sessions'), { recursive: true });
+    writeJson(path.join(baseAd, 'headless-workers.json'), { version: 1, records: [] });
+    writeJson(path.join(baseAd, 'unattended-workers.json'), { version: 1, records: [] });
+    writeJson(path.join(baseAd, 'bg-runner.json'), { workers: [{ code: 'BASE', id: 'base', state: 'running' }] });
+    const baseline = fv(['list'], { HOME: base, USERPROFILE: base, APPDATA: baseApp });
+    const expected = [
+        `runs: 0 run(s) read under ${path.join(baseAd, 'runs')}, 0 shown`,
+        `headless-worker: ${path.join(baseAd, 'headless-workers.json')}: 0 record(s), 0 shown`,
+        `unattended-worker: ${path.join(baseAd, 'unattended-workers.json')}: 0 record(s), 0 shown`,
+        `bg-runner: ${path.join(baseAd, 'bg-runner.json')}: 1 worker(s), 1 shown`,
+        'missions: COULD NOT READ (no --mission-store given, and the store has no default location)',
+        `desktop-sessions: 0 session file(s) across 0 account folder(s) under ${path.join(baseApp, 'Claude', 'claude-code-sessions')}, 0 shown`,
+        'desktop-routines: 0 routine(s) in 0 scheduled-tasks.json file(s), 0 enabled, 0 shown',
+        'window: live, asking, or touched in the last 48 h. 2 row(s).',
+        'COULD-NOT-READ  -  -  missions  COULD-NOT-READ  -  -  | missions: COULD NOT READ (no --mission-store given, and the store has no default location)',
+        'BASE  -  default  bg-runner  running  none  -', '',
+    ].join('\n');
+    check('2. default single-dir output matches the before fixture byte for byte', baseline.exit === 0 && baseline.stderr === '' && baseline.stdout === expected, baseline.stdout);
+
     // ------------------------------------------------------------ 3. an unreadable ledger is a row, never an absence
     const saved = read(LEDGER);
     write(LEDGER, '{ not json');
@@ -218,6 +296,41 @@ async function main() {
     check('3. without --appdata, an empty %APPDATA% falls back to the MSIX package copy of the desktop store',
         !!pkg && pkg.rows.some((r) => r.code === 'Package session') && !pkg.rows.some((r) => r.source === 'desktop-sessions' && r.process === 'COULD-NOT-READ'),
         JSON.stringify(((pkg && pkg.rows) || []).filter((r) => /desktop/.test(r.source || '')).slice(0, 3)));
+
+    // The page and its POST must use the account-qualified key, even with duplicate job names.
+    const multiSrv = await startServer(flags);
+    if (!multiSrv.port) {
+        if (multiSrv.exited) check('3. multi-account server starts', false, JSON.stringify(multiSrv.exited));
+        else indeterminateCase('3. multi-account server', multiSrv.err);
+        multiSrv.child.stdin.end();
+    } else {
+        const page = await request(multiSrv.port, 'GET', '/');
+        const token = (/name="token" value="([0-9a-f]+)"/.exec(page.body) || [])[1];
+        check('3. one page renders both account labels and both asks', page.status === 200 && page.body.includes(configA)
+            && page.body.includes(configB) && page.body.includes('Second account choice?') && page.body.includes('Seeded or production?'));
+        const rows = await rowsOf(multiSrv.port);
+        const second = rows.find((r) => r.configDir === configB && r.code === 'ask-job');
+        const answered = await request(multiSrv.port, 'POST', '/action', { body: form({ token, action: 'answer', key: second && second.key, label: 'Second only' }) });
+        check('3. answering account B writes only account B answer.json', answered.status === 303
+            && JSON.parse(read(path.join(askB, 'answer.json')) || '{}').label === 'Second only'
+            && !fs.existsSync(path.join(R1, 'answer.json')), answered.headers.location);
+        const stopped = rows.find((r) => r.code === 'B-STOPPED');
+        const relaunched = await request(multiSrv.port, 'POST', '/action', { body: form({ token, action: 'relaunch', key: stopped && stopped.key }) });
+        const newRecord = JSON.parse(read(ledgerB)).records.find((r) => r.code === 'B-STOPPED-R2');
+        if (newRecord && newRecord.pid) pids.push(newRecord.pid);
+        for (let i = 0; i < 40 && newRecord && !(read(newRecord.log) || '').includes('CONFIG_DIR='); i++) await sleep(50);
+        check('3. account B relaunch retains its config even when the old record omitted it', relaunched.status === 303 && newRecord
+            && newRecord.configDir === path.basename(configB) && (read(newRecord.log) || '').includes('CONFIG_DIR=' + configB),
+            decodeURIComponent(relaunched.headers.location || ''));
+        const ended = new Promise((resolve) => {
+            const timer = setTimeout(() => resolve(null), 15000);
+            multiSrv.child.once('exit', (code) => { clearTimeout(timer); resolve(code); });
+        });
+        multiSrv.child.stdin.end();
+        check('3. multi-account server exits cleanly', await ended === 0 && multiSrv.err === '', multiSrv.err);
+    }
+
+    if (process.argv.includes('--multi-config-only')) return;
 
     // ------------------------------------------------------------ 4. the server
     const srv = await startServer(['--takeover-script', path.join(ROOT, 'takeover.ps1'), '--no-launch']);
