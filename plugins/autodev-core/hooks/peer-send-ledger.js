@@ -29,7 +29,7 @@
 // passes 4 MB, the oldest lines go too, until it fits in 1 MB. The file is
 // rewritten only when at least one line is dropped, so a busy week of recent
 // sends costs a read per send and never a rewrite.
-// Append and prune share `<ledger>.write-lock`. If it stays busy for 250 ms,
+// Append and prune share `<ledger>.write-lock`. If it stays busy for 2 s,
 // this hook skips the write. The legacy prune lock still prevents a rewrite
 // while an older pruner holds it. Tail copying retains legacy appends that
 // arrive before that copy, but mixed-version writers cannot share this guarantee.
@@ -187,7 +187,7 @@ function main(rawPayload) {
     withLedgerLock(file, () => {
         fs.appendFileSync(file, JSON.stringify(row) + '\n', 'utf8');
         pruneIfLarge(file, now.getTime());
-    }, { waitMs: 250 });
+    }, { waitMs: 2000 });
 }
 
 if (require.main === module) {
