@@ -1,14 +1,21 @@
----
-name: wizard
-description: "Work is blocked on something only the user can do: choosing a browser or account, clicking a dashboard toggle, entering a credential, approving a grant, plugging in a device. Load the moment an error names a human decision, before retrying it."
-when_to_use: "The moment a tool error names a decision, a permission, or a credential rather than a fault. Do not load it after the second identical retry — by then it has already cost what it exists to save."
-allowed-tools: Read, Grep, Glob, Bash
----
+<!-- Merged from the former wizard skill (zero loads in 30 days, 2026-10-11). -->
+
+**When this applies:** Work is blocked on something only the user can do: choosing a browser or account, clicking a dashboard toggle, entering a credential, approving a grant, plugging in a device. Load the moment an error names a human decision, before retrying it. The moment a tool error names a decision, a permission, or a credential rather than a fault. Do not load it after the second identical retry — by then it has already cost what it exists to save.
 
 # Hand the work back cleanly
 
 Some steps are not yours to take. When one appears, the failure mode is not
 getting it wrong — it is not noticing, and retrying instead.
+
+## Contents
+
+- The measurement this exists for
+- Recognise it
+- Stop, then write the steps
+- Then say what happens next
+- Never ask for these
+- When the blocked step is a credential, write a throwaway script
+- The shape, compressed
 
 ## The measurement this exists for
 
@@ -91,7 +98,7 @@ A handback that ends at the last step is half a handback. Close with:
   strings, even when the user offers. They go to the clipboard, the environment
   editor, or the secret manager. Ask them to put it there and tell you the NAME.
 - **Something you can do yourself.** Check first. A handback for work you could
-  have finished is the ritual this skill is meant to prevent, and it trains the
+  have finished is the ritual this handback is meant to prevent, and it trains the
   user to skim these.
 - **A decision you should be making.** If it is reversible, in scope, and
   obvious, do it and say you did.

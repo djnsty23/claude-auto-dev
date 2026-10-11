@@ -1,18 +1,19 @@
----
-name: memory-maintenance
-description: Audit and repair authorized project memory and instruction drift with verified project mapping, recoverable edits, and explicit unresolved contradictions.
-when_to_use: "Invoked when the user says \"memory maintenance\", \"defrag memory\", \"dedup memory\", \"tidy memory\", \"clean up CLAUDE.md\", or by a configured maintenance routine."
-allowed-tools: Bash, Read, Write, Edit, Grep, Glob
-model: opus
-user-invocable: true
-argument-hint: "[project path | --all | --dry-run]"
----
+<!-- Merged from the former memory-maintenance skill (zero loads in 30 days, 2026-10-11). -->
+
+**When this applies:** Audit and repair authorized project memory and instruction drift with verified project mapping, recoverable edits, and explicit unresolved contradictions. Invoked when the user says "memory maintenance", "defrag memory", "dedup memory", "tidy memory", "clean up CLAUDE.md", or by a configured maintenance routine.
 
 # Memory Maintenance
 
 Repair retrieval and stale factual claims while preserving unique knowledge,
 the user's instructions and current authorization. A similarity score is a
 lead to inspect, not permission to merge or delete.
+
+## Contents
+
+- Establish scope and read the audit
+- Make recoverable, owned repairs
+- Refresh factual instruction drift
+- Verify the repair and report
 
 ## Establish scope and read the audit
 

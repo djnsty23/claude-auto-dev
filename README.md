@@ -55,8 +55,8 @@ before installing — it clears those out.
 
 | Plugin | Contains | Install it if |
 |--------|----------|---------------|
-| **autodev-core** | The workflow — `brainstorm`, `auto`, `iterate`, `audit`, `review`, `ship`, `scan`, plus the `prd.json` sprint system, 4 subagents, and the sprint/typecheck/safety hooks | Always. This is the tool. |
-| **autodev-memory** | Cross-session project memory + nightly `memory-maintenance` — automatic observation capture, semantic search, domain-knowledge briefs, repo-backed backup | You want Claude to remember earlier sessions in a project |
+| **autodev-core** | The workflow — `brainstorm`, `auto`, `audit`, `review`, `ship`, `scan`, plus the `prd.json` sprint system, 4 subagents, and the sprint/typecheck/safety hooks | Always. This is the tool. |
+| **autodev-memory** | Cross-session project memory, with maintenance under `mem-search`: automatic observation capture, semantic search, domain-knowledge briefs, repo-backed backup | You want Claude to remember earlier sessions in a project |
 | **autodev-stack** | Supabase, Doppler, Stripe, and Remotion integrations | You use that stack |
 
 `autodev-core` stands alone. The other two are additive and can be removed
@@ -76,7 +76,7 @@ without touching it.
 | `brainstorm apply` | Create stories from the last brainstorm |
 | `framework radar` | Research the agent-development ecosystem and execute measured experiments |
 | `auto` | Work through all pending stories autonomously |
-| `iterate` | Convergence loop: brainstorm → fix → re-scan until clean |
+| `auto iterate` | Convergence loop: brainstorm → fix → re-scan until clean |
 | `audit` | 7-agent parallel quality audit |
 | `review` | Runs `/code-review`, then this project's own checks |
 | `ship` | Build, test, review, deploy, verify |
@@ -89,7 +89,7 @@ without touching it.
 | `a11y` | WCAG 2.1 AA audit |
 | `design` / `ui` | UI design with anti-slop checklist |
 | `progress` | Show sprint progress |
-| `sprint` | Create/advance sprint |
+| `auto sprint` | Create/advance sprint |
 
 Plugin skills are namespaced, so `/autodev-core:audit` always works even if you
 have another `audit` skill installed. See [`docs/commands.md`](docs/commands.md)
@@ -124,7 +124,7 @@ add loading state to the dashboard
 brainstorm → scans codebase + live site, proposes improvements
 auto       → implements all pending stories + visual verification
 ship       → review + security + deploy + post-deploy scan
-iterate    → brainstorm → fix → re-scan loop until clean
+auto iterate → brainstorm → fix → re-scan loop until clean
 ```
 
 **Framework Radar.** `framework radar` collects official changes across Claude

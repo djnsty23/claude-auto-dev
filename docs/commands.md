@@ -12,7 +12,7 @@ These are what you type. Everything else is handled automatically by `auto`.
 | `autodev init` | Derive this project's real conventions into `.claude/project-rules.md` |
 | `learn from fixes` | Rank the failure classes this project actually ships, from its git history |
 | `preflight` | Scaffold / extend the executable pre-deploy gate file |
-| `memory maintenance` | Dedup memories, repair the index, refresh CLAUDE.md (nightly-schedulable) |
+| `memory maintenance` | Dedup memories, repair the index, refresh CLAUDE.md (nightly-schedulable, loaded through `mem search`) |
 | `auto` | Work through all tasks autonomously (deploys, tests, transitions sprints) |
 | `audit` | Find bugs + violations (7 parallel agents) → creates fix stories |
 | `brainstorm` | Feature ideas + architecture improvements → present findings |
@@ -36,8 +36,8 @@ Use when you need something specific. Auto mode calls these internally too.
 | `commit` | Conventional commit + push + PR |
 | `deploy` / `ci` | Deploy workflow (Vercel, Supabase, CI/CD) |
 | `clean` | Remove temp files |
-| `iterate` | Convergence loop: brainstorm→fix→re-scan until clean |
-| `sprint` | Create/advance sprint |
+| `auto iterate` | Convergence loop: brainstorm→fix→re-scan until clean |
+| `auto sprint` | Create/advance sprint |
 
 ## Specialized Commands
 
@@ -63,7 +63,7 @@ Pattern libraries for specific domains. Auto-loaded when relevant.
 | `doppler` / `setup doppler` | Install + link + migrate secrets to Doppler (hub/spoke pattern) |
 | `memory backup` | Backup/restore auto-memory to private GitHub repo |
 | `mem search <query>` / `mem recent` / `mem decisions` | Search persistent project memory across sessions |
-| `knowledge <area>` / `what do we know about` / `brief me on` | Distill a domain knowledge brief for a code area from memory |
+| `knowledge <area>` / `what do we know about` / `brief me on` | Distill a domain knowledge brief for a code area from memory (through `mem search`) |
 | `framework radar [days or video URL]` | Collect broad agent-development evidence, test every selected hypothesis, and report A/B/simpler verdicts |
 
 For quick fixes, just describe what to fix — no commands needed.
@@ -75,7 +75,7 @@ For quick fixes, just describe what to fix — no commands needed.
 - Stories as object: `{ "S1-001": { ... } }`
 
 ## Skills
-- 62 skills across three plugins: 53 in `autodev-core`, 5 in `autodev-memory`, 4 in `autodev-stack`
+- 56 skills across three plugins: 50 in `autodev-core`, 2 in `autodev-memory`, 4 in `autodev-stack`
 - Claude picks a skill from its `description` and `when_to_use`; run `/plugin` to see what is installed
 - Auto-loaded by file context: `core` (on prd.json), `standards` and the `rule-*` skills (on matching source files)
 

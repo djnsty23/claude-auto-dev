@@ -1,11 +1,6 @@
----
-name: mem-dashboard
-description: Show a scoped memory overview with stored totals, bounded recent activity, retrieval health and explicit coverage limits.
-when_to_use: "Invoked when the user says \"mem dashboard\", \"memory dashboard\", \"memory overview\", or asks what this project remembers."
-allowed-tools: Bash, Read
-model: opus
-user-invocable: true
----
+<!-- Merged from the former mem-dashboard skill (zero loads in 30 days, 2026-10-11). -->
+
+**When this applies:** Show a scoped memory overview with stored totals, bounded recent activity, retrieval health and explicit coverage limits. Invoked when the user says "mem dashboard", "memory dashboard", "memory overview", or asks what this project remembers.
 
 # Memory Dashboard
 
