@@ -24,7 +24,7 @@ let passed = 0;
 const failures = [];
 function check(name, cond, detail) {
     if (cond) { passed++; return; }
-    failures.push(name + (detail ? '\n      -> ' + String(detail).slice(0, 300) : ''));
+    failures.push(name + (detail ? '\n      -> ' + String(detail).slice(0, name.startsWith('CONCURRENT:') ? 8192 : 300) : ''));
 }
 
 let n = 0;
@@ -239,6 +239,139 @@ const rec = (cfg, extra) => run(cfg, ['--record', '--repo', 'qr', '--subject', '
     check('a reservation appears in --list', /reserved D6/.test(l.stdout || ''), l.stdout);
 }
 
+function releaseSafetyChecks() {
+    const preload = path.join(ROOT, 'release-safety.js');
+    fs.writeFileSync(preload, `const fs = require('fs'), path = require('path');
+const log = path.join(process.env.CLAUDE_CONFIG_DIR, 'fleet', 'DECISIONS.jsonl');
+const open = fs.openSync;
+let lockFd;
+fs.openSync = function(p, ...args) {
+  const fd = open.call(this, p, ...args);
+  if (String(p) === log + '.lock') lockFd = fd;
+  return fd;
+};
+const append = fs.appendFileSync;
+fs.appendFileSync = function(p, ...args) {
+  if (String(p) === log && process.env.FLEET_TEST_SAFETY === 'append-failure')
+    throw new Error('fixture append failure');
+  const result = append.call(this, p, ...args);
+  if (String(p) === log && process.env.FLEET_TEST_SAFETY === 'replacement') {
+    fs.renameSync(log + '.lock', log + '.retired-lock');
+    fs.writeFileSync(log + '.lock', 'foreign replacement');
+  }
+  return result;
+};
+if (process.env.FLEET_TEST_SAFETY === 'descriptor') {
+  const logOutput = console.log;
+  console.log = function(...args) {
+    if (/^D\\d+$/.test(String(args[0]))) {
+      const fd = fs.openSync(path.join(process.env.CLAUDE_CONFIG_DIR, 'witness'), 'w');
+      process.once('exit', () => {
+        fs.writeSync(fd, JSON.stringify({ lockFd, witnessFd: fd, remainsOwned: true }));
+        fs.closeSync(fd);
+      });
+    }
+    return logOutput.apply(this, args);
+  };
+}`);
+    for (const mode of ['replacement', 'descriptor', 'append-failure']) {
+        const cfg = freshCfg();
+        fs.mkdirSync(path.join(cfg, 'fleet'));
+        const log = path.join(cfg, 'fleet', 'DECISIONS.jsonl');
+        fs.writeFileSync(log, '');
+        const result = spawnSync(process.execPath, ['--require', preload, SUBJECT,
+            '--next', '--repo', 'safety', '--author', 'fixture'], {
+            encoding: 'utf8', env: { ...process.env, CLAUDE_CONFIG_DIR: cfg, FLEET_TEST_SAFETY: mode },
+        });
+        if (mode === 'replacement') {
+            check('release: never removes a different lock identity',
+                result.status === 0 && fs.existsSync(log + '.lock') &&
+                fs.readFileSync(log + '.lock', 'utf8') === 'foreign replacement', result.stderr);
+        } else if (mode === 'descriptor') {
+            const witness = fs.existsSync(path.join(cfg, 'witness')) &&
+                fs.readFileSync(path.join(cfg, 'witness'), 'utf8');
+            const identity = witness && JSON.parse(witness);
+            check('release: exit fallback cannot close a subsequently owned descriptor',
+                result.status === 0 && identity && identity.remainsOwned === true &&
+                Number.isInteger(identity.lockFd) && identity.witnessFd === identity.lockFd,
+                JSON.stringify({ witness: identity, stderr: result.stderr }));
+        } else {
+            check('release: failed append stays failed and releases only its owned lock',
+                result.status !== 0 && /fixture append failure/.test(result.stderr || '') &&
+                !fs.existsSync(log + '.lock') && fs.readFileSync(log, 'utf8') === '', result.stderr);
+        }
+    }
+}
+
+releaseSafetyChecks();
+
+// A completed transaction must not retain the lock for unrelated output or
+// earlier exit listeners (the dependency tracer also writes on exit). A parent
+// completion barrier, rather than a timing assertion, keeps the first CLI alive
+// until the contender returns. Only private fixture logs are used.
+async function transactionLifetimeChecks() {
+    const preload = path.join(ROOT, 'post-transaction.js');
+    fs.writeFileSync(preload, `const fs = require('fs');
+if (process.env.FLEET_TEST_MARKER) {
+  const pause = () => {
+    fs.writeFileSync(process.env.FLEET_TEST_MARKER, 'ready');
+    for (let n = 0; n < 1500; n++) {
+      if (fs.existsSync(process.env.FLEET_TEST_MARKER + '.release')) return;
+      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 20);
+    }
+    throw new Error('post-transaction fixture barrier expired');
+  };
+  if (process.env.FLEET_TEST_MODE === 'exit') process.once('exit', pause);
+  else {
+    const log = console.log;
+    console.log = function(...args) {
+      if (/^D\\d+$/.test(String(args[0]))) pause();
+      return log.apply(this, args);
+    };
+  }
+}`);
+    const launch = (cfg, author, mode, marker) => new Promise((resolve, reject) => {
+        const env = { ...process.env, CLAUDE_CONFIG_DIR: cfg };
+        delete env.FLEET_TEST_MARKER;
+        delete env.FLEET_TEST_MODE;
+        if (marker) { env.FLEET_TEST_MARKER = marker; env.FLEET_TEST_MODE = mode; }
+        const child = spawn(process.execPath, ['--require', preload, SUBJECT,
+            '--next', '--repo', 'lifetime', '--author', author], { env });
+        let stdout = '', stderr = '';
+        child.stdout.on('data', (s) => { stdout += s; });
+        child.stderr.on('data', (s) => { stderr += s; });
+        child.on('error', reject);
+        child.on('close', (status) => resolve({ status, stdout, stderr }));
+    });
+    for (const mode of ['exit', 'output']) {
+        const cfg = freshCfg();
+        fs.mkdirSync(path.join(cfg, 'fleet'));
+        const log = path.join(cfg, 'fleet', 'DECISIONS.jsonl');
+        fs.writeFileSync(log, '');
+        const marker = path.join(cfg, 'ready');
+        const first = launch(cfg, 'first', mode, marker);
+        let ready = false, second;
+        try {
+            for (let n = 0; n < 1500; n++) {
+                if (fs.existsSync(marker)) { ready = true; break; }
+                await new Promise((resolve) => setTimeout(resolve, 20));
+            }
+            if (ready) second = await launch(cfg, 'second');
+        } finally {
+            fs.writeFileSync(marker + '.release', 'release');
+        }
+        const results = [await first, second];
+        check('CONCURRENT: completed transaction releases before ' + mode + ' work',
+            ready && results.every((r) => r && r.status === 0) &&
+            results[0].stdout.trim() === 'D1' && results[1].stdout.trim() === 'D2',
+            JSON.stringify({ ready, results }));
+        const records = fs.readFileSync(log, 'utf8').trim().split('\n').filter(Boolean).map(JSON.parse);
+        check('CONCURRENT: ' + mode + ' completion barrier preserves both durable reservations',
+            records.length === 2 && records[0].reserved === '1' && records[1].reserved === '2',
+            JSON.stringify(records));
+    }
+}
+
 // Actual simultaneous CLIs, with a read delay to expose the check/append gap.
 // The implementation is unmodified; delaying a filesystem read is an execution
 // interleaving, not a replacement of the allocator or contradiction checker.
@@ -316,7 +449,7 @@ if (failures.length) {
 }
 console.log(`fleet-decisions: ${passed}/${total} passed — the collision refusal, scoping, normalisation, and a torn log`);
 }
-concurrentChecks().then(report).catch((err) => {
+transactionLifetimeChecks().then(concurrentChecks).then(report).catch((err) => {
     failures.push('concurrent CLI harness failed: ' + err.stack);
     report();
 });

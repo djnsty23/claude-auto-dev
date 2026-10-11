@@ -63,15 +63,19 @@ function lockDecisions() {
             continue;
         }
         const identity = fs.fstatSync(fd);
-        process.once('exit', () => {
+        let released = false;
+        const release = () => {
+            if (released) return;
+            released = true;
             try { fs.closeSync(fd); } catch { /* already closed */ }
             try {
                 const current = fs.statSync(lock);
                 if (current.dev === identity.dev && current.ino === identity.ino) fs.unlinkSync(lock);
             } catch { /* removed externally; do not touch another path */ }
-        });
+        };
+        process.once('exit', release);
         fs.writeFileSync(fd, JSON.stringify({ pid: process.pid, acquiredAt: new Date().toISOString() }) + '\n');
-        return;
+        return release;
     }
     let owner = '(unreadable owner)';
     try { owner = fs.readFileSync(lock, 'utf8').trim().slice(0, 300); } catch { /* name the path anyway */ }
@@ -148,7 +152,7 @@ if (has('--next')) {
         console.error('  An unattributed reservation cannot be released or questioned.');
         process.exit(2);
     }
-    lockDecisions();
+    const release = lockDecisions();
     const { entries } = readAll();
     // Highest reserved number for this repo and prefix, whether or not the
     // decision was ever written. A reservation is a claim on the NAME, so a
@@ -175,6 +179,11 @@ if (has('--next')) {
     };
     fs.mkdirSync(path.dirname(LOG), { recursive: true });
     fs.appendFileSync(LOG, JSON.stringify(rec) + '\n', 'utf8');
+    // The durable transaction is complete. Output and earlier exit listeners
+    // must not consume another writer's bounded contention window. Keep the
+    // exit fallback for interrupted/throwing paths; release is identity-safe
+    // and idempotent so that fallback cannot close a reused descriptor.
+    release();
     console.log(`${prefix}${next}`);
     console.error(`reserved ${prefix}${next} for ${repo} by ${author}`);
     console.error('  Pass --floor <n> with the highest number already in the repo file the');
@@ -233,7 +242,7 @@ if (has('--record')) {
     // The collision check runs BEFORE the write and blocks it. A log that records
     // the contradiction after the fact documents the failure rather than
     // preventing it — which is what the per-repo DECISIONS.md already did.
-    lockDecisions();
+    const release = lockDecisions();
     const prior = priorFor(repo, subject).filter((e) => e.author !== author);
     if (prior.length && !has('--force')) {
         console.error(`REFUSING: ${prior.length} other session(s) already decided on ${repo}/${normSubject(subject)}:\n`);
@@ -251,6 +260,7 @@ if (has('--record')) {
     if (because) rec.because = because;
     fs.mkdirSync(path.dirname(LOG), { recursive: true });
     fs.appendFileSync(LOG, JSON.stringify(rec) + '\n', 'utf8');
+    release();
     console.log(`recorded: ${repo}/${rec.subject} — ${decision}`);
     console.log(`  ${LOG}`);
     console.log('  This is an INDEX. The durable write still belongs in the repo\'s own');
