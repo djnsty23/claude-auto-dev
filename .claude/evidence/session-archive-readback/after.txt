@@ -1,0 +1,36 @@
+2026-10-11, isolated source repair, real verification rather than skipped checks.
+Only on Darwin, canonically equivalent archive names may match when both names
+resolve to the same nonzero inode/device regular file. Exact membership remains
+the fast path everywhere. Linux and Windows do not normalize names. Duplicate,
+missing, incorrect, compatibility-only and independent-file cases stay refused.
+No correctness requirement, gate, coverage ceiling or platform is removed.
+
+Command: SESSION_SWEEP_ARCHIVE_MEMBERS_ONLY=1 node tooling/test-session-sweep.js
+B, Windows Node24.15.0:23/23, exit0,131ms,1374 output bytes.
+Linux Node22.23.3:23/23, exit0, including distinct NFC/NFD file controls.
+No latency improvement claim: single boundary runs are correctness controls.
+
+Command: SESSION_SWEEP_PRESERVATION_GUARDS_ONLY=1 node tooling/test-session-sweep.js
+Linux Node22.23.3:116/116, nine planted worktree states, exit0,3959ms,
+5563 output bytes. This runs the actual preservation CLI/tar workflow, not a copy.
+An additional Unicode archive extraction assertion is added after this run;
+the final rerun/full sweep and real macOS CI must verify that assertion too.
+
+Command: node tooling/test-prd-container-class.js with NODE_V8_COVERAGE
+Windows Node24.15.0:25/25, exit0,60564ms.26 readable V8 dumps, zero unreadable.
+The actual attributor's session-carrier function map no longer includes clearPrompt.
+Remaining module functions are established by their own real suites in the full
+census, not claimed covered by this collaborator fixture.
+
+Syntax checks and git diff --check pass. Actual macOS CI and the integrated
+thirteen-step full gate are still pending; do not treat these local checks as
+end-to-end platform verification. The PR385 integration owner runs the final
+frozen-head aggregate gate. No duplicate full gate is launched by this follow-up.
+
+Final Linux rerun after adding real Unicode extraction: Node22.23.3,
+node tooling/test-session-sweep.js,548/548 checks,79 planted worktree states,
+exit0,29110ms,17418 output bytes. The preservation CLI is real and unchanged
+outside the narrow filename comparison; all named safety labels remain asserted.
+The PRD container suite independently reruns25/25 on Linux Node22.23.3, exit0.
+Population-reporting selftest21/21; probe-shapes selftest17/17; AGENTS drift
+check passes. These targeted results do not replace the final aggregate gate.
