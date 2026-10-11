@@ -1,0 +1,9 @@
+Candidate source SHA256: 410f7d60f87c72b0700f8866d3844822ea7eed285dc1f3e247e90fb56956bfec
+Only the test probe and harness-cap assertion changed; production scheduling is unchanged.
+Independent exact-expression transport: 8 passed, 0 failed, exit 0.
+Exact probe literal with synthetic lock files: 5 passed, 0 failed. Matching lane 1 and lane 2 accepted; wrong run ID, wrong token, absent metadata rejected.
+Real unmodified wrapper with isolated private two-lane paths: 1 passed, exit 0. Live product peer remained in lane 1; wrapper acquired lane 2 once; observed path, PID, run ID, and token matched; peer lock was preserved.
+Native Windows node tooling/test-gate-lock.js: 85 passed, 0 failed, exit 0. Expected platform skip: SIGTERM delivery unsupported on Windows; forced chain termination passed.
+node --check tooling/test-gate-lock.js and git diff --check passed.
+Independent review: CLEAN for this exact source hash.
+This evidence does not establish full aggregate gate completion or cross-platform CI success.

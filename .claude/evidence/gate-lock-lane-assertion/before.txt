@@ -1,0 +1,6 @@
+Baseline: 95480cbe9c197546230228ae5973ae6a373c9178
+The harness-cap assertion required lane 1 after the live harness peer left.
+The contract allows either lane when the harness cap is free.
+Independent transport controls against the exact baseline expression: 3 passed, 5 failed, exit 1.
+Failures: legitimate lane 2 rejected; duplicate admission, missing observation, wrong owner PID, and wrong observed path accepted.
+These controls exercise assertion transport, not the production wrapper.
