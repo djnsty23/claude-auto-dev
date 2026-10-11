@@ -248,11 +248,13 @@ function withLock(ledgerFile, fn) {
             fs.writeFileSync(lock, JSON.stringify({ pid: process.pid, at: new Date().toISOString(), token }), { flag: 'wx' });
             break;
         } catch (e) {
-            if (e.code !== 'EEXIST') fault('ledger-locked', `${lock}: ${e.code || e.message}`);
+            if (!['EEXIST', 'EPERM', 'EACCES', 'EBUSY'].includes(e.code)) fault('ledger-locked', `${lock}: ${e.code || e.message}`);
+            if (Date.now() > deadline) fault('ledger-locked', `${lock} is held by another writer, try again`);
             let age = null;
-            try { age = Date.now() - fs.statSync(lock).mtimeMs; } catch { age = null; }
+            if (e.code === 'EEXIST') {
+                try { age = Date.now() - fs.statSync(lock).mtimeMs; } catch { age = null; }
+            }
             if (age !== null && age > LOCK_STALE_MS) { try { fs.unlinkSync(lock); } catch { /* another writer took it over first */ } continue; }
-            if (Date.now() > deadline) fault('ledger-locked', `${lock} is held by another writer; try again`);
             sleepMs(50);
         }
     }

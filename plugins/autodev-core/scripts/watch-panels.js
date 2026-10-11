@@ -14,6 +14,7 @@
 const { execFileSync } = require('child_process');
 const path = require('path');
 const claudePaths = require('./claude-paths.js');
+const { withLedgerLock, writeAtomic } = require('./ledger-lock.js');
 
 // fleet-status.js is a SIBLING in this plugin. Resolving it through
 // process.env.USERPROFILE + 'claude-auto-dev' meant the INSTALLED plugin ran one
@@ -79,7 +80,10 @@ function loadSeen() {
 function saveSeen(set) {
   try {
     fs.mkdirSync(FLEET_DIR, { recursive: true });
-    fs.writeFileSync(STATE, JSON.stringify([...set].slice(-500)));
+    withLedgerLock(STATE, () => {
+      const merged = new Set([...loadSeen(), ...set]);
+      writeAtomic(STATE, JSON.stringify([...merged].slice(-500)));
+    });
   } catch {
     /* a failed write costs a duplicate ping, never a missed one */
   }

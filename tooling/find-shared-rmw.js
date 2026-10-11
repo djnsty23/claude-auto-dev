@@ -13,7 +13,8 @@
  *   replace  renameSync(tmp, P) or copyFileSync(src, P) after a read of P
  *   consume  unlinkSync(P) after a read of P, which deletes what arrived since
  *
- * A read is readFileSync(P) or a call to a local helper that reads P, and a
+ * A read is readFileSync(P), a statSync(P) age read for a .reclaim mutex,
+ * or a call to a local helper that reads P, and a
  * write is the same for the write calls. A helper counts when P is its own first
  * parameter, so `const s = readState(p); ...; writeState(p, s)` pairs, or when P
  * is FIXED: built only from module-level names and globals, like `ledgerPath()`
@@ -65,7 +66,7 @@ const ACCEPTED = [
     { file: 'plugins/autodev-core/hooks/agent-browser-cleanup.js', kind: 'rewrite', path: 'prefsPath',
         why: 'Chrome Preferences of an agent-browser profile. Every run of this hook sets the same two keys to false, so a lost update rewrites the same values. The only other writer is Chrome.' },
     { file: 'plugins/autodev-core/hooks/peer-send-ledger.js', kind: 'replace', path: 'file',
-        why: 'The prune holds an exclusive lock against other prunes and copies every byte appended after its read before the rename. What remains is an append between its last stat and the rename, only when the ledger passes PRUNE_BYTES.' },
+        why: 'Current append and prune hold the same bounded exclusive write lock. The legacy prune lock and tail copy remain for older callers. The load suite exercises the pruning threshold with 20 writers.' },
     { file: 'plugins/autodev-core/hooks/session-env-dedupe.js', kind: 'replace', path: 'path.join(dir, change.name)',
         why: 'The dir is session-env/<session id>, one per session (hookDir builds it from the payload session_id). The replace is a compare-and-swap: it re-reads the file, renames only if it still holds the text the plan was made from, and replans on a miss. What remains is an append between that re-read and the rename, in its own session only.' },
     { file: 'plugins/autodev-core/hooks/session-register.js', kind: 'consume', path: 'path.join(DIR, name)',
@@ -76,8 +77,14 @@ const ACCEPTED = [
         why: 'The caller keys it by a hash of the transcript path, so one session owns each file. Losing it costs one full reprint.' },
     { file: 'plugins/autodev-core/scripts/fleet-intent.js', kind: 'rewrite', path: "recordPath('r', 'claude/x', tmp)",
         why: 'The --selftest writes a temp dir it created.' },
+    { file: 'plugins/autodev-core/scripts/ledger-lock.js', kind: 'consume', path: "lock + '.reclaim'",
+        why: 'Accepted residual: removal after the 30-second mtime bound only happens after a reclaimer died inside a microsecond section. The same path is otherwise released only by dev/ino identity. test-ledger-lock.js proves fresh mutex exclusion and abandoned mutex recovery.' },
+    { file: 'plugins/autodev-core/scripts/ledger-lock.js', kind: 'consume', path: 'lock',
+        why: 'Judge, re-stat and unlink hold the exclusive .reclaim mutex created with wx. The textual detector cannot see this serialization. test-ledger-lock.js pauses B before unlink and proves A cannot reclaim or acquire L2 until B releases the mutex.' },
+    { file: 'plugins/autodev-core/scripts/ledger-lock.js', kind: 'consume', path: "file + '.write-lock'",
+        why: 'The propagated reclaim read is serialized by the exclusive .reclaim mutex; the later unlink releases this writer own wx-acquired lock by dev/ino identity. The textual detector cannot see this serialization. test-ledger-lock.js proves the A/B interleaving excludes A and a third owner.' },
     { file: 'plugins/autodev-core/scripts/watch-panels.js', kind: 'rewrite', path: "path.join(FLEET_DIR, 'watch-panels-seen.json')",
-        why: 'Two watchers sharing the seen-set overwrite each other, and a lost id only re-reports a panel already reported. The set only suppresses, so a loss is a duplicate ping, never a missed one.' },
+        why: 'Save holds the shared write lock, merges the latest on-disk set and publishes atomically. The load suite checks 20 independent panel keys. A failed save still only costs a duplicate ping.' },
 ];
 const PRIVATE_TOKEN = /(sid|sessionid|session_id|pid|uuid|runid|agentid)$|^(sid|key|id|sessionid|session_id)/i;
 const KEYWORDS = new Set(['if', 'for', 'while', 'switch', 'catch', 'with', 'return', 'typeof', 'function']);
@@ -279,10 +286,10 @@ function isFixed(text, spans, expr) {
     return true;
 }
 
-const DIRECT = /\b(?:fs\.)?(readFileSync|writeFileSync|renameSync|copyFileSync|unlinkSync)\s*\(/g;
+const DIRECT = /\b(?:fs\.)?(statSync|readFileSync|writeFileSync|renameSync|copyFileSync|unlinkSync)\s*\(/g;
 const KIND = { writeFileSync: 'rewrite', renameSync: 'replace', copyFileSync: 'replace', unlinkSync: 'consume' };
 
-function directCalls(text) {
+function directCalls(text, spans) {
     const calls = [];
     let m;
     DIRECT.lastIndex = 0;
@@ -291,7 +298,19 @@ function directCalls(text) {
         const name = m[1];
         const target = name === 'renameSync' || name === 'copyFileSync' ? args[1] : args[0];
         if (!target || target === '0') continue;
-        calls.push({ at: m.index, arg: target, args, op: name === 'readFileSync' ? 'read' : KIND[name], via: name });
+        // Reclaim age checks authorize deletion using metadata, not contents.
+        // Keep general stat/rotation audits outside this content-RMW detector.
+        if (name === 'statSync' && !resolve(text, spans, target, m.index).some((e) => /['"]\.reclaim['"]/.test(e))) continue;
+        calls.push({ at: m.index, arg: target, args, op: name === 'readFileSync' || name === 'statSync' ? 'read' : KIND[name], via: name });
+    }
+    // The core helper replaces the complete destination. Follow this shipped
+    // import just like writeFileSync so moving I/O into it cannot hide a writer.
+    if (/const\s*\{[^}]*\bwriteAtomic\b[^}]*\}\s*=\s*require\(['"]\.\/ledger-lock\.js['"]\)/.test(text)) {
+        const atomic = /(?<![\w$.])writeAtomic\s*\(/g;
+        while ((m = atomic.exec(text))) {
+            const args = argsAt(text, m.index + m[0].length - 1);
+            if (args[0]) calls.push({ at: m.index, arg: args[0], args, op: 'rewrite', via: 'writeAtomic' });
+        }
     }
     return calls;
 }
@@ -381,7 +400,7 @@ function scanText(src, file) {
     const text = stripComments(src);
     const spans = functionSpans(text);
     const branches = branchBlocks(text);
-    const direct = directCalls(text);
+    const direct = directCalls(text, spans);
 
     // Helpers: named functions that read or write their own first parameter, and
     // named functions that read or write a FIXED path. A call to either is that
@@ -394,7 +413,9 @@ function scanText(src, file) {
         const ops = [];
         const p0 = s.params[0];
         for (const c of direct) {
-            if (innermost(spans, c.at) !== s) continue;
+            // Anonymous transaction callbacks still execute in their named
+            // helper. Keep named nested functions separate.
+            if (innermost(spans.filter((span) => span.name), c.at) !== s) continue;
             const chain = resolve(text, spans, c.arg, c.at);
             if (p0 && chain.some((e) => norm(e) === p0 || norm(e).startsWith(p0 + '+'))) { ops.push({ op: c.op, fixed: null }); continue; }
             const fixed = chain.find((e) => isFixed(text, spans, e));

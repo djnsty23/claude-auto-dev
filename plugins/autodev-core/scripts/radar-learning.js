@@ -10,6 +10,7 @@
 
 const fs = require('fs');
 const path = require('path');
+const { withLedgerLock, writeAtomic } = require('./ledger-lock.js');
 
 const SCHEMA_VERSION = 1;
 const DAY_MS = 86400000;
@@ -45,13 +46,6 @@ function value(flag, fallback, argv = process.argv) {
 
 function readJson(file, fallback = null) {
   try { return JSON.parse(fs.readFileSync(file, 'utf8')); } catch { return fallback; }
-}
-
-function writeAtomic(file, data) {
-  fs.mkdirSync(path.dirname(file), { recursive: true });
-  const temporary = `${file}.${process.pid}.tmp`;
-  fs.writeFileSync(temporary, data, 'utf8');
-  fs.renameSync(temporary, file);
 }
 
 function cleanText(input) {
@@ -491,31 +485,35 @@ function main(argv = process.argv) {
   if (transitionId) {
     if (!stateOverride) throw new Error('--transition requires --state-dir');
     const ledgerFile = path.join(path.resolve(stateOverride), 'learning-ledger.json');
-    const ledger = readJson(ledgerFile, null);
-    if (!ledger) throw new Error('learning ledger not found');
-    const entry = transitionLifecycle(ledger, transitionId, value('--to', '', argv), value('--evidence', '', argv), {
-      revalidateBy: value('--revalidate-by', null, argv),
+    return withLedgerLock(ledgerFile, () => {
+      const ledger = readJson(ledgerFile, null);
+      if (!ledger) throw new Error('learning ledger not found');
+      const entry = transitionLifecycle(ledger, transitionId, value('--to', '', argv), value('--evidence', '', argv), {
+        revalidateBy: value('--revalidate-by', null, argv),
+      });
+      writeAtomic(ledgerFile, JSON.stringify(ledger, null, 2));
+      console.log(`transitioned ${transitionId} to ${entry.status}`);
     });
-    writeAtomic(ledgerFile, JSON.stringify(ledger, null, 2));
-    console.log(`transitioned ${transitionId} to ${entry.status}`);
-    return;
   }
   const manifestFile = value('--manifest', null, argv);
   if (!manifestFile) throw new Error('--manifest is required');
   const manifest = loadManifest(path.resolve(manifestFile));
   const stateDir = path.resolve(stateOverride || manifest.run.state_dir);
   const ledgerFile = path.join(stateDir, 'learning-ledger.json');
-  let ledger = readJson(ledgerFile, createLedger());
+  let ledger;
   const verdictFile = value('--verdicts', null, argv);
   let added = 0;
   const nowIso = new Date().toISOString();
   if (verdictFile) {
     const verdictInput = validateVerdictFile(readJson(path.resolve(verdictFile), null), manifest);
-    const result = ingestVerdicts(ledger, manifest, verdictInput, nowIso);
-    ledger = result.ledger;
-    added = result.added;
-    writeAtomic(ledgerFile, JSON.stringify(ledger, null, 2));
-  }
+    withLedgerLock(ledgerFile, () => {
+      ledger = readJson(ledgerFile, createLedger());
+      const result = ingestVerdicts(ledger, manifest, verdictInput, nowIso);
+      ledger = result.ledger;
+      added = result.added;
+      writeAtomic(ledgerFile, JSON.stringify(ledger, null, 2));
+    });
+  } else ledger = readJson(ledgerFile, createLedger());
   const outputDir = path.resolve(value('--output-dir', path.join(process.cwd(), '.claude', 'reports'), argv));
   const files = writeArtifacts(outputDir, reportData(manifest, ledger, nowIso));
   console.log(`learning: ${added} new verdict(s), ${Object.keys(ledger.experiments || {}).length} total experiment(s)`);
