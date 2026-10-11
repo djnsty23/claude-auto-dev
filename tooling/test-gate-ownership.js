@@ -137,8 +137,20 @@ function gitUsrBin(exe) {
     return fs.existsSync(p) ? p : null;
 }
 
-/** A Git Bash that sleeps; its MSYS pid, or null with a reason. */
-async function msysSleeper() {
+/** Select a real MSYS-only pid; retry only native-PID collisions, never setup failures. */
+async function msysSleeper(maxAttempts = 8, attempt = msysSleeperAttempt) {
+    const collisions = [];
+    for (let n = 1; n <= maxAttempts; n++) {
+        const result = await attempt();
+        if (!result.collision) return { ...result, attempts: n };
+        collisions.push(result.why);
+    }
+    return { pid: null, attempts: maxAttempts,
+        why: `no MSYS-only pid after ${maxAttempts} candidates: ${collisions.join('; ')}` };
+}
+
+/** One owned Git Bash; rejected colliding candidates are stopped before reselection. */
+async function msysSleeperAttempt() {
     if (!WIN) return { pid: null, why: 'not Windows, so there is no second pid table' };
     const bash = gitUsrBin('bash.exe');
     if (!bash) return { pid: null, why: 'Git Bash not found' };
@@ -160,11 +172,42 @@ async function msysSleeper() {
     if (!pid) return { pid: null, why: 'bash did not write its pid within 20 s' };
     if (c.exitCode !== null) return { pid: null, why: `bash exited ${c.exitCode} before the probe: ${stderr.trim()}` };
     const t = spawnSync('tasklist', ['/FI', `PID eq ${pid}`, '/NH', '/FO', 'CSV'], { encoding: 'utf8', windowsHide: true });
-    if (new RegExp(`^"[^"]*","${pid}"`, 'm').test(t.stdout || '')) return { pid: null, why: `MSYS pid ${pid} is also a live Windows pid` };
+    if (t.error || t.status !== 0) return { pid: null, why: `native PID probe failed: ${t.error || t.stderr || t.status}` };
+    if (new RegExp(`^"[^"]*","${pid}"`, 'm').test(t.stdout || '')) {
+        try { c.kill(); } catch (e) { return { pid: null, why: `could not stop rejected Bash: ${e.message}` }; }
+        for (let i = 0; i < 100 && c.exitCode === null && c.signalCode === null; i++) await sleep(50);
+        if (c.exitCode === null && c.signalCode === null) return { pid: null, why: 'rejected Bash did not stop within 5 s' };
+        // Do not leave a dead pid in tree cleanup where Windows could reuse it.
+        trees.splice(trees.indexOf(c), 1);
+        return { pid: null, collision: true, why: `MSYS pid ${pid} is also a live Windows pid` };
+    }
     ident.forgetMsys();
     const table = ident.msysTable();
     if (!table.ok || !table.byMsys.has(pid)) return { pid: null, why: `ps -W does not list MSYS pid ${pid}` };
     return { pid, winpid: table.byMsys.get(pid), why: null };
+}
+
+/** Retry-policy controls are independent of native liveness; S7/P6 still probe the real queue. */
+async function s0MsysSelection() {
+    const rows = [];
+    const collision = { pid: null, collision: true, why: 'native PID collision' };
+    const live = { pid: 701, winpid: 702, why: null };
+    let calls = 0;
+    let result = await msysSleeper(undefined, async () => { calls++; return live; });
+    rows.push(['S0: a valid first candidate is used without retries', result.pid === 701 && calls === 1, JSON.stringify(result)]);
+    calls = 0;
+    result = await msysSleeper(undefined, async () => ++calls <= 2 ? collision : live);
+    rows.push(['S0: two collisions select the third candidate, never a colliding pid', result.pid === 701 && calls === 3, JSON.stringify(result)]);
+    calls = 0;
+    result = await msysSleeper(undefined, async () => { calls++; return collision; });
+    rows.push(['S0: exhausted collisions fail closed at exactly eight candidates', result.pid === null && calls === 8 && /after 8 candidates/.test(result.why), JSON.stringify(result)]);
+    calls = 0;
+    result = await msysSleeper(undefined, async () => { calls++; return { pid: null, why: 'tasklist unavailable' }; });
+    rows.push(['S0: an unavailable native probe is not retried or accepted', result.pid === null && calls === 1 && result.why === 'tasklist unavailable', JSON.stringify(result)]);
+    calls = 0;
+    result = await msysSleeper(undefined, async () => ++calls === 1 ? collision : { pid: null, why: 'Bash exited' });
+    rows.push(['S0: a setup failure after a collision stops selection', result.pid === null && calls === 2 && result.why === 'Bash exited', JSON.stringify(result)]);
+    return rows;
 }
 
 /**
@@ -855,6 +898,7 @@ function expectRed(id, what, rows) {
 async function main() {
     const only = process.env.GATE_OWNERSHIP_ONLY ? process.env.GATE_OWNERSHIP_ONLY.split(',') : null;
     const want = (id) => !only || only.includes(id);
+    report('S0', await s0MsysSelection());
     setLineagePath(path.join(mkTemp('gown-lineage-'), 'lineage.json'));
     const msys = await msysSleeper();
     freshSnap();
