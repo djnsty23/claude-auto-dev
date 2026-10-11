@@ -1,0 +1,68 @@
+  ok   control: pattern fires on a planted reference to iterate
+  ok   control: pattern fires on a planted reference to wizard
+  ok   control: pattern fires on a planted reference to sprint
+  ok   control: pattern fires on a planted reference to show-your-work
+  ok   control: pattern fires on a planted reference to mem-dashboard
+  ok   control: pattern fires on a planted reference to knowledge-agent
+  ok   control: pattern fires on a planted reference to memory-maintenance
+  ok   control: pattern ignores prose use of a word
+  ok   population: inventory read at least 20 user-invocable skills (49 read)
+  FAIL iterate: skill directory removed
+  FAIL iterate: not in the user-invocable inventory
+  FAIL iterate: content lives in auto/references/iterate.md (0 bytes)
+  FAIL iterate: auto/SKILL.md links references/iterate.md
+  FAIL wizard: skill directory removed
+  FAIL wizard: not in the user-invocable inventory
+  FAIL wizard: content lives in auto/references/handback.md (0 bytes)
+  FAIL wizard: auto/SKILL.md links references/handback.md
+  FAIL sprint: skill directory removed
+  FAIL sprint: not in the user-invocable inventory
+  FAIL sprint: content lives in auto/references/sprint.md (0 bytes)
+  FAIL sprint: auto/SKILL.md links references/sprint.md
+  FAIL show-your-work: skill directory removed
+  FAIL show-your-work: not in the user-invocable inventory
+  FAIL show-your-work: content lives in prove/references/show-your-work.md (0 bytes)
+  FAIL show-your-work: prove/SKILL.md links references/show-your-work.md
+  FAIL mem-dashboard: skill directory removed
+  FAIL mem-dashboard: not in the user-invocable inventory
+  FAIL mem-dashboard: content lives in mem-search/references/dashboard.md (0 bytes)
+  FAIL mem-dashboard: mem-search/SKILL.md links references/dashboard.md
+  FAIL knowledge-agent: skill directory removed
+  FAIL knowledge-agent: not in the user-invocable inventory
+  FAIL knowledge-agent: content lives in mem-search/references/knowledge-brief.md (0 bytes)
+  FAIL knowledge-agent: mem-search/SKILL.md links references/knowledge-brief.md
+  FAIL memory-maintenance: skill directory removed
+  FAIL memory-maintenance: not in the user-invocable inventory
+  FAIL memory-maintenance: content lives in mem-search/references/maintenance.md (0 bytes)
+  FAIL memory-maintenance: mem-search/SKILL.md links references/maintenance.md
+  ok   population: git ls-files listed tracked files (866 tracked)
+  ok   population: at least 300 shipped text files scanned (641 scanned)
+  FAIL iterate: no surviving reference as a skill (4 hit(s)
+      README.md:58: | **autodev-core** | The workflow — `brainstorm`, `auto`, `iterate`, `audit`, `review`, `ship`, `scan`, plus the `prd.json` sprint system, 4
+      README.md:79: | `iterate` | Convergence loop: brainstorm → fix → re-scan until clean |
+      plugins/autodev-core/skills/brainstorm/SKILL.md:166: when it starts (the first run creates it), any `iterate` round after the first,
+      plugins/autodev-core/skills/rule-workflow-spine/SKILL.md:119: Existing: `auto`, `iterate`, `heal`)
+  FAIL wizard: no surviving reference as a skill (7 hit(s)
+      plugins/autodev-core/scripts/prd-mark-needs-setup.js:12: * state was invented, and `wizard` tells them to write the handback into the
+      plugins/autodev-core/skills/auto/SKILL.md:315: The moment `wizard` fires for a story — an error names a choice, a permission,
+      plugins/autodev-core/skills/auto/SKILL.md:332: 2. **Write the handback into the chat** in the shape `wizard` gives: numbered
+      plugins/autodev-core/skills/auto/references/handback-rationale.md:12: file and pointed the story at it. `wizard` was written after a session retried
+      plugins/autodev-core/skills/production-radar/SKILL.md:53: handback (load `wizard`): name the variable, where it goes, and what done looks
+      plugins/autodev-core/skills/rule-workflow-spine/SKILL.md:113: Existing: `spec`, `brainstorm`, `framework-radar`, `wizard`, `setup-project`
+      plugins/autodev-core/skills/spec/SKILL.md:161: where, with the URL; it is the handback, and `wizard`'s rules for a handback)
+  FAIL sprint: no surviving reference as a skill (3 hit(s)
+      README.md:92: | `sprint` | Create/advance sprint |
+      tooling/test-prd-container-class.js:210: // it on `sprint` and nested on `sprints[].id`, so comparing it would fail
+      tooling/test-stop-failure-note.js:73: ok('tells the operator on stderr', /sprint still active/i.test(r.stderr || ''), JSON.stringify(r.stderr));)
+  FAIL show-your-work: no surviving reference as a skill (2 hit(s)
+      plugins/autodev-core/skills/rule-workflow-spine/SKILL.md:122: Existing: `prove`, `test`, `preflight`, `review`, `show-your-work`, `rule-verification`, `rule-gate-integrity`
+      plugins/autodev-core/skills/show-your-work/SKILL.md:14: Adapted from the show-your-work skill in Lauren Tan's Pstack (MIT).)
+  ok   mem-dashboard: no surviving reference as a skill (0 hit(s))
+  FAIL knowledge-agent: no surviving reference as a skill (1 hit(s)
+      plugins/autodev-memory/hooks/memory-capture.js:98: // skills/knowledge-agent/SKILL.md.)
+  FAIL memory-maintenance: no surviving reference as a skill (1 hit(s)
+      README.md:59: | **autodev-memory** | Cross-session project memory + nightly `memory-maintenance` — automatic observation capture, semantic search, domain-)
+
+population: 49 user-invocable skill(s), 7 merged name(s), 641 shipped file(s) scanned for references
+34 of 46 check(s) failed
+exit 1
