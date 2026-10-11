@@ -1,13 +1,11 @@
 # CLAUDE.md
 
-The rules for this repository. The incidents behind them are in
+Keep this file within 8,192 bytes, enforced by `check:claude-md`. Incidents and moved text are in
 [docs/claude-md-long-form.md](docs/claude-md-long-form.md).
 
 ## What this repo is
 
-A **Claude Code plugin marketplace**, not an application. Everything under `plugins/` runs inside
-someone else's session: a hook that throws kills their turn, and one that prints needlessly costs
-them context on every prompt. Everything outside `plugins/` is repo machinery and never ships.
+A **Claude Code plugin marketplace**. `plugins/` ships into other people's sessions. Hook errors kill turns and needless output costs context. Everything else is unshipped repo machinery.
 
 ## Commands
 
@@ -37,31 +35,15 @@ npm test && npm run check:suites && npm run check:probe-shapes
 When the first step fails, run the remaining twelve yourself.
 The chain's exit status is a verdict on one step, not on thirteen.
 
-- **`npm run gate` waits its turn** in the machine-wide `full-gate-queue.js` queue
-  (`tooling/gate-lock.js`), as a harness gate behind every product gate, then runs `scripts["gate:chain"]`
-  and passes its exit code through unless the machine explains a red (next bullet).
-  A waiter stopped by hand leaves its ticket: `full-gate-queue.js leave --pid <pid>` removes it.
-- **Exit 2 is INDETERMINATE**, never a pass or a fail: a chain the lock did not see finish, a
-  conflict, or a red with machine evidence from `tooling/gate-recovery.js` (ENOSPC under the disk
-  floor, a port still taken, a crash exit with event 2004). Inside `npm test` that evidence must sit
-  in every failed suite's own log. Read the conflict line before re-running.
-- **One full gate per merge, on the frozen candidate.** Iterate with `npm test`. Then rebase onto
-  `origin/main`, commit, and run the gate once on that clean tree: `check:suites` grades HEAD in a
-  private worktree and refuses a dirty tree. Merge with `plugins/autodev-core/scripts/merge-lock.js`,
-  which takes the per-repo merge lock, refuses a base that moved, and reads the merged tree back.
-- **A product's small candidate can take the fast lane** where the operator's policy grants it:
-  `plugins/autodev-core/scripts/fast-lane.js run` classifies the diff (size and sensitive paths),
-  runs lint, typecheck, test and build, and writes a receipt that `merge-lock.js --fast-lane-receipt`
-  accepts after classifying GitHub's diff again. This repo always takes its own full gate.
-- **Do not touch the tree while it runs.** `test-all.js` fails `tree-inert` when a suite changes
-  `git status` under a stable HEAD. A moved HEAD makes that row INDETERMINATE, so the run exits 2,
-  or 1 when a suite also failed on its own. Draft in a scratchpad. `check:coverage` grades the receipt that `npm test` left and refuses (exit 2) one
-  that is missing, stale, partial or red; `find-untested-functions.js --fresh` measures anew.
+- **`npm run gate` waits its turn** via `tooling/gate-lock.js` in the machine-wide `full-gate-queue.js`, behind product gates, then runs `scripts["gate:chain"]`. Remove a stopped waiter with `full-gate-queue.js leave --pid <pid>`.
+- **Exit 2 is INDETERMINATE**, never pass or fail. Read the conflict or `tooling/gate-recovery.js` machine evidence (unfinished chain, ENOSPC below the disk floor, occupied port, crash with event 2004). In `npm test`, evidence belongs in each failed suite's own log.
+- **One full gate per merge, on the frozen candidate.** Iterate with `npm test`, rebase onto `origin/main`, commit, then gate the clean tree. `check:suites` grades HEAD in a private worktree and refuses dirt. Use `plugins/autodev-core/scripts/merge-lock.js` for the per-repo lock, base check and merged-tree readback.
+- **Product fast lanes require operator policy.** `plugins/autodev-core/scripts/fast-lane.js run` classifies size and sensitive paths, runs lint/typecheck/test/build, and records a receipt. `merge-lock.js --fast-lane-receipt` reclassifies GitHub's diff. This repo always uses its full gate.
+- **Do not touch the tree during a gate.** `test-all.js` fails `tree-inert` for changed `git status` under stable HEAD. Moved HEAD exits 2, or 1 if a suite also fails. Draft in a scratchpad. `check:coverage` refuses missing/stale/partial/red receipts with exit 2. `find-untested-functions.js --fresh` measures anew.
 - **`gate:fast` does not satisfy the merge bar.** The bar is the full gate on the rebased candidate.
-- **The gate is not what CI runs.** `check:hook-parse` is CI's `node --check` loop over
-  `plugins/*/hooks/*.js`, but seven of CI's steps are `if: matrix.os == 'ubuntu-latest'`.
-- **A conflict marker inside a string still parses**, so `check:conflict-markers` greps every tracked
-  file. Show a conflict in a doc only inside a closed fence.
+- **The gate differs from CI.** `check:hook-parse` runs CI's `node --check` on `plugins/*/hooks/*.js`. Seven of CI's steps are `if: matrix.os == 'ubuntu-latest'`.
+- **Conflict markers in strings parse.** `check:conflict-markers` scans all tracked files. Doc examples need closed fences.
+
 - **Kill by pid, never by pattern**: every worktree runs the same command lines. Confirm the pid's cwd.
 - A child killed on timeout still carries its stdout. Report what it printed, not a bare `ETIMEDOUT`.
 - `$?` after a pipe is the pipe's status: `npm run check:suites | tail -3` reads 0 on an exit 2.
@@ -70,24 +52,17 @@ The chain's exit status is a verdict on one step, not on thirteen.
 
 ## Architecture
 
-`autodev-core` (the workflow, its skills, agents and hooks, the sprint system) · `autodev-memory`
-(sqlite memory, its own hooks) · `autodev-stack` (vendor skills). `${CLAUDE_PLUGIN_ROOT}` resolves
-per plugin, so cross-plugin paths cannot work: if core needs a file, core ships it.
+`autodev-core` ships workflow, skills, agents, hooks and sprints. `autodev-memory` ships sqlite memory and hooks. `autodev-stack` ships vendor skills. `${CLAUDE_PLUGIN_ROOT}` resolves per plugin. If core needs a file, core must ship it.
 
 State no skill, agent or hook-event counts here: they go stale silently. Count on disk.
 
 ### Skills are the unit of behaviour
 
-`plugins/<plugin>/skills/<name>/SKILL.md`, frontmatter-driven. User-invocable skills take their
-command name from the directory. **No `rule-*` skill is auto-loaded, and a `paths:` glob loads
-nothing**: over 30 days every load of a rule skill was a Skill call the model chose. Load
-`rule-diagnosis`, `rule-ab-testing` and `rule-gate-integrity` explicitly before proposing a cause, a
-detector or a gate. Long reference material goes in `references/` beside the skill.
+`plugins/<plugin>/skills/<name>/SKILL.md` is frontmatter-driven. Invocable names come from directories. **No `rule-*` skill is auto-loaded, and a `paths:` glob loads nothing.** Explicitly load `rule-diagnosis`, `rule-ab-testing` and `rule-gate-integrity` before proposing a cause, detector or gate. Put long references in the skill's `references/`.
 
 ### The prd.json sprint system
 
-`prd.json` at a user's project root is shared state between `auto`, `status`, the Stop hook and the
-drift audit. Stories live in a `stories` object keyed by id. The field that matters is **`passes`**:
+`prd.json` shares state between `auto`, `status`, Stop and drift audit. Its `stories` object is keyed by id. **`passes`** means:
 
 | value | remaining work? | an agent can act on it? |
 |---|---|---|
@@ -97,48 +72,29 @@ drift audit. Stories live in a `stories` object keyed by id. The field that matt
 | `"deferred"` | **no**, a decision not to do it | no |
 | `"needs-setup"` | **yes**, blocked on a human | **no** |
 
-Anything reading this file must distinguish **all five** states, not treat `passes` as a boolean and
-not stop at four. Use `summarise()` from `plugins/autodev-core/scripts/prd-states.js`: it keeps the
-five apart and has an `unrecognised` bucket. A new state changes this table and `prd-states.js` in
-one commit.
+Readers must distinguish **all five** states, not boolean truthiness and not stop at four. Use `summarise()` in `plugins/autodev-core/scripts/prd-states.js`, including its `unrecognised` bucket. Change this table and the parser together for new states.
 
-`stop-auto-check.js` blocks the end of a turn while pending stories remain, so a wrong answer hangs
-the session. Its escape hatches: an explicit auto-exit signal, a flag older than 2h, an unparseable or
-missing `prd.json`, an idle one-shot marker, and stories the drift audit measured as long-untouched.
+`stop-auto-check.js` blocks turn end while work is pending. Escapes: explicit auto-exit, flag older than 2h, missing/unparseable PRD, idle one-shot marker, or drift-audited long-untouched stories.
 
 ### Hooks run on every turn
 
-Registered in `plugins/<plugin>/hooks/hooks.json`, with paths only through `${CLAUDE_PLUGIN_ROOT}`
-(validate rejects `~/.claude` and relative paths). Wrap the body in try/catch and `process.exit(0)`
-unless blocking is the purpose. `pre-tool-filter.js` fails closed, but its private-name block fails
-open, because it ships installed and a defect there lasts until the user reinstalls.
+Register hooks in `plugins/<plugin>/hooks/hooks.json` using only `${CLAUDE_PLUGIN_ROOT}` paths. Validate rejects `~/.claude` and relative paths. Wrap bodies in try/catch, set `process.exitCode` and drain output. Only intentional blockers fail. `pre-tool-filter.js` fails closed except its private-name block, which fails open.
 
-**A hook with nothing to say emits zero bytes**: assert zero stdout and zero stderr. Every wired hook
-needs a suite (`check:hooks` is a hard gate), driven as a subprocess like
-`tooling/test-pre-tool-filter.js`.
+**Nothing to say means zero stdout and stderr.** Every wired hook needs a subprocess suite (`check:hooks` is a hard gate). Follow `tooling/test-pre-tool-filter.js`.
 
 ### Version is six files and one writer
 
-`VERSION` is the source of truth. `bump.js` propagates it to `package.json`,
-`.claude-plugin/marketplace.json` and every `plugins/*/.claude-plugin/plugin.json`. A version number
-is a plugin-cache key, so two trees must never share one: re-read `VERSION` and the origin branches
-immediately before `bump.js`.
+`VERSION` is authoritative. Only `bump.js` writes versions to `package.json`, `.claude-plugin/marketplace.json` and every `plugins/*/.claude-plugin/plugin.json`. Versions are cache keys, so never reuse one for two trees. Re-read `VERSION` and origin branches immediately before bumping.
 
 ## Conventions that have cost something
 
 - **`git commit -F <file>`, never `-m`**: the shell eats backticks.
   `[measured 2026-09-08]` **force-push is not blocked**: `main` has no branch protection and no
   rulesets, and `check:claude-md` grades this sentence against the API in both directions.
-- **Never `git commit --amend`, and stage explicit paths, never `git add -A`.** Several sessions
-  commit to this clone at once, so HEAD moves in seconds and `-A` sweeps up their work.
-- **This repo is PUBLIC.** `check-no-private-names.js` gates the tree and
-  `tooling/githooks/commit-msg` gates messages: enable both per clone with
-  `git config core.hooksPath tooling/githooks`. A sentence that would not be true on another machine
-  belongs in `~/.claude/rules/`, not here. The denylist is stored as digests. Add a name with
-  `node tooling/check-no-private-names.js --digest <name>`, never in plaintext.
-- **`process.exit()` can truncate pending output.** Pipes are asynchronous on POSIX. Set
-  `process.exitCode` and let the event loop drain. Test it with one write big enough to hit
-  backpressure.
+- **Never `git commit --amend` or `git add -A`.** Stage explicit paths. Concurrent sessions move HEAD and leave unrelated work.
+- **This repo is PUBLIC.** Enable tree/message privacy gates with `git config core.hooksPath tooling/githooks`. Machine-specific rules belong in `~/.claude/rules/`. Keep denylisted names as digests, generated by `node tooling/check-no-private-names.js --digest <name>`, never plaintext.
+- **`process.exit()` can truncate output.** POSIX pipes are asynchronous. Set `process.exitCode`, drain the event loop, and test a write large enough for backpressure.
+
 - A scripted rewrite of `process.exit(X)` must count parens, then grep for survivors.
 - **`;` is not `&&`**, and a validation run piped into `head` or `tail` inside a chain reads red as green.
 - macOS `realpathSync`: `/var/folders` and `/private/var/folders` are one directory. Resolve any path
@@ -147,9 +103,4 @@ immediately before `bump.js`.
 
 ## Product repos
 
-**Commit and push autodev freely.** In a product repo, who merges and deploys is the operator's
-decision policy (`~/.claude/rules/decision-policy.md`), and without one, ask first. Use
-`git worktree add`, never `git checkout` in a live main tree, and re-run its gate after a rebase.
-Then `plugins/autodev-core/scripts/shared-install.js link <worktree>` hardlinks the main
-checkout's node_modules, and a linked tree is unshared before anything installs into it
-([docs/shared-install.md](docs/shared-install.md)).
+**Commit and push autodev freely.** Product merges/deploys follow `~/.claude/rules/decision-policy.md`, otherwise ask. Use `git worktree add`, never checkout in a live main tree. Re-run the product gate after rebasing. `plugins/autodev-core/scripts/shared-install.js link <worktree>` hardlinks main's node_modules. Unshare before installs ([details](docs/shared-install.md)).

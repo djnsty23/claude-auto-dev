@@ -136,6 +136,44 @@ try {
     const MD = path.join(scratch, 'CLAUDE.md');
     const pristine = fs.readFileSync(MD, 'utf8');
 
+    // Keep the byte probe independent of the current document's size.
+    // Other required claims stay valid so only the budget can reject it.
+    const chain = JSON.parse(fs.readFileSync(path.join(scratch, 'package.json'), 'utf8'))
+        .scripts['gate:chain'];
+    const budgetBase = '# CLAUDE.md\n\n## Commands\n\nStep 1 of '
+        + chain.split('&&').length + '.\n\n```bash\n' + chain + '\n```\n\n'
+        + '## Architecture\n\n`autodev-core`, `autodev-memory`, `autodev-stack`.\n\n'
+        + 'force-push is not blocked\n\n'
+        + pristine.match(/\| value \|[^]*?(?=\r?\n\r?\n)/)[0] + '\n';
+    for (const [label, bytes, suffix] of [
+        ['ASCII at the limit', 8192, ''],
+        ['ASCII one byte over', 8193, ''],
+        ['UTF-8 at the limit', 8192, '\u00e9'],
+        ['UTF-8 one byte over', 8193, '\u00e9'],
+        ['CRLF one byte over', 8193, '\r\n'],
+    ]) {
+        const fixture = budgetBase
+            + ' '.repeat(bytes - Buffer.byteLength(budgetBase + suffix, 'utf8')) + suffix;
+        fs.writeFileSync(MD, fixture);
+        check(`byte fixture has exactly ${bytes} bytes: ${label}`,
+            fs.statSync(MD).size === bytes, String(fs.statSync(MD).size));
+        const r = run(['--root', scratch, '--no-network', '--json']);
+        let report = null;
+        try { report = JSON.parse(r.stdout); } catch { /* asserted below */ }
+        const over = bytes > 8192;
+        check(`byte budget ${over ? 'rejects' : 'accepts'} ${label} (exit ${over ? 1 : 0})`,
+            r.status === (over ? 1 : 0) && !r.error && r.stderr === '', detail(r));
+        check(`byte budget reports only the expected finding: ${label}`,
+            !!report && report.indeterminate.length === 0
+                && report.findings.length === (over ? 1 : 0)
+                && (!over || (report.findings[0].family === 'byte-budget'
+                    && report.findings[0].actual === bytes
+                    && report.findings[0].claimed === 8192
+                    && report.findings[0].source === 'CLAUDE.md file bytes')),
+            r.stdout);
+    }
+    fs.writeFileSync(MD, pristine);
+
     // Each mutation is ONE edit to the REAL file's real sentences. `applied`
     // is asserted first: a mutation that silently matched nothing would make
     // the RED assertion below untestable rather than failing.
