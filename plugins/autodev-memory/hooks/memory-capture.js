@@ -95,7 +95,7 @@ try {
         // monorepo's `packages/foo/src/auth/login.js` to just `packages/foo`, so
         // all of a package's areas share one throttle key and one brief. This is
         // a deliberate simplicity trade-off, not a bug — documented in
-        // skills/knowledge-agent/SKILL.md.
+        // skills/mem-search/references/knowledge-brief.md.
         //
         // Both sides are resolved through realpath first. On macOS a project
         // reached via a symlinked path (/var/folders/... → /private/var/...,

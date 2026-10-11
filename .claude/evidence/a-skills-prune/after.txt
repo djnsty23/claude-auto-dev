@@ -1,0 +1,53 @@
+  ok   control: pattern fires on a planted reference to iterate
+  ok   control: pattern fires on a planted reference to wizard
+  ok   control: pattern fires on a planted reference to sprint
+  ok   control: pattern fires on a planted reference to show-your-work
+  ok   control: pattern fires on a planted reference to mem-dashboard
+  ok   control: pattern fires on a planted reference to knowledge-agent
+  ok   control: pattern fires on a planted reference to memory-maintenance
+  ok   control: pattern ignores prose use of a word
+  ok   population: inventory read at least 20 user-invocable skills (42 read)
+  ok   iterate: skill directory removed
+  ok   iterate: not in the user-invocable inventory
+  ok   iterate: content lives in auto/references/iterate.md (4803 bytes)
+  ok   iterate: auto/SKILL.md links references/iterate.md
+  ok   wizard: skill directory removed
+  ok   wizard: not in the user-invocable inventory
+  ok   wizard: content lives in auto/references/handback.md (7682 bytes)
+  ok   wizard: auto/SKILL.md links references/handback.md
+  ok   sprint: skill directory removed
+  ok   sprint: not in the user-invocable inventory
+  ok   sprint: content lives in auto/references/sprint.md (3472 bytes)
+  ok   sprint: auto/SKILL.md links references/sprint.md
+  ok   show-your-work: skill directory removed
+  ok   show-your-work: not in the user-invocable inventory
+  ok   show-your-work: content lives in prove/references/show-your-work.md (3215 bytes)
+  ok   show-your-work: prove/SKILL.md links references/show-your-work.md
+  ok   mem-dashboard: skill directory removed
+  ok   mem-dashboard: not in the user-invocable inventory
+  ok   mem-dashboard: content lives in mem-search/references/dashboard.md (3875 bytes)
+  ok   mem-dashboard: mem-search/SKILL.md links references/dashboard.md
+  ok   knowledge-agent: skill directory removed
+  ok   knowledge-agent: not in the user-invocable inventory
+  ok   knowledge-agent: content lives in mem-search/references/knowledge-brief.md (5325 bytes)
+  ok   knowledge-agent: mem-search/SKILL.md links references/knowledge-brief.md
+  ok   memory-maintenance: skill directory removed
+  ok   memory-maintenance: not in the user-invocable inventory
+  ok   memory-maintenance: content lives in mem-search/references/maintenance.md (6666 bytes)
+  ok   memory-maintenance: mem-search/SKILL.md links references/maintenance.md
+  ok   population: git ls-files listed tracked files (868 tracked)
+  ok   population: at least 300 shipped text files scanned (642 scanned)
+  ok   iterate: no surviving reference as a skill (0 hit(s))
+  ok   wizard: no surviving reference as a skill (0 hit(s))
+  ok   sprint: no surviving reference as a skill (0 hit(s))
+  ok   show-your-work: no surviving reference as a skill (0 hit(s))
+  ok   mem-dashboard: no surviving reference as a skill (0 hit(s))
+  ok   knowledge-agent: no surviving reference as a skill (0 hit(s))
+  ok   memory-maintenance: no surviving reference as a skill (0 hit(s))
+
+population: 42 user-invocable skill(s), 7 merged name(s), 642 shipped file(s) scanned for references
+all 46 checks passed
+exit 0
+
+analyzer inventory at this tree (--days 1 --max-files 5):
+inventory:  42 user-invocable skill(s), 14 rule-* skill(s) that are not user-invocable, from 3 plugin root(s) in the repo layout

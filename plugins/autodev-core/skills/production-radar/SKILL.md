@@ -50,7 +50,7 @@ Four source kinds exist:
 | `sentry-issues` | the Sentry Issues API for one project | `token_env`, `org`, `project`, `region` |
 
 If a source needs a credential the machine does not hold, that is a numbered
-handback (load `wizard`): name the variable, where it goes, and what done looks
+handback (load auto's references/handback.md): name the variable, where it goes, and what done looks
 like. Do not ask for the value in chat.
 
 ## 2. Collect

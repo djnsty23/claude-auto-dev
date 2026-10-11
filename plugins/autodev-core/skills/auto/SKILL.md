@@ -1,8 +1,8 @@
 ---
 name: auto
 description: Autonomous task execution with testing and security. Works through all tasks without stopping.
-when_to_use: "Invoked when the user says \"auto\"."
-allowed-tools: Bash, Read, Write, Edit, Grep, Glob, Task, Agent, SendMessage, mcp__Claude_Browser__*
+when_to_use: "Invoked when the user says \"auto\", \"iterate\", \"converge\" or \"sprint\", and the moment a tool error names a human decision rather than a fault."
+allowed-tools: Bash, Read, Write, Edit, Grep, Glob, Task, WebSearch, Agent, SendMessage, mcp__Claude_Browser__*
 model: opus
 user-invocable: true
 ---
@@ -312,7 +312,7 @@ Load [references/error-patterns.md](references/error-patterns.md) for the common
 
 ## Handback: a story blocked on a person
 
-The moment `wizard` fires for a story — an error names a choice, a permission,
+The moment a story is blocked on a person — an error names a choice, a permission,
 a credential, a console nobody has opened, a decision of taste, a client — do
 these three things in the SAME turn, before touching anything else:
 
@@ -329,7 +329,7 @@ these three things in the SAME turn, before touching anything else:
    reason, and a second identical call is a no-op — so calling it from a loop
    is safe.
 
-2. **Write the handback into the chat** in the shape `wizard` gives: numbered
+2. **Write the handback into the chat** in the shape [references/handback.md](references/handback.md) gives: numbered
    atomic steps, the exact URL or settings path, what done looks like, how long
    it takes, what you will do when they confirm.
 
@@ -349,6 +349,8 @@ close it as usual. A `type: "setup"` story from `spec` closes `true` once that
 observable holds, and its dependents become ready then — not when the person
 says "done", because the agent verifying is the half that catches a key pasted
 into the wrong environment.
+
+Load [references/handback.md](references/handback.md) the moment an error names a choice, an account, a credential or a console only the user can act on, before retrying it: it holds the handback shape and the stop conditions.
 
 Load [references/handback-rationale.md](references/handback-rationale.md) when the script or the same-turn rule is questioned: it holds the measured evidence behind both.
 
@@ -431,6 +433,12 @@ If no tasks to work on:
 4. Assess context to decide next action
 
 Load [references/sprint-transition.md](references/sprint-transition.md) at step 2: it holds the build gate, the archive and bump steps, the honest close criteria, the decision matrix, the auto-continue limit and the ask-user prompt.
+
+## Sprints and convergence
+
+Load [references/sprint.md](references/sprint.md) when asked to create, advance or close a sprint in prd.json.
+
+Load [references/iterate.md](references/iterate.md) when asked to iterate or converge: the brainstorm, fix and re-scan loop, its scope and its exit condition.
 
 ## Quick Reference
 

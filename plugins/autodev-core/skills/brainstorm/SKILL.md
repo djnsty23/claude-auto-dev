@@ -163,7 +163,7 @@ A product with a user-facing surface is not done when it works: see the done bar
 in `${CLAUDE_PLUGIN_ROOT}/skills/ship/references/done-bar.md`. From the second
 improvement pass, propose personal touches unprompted. A second pass is any
 brainstorm that finds `.claude/agent-memory/brainstorm-history.md` already there
-when it starts (the first run creates it), any `iterate` round after the first,
+when it starts (the first run creates it), any convergence round after the first,
 or any sprint after the first.
 
 1. Load `${CLAUDE_PLUGIN_ROOT}/skills/brainstorm/references/delight-catalogue.md`.

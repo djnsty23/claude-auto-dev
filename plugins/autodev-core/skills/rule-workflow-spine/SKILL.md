@@ -110,16 +110,16 @@ line must be a real skill, and `tooling/validate.js` fails the build when one is
 not.
 
 Before building, to settle what to build:
-Existing: `spec`, `brainstorm`, `framework-radar`, `wizard`, `setup-project`
+Existing: `spec`, `brainstorm`, `framework-radar`, `setup-project`
 
 Before any UI change:
 Existing: `design`, `artifact-design`, `a11y`, `rule-design-system`, `rule-thumb-first`
 
 Step 2, build:
-Existing: `auto`, `iterate`, `heal`
+Existing: `auto`, `heal`
 
 Step 3, prove:
-Existing: `prove`, `test`, `preflight`, `review`, `show-your-work`, `rule-verification`, `rule-gate-integrity`
+Existing: `prove`, `test`, `preflight`, `review`, `rule-verification`, `rule-gate-integrity`
 
 Step 4, ship:
 Existing: `ship`, `commit`, `preflight`, `rule-local-first`

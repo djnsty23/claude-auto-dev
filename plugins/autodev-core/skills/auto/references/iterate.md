@@ -1,12 +1,6 @@
----
-name: iterate
-description: Convergence loop — brainstorm, fix, re-scan until the codebase is clean. Combines brainstorm→apply→auto in one command.
-when_to_use: "Invoked when the user says \"iterate\", \"deep work\", \"converge\"."
-allowed-tools: Bash, Read, Write, Edit, Grep, Glob, Task, WebSearch, Agent, SendMessage
-model: opus
-user-invocable: true
-argument-hint: "[focus area or max rounds]"
----
+<!-- Merged from the former iterate skill (zero loads in 30 days, 2026-10-11). -->
+
+**When this applies:** Convergence loop — brainstorm, fix, re-scan until the codebase is clean. Combines brainstorm→apply→auto in one command. Invoked when the user says "iterate", "deep work", "converge".
 
 # Iterate — Convergence Loop
 
@@ -90,7 +84,7 @@ not substitute for the final gate or live verification.
 ## Feeding the learning loop
 
 **Threshold — record it when an iteration undoes an earlier one.** Oscillation is
-the signal this skill is uniquely placed to see and the only one worth storing.
+the signal this loop is uniquely placed to see and the only one worth storing.
 
 Two changes that reverse each other mean the requirement was never settled, and
 the third pass will cost as much as the first two. Write down what the two
