@@ -167,6 +167,8 @@ async function unit() {
     ['free-guide', 'Download our free GA4 setup guide https://example.com/guide', false],
     ['paid-template', 'Buy my GA4 setup template for $29 https://example.com/template', true],
     ['premium-template', 'Download our paid GA4 template https://example.com/store', true],
+    ['priced-template', 'Download my GA4 template for $29 https://example.com/template', true],
+    ['priced-swipe-file', 'Grab my GA4 swipe file for $9 https://example.com/swipe', true],
     ['discount-template', 'Get my GA4 template with coupon SAVE20 https://example.com/store', true],
     ['affiliate-offer', 'Buy the analytics course using my affiliate link https://example.com/partner', true],
     ['free-audit', 'Book a free tracking audit https://example.com/audit', true],
@@ -202,14 +204,14 @@ async function unit() {
       && resourcesFiltered.retained.some((row) => row.id === 'viewer-offer'));
   const resourceOutput = [...resourcesFiltered.retained, ...resourcesFiltered.excluded];
   check('resource filtering preserves text, anonymized attribution, sampling lane and metadata',
-    resourceOutput.length === 12 && resourceComments.every((input) => {
+    resourceOutput.length === 14 && resourceComments.every((input) => {
       const matches = resourceOutput.filter((row) => row.id === input.id);
       return matches.length === 1 && Object.keys(input).every((key) => matches[0][key] === input[key]);
     }));
   check('resource retained and excluded accounting matches all independent labels exactly',
-    resourcesFiltered.retained.length === 6 && resourcesFiltered.excluded.length === 6
-      && resourcesFiltered.reasons['creator-promotion'] === 6
-      && Object.values(resourcesFiltered.reasons).reduce((sum, count) => sum + count, 0) === 6
+    resourcesFiltered.retained.length === 6 && resourcesFiltered.excluded.length === 8
+      && resourcesFiltered.reasons['creator-promotion'] === 8
+      && Object.values(resourcesFiltered.reasons).reduce((sum, count) => sum + count, 0) === 8
       && resourcesFiltered.retained.map((row) => row.id).sort().join(',') ===
         'api-free-template,free-guide,free-swipe-file,free-template,free-worksheet,viewer-offer');
 
