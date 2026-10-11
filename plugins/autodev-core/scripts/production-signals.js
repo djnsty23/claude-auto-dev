@@ -721,10 +721,6 @@ async function main() {
   const summary = hasFlag('--summary');
   const apply = hasFlag('--apply');
 
-  const ledger = readJson(ledgerPath, { schema: SCHEMA_VERSION, proposed: {}, runs: [] });
-  if (!ledger.proposed) ledger.proposed = {};
-  if (!Array.isArray(ledger.runs)) ledger.runs = [];
-
   // Register every credential the config names for redaction BEFORE any source
   // runs — including in fixture mode, where no adapter reads the environment.
   // A payload can echo a key (an upstream 401 body often does), and the scrub
@@ -759,88 +755,94 @@ async function main() {
   }
 
   // Threshold, ignore list, ledger.
-  const prd = loadPrd(prdPath);
-  const prefix = derivePrefix(prd, argValue('--sprint', config.sprint));
-  let nextNo = nextStoryNumber(prefix, prd, ledger);
-  const candidates = [];
-  const held = [];
-  for (const s of signals) {
-    if (isIgnored(s, config)) { held.push({ source: s.source, id: s.id, count: s.count, reason: 'on the config ignore list' }); continue; }
-    const th = crossesThreshold(s, config, ctx);
-    if (!th.pass) { held.push({ source: s.source, id: s.id, count: s.count, reason: th.reason }); continue; }
-    const ld = ledgerDecision(s, ledger, config, ctx);
-    if (!ld.propose) { held.push({ source: s.source, id: s.id, count: s.count, reason: ld.reason }); continue; }
-    const id = `${prefix === 'PROD' ? 'PROD' : `${prefix}-PROD`}-${String(nextNo).padStart(3, '0')}`;
-    nextNo += 1;
-    candidates.push(candidateStory(s, id, ctx, `${th.reason}; ${ld.reason}`));
-  }
+  // Collect outside the lock, then decide and publish from the latest state.
+  return require('./ledger-lock.js').withLedgerLock(ledgerPath, () => {
+    const ledger = readJson(ledgerPath, { schema: SCHEMA_VERSION, proposed: {}, runs: [] });
+    if (!ledger.proposed) ledger.proposed = {};
+    if (!Array.isArray(ledger.runs)) ledger.runs = [];
+    const prd = loadPrd(prdPath);
+    const prefix = derivePrefix(prd, argValue('--sprint', config.sprint));
+    let nextNo = nextStoryNumber(prefix, prd, ledger);
+    const candidates = [];
+    const held = [];
+    for (const s of signals) {
+      if (isIgnored(s, config)) { held.push({ source: s.source, id: s.id, count: s.count, reason: 'on the config ignore list' }); continue; }
+      const th = crossesThreshold(s, config, ctx);
+      if (!th.pass) { held.push({ source: s.source, id: s.id, count: s.count, reason: th.reason }); continue; }
+      const ld = ledgerDecision(s, ledger, config, ctx);
+      if (!ld.propose) { held.push({ source: s.source, id: s.id, count: s.count, reason: ld.reason }); continue; }
+      const id = `${prefix === 'PROD' ? 'PROD' : `${prefix}-PROD`}-${String(nextNo).padStart(3, '0')}`;
+      nextNo += 1;
+      candidates.push(candidateStory(s, id, ctx, `${th.reason}; ${ld.reason}`));
+    }
 
-  // Scrub the CANDIDATES THEMSELVES, not only the rendered outputs: a story title
-  // built from an error message can carry a key the upstream echoed, and --apply
-  // writes the object into prd.json. `[measured 2026-09-08]` the first suite run
-  // planted a canary in a fixture message and found it in the applied prd.json.
-  candidates.splice(0, candidates.length, ...redactor.scrubDeep(candidates));
-  held.splice(0, held.length, ...redactor.scrubDeep(held));
+    // Scrub the CANDIDATES THEMSELVES, not only the rendered outputs: a story title
+    // built from an error message can carry a key the upstream echoed, and --apply
+    // writes the object into prd.json. `[measured 2026-09-08]` the first suite run
+    // planted a canary in a fixture message and found it in the applied prd.json.
+    candidates.splice(0, candidates.length, ...redactor.scrubDeep(candidates));
+    held.splice(0, held.length, ...redactor.scrubDeep(held));
 
-  // --apply is decided BEFORE anything is written, so a refusal leaves the tree exactly as found
-  // apart from the proposal file, which is the safe output.
-  let applied = false;
-  let applyVerdict = null;
-  if (apply) applyVerdict = applyPermitted(cwd, prd, prdPath);
+    // --apply is decided BEFORE anything is written, so a refusal leaves the tree exactly as found
+    // apart from the proposal file, which is the safe output.
+    let applied = false;
+    let applyVerdict = null;
+    if (apply) applyVerdict = applyPermitted(cwd, prd, prdPath);
 
-  const date = ctx.nowIso.slice(0, 10);
-  let reportPath = null;
-  if (candidates.length || failures.length) {
-    fs.mkdirSync(reportsDir, { recursive: true });
-    reportPath = path.join(reportsDir, `production-candidates-${date}.md`);
-    fs.writeFileSync(reportPath, redactor.scrub(renderMarkdown(candidates, held, failures, ctx, config)));
-    fs.writeFileSync(reportPath.replace(/\.md$/, '.json'), JSON.stringify(redactor.scrubDeep({ schema: SCHEMA_VERSION, collected_at: ctx.nowIso, candidates, held, failures }), null, 2) + '\n');
-  }
+    const date = ctx.nowIso.slice(0, 10);
+    let reportPath = null;
+    if (candidates.length || failures.length) {
+      fs.mkdirSync(reportsDir, { recursive: true });
+      reportPath = path.join(reportsDir, `production-candidates-${date}.md`);
+      fs.writeFileSync(reportPath, redactor.scrub(renderMarkdown(candidates, held, failures, ctx, config)));
+      fs.writeFileSync(reportPath.replace(/\.md$/, '.json'), JSON.stringify(redactor.scrubDeep({ schema: SCHEMA_VERSION, collected_at: ctx.nowIso, candidates, held, failures }), null, 2) + '\n');
+    }
 
-  if (apply && applyVerdict.ok && candidates.length) {
-    applyToPrd(prd, prdPath, candidates);
-    applied = true;
-  }
+    if (apply && applyVerdict.ok && candidates.length) {
+      applyToPrd(prd, prdPath, candidates);
+      applied = true;
+    }
 
-  // Every signal SEEN refreshes its ledger entry's last_seen, not only the ones
-  // proposed. `[measured 2026-09-08]` review of the first cut: with last_seen
-  // frozen at proposal time, a chronic signal that never went quiet was re-filed
-  // as a "regression" every ~38 days, forever — the rule manufactured the thing
-  // it exists to detect. `count` stays the count AT PROPOSAL, because escalation
-  // compares against it.
-  for (const s of signals) {
-    const prior = ledger.proposed[ledgerKey(s)];
-    if (prior && s.last_seen && (!prior.last_seen || Date.parse(s.last_seen) > Date.parse(prior.last_seen))) prior.last_seen = s.last_seen;
-  }
-  for (const c of candidates) {
-    const key = `${c.source.source}:${c.source.id}`;
-    const prior = ledger.proposed[key];
-    ledger.proposed[key] = {
-      first_proposed: prior && prior.first_proposed ? prior.first_proposed : ctx.nowIso,
-      last_proposed: ctx.nowIso,
-      last_seen: c.source.last_seen, count: c.source.count, title: c.title,
-      report: reportPath ? path.basename(reportPath) : null, story_id: c.id, applied,
-    };
-  }
-  ledger.runs.push({ at: ctx.nowIso, days, sources_checked: checked, sources_failed: failures.map((f) => f.source), signals: signals.length, held: held.length, candidates: candidates.length, applied });
-  if (ledger.runs.length > 200) ledger.runs = ledger.runs.slice(-200);
-  fs.mkdirSync(path.dirname(ledgerPath), { recursive: true });
-  fs.writeFileSync(ledgerPath, JSON.stringify(redactor.scrubDeep(ledger), null, 2) + '\n');
+    // Every signal SEEN refreshes its ledger entry's last_seen, not only the ones
+    // proposed. `[measured 2026-09-08]` review of the first cut: with last_seen
+    // frozen at proposal time, a chronic signal that never went quiet was re-filed
+    // as a "regression" every ~38 days, forever — the rule manufactured the thing
+    // it exists to detect. `count` stays the count AT PROPOSAL, because escalation
+    // compares against it.
+    for (const s of signals) {
+      const prior = ledger.proposed[ledgerKey(s)];
+      if (prior && s.last_seen && (!prior.last_seen || Date.parse(s.last_seen) > Date.parse(prior.last_seen))) prior.last_seen = s.last_seen;
+    }
+    for (const c of candidates) {
+      const key = `${c.source.source}:${c.source.id}`;
+      const prior = ledger.proposed[key];
+      ledger.proposed[key] = {
+        first_proposed: prior && prior.first_proposed ? prior.first_proposed : ctx.nowIso,
+        last_proposed: ctx.nowIso,
+        last_seen: c.source.last_seen, count: c.source.count, title: c.title,
+        report: reportPath ? path.basename(reportPath) : null, story_id: c.id, applied,
+      };
+    }
+    ledger.runs.push({ at: ctx.nowIso, days, sources_checked: checked, sources_failed: failures.map((f) => f.source), signals: signals.length, held: held.length, candidates: candidates.length, applied });
+    if (ledger.runs.length > 200) ledger.runs = ledger.runs.slice(-200);
+    fs.mkdirSync(path.dirname(ledgerPath), { recursive: true });
+    require('./ledger-lock.js').writeAtomic(ledgerPath, JSON.stringify(redactor.scrubDeep(ledger), null, 2) + '\n');
 
-  // Output. Zero bytes when everything was checked and nothing is new.
-  const out = [];
-  if (failures.length) for (const f of failures) out.push(`COULD NOT CHECK ${f.source}: ${f.reason}`);
-  if (candidates.length || summary || failures.length) {
-    out.push(`production-signals: ${checked.length}/${config.sources.length} sources checked, ${signals.length} signals, ${held.length} held back, ${candidates.length} new candidate(s)`);
-    if (reportPath) out.push(`candidates: ${reportPath}`);
-    for (const c of candidates) out.push(`  ${c.id}  ${c.title}  [${c.source.count} over ${days} d]`);
-  }
-  if (apply) {
-    if (applyVerdict.ok) out.push(applied ? `applied ${candidates.length} stor${candidates.length === 1 ? 'y' : 'ies'} into ${path.relative(cwd, prdPath)}` : 'apply: nothing new to apply');
-    else out.push(`APPLY REFUSED: ${applyVerdict.reason}`);
-  }
-  if (out.length) (failures.length || (apply && !applyVerdict.ok) ? process.stderr : process.stdout).write(redactor.scrub(out.join('\n')) + '\n');
-  return failures.length || (apply && !applyVerdict.ok) ? 2 : 0;
+    // Output. Zero bytes when everything was checked and nothing is new.
+    const out = [];
+    if (failures.length) for (const f of failures) out.push(`COULD NOT CHECK ${f.source}: ${f.reason}`);
+    if (candidates.length || summary || failures.length) {
+      out.push(`production-signals: ${checked.length}/${config.sources.length} sources checked, ${signals.length} signals, ${held.length} held back, ${candidates.length} new candidate(s)`);
+      if (reportPath) out.push(`candidates: ${reportPath}`);
+      for (const c of candidates) out.push(`  ${c.id}  ${c.title}  [${c.source.count} over ${days} d]`);
+    }
+    if (apply) {
+      if (applyVerdict.ok) out.push(applied ? `applied ${candidates.length} stor${candidates.length === 1 ? 'y' : 'ies'} into ${path.relative(cwd, prdPath)}` : 'apply: nothing new to apply');
+      else out.push(`APPLY REFUSED: ${applyVerdict.reason}`);
+    }
+    if (out.length) (failures.length || (apply && !applyVerdict.ok) ? process.stderr : process.stdout).write(redactor.scrub(out.join('\n')) + '\n');
+    return failures.length || (apply && !applyVerdict.ok) ? 2 : 0;
+  });
 }
 
 if (require.main === module) {

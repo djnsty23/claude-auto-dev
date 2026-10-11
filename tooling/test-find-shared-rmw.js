@@ -223,6 +223,36 @@ save(path.join(CFG, 'b'));
         f.map((x) => `:${x.line} ${x.kind} ${x.via}`).join(', '));
 }
 
+{
+    const f = rmw.scanText(`
+const { writeAtomic, withLedgerLock } = require('./ledger-lock.js');
+const STATE = path.join(FLEET_DIR, 'seen.json');
+function loadSeen() { return JSON.parse(fs.readFileSync(STATE, 'utf8')); }
+function saveSeen(set) {
+    withLedgerLock(STATE, () => { writeAtomic(STATE, JSON.stringify(set)); });
+}
+const seen = loadSeen();
+function scan() { seen.push('new'); saveSeen(seen); }
+`);
+    check('tracks a core atomic writer inside a lock callback through its named helper',
+        f.some((x) => x.fn === 'scan' && x.via === 'loadSeen -> saveSeen'), JSON.stringify(f));
+}
+
+{
+    const f = scan(PRE + `
+function reclaim(lock) {
+    const mutex = lock + '.reclaim';
+    if (Date.now() - fs.statSync(mutex).mtimeMs > 30000) fs.unlinkSync(mutex);
+}
+`);
+    check('tracks reclaim-mutex age reads before unlink through a path alias',
+        f.length === 1 && f[0].kind === 'consume' && f[0].via === 'statSync -> unlinkSync', JSON.stringify(f));
+    const ordinary = scan(PRE + `
+function inspect(file) { fs.statSync(file); fs.unlinkSync(file); }
+`);
+    check('ordinary metadata inspection remains outside the content RMW scope', ordinary.length === 0, JSON.stringify(ordinary));
+}
+
 // The shipped files themselves, where history is present. A shallow clone
 // lacks the commits, and that is reported as not run, never as a pass.
 {

@@ -29,12 +29,10 @@
 // passes 4 MB, the oldest lines go too, until it fits in 1 MB. The file is
 // rewritten only when at least one line is dropped, so a busy week of recent
 // sends costs a read per send and never a rewrite.
-// The rewrite holds `<ledger>.lock`, created with the exclusive flag. A second
-// session that finds the lock skips its prune, not its append. A lock older than
-// a minute belongs to a pruner that died and is removed. Appends never take the
-// lock, so any bytes appended between the read and the rename are copied onto
-// the new file just before the rename. That shrinks the window in which a
-// concurrent append can be lost to the gap between that copy and the rename.
+// Append and prune share `<ledger>.write-lock`. If it stays busy for 250 ms,
+// this hook skips the write. The legacy prune lock still prevents a rewrite
+// while an older pruner holds it. Tail copying retains legacy appends that
+// arrive before that copy, but mixed-version writers cannot share this guarantee.
 //
 // SILENT AND FAIL-OPEN, ALWAYS. It emits zero bytes on every path and exits 0
 // on every error. A bookkeeping hook must never cost the sender a turn.
@@ -44,7 +42,11 @@ const fs = require('fs');
 const path = require('path');
 // A broken install is quiet, never loud: no helper, no opinion.
 let configDir;
-try { ({ configDir } = require('../scripts/claude-paths.js')); } catch { process.exit(0); }
+let withLedgerLock;
+try {
+    ({ configDir } = require('../scripts/claude-paths.js'));
+    ({ withLedgerLock } = require('../scripts/ledger-lock.js'));
+} catch { /* a missing core dependency leaves this bookkeeping hook inert */ }
 
 const TOOL = 'mcp__ccd_session_mgmt__send_message';
 const PROBE_CHARS = 80;
@@ -160,6 +162,7 @@ function pruneIfLarge(file, nowMs) {
 }
 
 function main(rawPayload) {
+    if (!configDir || !withLedgerLock) return;
     let payload;
     try { payload = JSON.parse(rawPayload); } catch { return; }
     const name = payload && (payload.tool_name || payload.toolName);
@@ -181,8 +184,10 @@ function main(rawPayload) {
     };
     const file = ledgerPath();
     fs.mkdirSync(path.dirname(file), { recursive: true });
-    fs.appendFileSync(file, JSON.stringify(row) + '\n', 'utf8');
-    pruneIfLarge(file, now.getTime());
+    withLedgerLock(file, () => {
+        fs.appendFileSync(file, JSON.stringify(row) + '\n', 'utf8');
+        pruneIfLarge(file, now.getTime());
+    }, { waitMs: 250 });
 }
 
 if (require.main === module) {

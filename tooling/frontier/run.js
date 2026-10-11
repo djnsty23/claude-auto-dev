@@ -889,16 +889,19 @@ function plantedFindings(expected) {
 
 function plant(c, ids) {
     const file = path.join(c.data, 'plant.json');
-    const state = readJson(file, { tasks: {} });
     const results = {};
     for (const id of ids) {
         let rec;
         try { rec = plantTask(c, loadTask(c, id)); } catch (e) { rec = { ok: false, reason: `${e.publicCode || 'error'}: ${e.message}`, at: new Date().toISOString() }; }
-        state.tasks[id] = rec;
         results[id] = rec;
-        state.srcHead = revParse(c.src, 'HEAD');
-        state.updatedAt = new Date().toISOString();
-        writeJsonAtomic(file, state);
+        const srcHead = revParse(c.src, 'HEAD');
+        require('../../plugins/autodev-core/scripts/ledger-lock.js').withLedgerLock(file, () => {
+            const state = readJson(file, { tasks: {} });
+            state.tasks[id] = rec;
+            state.srcHead = srcHead;
+            state.updatedAt = new Date().toISOString();
+            writeJsonAtomic(file, state);
+        });
     }
     return results;
 }
