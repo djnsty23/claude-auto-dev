@@ -80,7 +80,7 @@ const DENYLIST_FILE = path.join(claudePaths.configDir(), 'session-sweep-denylist
 
 // What counts as regenerable residue lives in worktree-residue.js, shared
 // with worktree-reap.js so the sweep and the reaper agree on what is loss.
-const { REGENERABLE } = require('./worktree-residue.js');
+const { REGENERABLE, sameMembers } = require('./worktree-residue.js');
 
 const args = process.argv.slice(2);
 const flag = (n) => args.includes(n);
@@ -452,7 +452,7 @@ function preserveLocal(s, all, files) {
       const code = Number.isInteger(e.status) && e.status >= 0 && e.status <= 255 ? ' (exit ' + e.status + ')' : '';
       throw new Error('tar failed' + code);
     }
-    if (back.length !== files.length || JSON.stringify([...back].sort()) !== JSON.stringify([...files].sort())) {
+    if (!sameMembers(back, files)) {
       throw new Error('read-back holds ' + back.length + ' of ' + files.length + ' files or member names disagree');
     }
     const finalRisk = worktreeRisk(s, all, { localPreserved: true });
