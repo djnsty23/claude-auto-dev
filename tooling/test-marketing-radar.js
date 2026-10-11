@@ -158,6 +158,61 @@ async function unit() {
       JSON.stringify({ retained: result.retained.map((row) => row.id), excluded: result.excluded.map((row) => [row.id, row.exclusion_reason]) }));
   }
 
+  // Independent labels: a useful resource is not a commercial offer merely
+  // because the creator owns it. Explicit sales language still excludes it.
+  const resourceCases = [
+    ['free-worksheet', 'download my free GA4 setup worksheet https://example.com/worksheet', false],
+    ['free-template', 'download my free GA4 setup template https://example.com/template', false],
+    ['free-swipe-file', 'Grab my free GA4 event naming swipe file https://example.com/events', false],
+    ['free-guide', 'Download our free GA4 setup guide https://example.com/guide', false],
+    ['paid-template', 'Buy my GA4 setup template for $29 https://example.com/template', true],
+    ['premium-template', 'Download our paid GA4 template https://example.com/store', true],
+    ['discount-template', 'Get my GA4 template with coupon SAVE20 https://example.com/store', true],
+    ['affiliate-offer', 'Buy the analytics course using my affiliate link https://example.com/partner', true],
+    ['free-audit', 'Book a free tracking audit https://example.com/audit', true],
+    ['mixed-guide-offer', 'Download my free GA4 guide, then buy my course https://example.com/course', true],
+  ];
+  const resourceComments = resourceCases.map(([id, text], index) =>
+    subject.normalizeComment({
+      id, text, author_id: 'resource-creator', author_is_uploader: true,
+      likes: index + 1, is_pinned: index === 0, published_at: iso(1),
+    }, index % 2 === 0 ? 'top' : 'recent', index));
+  const apiResource = subject.normalizeComment({
+    video_channel_id: 'resource-creator',
+    snippet: { topLevelComment: { id: 'api-free-template', snippet: {
+      textOriginal: 'Get our free GA4 event template https://example.com/events',
+      authorChannelId: { value: 'resource-creator' }, likeCount: 7, publishedAt: iso(1),
+    } } },
+  }, 'recent');
+  const viewerOffer = subject.normalizeComment({
+    id: 'viewer-offer', author_id: 'viewer',
+    text: 'Buy my GA4 setup template for $29 https://example.com/template',
+  }, 'top');
+  resourceComments.push(apiResource, viewerOffer);
+  const resourcesFiltered = subject.filterCommentFeedback(resourceComments);
+  for (const [id, , shouldExclude] of resourceCases) {
+    const rows = shouldExclude ? resourcesFiltered.excluded : resourcesFiltered.retained;
+    check(`resource boundary ${id}: ${shouldExclude ? 'excludes commercial promotion' : 'retains useful free resource'}`,
+      rows.some((row) => row.id === id && (!shouldExclude || row.exclusion_reason === 'creator-promotion')),
+      `retained=${resourcesFiltered.retained.map((row) => row.id).join(',')}; excluded=${resourcesFiltered.excluded.map((row) => row.id).join(',')}`);
+  }
+  check('resource boundary uses verified creator attribution for API and uploader shapes',
+    apiResource.is_creator === true && viewerOffer.is_creator === false
+      && resourcesFiltered.retained.some((row) => row.id === 'api-free-template')
+      && resourcesFiltered.retained.some((row) => row.id === 'viewer-offer'));
+  const resourceOutput = [...resourcesFiltered.retained, ...resourcesFiltered.excluded];
+  check('resource filtering preserves text, anonymized attribution, sampling lane and metadata',
+    resourceOutput.length === 12 && resourceComments.every((input) => {
+      const matches = resourceOutput.filter((row) => row.id === input.id);
+      return matches.length === 1 && Object.keys(input).every((key) => matches[0][key] === input[key]);
+    }));
+  check('resource retained and excluded accounting matches all independent labels exactly',
+    resourcesFiltered.retained.length === 6 && resourcesFiltered.excluded.length === 6
+      && resourcesFiltered.reasons['creator-promotion'] === 6
+      && Object.values(resourcesFiltered.reasons).reduce((sum, count) => sum + count, 0) === 6
+      && resourcesFiltered.retained.map((row) => row.id).sort().join(',') ===
+        'api-free-template,free-guide,free-swipe-file,free-template,free-worksheet,viewer-offer');
+
   const apiCalls = [];
   const apiComments = await subject.discoverCommentsWithApi('MARKETVID01', 'test-key', 20, async (url) => {
     apiCalls.push(url);
