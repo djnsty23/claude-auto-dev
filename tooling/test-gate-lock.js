@@ -443,25 +443,29 @@ async function main() {
             Boolean(s) && s.exists && s.content.split(/\r?\n/)[2] === 'class harness', JSON.stringify(s));
     }
 
-    // -- 16. Two lanes, a harness gate on one: the other stays open to products --
+    // -- 16. Two lanes, a harness gate on one: the other stays open while a product waits --
     {
         const fx = fixture('node probe.js 0');
         const peer = keepAlive();
+        const product = keepAlive();
         const lane1 = `${peer.pid}\nharness gate holding lane 1\nclass harness\n`;
         fs.mkdirSync(fx.lockDir, { recursive: true });
         fs.writeFileSync(fx.lockPath, lane1);
         fs.writeFileSync(path.join(fx.lockDir, 'full-gate.lanes'), '2\n');
+        // An older single-lane product waiter, queued for lane 1 only.
+        const productTicket = writeTicket(fx, product.pid, 'product gate waiting for lane 1', new Date(Date.now() - 60000), 'product');
         const lane2 = path.join(fx.lockDir, 'full-gate-2.lock');
         const run = start(fx);
         const told = await waitFor(() => /kept for product gates/.test(run.out), 20000, 'the kept-for-products line');
         await sleep(500);
-        check('harness cap: the wrapper does not take the free lane 2 and says it is kept for product gates',
+        check('harness cap: while a product waits, the wrapper does not take the free lane 2 and says it is kept for product gates',
             told && !fs.existsSync(lane2) && saw(fx) === null, run.out);
-        fs.renameSync(fx.lockPath, fx.lockPath + '.released-peer');
+        fs.rmSync(productTicket, { force: true });
         const r = await finished(run);
         killTree(peer.pid);
-        check('harness cap: once lane 1 frees, the wrapper takes it and exits 0',
-            r.code === 0 && /lock taken: .*full-gate\.lock \(pid \d+\)/.test(r.out), `exit=${r.code}\n${r.out}`);
+        killTree(product.pid);
+        check('harness borrow: once no product waits, the wrapper borrows lane 2 and exits 0',
+            r.code === 0 && /lock taken: .*full-gate-2\.lock \(pid \d+\)/.test(r.out), `exit=${r.code}\n${r.out}`);
     }
 }
 

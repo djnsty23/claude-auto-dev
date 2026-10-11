@@ -9,7 +9,7 @@
  * Every scenario runs against the real subject (every row must pass) and
  * against a copy with one defect planted by an exact anchor (some row must
  * fail). The anchor must match exactly once, or the plant itself fails:
- *   P1  admission runs without the mutex          -> two harness lanes on a cap of one (S1, S2)
+ *   P1  admission runs without the mutex          -> three harness lanes on a cap of two (S1, S2)
  *   P2  the class is the declared one              -> a harness checkout queues as product (S3)
  *   P3  arrival is the admission time              -> a hand-over forgets when the ticket arrived (S4)
  *   P4  the judgement ignores the boot             -> a pre-boot lock on a live pid holds forever (S5)
@@ -303,37 +303,49 @@ const OLD_START = '2020-01-01T00:00:00.0000000Z';
 // Scenarios: each returns [name, ok, detail] rows.
 // ---------------------------------------------------------------------------
 
-/** S1: two harness takes race for two free lanes under a cap of one. */
+/**
+ * Plants harness holder H0 on lane 1 and an older single-lane product ticket
+ * in lane 1's queue: a product waits, so harness gates may hold 2 of 3 lanes.
+ */
+function capBinds(fx) {
+    const [h0, q] = [sleeper(), sleeper()];
+    fs.writeFileSync(fx.lane(1), `${h0}\nharness holder H0\nclass harness\n`);
+    plantTicket(fx.queue(1), q, 9000, 'product');
+}
+
+/** S1: two harness takes race for two free lanes when one more harness lane is allowed. */
 async function s1HarnessRace(subject) {
-    const fx = fixture(2);
+    const fx = fixture(3);
+    capBinds(fx);
     const [a, b] = [sleeper(), sleeper()];
     const env = { AUTODEV_GATE_TEST_ADMIT_PAUSE_MS: '4000' };
     const pa = runAsync(subject, fx, ['take', '--pid', String(a), '--what', 'harness A', '--class', 'harness'], { env });
     await sleep(1200);
     const pb = runAsync(subject, fx, ['take', '--pid', String(b), '--what', 'harness B', '--class', 'harness'], { env });
     const [ra, rb] = await Promise.all([pa, pb]);
-    const held = [1, 2].map((k) => readLockFile(fx.lane(k))).filter(Boolean);
+    const held = [2, 3].map((k) => readLockFile(fx.lane(k))).filter(Boolean);
     const harness = held.filter((h) => h.cls === 'harness');
     return [
-        ['S1: exactly one harness gate holds a lane (cap 1 of 2)', harness.length === 1, `held: ${held.map((h) => `${h.pid}/${h.cls}`).join(', ')}\nA: ${ra.out}\nB: ${rb.out}`],
+        ['S1: harness H0 holds lane 1 and a product waits: exactly one of A and B takes a lane (cap 2 of 3)', harness.length === 1, `held: ${held.map((h) => `${h.pid}/${h.cls}`).join(', ')}\nA: ${ra.out}\nB: ${rb.out}`],
         ['S1: one take exits 0 and the other is queued (exit 3)', [ra.code, rb.code].sort().join() === `0,${EXIT_QUEUED}`, `A=${ra.code} B=${rb.code}`],
     ];
 }
 
-/** S2: two product holders release at once, a harness ticket at the front of each lane. */
+/** S2: two product holders release at once, a harness ticket at the front of each lane, one more harness lane allowed. */
 async function s2ConcurrentRelease(subject) {
-    const fx = fixture(2);
+    const fx = fixture(3);
+    capBinds(fx);
     const [p1, p2, h1, h2] = [sleeper(), sleeper(), sleeper(), sleeper()];
-    fs.writeFileSync(fx.lane(1), `${p1}\nproduct holder 1\nclass product\n`);
-    fs.writeFileSync(fx.lane(2), `${p2}\nproduct holder 2\nclass product\n`);
-    plantTicket(fx.queue(1), h1, 5000, 'harness');
-    plantTicket(fx.queue(2), h2, 4000, 'harness');
+    fs.writeFileSync(fx.lane(2), `${p1}\nproduct holder 2\nclass product\n`);
+    fs.writeFileSync(fx.lane(3), `${p2}\nproduct holder 3\nclass product\n`);
+    plantTicket(fx.queue(2), h1, 5000, 'harness');
+    plantTicket(fx.queue(3), h2, 4000, 'harness');
     const env = { AUTODEV_GATE_TEST_ADMIT_PAUSE_MS: '3000' };
     const [r1, r2] = await Promise.all([
         runAsync(subject, fx, ['release', '--pid', String(p1)], { env }),
         runAsync(subject, fx, ['release', '--pid', String(p2)], { env }),
     ]);
-    const held = [1, 2].map((k) => readLockFile(fx.lane(k))).filter(Boolean);
+    const held = [2, 3].map((k) => readLockFile(fx.lane(k))).filter(Boolean);
     const harness = held.filter((h) => h.cls === 'harness');
     return [
         ['S2: both releases exit 0', r1.code === 0 && r2.code === 0, `${r1.out}\n${r2.out}`],
