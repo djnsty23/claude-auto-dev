@@ -617,7 +617,9 @@ function creatorPromotion(text) {
   // Ownership alone does not make a technical template or worksheet a sale.
   // Keep explicit paid resources and commercial services separate from free help.
   const hasOwnedCommercialOffer = /\b(?:check out|get|grab|download|join)\b[^.\n]{0,100}\b(?:my|our)\b[^.\n]{0,100}\b(?:course|community|academy|coaching|consultation|audit|service|training|newsletter|offer|(?:paid|premium)\b[^.\n]{0,60}\b(?:swipe file|template|worksheet|guide))\b/i.test(text);
-  return hasLink && (hasCallToAction || hasOwnedCommercialOffer);
+  const ownedResource = text.match(/\b(?:check out|get|grab|download)\b[^.\n]{0,100}\b(?:my|our)\b[^.\n]{0,100}\b(?:template|swipe file)\b([^.\n]{0,100})/i);
+  const hasResourcePrice = ownedResource && /\b(?:for|at|only|just)\s*(?:[$€£]\s*\d|(?:USD|EUR|GBP)\s*\d|\d+(?:[.,]\d+)?\s*(?:USD|EUR|GBP|dollars?|euros?|pounds?)\b)/i.test(ownedResource[1]);
+  return hasLink && (hasCallToAction || hasOwnedCommercialOffer || hasResourcePrice);
 }
 
 function filterCommentFeedback(comments) {
