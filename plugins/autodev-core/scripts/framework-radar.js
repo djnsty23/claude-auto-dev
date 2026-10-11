@@ -614,7 +614,9 @@ function commentFingerprint(text) {
 function creatorPromotion(text) {
   const hasLink = /https?:\/\/|www\.|\blink in (?:the )?(?:bio|description|comments)\b/i.test(text);
   const hasCallToAction = /\b(?:book|schedule|sign up|register|subscribe|buy|order|purchase|join|free audit|free trial|discount|coupon|consultation|contact me|dm me)\b/i.test(text);
-  const hasOwnedCommercialOffer = /\b(?:check out|get|grab|download|join)\b[^.\n]{0,100}\b(?:my|our)\b[^.\n]{0,100}\b(?:course|community|academy|coaching|consultation|audit|service|training|newsletter|swipe file|template|offer)\b/i.test(text);
+  // Ownership alone does not make a technical template or worksheet a sale.
+  // Keep explicit paid resources and commercial services separate from free help.
+  const hasOwnedCommercialOffer = /\b(?:check out|get|grab|download|join)\b[^.\n]{0,100}\b(?:my|our)\b[^.\n]{0,100}\b(?:course|community|academy|coaching|consultation|audit|service|training|newsletter|offer|(?:paid|premium)\b[^.\n]{0,60}\b(?:swipe file|template|worksheet|guide))\b/i.test(text);
   return hasLink && (hasCallToAction || hasOwnedCommercialOffer);
 }
 
