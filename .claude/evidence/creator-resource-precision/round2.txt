@@ -1,0 +1,12 @@
+Round 2, same 47-check population, native Windows Node24.15.0, 2026-10-11.
+Command: node tooling/test-marketing-radar.js
+PR original b992419:43 passed,4 failed (free-resource exclusions).
+First candidate811c7c9:44 passed,3 failed (explicit priced-resource exclusion and accounting).
+Blanket free exemption:40 passed,7 failed.
+Final matcher:47 passed,0 failed; explicit price phrases tied to owned templates/swipe files are excluded.
+The queued gate for811c7c9 was cancelled before its chain started. No full-gate verdict exists for that candidate.
+Full gate remains pending for this commit.
+  FAIL resource boundary priced-template: excludes commercial promotion - retained=free-worksheet,free-template,free-swipe-file,free-guide,priced-template,priced-swipe-file,api-free-template,viewer-offer; excluded=paid-template,premium-template,discount-template,affiliate-offer,free-audit,mixed-guide-offer
+  FAIL resource boundary priced-swipe-file: excludes commercial promotion - retained=free-worksheet,free-template,free-swipe-file,free-guide,priced-template,priced-swipe-file,api-free-template,viewer-offer; excluded=paid-template,premium-template,discount-template,affiliate-offer,free-audit,mixed-guide-offer
+  FAIL resource retained and excluded accounting matches all independent labels exactly
+44 passed, 3 failed
