@@ -129,16 +129,18 @@ function writeAt(file, text, minutesAgo) {
         `${empty.out.length}B`);
 }
 
-// --- a handoff exists: startup stays silent, compact speaks ---------------------
+// --- every source names its own handoff ----------------------------------------
 {
     const p = project();
     const own = path.join(p.cwd, '.claude', 'handoffs', 'RESUME-bbbb2222.md');
     writeAt(own, '# RESUME\n', 3);
 
     const startup = run(p, { session_id: 'bbbb2222-y', source: 'startup' });
+    check('source startup names its own handoff', ctxOf(startup).includes(own));
     check('source startup with a handoff on disk: the compact text is absent',
         !!startup.json && !ctxOf(startup).includes('compacted'), ctxOf(startup).slice(0, 120));
     const resume = run(p, { session_id: 'bbbb2222-y', source: 'resume' });
+    check('source resume names its own handoff', ctxOf(resume).includes(own));
     check('source resume: absent too', !!resume.json && !ctxOf(resume).includes('compacted'));
 
     const compact = run(p, { session_id: 'bbbb2222-y', source: 'compact' });
@@ -149,8 +151,8 @@ function writeAt(file, text, minutesAgo) {
         !!compact.json && compact.json.hookSpecificOutput.hookEventName === 'SessionStart');
     check('  naming the handoff by absolute path', ctx.includes(own), ctx.slice(0, 300));
     check('  with its age in minutes', /written 3 min ago/.test(ctx), ctx.slice(0, 300));
-    check('  and the fleet ledger command', ctx.includes('unattended-worker.js') && ctx.includes('" status'),
-        ctx.slice(0, 400));
+    check('  naming the fleet ledger command',
+        ctx.includes(`node "${path.join(PLUGIN_ROOT, 'scripts', 'unattended-worker.js')}" status`), ctx.slice(0, 500));
     check('  and says to continue from its next steps', /next steps/.test(ctx));
     check('  exit 0 and empty stderr', compact.status === 0 && compact.err.length === 0);
     check('  and never copies the handoff\'s contents', !!compact.json && !ctx.includes('# RESUME'));
@@ -216,8 +218,8 @@ console.log('');
 console.log(sb.tally(pass, fail, noVerdict ? 1 : 0));
 console.log('subject: plugins/autodev-core/hooks/session-start.js, source "compact"; '
     + (pass + fail) + ' cases: zero added bytes with no handoff (byte-identical to startup), '
-    + 'silence on startup and resume with one present, the compact text with path, age and '
-    + 'the fleet ledger, own-handoff-wins, no fallback to a newer peer file or a root '
+    + 'own handoff on startup and resume, the compact text with path and age, '
+    + 'own-handoff-wins, no fallback to a newer peer file or a root '
     + 'RESUME.md, and a hostile path.');
 if (fail) console.log('failed: ' + failures.join('; '));
 if (noVerdict) console.log(`INDETERMINATE: ${noVerdict}. The cases after it were not graded.`);
