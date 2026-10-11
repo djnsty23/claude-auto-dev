@@ -62,6 +62,9 @@ const USAGE = [
     'Flags: --home <dir> (default the user home), --appdata <dir> (default %APPDATA%, else the MSIX',
     '       package copy under %LOCALAPPDATA%/Packages/Claude_*/LocalCache/Roaming),',
     '       --mission-store <dir> (the mission store has no default location),',
+    '       --config-dir <dir> (repeat for each account; labels are default or the directory basename).',
+    '       AUTODEV_FLEET_CONFIG_DIRS is a JSON array of directories. Flags override this list.',
+    '       Without either, the original single ~/.claude view and output are preserved.',
     '       --events <file> (default ~/.claude/autodev/fleet-events.jsonl), --claude-bin <path> (relaunch),',
     '       --takeover-script <file> (a .ps1 taking -Code and -Log), --no-launch (record takeover, open nothing).',
 ].join('\n') + '\n';
@@ -78,7 +81,7 @@ function fault(code, message) { const e = new Error(message || code); e.publicCo
 function parseArgs(argv) {
     const out = { _: [] };
     const flags = ['help', 'json', 'selftest', 'no-launch', 'until-stdin-closes'];
-    const known = [...flags, 'port', 'hours', 'home', 'appdata', 'mission-store', 'events', 'claude-bin', 'takeover-script'];
+    const known = [...flags, 'port', 'hours', 'home', 'appdata', 'mission-store', 'events', 'claude-bin', 'takeover-script', 'config-dir'];
     for (let i = 0; i < argv.length; i++) {
         const a = argv[i];
         if (a === '--help' || a === '-h' || a === 'help') { out.help = true; continue; }
@@ -88,8 +91,9 @@ function parseArgs(argv) {
         if (!known.includes(key)) fault('usage', `unknown flag --${key}`);
         if (flags.includes(key)) { out[key] = true; continue; }
         const value = eq > 0 ? a.slice(eq + 1) : argv[++i];
-        if (value === undefined || value === '') fault('usage', `--${key} needs a value`);
-        out[key] = value;
+        if (value === undefined || value === '' || value.startsWith('--')) fault('usage', `--${key} needs a value`);
+        if (key === 'config-dir') (out[key] ||= []).push(value);
+        else out[key] = value;
     }
     return out;
 }
@@ -117,8 +121,17 @@ function settings(opts) {
     const hours = opts.hours === undefined ? DEFAULT_HOURS : Number(opts.hours);
     if (!Number.isFinite(hours) || hours <= 0) fault('usage', '--hours must be a positive number');
     const autodev = path.join(home, '.claude', 'autodev');
+    let dirs = opts['config-dir'];
+    if (dirs === undefined && process.env.AUTODEV_FLEET_CONFIG_DIRS) {
+        try { dirs = JSON.parse(process.env.AUTODEV_FLEET_CONFIG_DIRS); }
+        catch { fault('usage', 'AUTODEV_FLEET_CONFIG_DIRS must be a JSON array of directories'); }
+    }
+    if (dirs !== undefined && (!Array.isArray(dirs) || !dirs.length || dirs.some((d) => typeof d !== 'string' || !d.trim()))) {
+        fault('usage', 'config directories must be a nonempty array of paths');
+    }
     return {
         home, hours, autodev,
+        configDirs: dirs === undefined ? null : [...new Set(dirs.map((d) => path.resolve(d)))],
         appdata: path.resolve(opts.appdata || desktopAppdata(process.env, home)),
         missionStore: opts['mission-store'] ? path.resolve(opts['mission-store']) : null,
         events: path.resolve(opts.events || path.join(autodev, 'fleet-events.jsonl')),
@@ -205,18 +218,17 @@ function question(askFile, answerFile) {
 }
 
 // ---------------------------------------------------------------- accounts
-/** Account uuid -> label, from every config dir under home that carries an oauthAccount. */
-function accountLabels(home) {
+function configLabel(home, configDir) {
+    return !configDir || path.resolve(configDir) === path.join(home, '.claude') ? 'default' : path.basename(configDir);
+}
+
+/** Default metadata lives beside ~/.claude; other configs carry their own .claude.json. */
+function accountLabels(home, configDir) {
     const labels = new Map();
-    const add = (uuid, label) => { if (!uuid) return; labels.set(uuid, labels.has(uuid) ? `${labels.get(uuid)}|${label}` : label); };
-    const top = readJson(path.join(home, '.claude.json'));
-    if (top && top.oauthAccount) add(top.oauthAccount.accountUuid, 'default');
-    let names = [];
-    try { names = fs.readdirSync(home).filter((n) => /^\.claude-[A-Za-z0-9_-]+$/.test(n)); } catch { /* home unreadable */ }
-    for (const n of names.sort()) {
-        const j = readJson(path.join(home, n, '.claude.json'));
-        if (j && j.oauthAccount) add(j.oauthAccount.accountUuid, n);
-    }
+    const label = configLabel(home, configDir);
+    const top = !configDir || path.resolve(configDir) === path.join(home, '.claude') ? readJson(path.join(home, '.claude.json'))
+        : readJson(path.join(configDir, '.claude.json'));
+    if (top && top.oauthAccount && top.oauthAccount.accountUuid) labels.set(top.oauthAccount.accountUuid, label);
     return labels;
 }
 
@@ -379,12 +391,16 @@ function desktopSource(s) {
     try { accounts = fs.readdirSync(root, { withFileTypes: true }).filter((d) => d.isDirectory()).map((d) => d.name); } catch (e) {
         return [unreadable('desktop-sessions', `${root}: ${e.code || e.message}`), unreadable('desktop-routines', `${root}: ${e.code || e.message}`)];
     }
-    const labels = accountLabels(s.home);
+    const labels = accountLabels(s.home, s.configDir);
+    if (s.configDir) {
+        if (!labels.size) return [unreadable('desktop-sessions', 'no account UUID in selected config'), unreadable('desktop-routines', 'no account UUID in selected config')];
+        accounts = accounts.filter((acct) => labels.has(acct));
+    }
     const sessions = [];
     const routines = [];
     let sessionFiles = 0; let sessionBroken = 0; let routineFiles = 0; let routineBroken = 0; let routinesRead = 0;
     for (const acct of accounts) {
-        const label = labels.get(acct) || acct.slice(0, 8);
+        const label = labels.get(acct) || `${configLabel(s.home, s.configDir)} (Desktop account ${labels.size ? 'mismatch' : 'unmapped'})`;
         let orgs = [];
         try { orgs = fs.readdirSync(path.join(root, acct), { withFileTypes: true }).filter((d) => d.isDirectory()).map((d) => d.name); } catch { continue; }
         for (const org of orgs) {
@@ -427,21 +443,45 @@ function desktopSource(s) {
     ];
 }
 
-/** Every source, merged, with the window applied. Never throws: a source that throws becomes a COULD-NOT-READ row. */
-function collect(s, now = Date.now()) {
+/** Read each selected directory independently and qualify row identities before merging. */
+function readSources(s, readers) {
     const sources = [];
-    const guard = (name, fn) => { try { const v = fn(s); sources.push(...(Array.isArray(v) ? v : [v])); } catch (e) { sources.push(unreadable(name, e.message)); } };
-    guard('runs', runsSource);
-    guard('headless-worker', headlessSource);
-    guard('unattended-worker', unattendedSource);
-    guard('bg-runner', bgRunnerSource);
-    guard('missions', missionSource);
-    guard('desktop', desktopSource);
+    for (const configDir of s.configDirs || [null]) {
+        const scoped = configDir ? { ...s, configDir, autodev: path.join(configDir, 'autodev') } : s;
+        const add = (src) => {
+            if (configDir) {
+                src.configDir = configDir;
+                src.population = `[${configDir}] ${src.population}`;
+                for (const r of src.rows) {
+                    r.configDir = configDir;
+                    r.account = configLabel(s.home, configDir);
+                    r.key = `${JSON.stringify(configDir)}:${r.key}`;
+                }
+            }
+            sources.push(src);
+        };
+        if (configDir) {
+            try { fs.readdirSync(configDir); }
+            catch (e) { add(unreadable('config-dir', `${configDir}: ${e.code || e.message}`)); continue; }
+        }
+        for (const [name, fn] of readers) {
+            try { const v = fn(scoped); for (const src of Array.isArray(v) ? v : [v]) add(src); }
+            catch (e) { add(unreadable(name, e.message)); }
+        }
+    }
+    return sources;
+}
+
+/** Every source, merged, with the window applied. A failed source becomes a COULD-NOT-READ row. */
+function collect(s, now = Date.now()) {
+    const sources = readSources(s, [['runs', runsSource], ['headless-worker', headlessSource],
+        ['unattended-worker', unattendedSource], ['bg-runner', bgRunnerSource], ['missions', missionSource], ['desktop', desktopSource]]);
     const windowMs = s.hours * 3600 * 1000;
     const rows = [];
     for (const src of sources) {
         if (!src.readable) {
-            rows.push({ key: `unreadable:${src.source}`, source: src.source, kind: src.source, code: 'COULD-NOT-READ', title: '', project: '', account: '',
+            rows.push({ key: `${src.configDir ? JSON.stringify(src.configDir) + ':' : ''}unreadable:${src.source}`,
+                ...(src.configDir ? { configDir: src.configDir } : {}), source: src.source, kind: src.source, code: 'COULD-NOT-READ', title: '', project: '', account: src.configDir ? configLabel(s.home, src.configDir) : '',
                 process: 'COULD-NOT-READ', exit: null, result: '', progress: src.population, lastAt: null, pr: null, question: null, actions: [] });
             continue;
         }
@@ -469,10 +509,7 @@ function collect(s, now = Date.now()) {
  * so no window applies here either.
  */
 function openAsks(s) {
-    const sources = [];
-    for (const [name, fn] of [['runs', runsSource], ['headless-worker', headlessSource]]) {
-        try { sources.push(fn(s)); } catch (e) { sources.push(unreadable(name, e.message)); }
-    }
+    const sources = readSources(s, [['runs', runsSource], ['headless-worker', headlessSource]]);
     return { sources, rows: sources.flatMap((src) => src.rows.filter((r) => r.question)) };
 }
 
@@ -607,7 +644,10 @@ function doAction(s, action, key, fields) {
             '--report', path.join(path.dirname(rec.report), `${code}.report.md`), '--ledger', row.ledger,
             '--permission-mode', rec.permissionMode || 'default'];
         if (row.cwd) args.push('--cwd', row.cwd);
-        if (rec.configDir) args.push('--config-dir', path.isAbsolute(rec.configDir) ? rec.configDir : path.join(s.home, rec.configDir));
+        // The worker ledger stores a basename, so reuse the selected full path on later relaunches too.
+        const configDir = row.configDir && (!rec.configDir || rec.configDir === path.basename(row.configDir))
+            ? row.configDir : rec.configDir;
+        if (configDir) args.push('--config-dir', path.isAbsolute(configDir) ? configDir : path.join(s.home, configDir));
         if (rec.model) args.push('--model', rec.model);
         if (rec.effort) args.push('--effort', rec.effort);
         // A record started with --dev ran a checkout on purpose, and its relaunch runs the same code.
