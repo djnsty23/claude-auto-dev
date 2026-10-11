@@ -1,0 +1,36 @@
+PR385 independent fixed-final classification acceptance, 2026-10-11.
+Environment: native Windows, Node24.15.0. No network or live marketing writes.
+Population:20 existing strict cases plus8 independently labeled new cases,
+28 unique synthetic rows. They test filter correctness, not marketing outcomes.
+Fixture SHA256:04e018f129d7b43dcc6fdd189309959641b6a1767d745209755d6285e1d6d3ce
+
+A:current broad owned-offer matcher at b992419.
+B:narrowed matcher from45fe872, integrated unchanged as3047a82.
+C:simpler original link plus explicit CTA matcher.
+Recorded before measurement:primary exact classification; guardrails zero
+false-positive exclusion and zero missed explicit promotion; median<1ms.
+Constants:same28 rows and oracle,1000 timing runs per variant, fixed final.
+Expected failure:A excludes helpful free resources; C misses explicit offers.
+Rollback:forward correction only, do not merge on this evidence alone.
+
+A:26/28 correct, FP2 FN0, retained14 excluded14, median0.0249ms.
+  FP:free-template-help,free-swipe-file-help.
+B:28/28 correct, FP0 FN0, retained16 excluded12, median0.0471ms.
+C:24/28 correct, FP0 FN4, retained20 excluded8, median0.0411ms.
+  FN:creator-owned-promo,owned-course-promotion,priced-template-promotion,
+  enroll-swipe-file-promotion.
+Every retained+excluded total is28; reason sums equal excluded counts.
+B exclusion reasons:creator-promotion7,engagement-manipulation1,
+off-platform-promotion1,multi-author-duplicate3.
+Verdict:adopt-B within this correctness fixture scope only.
+
+Historical125-row replay was aborted BEFORE any variant measurement:
+the mutable five-file comment cache now supplies127 rows, not125.
+Immutable prior inputs are unavailable. The earlier125-row result remains
+historical, not revalidated by this run. No real-comment accuracy or business
+outcome inference is justified by these28 synthetic rows.
+
+Combined integrated target commands on3047a82:
+node tooling/test-marketing-radar.js:55 passed,0 failed, exit0.
+node tooling/test-framework-radar.js:56 passed,0 failed, exit0.
+Full gate and fresh remote CI are separate pending requirements.
