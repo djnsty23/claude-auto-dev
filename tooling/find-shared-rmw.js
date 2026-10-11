@@ -521,11 +521,60 @@ function allPluginFiles() {
 
 const rel = (f) => path.relative(ROOT, f).split(path.sep).join('/');
 
+/** Ledger candidates include accepted findings and keyed storage omitted by RMW analysis. */
+function ledgerWriters() {
+    const files = allPluginFiles();
+    const candidates = scanFiles(files).filter((f) => f.kind !== 'consume'
+        && /ledger|seen/i.test([f.file, f.path, f.fn].join(' ')));
+    const writers = new Map();
+    const add = (file, fn) => {
+        if (!writers.has(file)) writers.set(file, new Set());
+        writers.get(file).add(fn);
+    };
+    // Keep known writers in the census after their RMW shape is repaired.
+    for (const [file, fn] of SHARED_LEDGER_WRITERS) add(file, fn);
+    for (const f of candidates) {
+        if (!LEDGER_EXCLUSIONS.some((e) => e.file === f.file)) add(f.file, f.fn);
+    }
+    for (const file of files) {
+        const src = stripComments(fs.readFileSync(file, 'utf8'));
+        if (src.includes('keyed-ledger.js') && /ledger\.write(?:UnlessCorrupt)?\s*\(/.test(src)) add(rel(file), 'keyed-ledger caller');
+    }
+    add('plugins/autodev-core/scripts/keyed-ledger.js', 'write');
+    // Frontier lives outside plugins, so the plugin census cannot discover it.
+    const frontier = 'tooling/frontier/run.js';
+    for (const f of scanFiles([path.join(ROOT, frontier)])) {
+        if (f.kind !== 'consume' && f.via.includes('writeJsonAtomic') && f.fn === 'plant') add(frontier, f.fn);
+    }
+    return [...writers].sort(([a], [b]) => a.localeCompare(b))
+        .map(([file, functions]) => ({ file, functions: [...functions].sort() }));
+}
+
 function scanFiles(files) {
     const findings = [];
     for (const f of files) findings.push(...scanText(fs.readFileSync(f, 'utf8'), rel(f)));
     return findings;
 }
+
+const LEDGER_EXCLUSIONS = [
+    { file: 'plugins/autodev-core/hooks/stop-auto-check.js', reason: 'forModel stores one notes file per session and project, not a shared ledger' },
+    { file: 'plugins/autodev-core/scripts/deploy-ledger.js', reason: 'main regenerates a maintainer-owned Markdown approval document, not an independent worker ledger' },
+    { file: 'plugins/autodev-core/scripts/inbox-watch.js', reason: 'claim replaces a complete directory snapshot, the read is used only to report the fresh count' },
+];
+
+const SHARED_LEDGER_WRITERS = [
+    ['plugins/autodev-core/hooks/peer-send-ledger.js', 'pruneIfLarge'],
+    ['plugins/autodev-core/hooks/stop-brain-report.js', 'keyed-ledger caller'],
+    ['plugins/autodev-core/hooks/stop-intent-record.js', 'keyed-ledger caller'],
+    ['plugins/autodev-core/hooks/stop-workflow-wall-note.js', 'keyed-ledger caller'],
+    ['plugins/autodev-core/scripts/headless-worker.js', 'withLedger'],
+    ['plugins/autodev-core/scripts/keyed-ledger.js', 'write'],
+    ['plugins/autodev-core/scripts/production-signals.js', 'main'],
+    ['plugins/autodev-core/scripts/radar-learning.js', 'main'],
+    ['plugins/autodev-core/scripts/unattended-worker.js', '(anonymous)'],
+    ['plugins/autodev-core/scripts/watch-panels.js', 'scan'],
+    ['tooling/frontier/run.js', 'plant'],
+];
 
 /**
  * Splits findings into open and accepted, and names every ACCEPTED entry that
@@ -541,7 +590,7 @@ function judge(findings, scannedFiles, accepted = ACCEPTED) {
     return { open, accepted: kept, stale };
 }
 
-module.exports = { scanText, scanFiles, hookClosure, allPluginFiles, functionSpans, stripComments, isPrivate, isFixed, judge, ACCEPTED };
+module.exports = { scanText, scanFiles, hookClosure, allPluginFiles, functionSpans, stripComments, isPrivate, isFixed, judge, ACCEPTED, ledgerWriters };
 
 if (require.main === module) {
     const argv = process.argv.slice(2);
@@ -553,11 +602,14 @@ if (require.main === module) {
         const findings = scanFiles(files);
         const v = judge(findings, files.map(rel));
         if (argv.includes('--json')) {
-            process.stdout.write(JSON.stringify({ scanned: files.map(rel), ...v }, null, 2) + '\n');
+            process.stdout.write(JSON.stringify({ scanned: files.map(rel), ...v, ledgerWriters: ledgerWriters() }, null, 2) + '\n');
         } else {
             console.log(`scanned ${files.length} file(s): ${findings.length} finding(s), ${v.accepted.length} accepted, ${v.open.length} open, ${v.stale.length} stale accepted entr${v.stale.length === 1 ? 'y' : 'ies'}`);
             for (const f of v.open) console.log(`OPEN   ${f.file}:${f.line}  ${f.kind} of ${f.path}  in ${f.fn} (read at :${f.readLine}, ${f.via})`);
             for (const a of v.stale) console.log(`STALE  ${a.file}  ${a.kind} of ${a.path}: no longer found, remove it from ACCEPTED`);
+            for (const writer of ledgerWriters()) console.log(`LEDGER ${writer.file} [${writer.functions.join(', ')}]`);
+            for (const excluded of LEDGER_EXCLUSIONS) console.log(`LEDGER-SCOPE ${excluded.file}: ${excluded.reason}`);
+            console.log('LEDGER-SCOPE tooling/frontier/run.js: finish metadata is per run, batchLoop state has one loop owner, plant.json is shared across tasks');
         }
         process.exitCode = v.open.length || v.stale.length ? 1 : 0;
     }
