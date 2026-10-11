@@ -130,6 +130,34 @@ async function unit() {
     ['near-a', 'near-b', 'near-c', 'repeat-a', 'repeat-b', 'finance-discussion']
       .every((id) => strictFiltered.retained.some((row) => row.id === id)));
 
+  // Freeze the conservative boundary independently of the matcher's vocabulary:
+  // linked help is not a commercial offer merely because its author owns it.
+  const creatorResourceCases = [
+    ['free-template-help', 'Download my free GA4 setup template at https://example.com/template, it fixes the consent issue you asked about.', false],
+    ['free-swipe-file-help', 'Get my free consent setup swipe file at https://example.com/swipe-file, it answers your implementation question.', false],
+    ['free-worksheet-help', 'Download my free GA4 setup worksheet at https://example.com/worksheet, it fixes the consent issue you asked about.', false],
+    ['owned-course-promotion', 'Check out my new Meta Ads course and community at https://example.com/course', true],
+    ['owned-community-promotion', 'Join our marketing community at https://example.com/community', true],
+    ['buy-template-promotion', 'Buy my GA4 setup template at https://example.com/template', true],
+    ['priced-template-promotion', 'Get my GA4 setup template for $49 at https://example.com/template', true],
+    ['enroll-swipe-file-promotion', 'Get my paid swipe file and enroll at https://example.com/swipe-file', true],
+  ];
+  for (const [id, text, shouldExclude] of creatorResourceCases) {
+    const comment = subject.normalizeComment({
+      id, text, author_id: 'resource-creator', author_is_uploader: true,
+    }, 'fixture', 0);
+    const result = subject.filterCommentFeedback([comment]);
+    check(`creator resource boundary: ${id}`,
+      shouldExclude
+        ? result.retained.length === 0 && result.excluded.length === 1
+          && result.excluded[0].id === id && result.excluded[0].exclusion_reason === 'creator-promotion'
+          && result.reasons['creator-promotion'] === 1
+        : result.retained.length === 1 && result.retained[0].id === id
+          && result.retained[0].text === text && result.excluded.length === 0
+          && Object.keys(result.reasons).length === 0,
+      JSON.stringify({ retained: result.retained.map((row) => row.id), excluded: result.excluded.map((row) => [row.id, row.exclusion_reason]) }));
+  }
+
   const apiCalls = [];
   const apiComments = await subject.discoverCommentsWithApi('MARKETVID01', 'test-key', 20, async (url) => {
     apiCalls.push(url);
