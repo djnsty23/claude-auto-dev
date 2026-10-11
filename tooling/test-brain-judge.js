@@ -94,7 +94,7 @@ const fakeJudge = path.join(scratch, 'fake-judge.js');
 fs.writeFileSync(fakeJudge, [
     "const fs = require('fs'); let input = '';",
     "process.stdin.on('data', (d) => { input += d; }).on('end', () => {",
-    "  if (process.env.FAKE_JUDGE_ARGV) fs.writeFileSync(process.env.FAKE_JUDGE_ARGV, JSON.stringify({ argv: process.argv.slice(2), input, cwd: process.cwd() }));",
+    "  if (process.env.FAKE_JUDGE_ARGV) fs.writeFileSync(process.env.FAKE_JUDGE_ARGV, JSON.stringify({ argv: process.argv.slice(2), input, cwd: process.cwd(), cfg: process.env.CLAUDE_CONFIG_DIR || null }));",
     "  const mode = process.env.FAKE_JUDGE || '';",
     "  if (mode === 'error') { process.stdout.write(JSON.stringify({ type: 'result', is_error: true, subtype: 'error_max_turns', total_cost_usd: 0.01 })); return; }",
     "  const decision = /FAKE-ESCALATE/.test(input) ? 'escalate' : /FAKE-FOLLOWUP/.test(input) ? 'follow-up' : 'accept';",
@@ -109,7 +109,7 @@ try {
     // =======================================================================
     const sd = path.join(scratch, 'pure-state');
     fs.mkdirSync(sd);
-    check('an absent switch file reads dry for both steps', JSON.stringify(bj.readSwitch(sd)) === JSON.stringify({ judge: 'dry', start: 'dry', source: 'default' }));
+    check('an absent switch file reads dry for both steps', JSON.stringify(bj.readSwitch(sd)) === JSON.stringify({ judge: 'dry', start: 'dry', source: 'default', judgeConfigDir: null }));
     fs.writeFileSync(path.join(sd, 'switch.json'), '{not json');
     check('an unreadable switch file reads off for both steps', bj.readSwitch(sd).judge === 'off' && bj.readSwitch(sd).start === 'off');
     fs.writeFileSync(path.join(sd, 'switch.json'), JSON.stringify({ judge: 'LIVE', start: 'live' }));
@@ -318,6 +318,22 @@ try {
     const one = judge(['judge', '--task-id', 'worker-old-one', '--judge-bin', fakeJudge]);
     check('judge --task-id judges one record and logs it as manual', one.value && one.value.decision === 'follow-up' && judge(['log', '--limit', '1']).value.judgements[0].mode === 'manual');
     check('judge refuses a record that has not finished', judge(['judge', '--task-id', 'worker-loop-c', '--judge-bin', fakeJudge]).code === 'bad-state');
+    // The judge logs in where the switch points it: the default login can be refused while another account works.
+    const judgeCfg = path.join(scratch, 'judge-cfg');
+    fs.mkdirSync(judgeCfg);
+    const cfgArgv = path.join(scratch, 'judge-cfg-argv.json');
+    const sw1 = judge(['switch', '--config-dir', judgeCfg]);
+    check('switch --config-dir records the judge\'s config dir and keeps both modes', sw1.value && sw1.value.switch.judgeConfigDir === path.resolve(judgeCfg)
+        && sw1.value.switch.judge === sw1.value.previous.judge && sw1.value.switch.start === sw1.value.previous.start, sw1.stdout.slice(0, 300));
+    judge(['judge', '--task-id', 'worker-old-one', '--judge-bin', fakeJudge], { FAKE_JUDGE_ARGV: cfgArgv });
+    check('the judge runs with CLAUDE_CONFIG_DIR set to the switch\'s config dir', fs.existsSync(cfgArgv) && JSON.parse(fs.readFileSync(cfgArgv, 'utf8')).cfg === path.resolve(judgeCfg));
+    check('switch refuses a config dir that does not exist', judge(['switch', '--config-dir', path.join(scratch, 'no-such-cfg')]).code === 'config-dir-missing'
+        && bj.readSwitch(stateDir).judgeConfigDir === path.resolve(judgeCfg));
+    const sw2 = judge(['switch', '--config-dir', 'default']);
+    fs.rmSync(cfgArgv);
+    judge(['judge', '--task-id', 'worker-old-one', '--judge-bin', fakeJudge], { FAKE_JUDGE_ARGV: cfgArgv });
+    check('control: --config-dir default clears it, and the judge runs on the default login again',
+        sw2.value && sw2.value.switch.judgeConfigDir === null && fs.existsSync(cfgArgv) && JSON.parse(fs.readFileSync(cfgArgv, 'utf8')).cfg === null, sw2.stdout.slice(0, 300));
     check('log refuses a zero limit', judge(['log', '--limit', '0']).code === 'usage');
 
     const stateFile = path.join(stateDir, 'state.json');
@@ -338,6 +354,105 @@ try {
     check('an unknown command is a usage error', judge(['launch']).code === 'usage');
     const help = judge(['--help']);
     check('--help prints usage', help.status === 0 && help.stdout.startsWith('Usage:'));
+
+    // =======================================================================
+    // 6. A refused login holds start and is never judged.
+    // `[measured 2026-10-10]` two headless workers were refused their login,
+    // settled as unreported, and this start step would have launched the next
+    // queued worker into the same refusal. The refused run is settled by the
+    // real headless-worker.js from a planted log, then the real tick reads it.
+    // =======================================================================
+    const ad = path.join(scratch, 'auth');
+    const aState = path.join(ad, 'state'); const aClock = path.join(ad, 'clock');
+    const aLedger = path.join(ad, 'unattended.json'); const aHeadless = path.join(ad, 'headless.json');
+    const aPaths = ['--state-dir', aState, '--ledger', aLedger, '--headless-ledger', aHeadless, '--clock-dir', aClock];
+    fs.mkdirSync(aState, { recursive: true }); fs.mkdirSync(aClock, { recursive: true });
+    fs.writeFileSync(path.join(aClock, 'passes.jsonl'), ['ok', 'ok', 'ok'].map((s) => JSON.stringify({ status: s })).join('\n') + '\n');
+    fs.writeFileSync(path.join(aState, 'state.json'), JSON.stringify({ since: '2026-01-01T00:00:00.000Z', reported: {} }));
+    const INCIDENT = 'Your organization has disabled Claude subscription access for Claude Code · Use an Anthropic API key instead, or ask your admin to enable access';
+    const deadPid = spawnSync(process.execPath, ['-e', '0']).pid;
+    const t0 = new Date(Date.now() - 2 * 3600000).toISOString();
+    const aLog = path.join(ad, 'auth-a.log');
+    fs.writeFileSync(aLog, [JSON.stringify({ type: 'system', subtype: 'init' }), JSON.stringify({ type: 'result', is_error: true, result: INCIDENT }), 'CLAUDE_EXIT=1'].join('\n') + '\n');
+    fs.writeFileSync(aHeadless, JSON.stringify({ version: 1, records: [{ code: 'auth-a', pid: deadPid, startedAt: t0, log: aLog, report: path.join(ad, 'auth-a.report.md'), configDir: null, state: 'running' }] }));
+    const hsA = spawnSync(process.execPath, [HEADLESS, 'settle', '--code', 'auth-a', '--ledger', aHeadless], { encoding: 'utf8', env: baseEnv });
+    const hsAv = (() => { try { return JSON.parse(hsA.stdout).value; } catch { return null; } })();
+    check('fixture: the real headless settle files the planted refusal as auth-refused', hsA.status === 0 && hsAv && hsAv.state === 'auth-refused' && hsAv.reason === INCIDENT, hsA.stdout.slice(0, 300));
+    const qn = uw(['enqueue', '--repo', repo, '--slug', 'auth-next', '--brief-file', briefFile, '--return', 'brain', '--ledger', aLedger]);
+    const al = JSON.parse(fs.readFileSync(aLedger, 'utf8'));
+    al.records.push({ taskId: 'worker-auth-a', slug: 'auth-a', repo, state: 'started', channel: 'headless', startedAt: t0, launchedAt: t0,
+        report: path.join(ad, 'auth-a.report.md'), headless: { code: 'auth-a', startedAt: t0, ledger: aHeadless } });
+    fs.writeFileSync(aLedger, JSON.stringify(al, null, 2));
+    check('fixture: a queued task waits behind the refused run', qn.status === 0, qn.stdout.slice(0, 200));
+    const aRec = (id) => JSON.parse(fs.readFileSync(aLedger, 'utf8')).records.find((r) => r.taskId === id);
+    const aTick = (env) => judge(['tick', '--live', '--dev', '--worker-bin', fakeWorker, '--judge-bin', fakeJudge, ...aPaths], env);
+    const startLine = (t) => (t.value ? t.value.lines.find((l) => l.startsWith('start')) : '') || '';
+    const heldRe = /^start \(dry\): held, nothing starts: the newest settled headless run (\S+) \(started [^)]*\) was refused its login: "Your organization has disabled Claude subscription access[^"]*"\. A claude -p probe must pass first: node brain-judge\.js probe$/;
+
+    const ta = aTick();
+    const closedEv = (ta.value ? ta.value.events : []).find((e) => e.type === 'judge.closed');
+    check('the tick closes the refused run as failed in the unattended ledger, and its event names the refusal',
+        closedEv && closedEv.detail.result === 'auth-refused' && closedEv.detail.reason === INCIDENT && aRec('worker-auth-a').state === 'closed' && aRec('worker-auth-a').runStatus === 'failed', ta.stdout.slice(0, 500));
+    check('the refused run is not judged: no verdict, no judge run spent, and the judge line says why',
+        !types(ta).includes('judge.verdict') && !types(ta).includes('judge.error') && !fs.existsSync(path.join(aState, 'runs.jsonl'))
+            && ta.value.lines.some((l) => /^judge \(dry\): 0 awaiting a verdict, .*1 skipped: their login was refused/.test(l)), ta.value && ta.value.lines.join(' | '));
+    check('start is held: one line naming the refused run, its text and the probe, and nothing would start',
+        (startLine(ta).match(heldRe) || [])[1] === 'auth-a' && !types(ta).includes('judge.would-start') && aRec('worker-auth-next').state === 'queued', startLine(ta));
+    check('the exit code and {"ok":...} contract hold while start is held', ta.status === 0 && ta.json && ta.json.ok === true);
+    const bfA = judge(['backfill', '--judge-bin', fakeJudge, ...aPaths]);
+    check('backfill spends nothing on a refused run either', bfA.value && bfA.value.results.every((r) => r.taskId !== 'worker-auth-a'), bfA.stdout.slice(0, 200));
+
+    const fakeProbe = path.join(scratch, 'fake-probe.js');
+    fs.writeFileSync(fakeProbe, [
+        "let input = ''; process.stdin.on('data', (d) => { input += d; }).on('end', () => {",
+        "  const refused = process.env.FAKE_PROBE === 'refused';",
+        `  process.stdout.write(JSON.stringify({ type: 'result', is_error: refused, result: refused ? ${JSON.stringify(INCIDENT)} : 'OK', num_turns: 1 }) + '\\n');`,
+        "  process.exitCode = refused ? 1 : 0;",
+        "});",
+    ].join('\n'));
+    const pargv = bj.probeArgv('claude');
+    check('the probe runs tool-less, with no MCP, no settings, one turn and no session', pargv[pargv.indexOf('--tools') + 1] === '' && pargv.includes('--strict-mcp-config') && pargv[pargv.indexOf('--max-turns') + 1] === '1' && pargv.includes('--no-session-persistence'));
+    const pr1 = judge(['probe', '--worker-bin', fakeProbe, ...aPaths], { FAKE_PROBE: 'refused' });
+    check('a refused probe exits 1 with auth-refused and the text, and is logged', pr1.status === 1 && pr1.code === 'auth-refused' && pr1.json.error.message.includes(INCIDENT)
+        && bj.readJsonl(path.join(aState, 'probes.jsonl')).rows.pop().passed === false, pr1.stdout.slice(0, 300));
+    check('a refused probe does not lift the hold', heldRe.test(startLine(aTick())));
+    const pr2 = judge(['probe', '--worker-bin', fakeProbe, '--config-dir', path.join(ad, 'other-cfg'), ...aPaths]);
+    check('control: a probe that passes on ANOTHER config dir does not lift the hold', pr2.status === 0 && pr2.value.probe.passed === true && pr2.value.probe.configDir === 'other-cfg' && heldRe.test(startLine(aTick())), pr2.stdout.slice(0, 300));
+    const pr3 = judge(['probe', '--worker-bin', fakeProbe, ...aPaths]);
+    const tp = aTick();
+    check('a probe that passes on the same login lifts the hold, and the queued task would start', pr3.status === 0 && pr3.value.probe.passed === true
+        && /^start \(dry\): 1 ready/.test(startLine(tp)) && types(tp).includes('judge.would-start'), `${pr3.stdout.slice(0, 200)} | ${startLine(tp)}`);
+
+    // A second refusal, after the probe: held again until a LATER run succeeds.
+    const plant = (rec) => { const h = JSON.parse(fs.readFileSync(aHeadless, 'utf8')); h.records.push({ pid: deadPid, configDir: null, state: 'settled', settledAt: new Date().toISOString(), ...rec }); fs.writeFileSync(aHeadless, JSON.stringify(h)); };
+    sleep(5);
+    plant({ code: 'auth-b', startedAt: new Date(Date.now() - 60000).toISOString(), result: 'auth-refused', reason: INCIDENT, exit: 1 });
+    const tb2 = aTick();
+    check('a newer refused run holds start again, named in the line', (startLine(tb2).match(heldRe) || [])[1] === 'auth-b', startLine(tb2));
+    plant({ code: 'auth-u', startedAt: new Date(Date.now() - 30000).toISOString(), result: 'unreported', reason: 'exited 0', exit: 0 });
+    check('control: a later run that settled unreported is not a success, so the hold stands', heldRe.test(startLine(aTick())));
+    plant({ code: 'auth-c', startedAt: new Date(Date.now() - 20000).toISOString(), result: 'done', sentence: 'worked', exit: 0 });
+    const tc = aTick();
+    check('a later run that succeeded lifts the hold, and the queued task would start', /^start \(dry\): 1 ready/.test(startLine(tc)), startLine(tc));
+    plant({ code: 'auth-d', startedAt: new Date(Date.now() - 90000).toISOString(), result: 'auth-refused', reason: 'Not logged in · Please run /login', exit: 1 });
+    check('control: a refused run that started BEFORE the success does not hold start', /^start \(dry\): 1 ready/.test(startLine(aTick())));
+    // Each config dir is its own login: a refusal on the default does not hold a task that logs in elsewhere.
+    plant({ code: 'auth-e', startedAt: new Date(Date.now() - 10000).toISOString(), result: 'auth-refused', reason: INCIDENT, exit: 1 });
+    const otherCfg = path.join(ad, 'other-cfg');
+    fs.mkdirSync(otherCfg, { recursive: true });
+    const qo = uw(['enqueue', '--repo', repo, '--slug', 'auth-other', '--brief-file', briefFile, '--return', 'brain', '--config-dir', otherCfg, '--ledger', aLedger]);
+    const te = aTick();
+    const lines = (t) => (t.value ? t.value.lines : []);
+    const wouldStart = (t) => (t.value ? t.value.events : []).filter((e) => e.type === 'judge.would-start').map((e) => e.key);
+    check('a refusal on the default login holds only the tasks that log in there: the other account\'s task would start',
+        qo.status === 0 && /^start \(dry\): 1 ready/.test(startLine(te)) && lines(te).some((l) => /^start \(dry\): worker-auth-next held: .*auth-e/.test(l))
+            && wouldStart(te).includes('worker-auth-other') && !wouldStart(te).includes('worker-auth-next'), `${qo.status} | ${lines(te).join(' | ')} | ${wouldStart(te).join(',')}`);
+    plant({ code: 'auth-f', startedAt: new Date(Date.now() - 5000).toISOString(), result: 'auth-refused', reason: INCIDENT, exit: 1, configDir: 'other-cfg' });
+    const tf = aTick();
+    check('control: once the other account is refused too, nothing starts and the line says so', /^start \(dry\): held, nothing starts: /.test(startLine(tf)), startLine(tf));
+    fs.writeFileSync(aHeadless, '{torn');
+    const tt = aTick();
+    check('an unreadable headless ledger holds start, since a refusal in it cannot be ruled out', /^start \(dry\): held, nothing starts: .*could not be read/.test(startLine(tt)) && tt.status === 0, startLine(tt));
 } finally {
     try { fs.rmSync(scratch, { recursive: true, force: true }); } catch { /* a locked file on Windows; the OS temp cleaner owns it */ }
 }

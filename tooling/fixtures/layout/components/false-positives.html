@@ -1,0 +1,97 @@
+<!doctype html>
+<html lang="en"><head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>false positives</title>
+<!--
+  Three false-positive classes measured on a real admin sweep, each beside a
+  planted true positive of the same rule. The suite asserts the exact set of
+  findings: the true positive fires and the false positive does not.
+
+    FP1 CLIPPED-TEXT   a closed <details> inside a clipping card. Its body is
+                       not rendered (content-visibility: hidden), so nobody
+                       can read it and nothing is cut off.
+    TP1 CLIPPED-TEXT   a visible paragraph cut off by a 56px clipping panel.
+
+    FP2 TEXT-OCCLUDED  a form under a position: sticky bottom action bar at
+                       scroll 0, the intended sticky-action pattern.
+    TP2 TEXT-OCCLUDED  a paragraph covered by an opaque absolute overlay that
+                       is not pinned to anything.
+    OK2 TEXT-OCCLUDED  the same overlay with data-unslop-ok="TEXT-OCCLUDED".
+
+    FP3 ROW-*          a 22px status chip, not interactive, beside a 44px
+                       button in one flex row.
+    TP3 ROW-*          a 32px button beside a 44px button in one flex row.
+-->
+<style>
+  *,*::before,*::after{box-sizing:border-box}
+  body{margin:0;font:16px/1.5 system-ui,sans-serif;color:#1a1a1a;background:#fff}
+  main{padding:16px}
+  h1{font-size:24px;margin:0 0 16px}
+  .card{height:88px;overflow:hidden;border:1px solid #d4d4d4;border-radius:12px;padding:12px;margin:0 0 16px}
+  .card summary{min-height:44px;line-height:44px;cursor:pointer}
+  .panel{height:56px;overflow:hidden;background:#f3f3f3;border-radius:8px;padding:12px;margin:0 0 16px}
+  .cover-wrap{position:relative;margin:0 0 16px}
+  .cover{position:absolute;inset:0;background:#e4e4e7}
+  .row{display:flex;align-items:center;gap:8px;margin:0 0 16px}
+  .btn{height:44px;display:inline-flex;align-items:center;padding:0 12px;border:1px solid #d4d4d4;border-radius:8px;background:#fff;color:#333;font:inherit;font-size:14px}
+  .btn.small{height:32px}
+  .chip{height:22px;display:inline-flex;align-items:center;padding:0 8px;border:1px solid #16a34a;border-radius:999px;background:#dcfce7;color:#14532d;font-size:12px}
+  .field{display:block;margin:0 0 12px}
+  .field input{display:block;width:100%;height:44px;border:1px solid #d4d4d4;border-radius:8px;padding:0 12px;font:inherit}
+  .actions{position:sticky;bottom:0;display:flex;gap:8px;padding:12px 16px;background:#fff;border-top:1px solid #e5e5e5}
+</style></head>
+<body>
+<main>
+  <h1>Settings</h1>
+
+  <section class="card" id="fp1">
+    <details>
+      <summary>Advanced options</summary>
+      <p>This paragraph sits in a closed details element. It is not rendered, so nobody can read it and nothing about it is cut off.</p>
+      <p>Neither is this second paragraph, which a naive clipping check reports as text running past the bottom of the card.</p>
+    </details>
+  </section>
+
+  <section class="panel" id="tp1">
+    <p>This panel is 56 pixels tall and this paragraph is longer than that. Everything after the first line is cut off with no way for anyone to reach it.</p>
+  </section>
+
+  <div class="cover-wrap" id="tp2">
+    <p>This paragraph is covered by an opaque box that is not pinned to the viewport, which is a real occlusion at any scroll position.</p>
+    <div class="cover"></div>
+  </div>
+
+  <div class="cover-wrap" id="ok2" data-unslop-ok="TEXT-OCCLUDED">
+    <p>This paragraph is covered the same way, and the product marked it reviewed with a data attribute in its own source.</p>
+    <div class="cover"></div>
+  </div>
+
+  <div class="row" id="fp3">
+    <span class="chip">Active</span>
+    <button class="btn" type="button">Edit plan</button>
+  </div>
+
+  <div class="row" id="tp3" data-unslop-ok="TAP-TARGET">
+    <button class="btn small" type="button">Cancel</button>
+    <button class="btn" type="button">Save</button>
+  </div>
+
+  <form id="fp2">
+    <label class="field">Company name <input name="a" value="Acme"></label>
+    <label class="field">Billing email <input name="b" value="billing@example.com"></label>
+    <label class="field">Street address <input name="c" value="1 Main Street"></label>
+    <label class="field">City <input name="d" value="Springfield"></label>
+    <label class="field">Postal code <input name="e" value="12345"></label>
+    <label class="field">Country <input name="f" value="Somewhere"></label>
+    <label class="field">VAT number <input name="g" value="XX123"></label>
+    <label class="field">Phone <input name="h" value="555 0100"></label>
+    <label class="field">Notes <input name="i" value="none"></label>
+    <label class="field">Reference <input name="j" value="R-1"></label>
+    <div class="actions">
+      <button class="btn" type="button">Discard</button>
+      <button class="btn" type="submit">Save changes</button>
+    </div>
+  </form>
+</main>
+</body></html>

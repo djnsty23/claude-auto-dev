@@ -35,7 +35,7 @@
 
 const fs = require('fs');
 const path = require('path');
-const { spawnSync, execSync } = require('child_process');
+const { spawnSync } = require('child_process');
 const sb = require('./spawn-budget.js');
 const ev = require('./subject-evidence.js');
 const sv = require('./suite-verdict-summary.js');
@@ -371,10 +371,31 @@ function reportRedBaseline(what, r) {
     }
 }
 
-// git() runs in the SOURCE tree (the dirty check, worktree management);
-// gitW() runs in the private sweep worktree (every scan below).
-const git = (args) => execSync('git ' + args, { cwd: ROOT, encoding: 'utf8' });
-const gitW = (args) => execSync('git ' + args, { cwd: SWEEP_ROOT, encoding: 'utf8' });
+// Evidence lives outside the disposable mutation worktree and survives its removal.
+const evidenceDir = process.env.AUTODEV_SWEEP_EVIDENCE_DIR || path.join(require('os').tmpdir(),
+    'autodev-sweep-evidence', `${Date.now()}-${process.pid}-${require('crypto').randomBytes(6).toString('hex')}`);
+let evidenceSeq = 0;
+function retainEvidence(label, phase, r, invocation) {
+    fs.mkdirSync(evidenceDir, { recursive: true });
+    const file = path.join(evidenceDir, `${String(++evidenceSeq).padStart(5, '0')}.json`);
+    fs.writeFileSync(file, JSON.stringify({ label, phase, ...invocation, status: r.status, signal: r.signal || null,
+        error: r.error ? { code: r.error.code || null, message: r.error.message } : null,
+        stdout: String(r.stdout || ''), stderr: String(r.stderr || '') }, null, 2) + '\n', { flag: 'wx' });
+    if (r.status !== 0 || r.error || r.signal) console.error(`  [evidence] ${label} (${phase}): ${file}`);
+    return r;
+}
+
+// Status is a read, so it must not contend for optional index-refresh locks.
+// An unreadable snapshot is unknown, never an empty or clean tree.
+function readStatus(cwd, phase) {
+    const r = spawnSync('git', ['--no-optional-locks', 'status', '--porcelain'], {
+        cwd, encoding: 'utf8', windowsHide: true, maxBuffer: 32 * 1024 * 1024,
+    });
+    if (r.status === 0 && !r.error && !r.signal) return r.stdout;
+    retainEvidence('git status', phase, r, { command: 'git', args: ['--no-optional-locks', 'status', '--porcelain'], cwd });
+    conflict(`git status (${phase}) could not be read: ${sb.lastWords(r)}`);
+    return null;
+}
 
 // Refuse to run on a dirty tree, and the REASON changed when the private
 // worktree landed. It used to be "this script overwrites your files", which was
@@ -392,7 +413,9 @@ const gitW = (args) => execSync('git ' + args, { cwd: SWEEP_ROOT, encoding: 'utf
 // still describing the retired mechanism, five days after it was retired. The
 // wording below is what a reader acts on, so it is part of the tool rather than
 // a comment: it told people to stash to protect work that was never at risk.
-const dirty = git('status --porcelain').trim();
+const initialStatus = readStatus(ROOT, 'source before');
+if (initialStatus === null) { process.exitCode = 2; return; }
+const dirty = initialStatus.trim();
 if (dirty) {
     console.error('\nRefusing to run: the working tree has uncommitted changes.\n');
     console.error('This sweep mutates a private worktree, not yours, so your edits are safe.');
@@ -599,16 +622,16 @@ const suiteEnv = (extra) => {
 // `traced` is a pair-cache run from pairCache.beginRun(): its env adds the
 // tracer preload and the run's private coverage and trace directories. null
 // (cache off, or the trace could not start) runs the suite exactly as before.
-const runSuite = (suite, traced) => {
+const runSuite = (suite, traced, phase = 'baseline') => {
     // checkRunner's child is the WHOLE of test-all.js — ~40x a single suite, and
     // measured at 827-890s against the 900s every suite used to share.
     const budget = sb.sweepBudgetFor(suite);
-    return spawnSuiteSync(process.execPath, [path.join(SWEEP_TOOLING, suite)], {
+    return retainEvidence(suite, phase, spawnSuiteSync(process.execPath, [path.join(SWEEP_TOOLING, suite)], {
         cwd: SWEEP_ROOT, encoding: 'utf8', timeout: budget,
         env: suiteEnv(Object.assign({
             [sb.DEADLINE_ENV]: String(Date.now() + budget - REPORT_MARGIN_MS),
         }, traced ? traced.env : {})),
-    }, { label: suite });
+    }, { label: suite }), { command: process.execPath, args: [path.join(SWEEP_TOOLING, suite)], cwd: SWEEP_ROOT });
 };
 
 // THE PAIR CACHE. Shadow by default, so it changes no verdict until it has been
@@ -640,7 +663,7 @@ function checkRunner(suite) {
         return { suite, status: 'UNCHECKED', cause: sv.CAUSE.RUN_INCOMPLETE, note: 'could not install the runner canary — see conflicts' };
     }
     try {
-        const r = runSuite(suite);
+        const r = runSuite(suite, null, 'runner canary');
         if (!completed(r, suite + ' (runner canary run)')) {
             return { suite, status: 'UNCHECKED', cause: sv.CAUSE.RUN_INCOMPLETE, note: 'canary run did not complete — indeterminate, not a verdict' };
         }
@@ -664,10 +687,10 @@ function checkValidator() {
     const file = path.join(SWEEP_ROOT, 'VERSION');
     if (!fs.existsSync(file)) return { suite, status: 'NO-SUBJECT', cause: sv.CAUSE.NO_SUBJECT, note: 'no VERSION file' };
 
-    const run = () => spawnSuiteSync(process.execPath, [path.join(SWEEP_TOOLING, 'validate.js')], {
+    const run = (phase) => retainEvidence(suite, phase, spawnSuiteSync(process.execPath, [path.join(SWEEP_TOOLING, 'validate.js')], {
         cwd: SWEEP_ROOT, encoding: 'utf8', timeout: RUN_BUDGET_MS, env: suiteEnv({}),
-    }, { label: suite });
-    const base = run();
+    }, { label: suite }), { command: process.execPath, args: [path.join(SWEEP_TOOLING, suite)], cwd: SWEEP_ROOT });
+    const base = run('baseline');
     if (!completed(base, 'validate (baseline)')) return { suite, status: 'UNCHECKED', cause: sv.CAUSE.RUN_INCOMPLETE, note: 'baseline did not complete — indeterminate' };
     if (base.status !== 0) {
         reportRedBaseline('validate (baseline)', base);
@@ -679,7 +702,7 @@ function checkValidator() {
         return { suite, status: 'UNCHECKED', cause: sv.CAUSE.RUN_INCOMPLETE, note: 'could not install the VERSION canary — see conflicts' };
     }
     try {
-        const r = run();
+        const r = run('VERSION canary');
         if (!completed(r, 'validate (VERSION canary run)')) {
             return { suite, status: 'UNCHECKED', cause: sv.CAUSE.RUN_INCOMPLETE, note: 'canary run did not complete — indeterminate, not a verdict' };
         }
@@ -760,7 +783,12 @@ for (const suite of suites) {
     // restore cannot remove untracked files, so the whole sweep exited 2 with
     // no verdict. Snapshot the untracked set once per suite and remove only
     // what is NEW; the finally fires on every continue below.
-    const untrackedBefore = new Set(gitW('status --porcelain').split('\n')
+    const statusBefore = readStatus(SWEEP_ROOT, suite + ' before');
+    if (statusBefore === null) {
+        rows.push({ suite, status: 'UNCHECKED', cause: sv.CAUSE.RUN_INCOMPLETE, note: 'git status unavailable before suite' });
+        continue;
+    }
+    const untrackedBefore = new Set(statusBefore.split('\n')
         .filter((l) => l.startsWith('?? ')).map((l) => l.slice(3).trim()));
     // OWNERSHIP IS EXPLICIT, never inferred (Sol's round-4 and round-5
     // blockers, in sequence). Round 4 deleted any new untracked path; round 5
@@ -772,7 +800,9 @@ for (const suite of suites) {
     // is reported and left - if it is a real orphan, the end-of-run tree
     // check names it and a human decides.
     const cleanNewUntracked = () => {
-        for (const line of gitW('status --porcelain').split('\n')) {
+        const statusAfter = readStatus(SWEEP_ROOT, suite + ' after');
+        if (statusAfter === null) return;
+        for (const line of statusAfter.split('\n')) {
             if (!line.startsWith('?? ')) continue;
             const p = line.slice(3).trim();
             if (untrackedBefore.has(p)) continue;
@@ -838,7 +868,7 @@ for (const suite of suites) {
         let outcome = 'incomplete';
         let r = null;
         try {
-            r = runSuite(suite, traced);
+            r = runSuite(suite, traced, 'stub ' + rel);
             if (!completed(r, suite + ' (with ' + rel + ' stubbed)')) return 'incomplete';
             outcome = r.status !== 0 ? 'killed' : 'green';
             return outcome;
@@ -929,7 +959,8 @@ try {
     conflict('could not re-read the source tree HEAD after the sweep: ' + e.message);
 }
 
-const after = gitW('status --porcelain').trim();
+const finalStatus = readStatus(SWEEP_ROOT, 'sweep after');
+const after = finalStatus === null ? null : finalStatus.trim();
 if (after) {
     console.error('\nSWEEP WORKTREE NOT CLEAN after the sweep:\n' + after);
     // Nothing here is this sweep's to fix: its own artifacts were returned

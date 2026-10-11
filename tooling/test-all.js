@@ -224,17 +224,27 @@ async function runOneUnguarded(run, item, opt) {
       if (logFd !== null) fs.writeSync(logFd, chunk);
     };
     const t0 = Date.now();
-    const res = await spawnSuite(process.execPath, item.args, {
-      cwd: repoRoot,
-      env,
-      stdio: ['inherit', 'pipe', 'pipe'],
-      windowsHide: true,
-      timeout: SUITE_TIMEOUT_MS,
-    }, { label: item.label, onStdout: tee(process.stdout), onStderr: tee(process.stderr) });
+    let res;
+    let c;
+    try {
+      res = await spawnSuite(process.execPath, item.args, {
+        cwd: repoRoot,
+        env,
+        stdio: ['inherit', 'pipe', 'pipe'],
+        windowsHide: true,
+        timeout: SUITE_TIMEOUT_MS,
+      }, { label: item.label, onStdout: tee(process.stdout), onStderr: tee(process.stderr) });
+      c = classify(res);
+      if (c.state !== 'pass') {
+        tee(process.stderr)(`\n[${item.label}] state=${c.state} status=${res.status} signal=${res.signal || 'none'} error=${res.error ? (res.error.code || res.error.message) : 'none'}: ${c.reason}\n`);
+      }
+    } catch (e) {
+      tee(process.stderr)(`\n[${item.label}] runner error: ${e.stack || e}\n`);
+      throw e;
+    } finally {
+      if (logFd !== null) fs.closeSync(logFd);
+    }
     const ms = Date.now() - t0;
-    if (logFd !== null) fs.closeSync(logFd);
-    const c = classify(res);
-    if (c.state !== 'pass' && c.reason && c.state === 'indet') console.error(`\n[${item.label}] ${c.reason}`);
     let dump = null;
     if (run) {
       try { dump = receipts.reduceSuite(run, item.label); } catch (e) { dump = { label: item.label, error: e.message, rawDumps: 0 }; }

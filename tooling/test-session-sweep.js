@@ -268,6 +268,23 @@ function buildCases() {
     }
     cases.push({ id: 'dash-branch', wt, expectRisk: 'branch-name-unsafe', expectSafe: false });
   }
+
+  // 10. An 8.3 short name. The GitHub Windows runner's TEMP is
+  // C:\Users\RUNNER~1\..., git prints the long toplevel, and the JS realpath
+  // keeps the short one, so a clean worktree read git-unreadable on CI and SAFE
+  // here. Record this one by its alias so a local run sees the same thing.
+  if (process.platform === 'win32') {
+    const wt = makeWorktree('clean-pushed-short-alias', 'case-short-alias');
+    sh('git push -q -u origin case-short-alias', wt);
+    const r = spawnSync(process.env.ComSpec || 'cmd.exe', ['/d', '/s', '/c', `"for %I in ("${wt}") do @echo %~sI"`],
+      { encoding: 'utf8', windowsVerbatimArguments: true });
+    const alias = (r.stdout || '').trim();
+    if (r.status !== 0 || !alias || alias.toLowerCase() === wt.toLowerCase()) {
+      console.log('SKIP short-alias case: this volume gave no 8.3 alias for ' + wt + ' (status ' + r.status + ')');
+    } else {
+      cases.push({ id: 'clean-pushed-short-alias', wt: alias, expectRisk: null, expectSafe: true });
+    }
+  }
 }
 
 // A session record old enough to be STALE under the 14d hand-started clock.
@@ -1414,6 +1431,8 @@ fs.lstatSync = function (file, ...args) {
       console.log('SKIP W1 POSIX control: non-ASCII names are preserved, locale cannot be verified as UTF-8 (' +
         (locale.error ? locale.error.code : charmap || 'locale exited ' + locale.status) + ')');
     } else {
+      // On failure this names the refusal: macOS CI showed only an empty archive.
+      check('W1 POSIX control: the non-ASCII row carries no blocker', row(after, 'unicode').risk, null);
       check('W1 POSIX control: non-ASCII names are preserved', JSON.stringify(members(row(after, 'unicode'))), JSON.stringify(['.claude/not\u0103 \u0219.md']));
     }
   }
@@ -1458,13 +1477,13 @@ function checkPosixLocaleControls() {
     const messages = [];
     require('vm').runInNewContext(source.slice(from, to), {
       spawnSync: () => ({ status: 0, stdout: charmap + '\n' }),
-      members: () => members, row: () => ({}), after: [],
+      members: () => members, row: () => ({ risk: null }), after: [],
       check: (name, actual, expected) => assertions.push(actual === expected),
       console: { log: (message) => messages.push(message) },
     });
     check('W4-R3: POSIX assertion handles ' + locale,
       locale === 'C' ? assertions.length === 0 && messages.some((m) => /^SKIP .*locale.*UTF-8/.test(m))
-        : assertions.length === 1 && assertions[0] && messages.length === 0, true);
+        : assertions.length === 2 && assertions.every(Boolean) && messages.length === 0, true);
   }
 }
 
@@ -1857,6 +1876,16 @@ fs.lstatSync = function(file, ...args) {
   }
   const ids = ['nonutf8-skip-edit', 'nonutf8-skip-same', 'nonutf8-assume-same'];
   const rawName = Buffer.concat([Buffer.from('nonutf8-'), Buffer.from([0xff])]);
+  // APFS refuses a name that is not valid UTF-8 with EILSEQ [measured: macOS CI
+  // 2026-10-09], so the fixture cannot exist there. Ask the filesystem first.
+  const probeDir = path.join(ROOT, 'byte-name-probe');
+  fs.mkdirSync(probeDir, { recursive: true });
+  try { fs.writeFileSync(Buffer.concat([Buffer.from(probeDir + '/'), rawName]), ''); }
+  catch (e) {
+    if (e.code !== 'EILSEQ') throw e;
+    console.log('SKIP B1-R5 POSIX byte-name fixture: this filesystem refuses byte 0xFF in a name (EILSEQ)');
+    return;
+  }
   const planted = new Map();
   for (const id of ids) {
     const wt = makeWorktree(id, id);
