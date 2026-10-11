@@ -1,0 +1,35 @@
+2026-10-11, independent native/MSYS fixture-selection repair on exact c20eae2.
+Actual peer setup encountered an MSYS PID that was also a live Windows PID.
+This is not a usable two-table detector control, nor evidence of detector failure.
+No aggregate verdict is inferred from the peer's ongoing test output.
+
+Preregistered fixed-final controls: A original one-sample c20 helper; B at most8
+fresh candidates, retrying ONLY a native-PID collision; C simpler cap2. Preserve
+b992419 builtin Bash wait, actual queue/liveness assertions, ordinary native PATH.
+Adoption requires actual S7/P6 green after2collisions, zero accepted collisions,
+owned rejected Bash retired, exhausted8 and unrelated setup failure remain RED.
+Expected A/C failure: no usable fixture before liveness; rollback test-file only.
+No performance claim, production queue change, coverage-floor or assertion waiver.
+
+A exact originalc20: exit1,0passed/2failed,1candidate,4894ms,385outputbytes.
+B: exit0,9/9,3candidates after2injected collisions,12562ms,1108bytes,
+3owned/3retired Bash. Actual P6 detector mutation remains RED2/2.
+C cap2: exit1,3passed/4failed,2candidates,4221ms,1276bytes,2owned/2retired.
+B exhaustion: exit1,5passed/2failed,exactly8candidates,8081ms,2524bytes,
+8owned/8retired. B native-probe unavailable: exit1,5passed/2failed,
+exactly1probe,4028ms,717bytes,1owned/1retired. Independent process readback
+finds none of those14owned Bash PIDs alive. Injected tasklist observations are
+boundary controls, not claimed natural collisions. Verdict adoptB within fixture.
+
+Final same source complete Linux22.23.3 ownership135/135,exit0,30469ms;
+Windows24.15.0 ordinaryPATH136/136,exit0,205058ms,one owned Bash retired.
+Integrated own actual GATE_OWNERSHIP_ONLY=S7,P6 replay9/9,exit0, including
+five permanent selection controls and unchanged liveness/mutation assertions.
+Exact test blob ad5de5ed4457731701b6b17c493af6d6060e0468;
+SHA256 f86f9cbad8bbc1c72cd763815e4018b1302f6bc6db84e410a6f75acf57d6d6d5.
+Independent Brain scoped diff/control review CLEAN on that exact source.
+
+Original c20 queued aggregate was canceled before admission, zero stage journals,
+children or held lane. Wrapper exit1 is cancellation/nonresult, not gate RED/PASS.
+Final integrated clean unchanged13stage aggregate and all fresh Linux/Windows/
+macOS CI remain required before publication/completion claims. No merge.
