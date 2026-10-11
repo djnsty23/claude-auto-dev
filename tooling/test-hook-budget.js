@@ -359,13 +359,13 @@ fs.writeFileSync(EMPTY, '');
 const floorRun = (env) => run(EMPTY, '', env, 30000);
 // `missing` names the first run with no CPU record; its figures are then not
 // a measurement and the caller reports NOT MEASURED.
-function measure(file, input, env, timeoutMs) {
+function measure(file, input, env, timeoutMs, sampleFloor = floorRun) {
     const hook = [];
     const floor = [];
     let last;
     let missing = null;
     for (let i = 0; i < RUNS; i++) {
-        const f = floorRun(env);
+        const f = sampleFloor(env);
         last = run(file, input, env, timeoutMs);
         if (f.cpuMs === null) missing = missing || `floor run: ${f.cpuWhy}`;
         if (last.cpuMs === null) missing = missing || `hook run: ${last.cpuWhy}`;
@@ -374,6 +374,25 @@ function measure(file, input, env, timeoutMs) {
     }
     if (missing) return { missing, last };
     return { hookMin: Math.min(...hook), hookMed: hook.sort((a, b) => a - b)[Math.floor(RUNS / 2)], floorMin: Math.min(...floor), last };
+}
+
+// Keep the canary construction in one place so a scripted floor change can
+// exercise the same subprocess and judge as the live control.
+function measureCanary(w, env, mode, sampleFloor = floorRun) {
+    const floors = Array.from({ length: RUNS }, () => sampleFloor(env).cpuMs);
+    if (floors.some((f) => f === null)) return { missing: 'the floor run left no CPU record' };
+    const floorMin = Math.min(...floors);
+    // Bind the plant and its verdict to one calibration. A second floor can
+    // raise the scaled budget after the burn was sized. Include the floor in
+    // the burn too, since judgeCost subtracts it from the measured total CPU.
+    const extraMs = Math.ceil(floorMin + BUDGET_MS[w.event] * Math.max(1, floorMin / FLOOR_REF_MS) * 1.5) + 100;
+    const file = path.join(SB, mode + '-' + path.basename(w.rel));
+    const real = JSON.stringify(path.join(w.pluginRoot, w.rel));
+    const prefix = mode === 'burn'
+        ? `{ const t = process.cpuUsage(); for (;;) { const d = process.cpuUsage(t); if ((d.user + d.system) / 1000 >= ${extraMs}) break; } }\n`
+        : mode === 'sleep' ? `Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ${extraMs});\n` : '';
+    fs.writeFileSync(file, prefix + `require(${real});\n`);
+    return { ...measure(file, JSON.stringify(payloadFor(w)), env, 60000, () => ({ cpuMs: floorMin })), extraMs };
 }
 
 // ---------------------------------------------------------------- the wired list, checked
@@ -469,28 +488,38 @@ if (process.platform === 'win32') {
 {
     const w = wired.find((x) => x.key === 'plugins/autodev-core/hooks/telemetry.js' && x.event === 'PostToolUse') || wired[0];
     const env = sandboxEnv(w.pluginRoot, false);
-    const floors = Array.from({ length: RUNS }, () => floorRun(env).cpuMs);
-    const real = JSON.stringify(path.join(w.pluginRoot, w.rel));
-    if (floors.some((f) => f === null)) {
-        unmeasured('known positive and known negative', 'the floor run left no CPU record');
-    } else {
-        const extraMs = Math.ceil(BUDGET_MS[w.event] * Math.max(1, Math.min(...floors) / FLOOR_REF_MS) * 1.5) + 100;
-        const burn = path.join(SB, 'burn-' + path.basename(w.rel));
-        fs.writeFileSync(burn, `{ const t = process.cpuUsage(); for (;;) { const d = process.cpuUsage(t); if ((d.user + d.system) / 1000 >= ${extraMs}) break; } }\nrequire(${real});\n`);
-        const hot = measure(burn, JSON.stringify(payloadFor(w)), env, 60000);
+    {
+        const hot = measureCanary(w, env, 'burn');
         if (hot.missing) unmeasured('known positive', hot.missing);
         else {
             const j = judgeCost(w.event, hot.hookMin, hot.floorMin);
-            check(`known positive: ${w.key} burning ${extraMs} CPU ms goes over its ${j.budget.toFixed(0)} ms budget (overhead ${j.overhead.toFixed(0)} ms)`, j.over);
+            check(`known positive: ${w.key} burning ${hot.extraMs} CPU ms goes over its ${j.budget.toFixed(0)} ms budget (overhead ${j.overhead.toFixed(0)} ms)`, j.over);
         }
-        const sleep = path.join(SB, 'sleep-' + path.basename(w.rel));
-        fs.writeFileSync(sleep, `Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ${extraMs});\nrequire(${real});\n`);
-        const idle = measure(sleep, JSON.stringify(payloadFor(w)), env, 60000);
+        const idle = measureCanary(w, env, 'sleep');
         if (idle.missing) unmeasured('known negative', idle.missing);
         else {
             const j = judgeCost(w.event, idle.hookMin, idle.floorMin);
-            check(`known negative: ${w.key} sleeping ${extraMs} ms stays inside its ${j.budget.toFixed(0)} ms budget (overhead ${j.overhead.toFixed(0)} CPU ms)`, !j.over);
+            check(`known negative: ${w.key} sleeping ${idle.extraMs} ms stays inside its ${j.budget.toFixed(0)} ms budget (overhead ${j.overhead.toFixed(0)} CPU ms)`, !j.over);
         }
+    }
+
+    // Model scheduling drift without competing with other suites for CPU.
+    // The hook still runs as a real subprocess under the telemetry preload.
+    let floorCalls = 0;
+    const drift = measureCanary(w, env, 'burn', () => ({ cpuMs: ++floorCalls <= RUNS ? 47 : 141 }));
+    if (drift.missing) unmeasured('canary calibration regression', drift.missing);
+    else {
+        const j = judgeCost(w.event, drift.hookMin, drift.floorMin);
+        check('canary calibration: the burn and verdict use the same floor', floorCalls === RUNS && drift.floorMin === 47,
+            { floorCalls, floorMin: drift.floorMin, extraMs: drift.extraMs });
+        check('canary calibration: a later higher floor cannot hide the planted burn', j.over, j);
+    }
+
+    const clean = measureCanary(w, env, 'bare');
+    if (clean.missing) unmeasured('plant removed', clean.missing);
+    else {
+        const j = judgeCost(w.event, clean.hookMin, clean.floorMin);
+        check('plant removed: 0 cost findings across 1 real hook', !j.over && clean.last.status === 0 && !clean.last.error, j);
     }
 }
 
