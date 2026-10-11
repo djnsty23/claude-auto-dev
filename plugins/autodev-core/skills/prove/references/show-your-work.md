@@ -1,9 +1,6 @@
----
-name: show-your-work
-description: "Keep a reviewable decision trail for work nobody is watching: an unattended or scheduled run, a multi-phase build, a fleet of agents, or anything a human will review after stepping away. Use when starting such work, or when asked to show your work."
-when_to_use: "At the START of long or unattended work, not at the end. A trail reconstructed afterwards is a summary, and a summary is exactly what a reviewer cannot check."
-allowed-tools: Read, Grep, Glob, Bash
----
+<!-- Merged from the former show-your-work skill (zero loads in 30 days, 2026-10-11). -->
+
+**When this applies:** Keep a reviewable decision trail for work nobody is watching: an unattended or scheduled run, a multi-phase build, a fleet of agents, or anything a human will review after stepping away. Use when starting such work, or when asked to show your work. At the START of long or unattended work, not at the end. A trail reconstructed afterwards is a summary, and a summary is exactly what a reviewer cannot check.
 
 # One row per decision
 
@@ -11,7 +8,7 @@ allowed-tools: Read, Grep, Glob, Bash
 happen. Both exist for work nobody watched, and they answer different questions:
 what went wrong, and why you did it that way.
 
-Adapted from the show-your-work skill in Lauren Tan's Pstack (MIT).
+Adapted from Pstack's show-your-work skill by Lauren Tan (MIT).
 
 ## The format
 

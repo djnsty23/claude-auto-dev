@@ -1,11 +1,6 @@
----
-name: knowledge-agent
-description: Build a bounded, sourced brief from saved observations for a code area, keeping uncertainty and conflicting decisions visible.
-when_to_use: "Invoked when the user says \"knowledge\", \"what do we know about\", \"brief me on\", or \"domain knowledge\"."
-allowed-tools: Bash, Read
-model: opus
-user-invocable: true
----
+<!-- Merged from the former knowledge-agent skill (zero loads in 30 days, 2026-10-11). -->
+
+**When this applies:** Build a bounded, sourced brief from saved observations for a code area, keeping uncertainty and conflicting decisions visible. Invoked when the user says "knowledge", "what do we know about", "brief me on", or "domain knowledge".
 
 # Knowledge Agent
 
@@ -78,7 +73,7 @@ to do so.
 
 The installed Write/Edit capture hook may surface a compact area brief once
 per session. Availability requires that host's hook activation and a readable
-store; the presence of this skill does not prove either. It derives the area
+store; the presence of this procedure does not prove either. It derives the area
 from the first 1–2 directory segments, so a monorepo package can share one broad
 throttle key. Invoke a deeper path explicitly when the task needs it. Hook
 silence is not proof of no knowledge.

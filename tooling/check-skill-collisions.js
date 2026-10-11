@@ -73,6 +73,23 @@ const MIN_TOKEN_LEN = 5;
 // rare shared words locate pairs built from one TEMPLATE, which correlates with
 // competing for a situation without being the same property.
 const TRIAGED = new Map([
+    ['audit|brainstorm',
+        'Split on purpose: each description names the other as the place for the ' +
+        'other half (audit for bugs and violations, brainstorm for features). ' +
+        '"violations" became corpus-rare when iterate was merged into auto on 2026-10-11.'],
+    ['core|standards',
+        'Same frame, different subject. Both are background knowledge loaded by ' +
+        'file context: core on prd.json, standards on TypeScript and React code. ' +
+        '"knowledge" became corpus-rare when knowledge-agent was merged into mem-search.'],
+    ['prove|rule-gate-integrity',
+        'Sequential, not competing. prove captures the before and after of one ' +
+        'change for a reviewer; rule-gate-integrity asks whether the gate itself ' +
+        'can fail, and prove names it as the next step. "passing" and "summary" ' +
+        'became corpus-rare when show-your-work was merged into prove.'],
+    ['memory-backup|security',
+        'Coincidental vocabulary. memory-backup copies memory files to a private ' +
+        'repo; security finds defects in code. "files" and "verified" became ' +
+        'corpus-rare in the 2026-10-11 merges.'],
     ['auto-brain|brain',
         'Intentional entry-point wrapper: auto-brain handles an explicitly away ' +
         'mission and loads brain\'s single procedure. It does not carry a second ' +

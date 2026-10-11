@@ -9,7 +9,7 @@
  * `[measured 2026-09-07]` `git log -S'needs-setup' -- prd.json` on the trunk of
  * three product repos: 0, 0 and 1 write, against 45, 7 and 23 writes of
  * `deferred`. auto/SKILL.md has told sessions to write `needs-setup` since the
- * state was invented, and `wizard` tells them to write the handback into the
+ * state was invented, and auto/references/handback.md tells them to write the handback into the
  * chat. Both are prose, and prose produced one write in four months while the
  * stories that ARE blocked on a person sat as `passes: null` — six of the ten
  * pending stories in one client repo, the oldest 122 days. The one time a

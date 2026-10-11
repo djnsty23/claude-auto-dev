@@ -1,8 +1,8 @@
 ---
 name: mem-search
 description: Retrieve bounded project memory with store-health checks, explicit result limits, and source records for decisions and prior fixes.
-when_to_use: "Invoked when the user says \"mem search\", \"mem recent\", \"mem decisions\", \"mem bugs\", \"mem timeline\", \"mem stats\", \"mem why\", \"remember\", \"what did we\", \"what was\", \"last session\", or \"past sessions\"."
-allowed-tools: Bash, Read
+when_to_use: "Invoked when the user says \"mem search\", \"mem recent\", \"mem decisions\", \"mem bugs\", \"mem timeline\", \"mem stats\", \"mem why\", \"remember\", \"what did we\", \"what was\", \"last session\", \"past sessions\", \"memory dashboard\", \"what do we know about\", \"brief me on\", or \"memory maintenance\"."
+allowed-tools: Bash, Read, Write, Edit, Grep, Glob
 model: opus
 user-invocable: true
 ---
@@ -93,6 +93,12 @@ Start with compact search results, then inspect relevant session context and
 individual observation details as needed. Preserve identifiers, dates and
 contradicting records. Report returned counts and actual bounds; global stored
 count is not the number that a bounded semantic search examined.
+
+## Overview, briefs and maintenance
+
+- Load [references/dashboard.md](references/dashboard.md) for a memory overview: stored totals, bounded recent activity, retrieval health and coverage limits.
+- Load [references/knowledge-brief.md](references/knowledge-brief.md) to build a sourced brief for a code area from saved observations.
+- Load [references/maintenance.md](references/maintenance.md) to audit and repair memory and instruction drift. It is the only part of this skill that writes, so it needs the user's authorisation for each store it edits.
 
 ## Report and privacy
 
