@@ -36,11 +36,11 @@ fs.mkdirSync(home);
 const env = { ...process.env, HOME: home, USERPROFILE: home, GIT_TERMINAL_PROMPT: '0' };
 delete env.CLAUDE_CONFIG_DIR;
 
-// The three files the script loads, laid out as the plugin cache lays them out.
+// The files the script loads, laid out as the plugin cache lays them out.
 function plant(pluginDir, manifest) {
     fs.mkdirSync(path.join(pluginDir, 'scripts'), { recursive: true });
     fs.mkdirSync(path.join(pluginDir, '.claude-plugin'), { recursive: true });
-    for (const f of ['unattended-worker.js', 'headless-worker.js', 'claude-paths.js']) {
+    for (const f of ['unattended-worker.js', 'headless-worker.js', 'claude-paths.js', 'ledger-temp-sweep.js']) {
         fs.copyFileSync(path.join(SCRIPTS, f), path.join(pluginDir, 'scripts', f));
     }
     fs.writeFileSync(path.join(pluginDir, '.claude-plugin', 'plugin.json'), JSON.stringify(manifest));

@@ -224,6 +224,7 @@ function readLedger(file) {
 
 function writeLedger(file, ledger) {
     fs.mkdirSync(path.dirname(file), { recursive: true });
+    require('./ledger-temp-sweep.js').sweepLedgerTemps(file);
     const temp = `${file}.${crypto.randomUUID()}.tmp`;
     fs.writeFileSync(temp, JSON.stringify(ledger, null, 2) + '\n');
     fs.renameSync(temp, file);
