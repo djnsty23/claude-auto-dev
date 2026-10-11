@@ -768,7 +768,16 @@ function run(root, opts) {
         report.unknown('file', `${mdPath} does not exist`);
         return report;
     }
-    const md = fs.readFileSync(mdPath, 'utf8');
+    const bytes = fs.readFileSync(mdPath);
+    if (bytes.length > 8192) {
+        report.fail({
+            family: 'byte-budget', line: 1,
+            claim: 'CLAUDE.md must fit within 8192 bytes. Move history to docs/claude-md-long-form.md',
+            claimed: 8192, actual: bytes.length,
+            source: 'CLAUDE.md file bytes',
+        });
+    } else report.pass();
+    const md = bytes.toString('utf8');
     checkGate(md, root, report);
     checkPassesTable(md, root, report);
     checkForcePush(md, root, report, opts);
