@@ -5,9 +5,8 @@ const os = require('node:os');
 const path = require('node:path');
 const { spawnSync } = require('node:child_process');
 const root = fs.mkdtempSync(path.join(os.tmpdir(), 'ledger-contention-'));
-const core = path.resolve(__dirname, '../plugins/autodev-core');
-const worker = path.join(core, 'scripts/unattended-worker.js');
-const hook = path.join(core, 'hooks/peer-send-ledger.js');
+const worker = path.resolve(__dirname, '../plugins/autodev-core/scripts/unattended-worker.js');
+const hook = path.resolve(__dirname, '../plugins/autodev-core/hooks/peer-send-ledger.js');
 const preload = path.join(root, 'contention.cjs');
 fs.writeFileSync(preload, `
 const fs = require('fs');
