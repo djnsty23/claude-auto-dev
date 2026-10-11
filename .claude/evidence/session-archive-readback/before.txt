@@ -1,0 +1,27 @@
+2026-10-11, base 95480cbe, dependency PR381 3c30737a unchanged.
+PR381 macOS CI jobs114340441289 and114340401593: two session-sweep failures.
+The real UTF-8 preservation row refuses archive publication:
+preserve-refused(read-back holds 1 of 1 files or member names disagree).
+Primary implementation evidence: libarchive/archive_string.c, Apple imports
+UTF-8 archive names with SCONV_NORMALIZATION_D (NFD), retrieved2026-10-11:
+https://github.com/libarchive/libarchive/blob/master/libarchive/archive_string.c
+
+Fixed population: 23 assertions over real files/hardlink aliases, independent
+NFC/NFD files, missing/duplicate/incorrect names, compatibility-only equivalence
+and a non-regular-file boundary. Drive the actual exported production comparator
+through tooling/test-session-sweep.js with SESSION_SWEEP_ARCHIVE_MEMBERS_ONLY=1.
+A preserves original exact string comparison. C refuses all Apple Unicode names.
+Windows Node24.15.0, same fixtures:
+A: exit1, 22 passed/1 failed, 199ms, 1359 output bytes.
+Failure: decomposed alias on darwin, expected true, actual false.
+C: exit1, 21 passed/2 failed, 309ms, 1403 output bytes.
+Failures: exact Apple UTF-8 name and valid decomposed alias.
+Do not infer macOS execution or a performance result from these boundary tests.
+
+Coverage: node tooling/test-prd-container-class.js, original behavioral20/20.
+Adding export-contract controls gives20 passed/5 failed, exit1, 72329ms.
+Actual V8 fold: temp session-carrier.js exports read:1, clear:1, clearPrompt:0.
+clearPrompt is absent from current production exports; the extra function in
+Linux main CI38090618558's45>44 census is obsolete fixture code.
+Coverage limits remain unchanged. These are fixture correctness repairs, not
+evidence that an untested production function has been executed.

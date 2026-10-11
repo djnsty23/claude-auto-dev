@@ -1311,6 +1311,15 @@ function checkRound3Regressions() {
     (v) => /^local-only\(12 files: /.test(v || '') && v.includes('.claude/reports/.parcel-cache/notes.md'));
   check('W2: all nested output documents are archived', JSON.stringify(members(row(after, 'nested-build'))), JSON.stringify(nestedNames.sort()));
   check('W2: nested output row becomes SAFE after verification', row(after, 'nested-build').safe, true);
+  // The required UTF-8 archive assertion below fails if no archive exists.
+  // When present, also prove a real extraction retains the only local bytes.
+  if (process.platform !== 'win32' && row(after, 'unicode').archive) {
+    const extracted = path.join(ROOT, 'round3-unicode-extracted');
+    fs.mkdirSync(extracted);
+    execFileSync(tar, ['-xzf', row(after, 'unicode').archive, '-C', extracted]);
+    check('W1 POSIX control: preserved non-ASCII file extracts with its original bytes',
+      fs.readFileSync(path.join(extracted, '.claude/not\u0103 \u0219.md'), 'utf8'), 'handwritten evidence\n');
+  }
 
   // Preloads model failures at real subprocess/filesystem boundaries. No host
   // tar executable, real source, or external archive directory is changed.
@@ -1443,7 +1452,10 @@ fs.lstatSync = function (file, ...args) {
     } else {
       // On failure this names the refusal: macOS CI showed only an empty archive.
       check('W1 POSIX control: the non-ASCII row carries no blocker', row(after, 'unicode').risk, null);
-      check('W1 POSIX control: non-ASCII names are preserved', JSON.stringify(members(row(after, 'unicode'))), JSON.stringify(['.claude/not\u0103 \u0219.md']));
+      // The expected spelling is explicit and independent of the production
+      // comparator: libarchive lists imported UTF-8 names as NFD on Apple.
+      const name = process.platform === 'darwin' ? '.claude/nota\u0306 s\u0326.md' : '.claude/not\u0103 \u0219.md';
+      check('W1 POSIX control: non-ASCII names are preserved', JSON.stringify(members(row(after, 'unicode'))), JSON.stringify([name]));
     }
   }
 
@@ -1482,12 +1494,16 @@ function checkPosixLocaleControls() {
   const to = source.indexOf('\n  }\n\n  // Exclusion', from);
   check('W4-R3 control: POSIX block extraction is bounded', start >= 0 && from > start && to > from, true);
   if (start < 0 || to < from) return;
-  for (const [locale, charmap, members] of [['C', 'ANSI_X3.4-1968', []], ['C.UTF-8', 'UTF-8', ['.claude/not\u0103 \u0219.md']]]) {
+  for (const [locale, charmap, members, platform] of [
+    ['C', 'ANSI_X3.4-1968', [], 'linux'],
+    ['C.UTF-8', 'UTF-8', ['.claude/not\u0103 \u0219.md'], 'linux'],
+    ['Apple UTF-8', 'UTF-8', ['.claude/nota\u0306 s\u0326.md'], 'darwin'],
+  ]) {
     const assertions = [];
     const messages = [];
     require('vm').runInNewContext(source.slice(from, to), {
       spawnSync: () => ({ status: 0, stdout: charmap + '\n' }),
-      members: () => members, row: () => ({ risk: null }), after: [],
+      members: () => members, row: () => ({ risk: null }), after: [], process: { platform },
       check: (name, actual, expected) => assertions.push(actual === expected),
       console: { log: (message) => messages.push(message) },
     });
@@ -1931,7 +1947,59 @@ fs.lstatSync = function(file, ...args) {
   preserveStates += ids.length + 1;
 }
 
+function checkArchiveMemberIdentity() {
+  const { sameArchiveMembers: same } = require(SCRIPT);
+  check('W1 archive identity: real comparison is exported', typeof same, 'function');
+  if (typeof same !== 'function') return;
+  const dir = path.join(ROOT, 'archive-member-identity');
+  fs.mkdirSync(dir);
+  const nfc = 'not\u0103 \u0219.md';
+  const nfd = nfc.normalize('NFD');
+  fs.writeFileSync(path.join(dir, nfc), 'only local copy\n');
+  // Hardlinks model two spellings of the SAME file without normalizing the
+  // oracle. APFS may already resolve the second spelling to the first.
+  try { fs.linkSync(path.join(dir, nfc), path.join(dir, nfd)); }
+  catch (e) { if (e.code !== 'EEXIST') throw e; }
+  const a = fs.lstatSync(path.join(dir, nfc));
+  const b = fs.lstatSync(path.join(dir, nfd));
+  check('W1 archive identity: alias control has the same device and inode', a.dev === b.dev && a.ino === b.ino, true);
+  for (const platform of ['darwin', 'linux', 'win32']) {
+    check('W1 archive identity: exact name on ' + platform, same([nfc], [nfc], dir, platform), true);
+    check('W1 archive identity: decomposed alias on ' + platform, same([nfd], [nfc], dir, platform), platform === 'darwin');
+    check('W1 archive identity: missing member on ' + platform, same([], [nfc], dir, platform), false);
+    check('W1 archive identity: duplicate member on ' + platform, same([nfc, nfc], [nfc, 'other.md'], dir, platform), false);
+    check('W1 archive identity: different name on ' + platform, same(['other.md'], [nfc], dir, platform), false);
+  }
+  check('W1 archive identity: missing canonical alias is refused', same(['gone/' + nfd], ['gone/' + nfc], dir, 'darwin'), false);
+  check('W1 archive identity: canonical collisions are refused', same([nfd, nfd], [nfc, nfd], dir, 'darwin'), false);
+  fs.writeFileSync(path.join(dir, 'ff.md'), 'ligature control\n');
+  fs.linkSync(path.join(dir, 'ff.md'), path.join(dir, '\ufb00.md'));
+  check('W1 archive identity: compatibility normalization is never accepted', same(['\ufb00.md'], ['ff.md'], dir, 'darwin'), false);
+  const lstat = fs.lstatSync;
+  try {
+    fs.lstatSync = function(file, ...args) {
+      const stat = lstat.call(this, file, ...args);
+      if (String(file) === path.join(dir, nfd)) stat.isFile = () => false;
+      return stat;
+    };
+    check('W1 archive identity: alias must still be a regular file', same([nfd], [nfc], dir, 'darwin'), false);
+  } finally { fs.lstatSync = lstat; }
+  const distinct = path.join(dir, 'distinct');
+  fs.mkdirSync(distinct);
+  fs.writeFileSync(path.join(distinct, nfc), 'first independent file\n');
+  try {
+    fs.writeFileSync(path.join(distinct, nfd), 'second independent file\n', { flag: 'wx' });
+    check('W1 archive identity: canonical equivalence alone is insufficient', same([nfd], [nfc], distinct, 'darwin'), false);
+    check('W1 archive identity: both distinct Linux names survive exact comparison', same([nfd, nfc], [nfc, nfd], distinct, 'linux'), true);
+  } catch (e) {
+    if (e.code !== 'EEXIST') throw e;
+    console.log('SKIP W1 distinct canonical names: this filesystem resolves NFC and NFD to the same file');
+  }
+}
+
 function run() {
+  checkArchiveMemberIdentity();
+  if (process.env.SESSION_SWEEP_ARCHIVE_MEMBERS_ONLY === '1') return;
   setup();
   if (process.env.SESSION_SWEEP_HIDDEN_PATHS_ONLY === '1') { checkHiddenIndexPaths(); return; }
   if (process.env.SESSION_SWEEP_HIDDEN_INDEX_ONLY === '1') { checkRound5Regressions(); return; }

@@ -80,7 +80,7 @@ const DENYLIST_FILE = path.join(claudePaths.configDir(), 'session-sweep-denylist
 
 // What counts as regenerable residue lives in worktree-residue.js, shared
 // with worktree-reap.js so the sweep and the reaper agree on what is loss.
-const { REGENERABLE, sameMembers } = require('./worktree-residue.js');
+const { REGENERABLE } = require('./worktree-residue.js');
 
 const args = process.argv.slice(2);
 const flag = (n) => args.includes(n);
@@ -385,6 +385,31 @@ function ignoredLocalFiles(dir, rel) {
   return files;
 }
 
+function sameArchiveMembers(actual, expected, wt, platform = process.platform) {
+  if (actual.length !== expected.length) return false;
+  if (JSON.stringify([...actual].sort()) === JSON.stringify([...expected].sort())) return true;
+  // libarchive imports UTF-8 archive names as NFD on Apple, even when APFS
+  // returns NFC. Accept that spelling only when it resolves to the SAME regular
+  // file. Global normalization could silently substitute a distinct Linux file.
+  if (platform !== 'darwin') return false;
+  const wanted = new Map(expected.map((name) => [name.normalize('NFC'), name]));
+  if (wanted.size !== expected.length) return false;
+  const seen = new Set();
+  return actual.every((name) => {
+    const key = name.normalize('NFC');
+    const original = wanted.get(key);
+    if (original === undefined || seen.has(key)) return false;
+    seen.add(key);
+    if (name === original) return true;
+    try {
+      const source = fs.lstatSync(path.join(wt, original));
+      const alias = fs.lstatSync(path.join(wt, name));
+      return source.isFile() && alias.isFile() && source.ino > 0 &&
+        source.ino === alias.ino && source.dev === alias.dev;
+    } catch { return false; }
+  });
+}
+
 function preserveLocal(s, all, files) {
   const wt = s.worktreePath;
   let scratch = null;
@@ -452,7 +477,7 @@ function preserveLocal(s, all, files) {
       const code = Number.isInteger(e.status) && e.status >= 0 && e.status <= 255 ? ' (exit ' + e.status + ')' : '';
       throw new Error('tar failed' + code);
     }
-    if (!sameMembers(back, files)) {
+    if (!sameArchiveMembers(back, files, wt)) {
       throw new Error('read-back holds ' + back.length + ' of ' + files.length + ' files or member names disagree');
     }
     const finalRisk = worktreeRisk(s, all, { localPreserved: true });
@@ -1355,4 +1380,5 @@ function main() {
 // exit on its own with the same status. Nothing here holds the loop open.
 // See rendered-layout-gate.js for the case that cost this, and CLAUDE.md under
 // conventions that have actually cost something.
-process.exitCode = main();
+module.exports = { sameArchiveMembers };
+if (require.main === module) process.exitCode = main();
