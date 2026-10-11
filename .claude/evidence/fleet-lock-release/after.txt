@@ -1,0 +1,29 @@
+PR 385 fleet transaction lifetime, tested winning repair
+Owner scoped commit: 22e55d64dcf6388e05d4a968b417ba105a7db19e
+Integrated commit: 99e431899ed932d1bc03eb95b0992de3aff2d759
+Production blob: ec772b9d4d4b9cc55f61e0b80e30cc4f5896cd55
+Test blob: 7c6dca154bb031f6623ce834b5b796868ef1e7c9
+Independent final source and test review: scoped CLEAN, zero findings.
+
+Same fixed-final two-case actual CLI completion-barrier population:
+B 2/2, exit 0, elapsed 339ms, output 718 bytes, child statuses 0/0 in both cases.
+Each case produced D1/D2 and exactly two durable reservation records. Adopt B
+for transaction correctness only: simpler C failed the output boundary.
+Single-population elapsed values are not a general performance improvement.
+Read/check/append remain locked. Release runs only after append, is identity-safe
+and idempotent; exit fallback handles interrupted or throwing paths. The original
+100-attempt contention budget and all 44 previous controls are preserved.
+New guards cover foreign lock replacement, actual lock-descriptor reuse by an
+owned witness, failed append cleanup, and both completion-barrier cases.
+Concurrent failure detail now retains up to 8192 rather than 300 characters.
+
+Actual command: node tooling/test-fleet-decisions.js
+Final owner native Windows Node 24.15.0: 51/51, exit 0, 10433ms, 96 output bytes.
+Final owner actual pair-traced Windows: 51/51, exit 0, 14841ms, 96 output bytes.
+Final owner Linux Node 22.23.3: 51/51, exit 0, 8543ms, 96 output bytes.
+Root integrated native Windows: 51/51, actual exit 0; exact reviewed blobs match.
+Executable idempotency-removal mutant: 50/51, actual child exit 1, only the
+measured reused-descriptor control fails with EBADF. An outer diagnostic shell
+reported 0 due to finally cleanup; the retained child receipt is authoritative.
+Syntax checks and git diff --check pass. Aggregate and remote CI remain pending.
+No push, merge, deployment, installed-plugin, shared-checkout or live-system edits.

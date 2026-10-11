@@ -1,0 +1,36 @@
+PR 385 fleet transaction lifetime, before repair
+Baseline: 4ae432e8ae52b757d4c71d0a054be20f7ad086f5
+Original full gate: actual/effective exit 1, unchanged clean source identity.
+Stage 1: 220/220 suites, exit 0. Stage 2: check:suites exit 1.
+Only failed baseline: test-fleet-decisions.js, 43/44, four concurrent reservations.
+Stages 3 through 13 did not run. Failure detail was truncated to 300 characters;
+later child statuses were not retained. Exact historical attribution is unknown.
+Two standalone traced suites and 24 bounded four-CLI batches passed. These do
+not erase the original RED or establish its exact cause.
+
+Preregistered fixed-final correctness comparison, actual CLI, private fixtures:
+A: original cleanup on exit; B: explicit identity-safe, idempotent release after
+append with exit fallback; C: simpler prepended exit cleanup only.
+Two task cases per variant: earlier exit callback and pre-exit output callback.
+Read/check/append remain one transaction. Existing 100 attempts x 20ms remains
+unchanged. Two CLI children per case, four per variant; no model/API calls,
+tokens or monetary cost. Both children must exit 0 with D1/D2 and exactly two
+distinct records. Existing refusal, identity and fallback checks must remain.
+Prefer C if equally correct; otherwise adopt only a variant passing all controls.
+Rollback: remove the proposed source/test change. No live fleet log is touched.
+
+Rejected first fixture: fixed 2600ms post-transaction delay, A/B/C all 2/2.
+It did not demonstrate the predicted refusal; no adoption from those results.
+An initial generated-preload syntax error executed no transaction, a fixture
+failure, not production evidence. Both failed diagnostic assumptions are kept.
+Before new measurements, revise only the fixture to a completion barrier:
+first child waits after append until the contender exits, then parent releases it.
+Barrier safety ceiling: 1500 x 20ms; production contention budget unchanged.
+
+Actual Windows Node 24.15.0 revised barrier population, same two cases:
+A 0/2, exit 1, elapsed 6557ms, output 1092 bytes, child statuses 0/4 in each case.
+Each A case retained only D1; second refused busy lock after completed append.
+C 1/2, exit 1, elapsed 3500ms, output 905 bytes. Exit case 0/0 and D1/D2;
+output case 0/4 and only D1. This establishes the lock-lifetime boundary defect,
+not the precise cause of the earlier natural aggregate failure.
+Tests-first actual suite on unchanged production: 44/48, exit 1.
