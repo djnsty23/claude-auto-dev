@@ -688,6 +688,43 @@ if (process.platform === 'win32') {
         ![...idle.lines, ...live.lines].some((l) => /crashpad_handler/i.test(l)));
 }
 
+// agentBrowserLive on every host. cleanup() reaches it only on Windows, so a
+// POSIX run never entered it. Calling the exported function in a child kills
+// nothing: it only reads tasklist, and a shim on PATH answers for tasklist.
+// The failing shim is the "unknown is not live" direction the sweep relies on.
+{
+    const liveIn = (listing, exitCode) => {
+        const sb = sandbox();
+        const bin = path.join(sb.home, 'shim-bin');
+        const log = path.join(sb.home, 'shim-calls.log');
+        fs.mkdirSync(bin, { recursive: true });
+        if (process.platform === 'win32') {
+            fs.writeFileSync(path.join(bin, 'tasklist.cmd'),
+                `@>>"${log}" echo tasklist %*\r\n@echo ${listing}\r\n@exit /b ${exitCode}\r\n`);
+        } else {
+            const p = path.join(bin, 'tasklist');
+            fs.writeFileSync(p, `#!/bin/sh\necho tasklist "$@" >> '${log}'\necho '${listing}'\nexit ${exitCode}\n`);
+            fs.chmodSync(p, 0o755);
+        }
+        const pathKey = Object.keys(process.env).find((k) => k.toUpperCase() === 'PATH') || 'PATH';
+        const env = { ...process.env, HOME: sb.home, USERPROFILE: sb.home, [pathKey]: bin + path.delimiter + (process.env[pathKey] || '') };
+        const r = spawnSync(process.execPath, ['-e', 'process.stdout.write(String(require(process.argv[1]).agentBrowserLive()))', HOOK],
+            { encoding: 'utf8', env, input: '', timeout: 30000 });
+        const calls = fs.existsSync(log) ? fs.readFileSync(log, 'utf8').trim().split(/\r?\n/).filter(Boolean) : [];
+        return { out: r.stdout, status: r.status, calls };
+    };
+    const live = liveIn('"agent-browser-win32-x64.exe","4242","Console","1","90,000 K"', 0);
+    check(`agentBrowserLive: a listed binary reads live (out: ${live.out}, calls: ${live.calls.length})`,
+        live.status === 0 && live.out === 'true' && live.calls.length === 1);
+    check('  and it asked tasklist for that image name', /IMAGENAME eq agent-browser-win32-x64\.exe/.test(live.calls[0] || ''));
+    const idle = liveIn('INFO: No tasks are running which match the specified criteria.', 0);
+    check(`agentBrowserLive: no match reads not live (out: ${idle.out}, calls: ${idle.calls.length})`,
+        idle.status === 0 && idle.out === 'false' && idle.calls.length === 1);
+    const broken = liveIn('"agent-browser-win32-x64.exe","4242","Console","1","90,000 K"', 1);
+    check(`agentBrowserLive: a failing tasklist reads not live, even naming the binary (out: ${broken.out}, calls: ${broken.calls.length})`,
+        broken.status === 0 && broken.out === 'false' && broken.calls.length === 1);
+}
+
 // The Windows-only paths must be inert elsewhere, or a macOS session start would
 // shell out to taskkill on every launch.
 if (process.platform !== 'win32') {
