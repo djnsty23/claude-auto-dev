@@ -81,4 +81,17 @@ function newestTranscriptMs(worktree, env = process.env) {
     return newest;
 }
 
-module.exports = { REGENERABLE, isRegenerable, transcriptDirs, newestTranscriptMs };
+/**
+ * Whether an archive's member listing names exactly the files that went in.
+ * macOS bsdtar (libarchive) hands back names read from an archive in Unicode
+ * NFD, while git and readdir give the NFC name the file was created with, so
+ * one non-ASCII file reads as a mismatch there. Compare in NFC. The count is
+ * checked on the raw lists, so a missing or extra member still disagrees.
+ */
+function sameMembers(listed, files) {
+    if (listed.length !== files.length) return false;
+    const nfc = (names) => JSON.stringify(names.map((n) => n.normalize('NFC')).sort());
+    return nfc(listed) === nfc(files);
+}
+
+module.exports = { REGENERABLE, isRegenerable, transcriptDirs, newestTranscriptMs, sameMembers };

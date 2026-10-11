@@ -1228,7 +1228,8 @@ function checkRound3Regressions() {
   const tar = process.platform === 'win32' ? path.join(process.env.SystemRoot || 'C:\\Windows', 'System32', 'tar.exe') : 'tar';
   const members = (r) => r.archive && fs.existsSync(r.archive)
     ? execFileSync(tar, ['-tzf', r.archive], { encoding: 'utf8' }).split(/\r?\n/)
-      .map((n) => n.replace(/^\.\//, '')).filter(Boolean).sort() : [];
+      // NFC: macOS bsdtar prints member names in NFD.
+      .map((n) => n.replace(/^\.\//, '').normalize('NFC')).filter(Boolean).sort() : [];
   const archiveFiles = (dir) => fs.existsSync(dir) ? fs.readdirSync(dir).filter((n) => n.endsWith('.tgz')) : [];
 
   // Submodule data is invisible to the parent's ignored-file and commit lists.
@@ -1282,6 +1283,15 @@ function checkRound3Regressions() {
       && !residue.isRegenerable('.claude/reports/' + name + '/notes.md'), true);
   }
   put('nested-build', nested);
+  // macOS bsdtar lists archive members in NFD while git and readdir give NFC.
+  // Literal code points, so this runs on every host and needs no APFS.
+  const nfc = '.claude/not\u0103 \u0219.md';
+  const nfd = '.claude/nota\u0306 s\u0326.md';
+  check('W1-NFD control: the fixture names differ byte for byte', nfc !== nfd && nfc === nfd.normalize('NFC'), true);
+  check('W1-NFD: an NFD read-back matches its NFC file', residue.sameMembers([nfd], [nfc]), true);
+  check('W1-NFD: a different name still disagrees', residue.sameMembers(['.claude/nota.md'], [nfc]), false);
+  check('W1-NFD: a missing member still disagrees', residue.sameMembers([nfd], [nfc, '.env.local']), false);
+  check('W1-NFD: a duplicated member still disagrees', residue.sameMembers([nfd, nfc], [nfc]), false);
   const unicode = linked('unicode');
   plant(unicode, '.claude/not\u0103 \u0219.md');
   put('unicode', unicode);
