@@ -1123,6 +1123,7 @@ try {
             'invalid-api-key': 'Invalid API key · Please run /login',
             'oauth-expired': 'OAuth token has expired. Please obtain a new token or refresh your existing token.',
             'run-login': 'Please run /login to sign in again.',
+            'auth-failed': 'Failed to authenticate: OAuth session expired and could not be refreshed',
         };
         const ev = (o) => JSON.stringify(o);
         const init = ev({ type: 'system', subtype: 'init', session_id: 's1', cwd: dir, model: 'm' });
