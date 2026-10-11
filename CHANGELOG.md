@@ -1,5 +1,31 @@
 # Changelog
 
+## [8.186.0]
+
+### Gates and merges
+
+- The gate frontier waits on the batch state its loop publishes, and retries a
+  contended rename.
+- Each failing gate step keeps its own evidence, and sweep status reads without
+  taking index locks.
+- `check:claude-md` enforces an 8192-byte budget on CLAUDE.md.
+
+### Headless workers and the Brain
+
+- `headless-worker` settles a refused login as `auth-refused`.
+- `brain-judge` holds start per login after a refused headless login, and the
+  judge can use another one.
+
+### Sessions and cleanup
+
+- `session-sweep` compares worktree paths by their long names on Windows, so an
+  8.3 short temp path (`RUNNER~1`) no longer reads as a different tree.
+- `worktree-reap` dates `logs/HEAD` by its newest entry, not its mtime.
+
+### Skills
+
+- `unslop` stops three measured false-positive classes in the layout rules.
+
 ## [8.185.0]
 
 ### Gates and merges
