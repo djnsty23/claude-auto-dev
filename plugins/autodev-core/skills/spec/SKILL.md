@@ -158,7 +158,7 @@ kind of story that is born blocked:
   one without the other.
 - `acceptance` is still the outcome list — the observable an AGENT verifies
   once the person says it is done. `blockedReason` is what the person does and
-  where, with the URL; it is the handback, and `wizard`'s rules for a handback
+  where, with the URL; it is the handback, and the rules for a handback in auto's references/handback.md
   apply to it (atomic, exact target, how long).
 - **Every story that cannot run without it lists it in `blockedBy`.** That is
   what makes `auto` wait for the person instead of failing the sign-in story

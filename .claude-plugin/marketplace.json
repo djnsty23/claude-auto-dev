@@ -12,7 +12,7 @@
     {
       "name": "autodev-core",
       "source": "./plugins/autodev-core",
-      "description": "The workflow itself: brainstorm, auto, iterate, audit, review, ship, plus the prd.json sprint system and its hooks.",
+      "description": "The workflow itself: brainstorm, auto, audit, review, ship, plus the prd.json sprint system and its hooks.",
       "category": "workflow",
       "keywords": [
         "workflow",
