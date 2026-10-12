@@ -119,13 +119,13 @@ Step 2, build:
 Existing: `auto`, `heal`
 
 Step 3, prove:
-Existing: `prove`, `test`, `preflight`, `review`, `rule-verification`, `rule-gate-integrity`
+Existing: `prove`, `setup-project` (its gate file), `review`, `rule-verification`, `rule-gate-integrity`
 
 Step 4, ship:
-Existing: `ship`, `commit`, `preflight`, `rule-local-first`
+Existing: `ship`, `commit`, `rule-local-first`
 
 Outside the spine, looking for what is wrong:
-Existing: `audit`, `scan`, `security`, `heal`, `perf`, `seo`, `learn-from-fixes`
+Existing: `audit`, `security`, `heal`, `perf`, `seo`, `learn-from-fixes`
 
 ## What the spine is not
 

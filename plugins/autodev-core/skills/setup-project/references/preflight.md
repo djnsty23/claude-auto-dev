@@ -1,12 +1,6 @@
----
-name: preflight
-description: Scaffold and grow a project's executable gate file — the checks that run before every deploy and fail the build on the bug families this project actually ships.
-when_to_use: "Invoked when the user says \"preflight\", \"add a gate\", \"set up preflight\", \"gate this\", or after /learn-from-fixes identifies a class worth enforcing mechanically."
-allowed-tools: Bash, Read, Write, Edit, Grep, Glob
-model: opus
-user-invocable: true
-argument-hint: "[init | add <class> | verify]"
----
+<!-- Merged from the former preflight skill (zero loads in 30 days, 2026-10-12). -->
+
+**When this applies:** Scaffold and grow a project's executable gate file — the checks that run before every deploy and fail the build on the bug families this project actually ships. Invoked when the user says "preflight", "add a gate", "set up preflight", "gate this", or after /learn-from-fixes identifies a class worth enforcing mechanically.
 
 # Preflight
 
@@ -16,6 +10,16 @@ release gate and existing CI when used, failing on relevant bug families.
 
 A rule’s presence does not prove it changes outcomes. Measure whether the
 actual gate rejects a reproduced defect while preserving a known-good control.
+
+## Contents
+
+- `preflight init`
+- `preflight add <class>` — first, prove the gate does not already exist
+- Gate shapes
+- The gate that a comment satisfies
+- `preflight verify`
+- The four laws
+- What not to do
 
 ## `preflight init`
 

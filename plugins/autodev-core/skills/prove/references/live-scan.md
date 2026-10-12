@@ -1,12 +1,6 @@
----
-name: scan
-description: Live site QA in a real browser. Scans pages for visual, console, accessibility, and performance regressions, and compares against baselines. Use when testing a running site or after deploying.
-when_to_use: "Invoked when the user says \"scan\", \"scan it\", \"test it\", \"qa\", \"visual qa\"."
-allowed-tools: Bash, Read, Write, Edit, Grep, Glob, mcp__Claude_Browser__*
-model: opus
-user-invocable: true
-argument-hint: "[url or scope]"
----
+<!-- Merged from the former scan skill (zero loads in 30 days, 2026-10-12). -->
+
+**When this applies:** Live site QA in a real browser. Scans pages for visual, console, accessibility, and performance regressions, and compares against baselines. Use when testing a running site or after deploying. Invoked when the user says "scan", "scan it", "test it", "qa", "visual qa".
 
 # Scan — Live Site QA
 
@@ -21,11 +15,26 @@ only one check: exercise the affected user flow and relevant state transitions.
 Use device emulation when pointer/touch/DPR/UA matters; width alone does not
 establish those conditions. Load `rule-local-first` for browser provenance.
 
+## Contents
+
+- Usage
+- Step 1: Detect or Start Target URL
+- Step 2: Discover Site Structure
+- Step 3: Run Scans (Unauthenticated)
+- Step 4: Authenticated Scan
+- Step 5: Analyze Screenshots
+- Step 6: Accessibility (axe-core)
+- Step 7: Performance (Lighthouse)
+- Step 8: Compare with Baseline
+- Step 9: Report
+- Integration with Other Skills
+- Rules
+
 ## Usage
 
 | Command | What It Does |
 |---------|-------------|
-| `scan` | Detect URL from project, run quick scan on key pages |
+| scan it | Detect URL from project, run quick scan on key pages |
 | `scan http://localhost:3000` | Scan specific URL |
 | `scan full` | Inventory routes and scan the declared population; report any cap/exclusions |
 | `scan auth` | Verify the intended account/role, then exercise protected flows |
@@ -229,9 +238,9 @@ Compared to baseline: [improved/regressed/new scan]
 
 | Skill | How Scan Integrates |
 |-------|-------------------|
-| `ship` | Run `scan` as post-deploy verification |
-| `auto` | After UI tasks, `scan` the affected page |
-| `fix` | When fixing UI bugs, `scan` to verify the fix |
+| `ship` | Run a live scan as post-deploy verification |
+| `auto` | After UI tasks, scan the affected page |
+| `fix` | When fixing UI bugs, scan to verify the fix |
 | `design` | Review screenshots for visual quality and AI slop indicators |
 
 ## Rules

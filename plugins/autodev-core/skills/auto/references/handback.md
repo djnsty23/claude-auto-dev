@@ -58,7 +58,7 @@ node "${CLAUDE_PLUGIN_ROOT}/scripts/prd-mark-needs-setup.js" <id> "<what is need
 ```
 
 A handback that exists only in the chat is gone when the session ends, and the
-story is what `status`, `auto` and the Stop hook read. `[measured 2026-09-07]`
+story is what the progress view, `auto` and the Stop hook read. `[measured 2026-09-07]`
 across three product repos this state had been written once in four months
 while six stories waiting on a person sat as pending for up to 122 days; the
 one session that did write it by hand put the handback in a log file. `auto`'s

@@ -1,12 +1,6 @@
----
-name: test
-description: Runs unit and browser tests on latest changes. Use after implementing features or fixing bugs.
-when_to_use: "Invoked when the user says \"test\", \"e2e\"."
-allowed-tools: Bash, Read, Grep, Glob, mcp__Claude_Browser__*
-model: opus
-user-invocable: true
-argument-hint: "[unit|browser|all]"
----
+<!-- Merged from the former test skill (zero loads in 30 days, 2026-10-12). -->
+
+**When this applies:** Runs unit and browser tests on latest changes. Use after implementing features or fixing bugs. Invoked when the user says "test", "e2e".
 
 # Test
 
@@ -20,6 +14,18 @@ Run the applicable unit/integration and browser checks for the requested scope.
 `test unit` reports a unit-only result; it does not declare overall readiness.
 A project without a UI needs real CLI/hook/API entry-point tests, not a fictitious
 main-page smoke test.
+
+## Contents
+
+- Step 1: Unit Tests
+- Step 2: Identify Latest Changes
+- Step 3: Browser Tests
+- Step 4: Report
+- Test Patterns
+- Server and auth setup
+- Risk-shaped testing
+- Record failures
+- Feeding the learning loop
 
 ## Step 1: Unit Tests
 

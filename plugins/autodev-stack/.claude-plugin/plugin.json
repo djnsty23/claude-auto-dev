@@ -12,7 +12,6 @@
   "keywords": [
     "supabase",
     "doppler",
-    "stripe",
-    "remotion"
+    "stripe"
   ]
 }

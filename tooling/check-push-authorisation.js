@@ -65,7 +65,6 @@ const GATE =
 // finding gets quietly filed as known.
 const EXEMPT = new Map([
   ['rule-local-first', 'this skill IS the authorisation rule'],
-  ['memory-backup', 'sanctioned mirror exception, see backup-protocol'],
 ]);
 
 const norm = (s) => s.replace(/\s+/g, ' ');
@@ -79,6 +78,12 @@ function skillFiles() {
     for (const skill of fs.readdirSync(skillsDir)) {
       const f = path.join(skillsDir, skill, 'SKILL.md');
       if (fs.existsSync(f)) out.push({ plugin, skill, file: f });
+      // references/ hold instructions the skill loads, merged skills among them.
+      const refs = path.join(skillsDir, skill, 'references');
+      if (!fs.existsSync(refs)) continue;
+      for (const r of fs.readdirSync(refs)) {
+        if (r.endsWith('.md')) out.push({ plugin, skill, file: path.join(refs, r) });
+      }
     }
   }
   return out;
@@ -122,14 +127,14 @@ function run(quiet) {
     }
     const r = scan(skill, content);
     instructions += r.instructions;
-    for (const item of r.findings) findings.push({ plugin, skill, ...item });
+    for (const item of r.findings) findings.push({ plugin, skill, file, ...item });
   }
 
   // Print the population, not just a verdict. A bare verdict is
   // indistinguishable from a finder that returned nothing.
   if (!quiet) {
     console.log(
-      `[push-auth] ${files.length} shipped SKILL.md scanned, ${instructions} push instruction(s), ` +
+      `[push-auth] ${files.filter((f) => path.basename(f.file) === 'SKILL.md').length} shipped SKILL.md scanned, plus ${files.filter((f) => path.basename(f.file) !== 'SKILL.md').length} reference file(s), ${instructions} push instruction(s), ` +
         `${exempt} exempt skill(s), ${findings.length} ungated`
     );
     for (const [name, why] of EXEMPT) console.log(`[push-auth]   exempt: ${name} (${why})`);
@@ -137,7 +142,7 @@ function run(quiet) {
 
   if (findings.length) {
     for (const f of findings) {
-      console.log(`[push-auth] FAIL ${f.plugin}/${f.skill}/SKILL.md:${f.line}: ${f.text}`);
+      console.log(`[push-auth] FAIL ${path.relative(PLUGINS, f.file).replace(/\\/g, '/')}:${f.line}: ${f.text}`);
     }
     console.log(
       `[push-auth] A shipped skill tells a session to push without naming the authorisation. ` +

@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 /* preflight — the rigidity gate that runs before every deploy.
  *
- * Scaffolded by autodev's `preflight` skill. Add gates for the bug families
+ * Scaffolded by autodev's setup-project gate-file step. Add gates for the bug families
  * THIS project actually ships (run `/learn-from-fixes` to rank them). Delete
  * the examples once you have real ones.
  *

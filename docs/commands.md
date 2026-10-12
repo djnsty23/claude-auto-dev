@@ -11,7 +11,7 @@ These are what you type. Everything else is handled automatically by `auto`.
 |-----|--------|
 | `autodev init` | Derive this project's real conventions into `.claude/project-rules.md` |
 | `learn from fixes` | Rank the failure classes this project actually ships, from its git history |
-| `preflight` | Scaffold / extend the executable pre-deploy gate file |
+| `add a gate` | Scaffold / extend the executable pre-deploy gate file (through `setup-project`) |
 | `memory maintenance` | Dedup memories, repair the index, refresh CLAUDE.md (nightly-schedulable, loaded through `mem search`) |
 | `auto` | Work through all tasks autonomously (deploys, tests, transitions sprints) |
 | `audit` | Find bugs + violations (7 parallel agents) → creates fix stories |
@@ -30,8 +30,8 @@ Use when you need something specific. Auto mode calls these internally too.
 |-----|--------|
 | `review` / `review quick` / `review deep` | Code quality check (adaptive effort) |
 | `ship` | Build, test, review, deploy |
-| `scan` / `qa` | Live site QA in a real browser (built-in Browser pane, or the agent-browser CLI in a terminal) |
-| `test` | Run unit + browser tests |
+| `scan it` / `qa` | Live site QA in a real browser, through `prove` (built-in Browser pane, or the agent-browser CLI in a terminal) |
+| `run the tests` | Run unit + browser tests, through `prove` |
 | `fix` | Debug and fix issues |
 | `commit` | Conventional commit + push + PR |
 | `deploy` / `ci` | Deploy workflow (Vercel, Supabase, CI/CD) |
@@ -58,10 +58,8 @@ Pattern libraries for specific domains. Auto-loaded when relevant.
 | `logs` / `monitoring` | Logging and observability |
 | `stripe` / `payment` | Stripe integration |
 | `seo` / `schema` | SEO and structured data |
-| `remotion` / `video` | Remotion video creation |
 | `update dev` | Reminds you to run `/plugin marketplace update autodev` |
 | `doppler` / `setup doppler` | Install + link + migrate secrets to Doppler (hub/spoke pattern) |
-| `memory backup` | Backup/restore auto-memory to private GitHub repo |
 | `mem search <query>` / `mem recent` / `mem decisions` | Search persistent project memory across sessions |
 | `knowledge <area>` / `what do we know about` / `brief me on` | Distill a domain knowledge brief for a code area from memory (through `mem search`) |
 | `framework radar [days or video URL]` | Collect broad agent-development evidence, test every selected hypothesis, and report A/B/simpler verdicts |

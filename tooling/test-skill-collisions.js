@@ -76,11 +76,12 @@ try {
     // MUTATION 2: an entry naming a skill that does not exist must go red,
     // so the map cannot outlive the skills it exempts.
     const staleEntry = withMutant(
-        { from: "['learn-from-fixes|preflight',", to: "['no-such-skill|preflight'," },
+        // Added beside a live entry, so the only change is one stale key.
+        { from: "['prove|rule-windows',", to: "['no-such-skill|rule-windows', 'planted'],\n    ['prove|rule-windows'," },
         (f) => run(f),
     );
     check('an entry naming a missing skill is reported STALE',
-        /STALE\s+no-such-skill\|preflight/.test(staleEntry.stdout),
+        /STALE\s+no-such-skill\|rule-windows/.test(staleEntry.stdout) && !/\bNEW\b/.test(staleEntry.stdout),
         staleEntry.stdout.slice(0, 400));
     check('  and STALE alone fails the run', staleEntry.status === 1, `status=${staleEntry.status}`);
 

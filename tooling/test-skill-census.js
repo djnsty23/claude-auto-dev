@@ -173,7 +173,7 @@ try {
     fs.mkdirSync(path.join(tmp, 'projects'));
     fs.writeFileSync(path.join(tmp, 'projects', 't.jsonl'), [
         skillCall('autodev-core:design', '2026-09-17T09:00:00.000Z'),
-        // F3: the built-in /status, typed bare, is not the status skill.
+        // F3: the built-in /status, typed bare, is not a skill named status.
         typedCmd('status', '2026-09-17T09:10:00.000Z'),
         // F2: the tag quoted inside a tool_result is not a load.
         JSON.stringify({ type: 'user', timestamp: '2026-09-17T09:20:00.000Z', uuid: 'tr1', message: { content: [

@@ -133,7 +133,7 @@ check('does not report the old folded count', parse(r) !== null && !/\b5 pending
 // "0 done" — true of the file, and the opposite of true about the work.
 fs.writeFileSync(path.join(PROJ, 'prd.json'), JSON.stringify({
     sprint: 'S4',
-    // Shape as `archive-prd` writes it, not invented here.
+    // Shape as auto's archive-prd.md writes it, not invented here.
     archived: {
         totalCompleted: 159,
         lastArchived: '2026-08-28',

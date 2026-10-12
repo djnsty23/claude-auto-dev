@@ -404,7 +404,7 @@ unresolved; list its evidence, owner and next action.
 |-------|-------------|
 | `review` | Explicitly load for code quality review |
 | `security` | Explicitly load for the applicable vulnerability review |
-| `test` | Explicitly load for project tests before deploy |
+| `prove` | Explicitly load for project tests before deploy (its run-tests reference) |
 | Platform skill actually installed | Load its current deployment/rollback guidance |
 
 ## Feeding the learning loop

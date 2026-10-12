@@ -7,7 +7,7 @@
 // ships two or three mutually exclusive instructions for the same job and the
 // model follows whichever it loaded. Observed 2026-08-17: `rule-windows` forbade
 // `npm run dev` and prescribed `start cmd /k`, `browser` had already moved to
-// `preview_start`, and `auto`/`test`/`scan` still instructed a detached Bash.
+// `preview_start`, and `auto` and the former test and scan skills still instructed a detached Bash.
 // Three live conventions, and nothing surfaced the contradiction.
 //
 // WHY A CLOSED DENYLIST, NOT AN ALLOWLIST OF GOOD PHRASING

@@ -86,10 +86,6 @@ const TRIAGED = new Map([
         'change for a reviewer; rule-gate-integrity asks whether the gate itself ' +
         'can fail, and prove names it as the next step. "passing" and "summary" ' +
         'became corpus-rare when show-your-work was merged into prove.'],
-    ['memory-backup|security',
-        'Coincidental vocabulary. memory-backup copies memory files to a private ' +
-        'repo; security finds defects in code. "files" and "verified" became ' +
-        'corpus-rare in the 2026-10-11 merges.'],
     ['auto-brain|brain',
         'Intentional entry-point wrapper: auto-brain handles an explicitly away ' +
         'mission and loads brain\'s single procedure. It does not carry a second ' +
@@ -106,9 +102,10 @@ const TRIAGED = new Map([
         'Coincidental vocabulary. heal sweeps repos for reachable vulnerabilities; ' +
         'rule-thumb-first is interface design by hand reach. The shared words ' +
         '"reach" and "starts" mean different things in each.'],
-    ['learn-from-fixes|preflight',
-        'Sequential, not competing. preflight\'s trigger names learn-from-fixes as ' +
-        'its predecessor.'],
+    ['prove|rule-windows',
+        'Coincidental vocabulary. prove captures before and after evidence; ' +
+        'rule-windows holds host rules for Windows. "command" and "status" became ' +
+        'corpus-rare when status and test were merged on 2026-10-12.'],
 ]);
 
 const pairKey = (a, b) => [a, b].sort().join('|');

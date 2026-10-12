@@ -117,7 +117,7 @@ check('re-archive: totalCompleted accumulates, never overwrites', () => {
 
 check('SKILL.md still routes through the helper, proof still precedes the write', () => {
   const md = fs.readFileSync(
-    path.join(ROOT, 'plugins/autodev-core/skills/archive-prd/SKILL.md'), 'utf8');
+    path.join(ROOT, 'plugins/autodev-core/skills/auto/references/archive-prd.md'), 'utf8');
   assert.ok(md.includes('isArchivable()'), 'skill no longer names isArchivable()');
   assert.ok(!/ACTIVE: passes=false OR passes=null/.test(md),
     'the destructive two-bucket prose is back');
