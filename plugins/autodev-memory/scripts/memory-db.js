@@ -79,10 +79,24 @@ CREATE TRIGGER IF NOT EXISTS obs_fts_delete AFTER DELETE ON observations BEGIN
 END;
 `;
 
+// Node 22 prints an ExperimentalWarning to stderr the first time node:sqlite loads, and the
+// SessionStart hook that reads this store must print nothing when it has nothing to say.
+// Only that one warning is dropped; every other warning still reaches stderr.
+function loadSqlite() {
+    const emit = process.emitWarning;
+    process.emitWarning = function (warning, ...rest) {
+        const type = typeof rest[0] === 'string' ? rest[0] : rest[0] && rest[0].type;
+        const text = String((warning && warning.message) || warning);
+        if (type === 'ExperimentalWarning' && /SQLite/.test(text)) return undefined;
+        return emit.call(this, warning, ...rest);
+    };
+    try { return require('node:sqlite'); } finally { process.emitWarning = emit; }
+}
+
 function isAvailable() {
     if (_available !== null) return _available;
     try {
-        require('node:sqlite');
+        loadSqlite();
         _available = true;
     } catch {
         _available = false;
@@ -97,7 +111,7 @@ function getDB() {
         return null;
     }
 
-    const { DatabaseSync } = require('node:sqlite');
+    const { DatabaseSync } = loadSqlite();
     if (_cliReadOnly) {
         if (!fs.existsSync(DB_PATH)) throw memoryError('memory-store-missing');
         let db;
