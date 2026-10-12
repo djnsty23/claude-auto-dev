@@ -112,7 +112,7 @@ const HOME = path.join(fixture, 'home');
 const STUB_SCRIPTS = path.join(fixture, 'subject');
 const PAYLOAD = path.join(fixture, 'payload.json');
 const ARGVLOG = path.join(fixture, 'argv.json');
-const DONELOG = path.join(fixture, 'stub-exited');
+const SCANLOG = path.join(fixture, 'scan-finished');
 
 fs.mkdirSync(STUB_SCRIPTS, { recursive: true });
 fs.copyFileSync(SUBJECT, path.join(STUB_SCRIPTS, 'watch-panels.js'));
@@ -129,7 +129,6 @@ fs.writeFileSync(path.join(STUB_SCRIPTS, 'fleet-status.js'), [
     "'use strict';",
     "const fs = require('fs');",
     'fs.writeFileSync(process.env.WP_ARGV_LOG, JSON.stringify(process.argv.slice(2)));',
-    "process.on('exit', () => { try { fs.writeFileSync(process.env.WP_DONE_LOG, ''); } catch { /* the harness reports it */ } });",
     "const mode = process.env.WP_MODE || 'ok';",
     "if (mode === 'fail') { process.stderr.write('fleet-status exploded\\n'); process.exit(7); }",
     "if (mode === 'garbage') { process.stdout.write('{not json'); process.exit(0); }",
@@ -197,7 +196,7 @@ const prematureKills = [];
 async function run(o) {
     fs.writeFileSync(PAYLOAD, JSON.stringify(o.payload, null, 2));
     try { fs.unlinkSync(ARGVLOG); } catch { /* first run */ }
-    try { fs.unlinkSync(DONELOG); } catch { /* first run */ }
+    try { fs.unlinkSync(SCANLOG); } catch { /* first run */ }
 
     const child = spawn(process.execPath, [PLANTED, ...(o.args || [])], {
         env: {
@@ -207,7 +206,7 @@ async function run(o) {
             AUTODEV_FLEET_DIR: o.fleetDir,
             AUTODEV_SELF_SESSION: '',
             WP_ARGV_LOG: ARGVLOG,
-            WP_DONE_LOG: DONELOG,
+            AUTODEV_WATCH_PANELS_SCANNED: SCANLOG,
             WP_PAYLOAD: PAYLOAD,
             WP_MODE: o.mode || 'ok',
             ...(o.env || {}),
@@ -259,16 +258,21 @@ async function run(o) {
        same tree passed:
          FAIL  with the memory deleted the identical panel is reported again
                (got undefined, expected "PANEL Orchard Harvest :: ...")
-       So the settle starts when the stub has exited. What is left inside it
-       is the watcher parsing one payload and printing, and a stub that never
-       exits is reported below as the infrastructure event it is. */
-    let stubExited = false;
+       Waiting for the stub's exit and then 250ms lost too, under check:suites
+       on 8dcbf08c: the stub had exited, and the watcher had printed nothing
+       and saved nothing when it was killed:
+         FAIL  a newly blocked session emits exactly one line  (got 0, expected 1)
+       So the harness waits for the event itself: the watcher appends a line to
+       AUTODEV_WATCH_PANELS_SCANNED when a scan has printed and saved. After that
+       it is idle until its next interval, a minute away, so no settle is needed,
+       and a scan that never ends is reported below as infrastructure. */
+    let scanEnded = false;
     if (!oneShot && scanned) {
-        const stubBy = Date.now() + 20000;
-        while (!closed && !fs.existsSync(DONELOG) && Date.now() < stubBy) await sleep(20);
-        stubExited = fs.existsSync(DONELOG);
+        const scanBy = Date.now() + 20000;
+        while (!closed && !fs.existsSync(SCANLOG) && Date.now() < scanBy) await sleep(20);
+        scanEnded = fs.existsSync(SCANLOG);
     }
-    if (!closed) { await sleep(250); child.kill(); killed = true; }
+    if (!closed) { child.kill(); killed = true; }
     await closePromise;
 
     /* A one-shot that still had to be killed is an INFRASTRUCTURE event, and the
@@ -281,11 +285,11 @@ async function run(o) {
             + `(scanned=${scanned}, stdout=${JSON.stringify(out.slice(0, 120))})`);
         prematureKills.push(JSON.stringify(o.args || []) + ' scanned=' + scanned);
     }
-    if (!oneShot && scanned && !stubExited) {
-        console.error('infrastructure: the planted fleet-status did not exit within its budget, '
-            + 'so the watcher was killed before it could report '
+    if (!oneShot && scanned && !scanEnded) {
+        console.error('infrastructure: the watcher did not finish its scan within its budget, '
+            + 'so it was killed before it could report '
             + `(stdout=${JSON.stringify(out.slice(0, 120))})`);
-        prematureKills.push(JSON.stringify(o.args || []) + ' stub never exited');
+        prematureKills.push(JSON.stringify(o.args || []) + ' scan never ended');
     }
 
     return {
