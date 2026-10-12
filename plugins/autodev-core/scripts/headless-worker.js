@@ -90,6 +90,7 @@ const USAGE = [
     'settle --unreported: settle a record whose worker exited without a RESULT <CODE> line, as result unreported.',
     '        Refused while the log has no exit line (that is --lost), while the report has a RESULT line, and while',
     '        <report dir>/<CODE>/<report name> has one (a report written into the scratch dir: move it, then settle).',
+    '        A RESULT line naming a code started later in the ledger is that retry\'s word, and settles this record.',
     '        An unreported record is its own result, never done, stopped or failed.',
     'settle, auth-refused: an ended run whose LAST stream-json result event is a refused login (Not logged in,',
     '        Invalid API key, an expired OAuth token, subscription access disabled) settles, plain or --unreported,',
@@ -948,7 +949,7 @@ function settle(opts) {
         if (opts.lost) return settleLost(rec, code, exit);
         // Read only once the run has ended: a refusal is a claim about how it ended.
         const refusal = exit === null ? null : authRefusal(logText);
-        if (opts.unreported) return settleUnreported(rec, code, exit, refusal);
+        if (opts.unreported) return settleUnreported(rec, code, exit, refusal, ledger.records);
         if (exit === null) {
             fault('not-exited', `${rec.log} has no CLAUDE_EXIT line yet, so the worker is running or its supervisor never wrote one. `
                 + 'A supervisor killed by a reboot or a kill never writes it, and settle --lost settles such a record once it is provably not running');
@@ -1020,6 +1021,14 @@ function settleLost(rec, code, exit) {
     return { code, state: 'lost', reason, sentence: rec.sentence, reportResult: rec.reportResult, exit: null, report: rec.report, settledAt, gateStep };
 }
 
+/** The record started after rec under the code a report's RESULT line names, or null. */
+function takenOverBy(rec, other, records) {
+    const i = Array.isArray(records) ? records.indexOf(rec) : -1;
+    const started = Date.parse(rec.startedAt || '');
+    if (i < 0 || !Number.isFinite(started)) return null;
+    return records.slice(i + 1).find((r) => r.code === other && Date.parse(r.startedAt || '') > started) || null;
+}
+
 /**
  * `settle --unreported` inside the ledger lock. `[measured 2026-09-24]` two
  * workers stopped on a full disk (ENOSPC), exited 0 and could not write their
@@ -1029,7 +1038,7 @@ function settleLost(rec, code, exit) {
  * result. It never guesses a worker's word: a report with a RESULT line for this
  * code takes plain settle, and one naming another code must be corrected first.
  */
-function settleUnreported(rec, code, exit, refusal = null) {
+function settleUnreported(rec, code, exit, refusal = null, records = []) {
     if (exit === null) {
         fault('not-exited', `${rec.log} has no CLAUDE_EXIT line, so the worker has not provably ended. `
             + 'settle --lost settles a record whose supervisor died without one');
@@ -1052,12 +1061,19 @@ function settleUnreported(rec, code, exit, refusal = null) {
     const other = reportText === null ? null : otherResultCode(reportText, code);
     const moved = other ? null : misplacedReport(rec);
     if (moved) fault('misplaced-report', misplacedHint(moved, rec));
-    if (other) {
+    // `[measured 2026-10-12]` four runs died with exit 1, and each retry, started
+    // under a new code, wrote its RESULT line into the dead run's report. That line
+    // is the retry's word, recorded on the retry's own record, and says nothing
+    // about this run. Only a code started later in this ledger counts as a retry.
+    const retry = other ? takenOverBy(rec, other, records) : null;
+    if (other && !retry) {
         fault('no-result', `RESULT line found for a different code: ${rec.report} ends RESULT ${other}, and this record's code is ${code}. `
             + `Correct that line to RESULT ${code} done|stopped|failed: <sentence>, then settle again`);
     }
     if (refusal) return settleAuthRefused(rec, code, exit, refusal);
-    const reason = reportText === null
+    const reason = retry
+        ? `exited ${exit} with no RESULT ${code} line, and ${rec.report} was taken over by the later run ${retry.code} started ${retry.startedAt}`
+        : reportText === null
         ? `exited ${exit} and ${rec.report} does not exist`
         : `exited ${exit} and ${rec.report} has no RESULT ${code} line`;
     const settledAt = new Date().toISOString();
