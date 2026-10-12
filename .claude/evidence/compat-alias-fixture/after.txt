@@ -1,0 +1,14 @@
+PR385 compatibility-alias fixture candidate
+Test blob: b15782e0800cb210f161ba95fad07d816aee4bab
+Source SHA256:25bdb2c2487d57ca269e8f2558a9ba04ae4d34597b10f96fdef861e0c0436bf1
+Production session-sweep blob unchanged:34c783683ea26ed0dc6033e709f0ab790cde32d2
+Fixture-only change: catch only EEXIST, verify both names are the same nonzero bigint device/inode regular file; positively establish NFC keys differ and NFKC keys agree. The actual compatibility-name rejection assertion and strict production comparator are unchanged. Other errors rethrow; no assertion, coverage floor, production budget or platform control removed.
+
+Fixed-final same six cases on native Windows Node24.15.0 and independently Linux Node22.23.3: A4/6, B6/6, simpler catch-only C4/6. Adopt B for fixture setup correctness, not production normalization or marketing outcome.
+B ordinary and existing-alias26/26 exit0; foreign and zero identity25pass1fail exit1 specifically the same-nonzero-regular-file assertion; EACCES19pass1fail setup exit1; real production NFC-to-NFKC runtime mutant25pass1fail exit1 specifically compatibility-normalization assertion, expectedfalse actualtrue.
+C ordinary/existing aliases pass, but foreign and zero controls incorrectly exit0; NFKC mutant still fails the original assertion. Catch-only cannot establish a nonvacuous identity witness.
+
+Independent full Linux session-sweep551/551 over79 worktree states, actual0,21222ms, stdout17653 bytes/stderr0, source fingerprints unchanged before/after. Independent exact-source review CLEAN; node--check and gitdiff--check0.
+Final exact native Windows Node24.15.0 full session-sweep: node tooling/test-session-sweep.js,518/518 over76 planted worktree states, actual/effective exit0, no signal,15437 complete output bytes. Started2026-10-11T21:12:39.512Z, finished2026-10-11T21:16:55.959Z. Source SHA256 above identical before/after. A previous numeric-witness source full518/518 actual0 is retained as predecessor proof only, separately from this final bigint source acceptance.
+Native macOS final proof, changed-candidate full13 gate and all six fresh remote checks remain pending. No transfer of the old0c gate PASS to this changed candidate.
+No merge, deployment, plugin installation, live marketing/customer system change or production filename-normalization broadening.

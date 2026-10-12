@@ -1,0 +1,14 @@
+PR385 compatibility-alias fixture baseline
+Revision: 0c24509f89c8942597e7143b00ac4a1156085537
+Production session-sweep blob: 34c783683ea26ed0dc6033e709f0ab790cde32d2
+Actual native macOS push CI run38173143594/job114569813448, completed2026-10-11T21:01:47Z.
+Command: npm test, actual main exit1,219/220 suites.
+test-session-sweep:19 passed,1 failed, suite crashed EEXIST linking ff.md to U+FB00.md in archive-member-identity fixture setup.
+The pull-request macOS job114569822587 corroborated the same setup failure. These are repeated observations of one defect, not two independent bugs.
+The production archive comparator was not reached by this compatibility fixture before the crash. The earlier exact local13-stage gate PASS is retained separately and is not all-platform proof.
+
+Preregistered fixed-final six-case population: ordinary creation, existing same-file alias, distinct positive injected identity, EACCES, zero identity, real production NFC-to-NFKC runtime mutation.
+Historical A replay uses the actual0c suite and real shipped comparator, archive-members-only subprocess entry point.
+A correct4/6: ordinary23/23 exit0; existing alias19pass1fail exit1 (wrong outcome); foreign setup exit1; permission setup exit1; zero identity23/23 exit0 (wrong outcome); NFKC mutant22pass1fail exit1 specifically compatibility-normalization assertion.
+Synthetic filesystem injections prove measurement/guard wiring, not native filesystem behavior or marketing efficacy.
+Initial foreign ino+=1 injection was vacuous above Windows Number safe-integer range:21955048184810016+1 equals itself. Initial A4/B5/C4 preserved as invalid injected-population evidence, not production precision. Correction uses guaranteed different positive typed identity with an explicit discrimination check.

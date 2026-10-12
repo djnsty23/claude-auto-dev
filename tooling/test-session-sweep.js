@@ -1973,7 +1973,17 @@ function checkArchiveMemberIdentity() {
   check('W1 archive identity: missing canonical alias is refused', same(['gone/' + nfd], ['gone/' + nfc], dir, 'darwin'), false);
   check('W1 archive identity: canonical collisions are refused', same([nfd, nfd], [nfc, nfd], dir, 'darwin'), false);
   fs.writeFileSync(path.join(dir, 'ff.md'), 'ligature control\n');
-  fs.linkSync(path.join(dir, 'ff.md'), path.join(dir, '\ufb00.md'));
+  // Some filesystems already resolve this compatibility spelling to ff.md.
+  // EEXIST is valid setup only when both names still identify the same file.
+  try { fs.linkSync(path.join(dir, 'ff.md'), path.join(dir, '\ufb00.md')); }
+  catch (e) { if (e.code !== 'EEXIST') throw e; }
+  const plain = fs.lstatSync(path.join(dir, 'ff.md'), { bigint: true });
+  const ligature = fs.lstatSync(path.join(dir, '\ufb00.md'), { bigint: true });
+  check('W1 archive identity: compatibility alias control is the same nonzero regular file',
+    plain.isFile() && ligature.isFile() && plain.ino > 0n && plain.dev > 0n &&
+    plain.ino === ligature.ino && plain.dev === ligature.dev, true);
+  check('W1 archive identity: compatibility control has different NFC keys', 'ff.md'.normalize('NFC') === '\ufb00.md'.normalize('NFC'), false);
+  check('W1 archive identity: compatibility control has equal NFKC keys', 'ff.md'.normalize('NFKC') === '\ufb00.md'.normalize('NFKC'), true);
   check('W1 archive identity: compatibility normalization is never accepted', same(['\ufb00.md'], ['ff.md'], dir, 'darwin'), false);
   const lstat = fs.lstatSync;
   try {
