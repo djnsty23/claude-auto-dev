@@ -1,5 +1,30 @@
 # Changelog
 
+## [8.187.0]
+
+### Ledgers
+
+- Every shared ledger writer writes behind one lock, and a load test drives
+  each one with 20 concurrent writers.
+- `peer-send-ledger` waits 2 s for the write lock, not 250 ms.
+- `ledger-temp-sweep` compares temp age in whole milliseconds.
+
+### Fleet and sessions
+
+- `fleet-view` reads workers from more than one account.
+- `session-start` names the session's own handoff on every start, and prints less.
+- `session-sweep` compares archive read-back names in NFC.
+- `brain-judge` no longer escalates a record when the judge login is refused.
+
+### Gates
+
+- A harness gate borrows the reserved lane when no product gate waits.
+- `hook-budget` sizes and judges the planted burn against one floor.
+
+### Memory
+
+- `memory-db` no longer prints the Node 22 SQLite ExperimentalWarning on load.
+
 ## [8.186.0]
 
 ### Gates and merges
