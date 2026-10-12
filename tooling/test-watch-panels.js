@@ -112,6 +112,7 @@ const HOME = path.join(fixture, 'home');
 const STUB_SCRIPTS = path.join(fixture, 'subject');
 const PAYLOAD = path.join(fixture, 'payload.json');
 const ARGVLOG = path.join(fixture, 'argv.json');
+const DONELOG = path.join(fixture, 'stub-exited');
 
 fs.mkdirSync(STUB_SCRIPTS, { recursive: true });
 fs.copyFileSync(SUBJECT, path.join(STUB_SCRIPTS, 'watch-panels.js'));
@@ -128,6 +129,7 @@ fs.writeFileSync(path.join(STUB_SCRIPTS, 'fleet-status.js'), [
     "'use strict';",
     "const fs = require('fs');",
     'fs.writeFileSync(process.env.WP_ARGV_LOG, JSON.stringify(process.argv.slice(2)));',
+    "process.on('exit', () => { try { fs.writeFileSync(process.env.WP_DONE_LOG, ''); } catch { /* the harness reports it */ } });",
     "const mode = process.env.WP_MODE || 'ok';",
     "if (mode === 'fail') { process.stderr.write('fleet-status exploded\\n'); process.exit(7); }",
     "if (mode === 'garbage') { process.stdout.write('{not json'); process.exit(0); }",
@@ -195,6 +197,7 @@ const prematureKills = [];
 async function run(o) {
     fs.writeFileSync(PAYLOAD, JSON.stringify(o.payload, null, 2));
     try { fs.unlinkSync(ARGVLOG); } catch { /* first run */ }
+    try { fs.unlinkSync(DONELOG); } catch { /* first run */ }
 
     const child = spawn(process.execPath, [PLANTED, ...(o.args || [])], {
         env: {
@@ -204,6 +207,7 @@ async function run(o) {
             AUTODEV_FLEET_DIR: o.fleetDir,
             AUTODEV_SELF_SESSION: '',
             WP_ARGV_LOG: ARGVLOG,
+            WP_DONE_LOG: DONELOG,
             WP_PAYLOAD: PAYLOAD,
             WP_MODE: o.mode || 'ok',
             ...(o.env || {}),
@@ -248,6 +252,22 @@ async function run(o) {
         const exitBy = Date.now() + 20000;
         while (!closed && Date.now() < exitBy) await sleep(20);
     }
+    /* The argv log proves the scan STARTED: the stub writes it before it reads
+       its payload, prints it and exits, and the watcher prints only after that.
+       `[measured 2026-10-12]` a flat 250ms from the argv log lost once on
+       windows-latest, push run of 56eaabc2, while the pull_request run of the
+       same tree passed:
+         FAIL  with the memory deleted the identical panel is reported again
+               (got undefined, expected "PANEL Orchard Harvest :: ...")
+       So the settle starts when the stub has exited. What is left inside it
+       is the watcher parsing one payload and printing, and a stub that never
+       exits is reported below as the infrastructure event it is. */
+    let stubExited = false;
+    if (!oneShot && scanned) {
+        const stubBy = Date.now() + 20000;
+        while (!closed && !fs.existsSync(DONELOG) && Date.now() < stubBy) await sleep(20);
+        stubExited = fs.existsSync(DONELOG);
+    }
     if (!closed) { await sleep(250); child.kill(); killed = true; }
     await closePromise;
 
@@ -260,6 +280,12 @@ async function run(o) {
             + 'killed; exitCode/stdout below are from a SHOT process, not from the watcher '
             + `(scanned=${scanned}, stdout=${JSON.stringify(out.slice(0, 120))})`);
         prematureKills.push(JSON.stringify(o.args || []) + ' scanned=' + scanned);
+    }
+    if (!oneShot && scanned && !stubExited) {
+        console.error('infrastructure: the planted fleet-status did not exit within its budget, '
+            + 'so the watcher was killed before it could report '
+            + `(stdout=${JSON.stringify(out.slice(0, 120))})`);
+        prematureKills.push(JSON.stringify(o.args || []) + ' stub never exited');
     }
 
     return {
