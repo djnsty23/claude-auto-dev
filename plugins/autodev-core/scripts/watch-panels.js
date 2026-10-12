@@ -204,11 +204,26 @@ function scan() {
   return true;
 }
 
+/**
+ * One scan, then one line in the file AUTODEV_WATCH_PANELS_SCANNED names, when
+ * it is set. Only the test harness sets it: a streaming watcher never exits, so
+ * from outside the end of its scan is otherwise invisible, and a fixed wait for
+ * it is a guess about a loaded machine.
+ */
+function scanAndMark() {
+  const scanned = scan();
+  const mark = process.env.AUTODEV_WATCH_PANELS_SCANNED;
+  if (mark) {
+    try { fs.appendFileSync(mark, `${scanned}\n`); } catch { /* the harness reports a scan it never saw end */ }
+  }
+  return scanned;
+}
+
 // Side effects live behind require.main, so importing this module for a test
 // neither scans nor arms a timer.
 if (require.main === module) {
-  const scanned = scan();
+  const scanned = scanAndMark();
   if (argv.includes('--once')) process.exitCode = scanned ? 0 : 2;
-  else setInterval(scan, INTERVAL_MS);
+  else setInterval(scanAndMark, INTERVAL_MS);
 }
 module.exports = { scan };
