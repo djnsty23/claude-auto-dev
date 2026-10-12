@@ -1,5 +1,30 @@
 # Changelog
 
+## [8.189.0]
+
+### Brain
+
+- `brain-judge` reads briefs up to 16 KB, not 3 KB, and leaves gate, merge,
+  release, cleanup and technical choices to the coordinator. On 36 labelled past
+  runs it escalates 7, not 23, and still escalates all 4 true escalations.
+
+### Fleet
+
+- Shared ledger writers release a finished append before any output or exit
+  listener runs.
+- MSYS test fixtures stay alive on a native Windows PATH and retry past native
+  pid collisions, at most eight times.
+
+### Radar
+
+- A creator's own template or swipe file counts as a promotion only with explicit
+  paid wording or the existing sales signals.
+
+### Harness
+
+- Archive membership accepts Apple's NFD spelling of a UTF-8 name only when it is
+  the same file on disk.
+
 ## [8.188.0]
 
 ### Skills
