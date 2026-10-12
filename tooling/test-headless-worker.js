@@ -839,6 +839,11 @@ try {
             mk('WRONGCODE', { reportText: 'RESULT OTHERCODE done: a copied line.\n' }),
             mk('BOTH'),
             mk('EXIT3', { logText: 'noise\nCLAUDE_EXIT=3\n' }),
+            // `[measured 2026-10-12]` a retry under a new code wrote its RESULT line into the dead run's report.
+            { ...mk('EARLY-0'), startedAt: new Date(Date.parse(now) - 60000).toISOString(), state: 'settled', result: 'done' },
+            mk('TAKEN', { logText: 'noise\nCLAUDE_EXIT=1\n', reportText: 'RESULT TAKEN-2 done: the retry wrote here.\n' }),
+            mk('EARLY', { logText: 'noise\nCLAUDE_EXIT=1\n', reportText: 'RESULT EARLY-0 done: an earlier run wrote here.\n' }),
+            { ...mk('TAKEN-2'), startedAt: new Date(Date.parse(now) + 60000).toISOString(), state: 'settled', result: 'done' },
         ];
         write(ledger, JSON.stringify({ version: 1, records }, null, 2) + '\n');
         const recOf = (code) => JSON.parse(read(ledger)).records.find((r) => r.code === code) || null;
@@ -878,6 +883,13 @@ try {
         const wrong = hw(['settle', '--code', 'WRONGCODE', '--unreported', '--ledger', ledger]);
         check('24b. settle --unreported refuses a report whose RESULT line names another code, so a mislabelled result is corrected, not buried',
             wrong.exit === 1 && wrong.json && !wrong.json.ok && wrong.json.error.code === 'no-result' && /different code/.test(wrong.json.error.message) && /OTHERCODE/.test(wrong.json.error.message) && recOf('WRONGCODE').state === 'running', wrong.stdout.slice(0, 240));
+        const taken = hw(['settle', '--code', 'TAKEN', '--unreported', '--ledger', ledger]);
+        check('24b. a RESULT line from a later run started under another code settles the dead run as unreported, naming the retry',
+            taken.exit === 0 && taken.json && taken.json.ok && taken.json.value.state === 'unreported' && /taken over by the later run TAKEN-2/.test(taken.json.value.reason)
+                && recOf('TAKEN').result === 'unreported' && recOf('TAKEN').exit === 1 && recOf('TAKEN-2').result === 'done', taken.stdout.slice(0, 240));
+        const early = hw(['settle', '--code', 'EARLY', '--unreported', '--ledger', ledger]);
+        check('24b. a RESULT line naming a run that started EARLIER is not a takeover, and still refuses no-result',
+            early.exit === 1 && early.json && !early.json.ok && early.json.error.code === 'no-result' && /EARLY-0/.test(early.json.error.message) && recOf('EARLY').state === 'running', early.stdout.slice(0, 240));
         const both = hw(['settle', '--code', 'BOTH', '--lost', '--unreported', '--ledger', ledger]);
         check('24b. --lost with --unreported refuses with usage and settles nothing',
             both.exit === 1 && both.json && !both.json.ok && both.json.error.code === 'usage' && recOf('BOTH').state === 'running', both.stdout.slice(0, 200));
