@@ -33,7 +33,10 @@ try {
             const r = spawnSync(process.execPath, ['--require', preload, worker, 'retire', '--ledger', file, '--task-id', 'probe'], {
                 encoding: 'utf8', timeout: 5000, windowsHide: true,
                 env: { ...process.env, LOCK_TARGET: file + '.lock', ATTEMPTS: attempts, FAILURE_CODE: code,
-                    FAILURES: String(failures), AUTODEV_LEDGER_LOCK_WAIT_MS: '150' },
+                    FAILURES: String(failures),
+                    // Two planted failures sleep 50 ms each, which overran 150 ms on a slow macOS
+                    // runner. The case that must succeed gets room; the one that must refuse stays short.
+                    AUTODEV_LEDGER_LOCK_WAIT_MS: failures === 2 ? '5000' : '150' },
             });
             assert.equal(r.error, undefined);
             assert.equal(r.status, failures === 2 ? 0 : 1, r.stdout + r.stderr);
