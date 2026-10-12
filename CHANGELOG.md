@@ -1,5 +1,24 @@
 # Changelog
 
+## [8.188.0]
+
+### Skills
+
+- Sixteen skills that never fired in 30 days fold into the fired skills that own
+  their job, as linked references: iterate, wizard, sprint, archive-prd and status
+  into `auto`, show-your-work, test and scan into `prove`, mem-dashboard,
+  knowledge-agent and memory-maintenance into `mem-search`, fleet into
+  `sessions`, autodev-init and preflight into `setup-project`.
+- memory-backup and remotion are retired. User-invocable skills go from 49 to 33.
+- `check-skill-tool-declarations` and `check-push-authorisation` read each
+  skill's references too, so moved text stays under both detectors.
+
+### Fleet
+
+- `unattended-worker` settles a dead run whose report a later retry took over,
+  instead of leaving it running.
+- `test-watch-panels` waits for the watcher's finished-scan line, not a fixed settle.
+
 ## [8.187.0]
 
 ### Ledgers
