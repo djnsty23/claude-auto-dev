@@ -22,7 +22,9 @@ function sweepLedgerTemps(ledger, { now = Date.now() } = {}) {
         const target = path.join(dir, name);
         try {
             const st = fs.lstatSync(target);
-            if (!st.isFile() || now - st.mtimeMs <= MAX_AGE_MS) continue;
+            // Whole milliseconds: on Linux a stamped mtime reads back a fraction of a millisecond
+            // off, so a file exactly MAX_AGE_MS old read as older about half the time.
+            if (!st.isFile() || now - Math.round(st.mtimeMs) <= MAX_AGE_MS) continue;
             fs.unlinkSync(target);
             result.removed.push(name);
         } catch (e) {
