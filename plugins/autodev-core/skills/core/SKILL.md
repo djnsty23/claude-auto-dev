@@ -79,7 +79,7 @@ dispatch; update the outcome as it changes rather than waiting for session end.
 | `resolution` | HOW it was fixed (learning) |
 | `blockedBy` | optional array of story ids. A story is ready only when every one of them is `true`; `workPlan(prd).ready` is the reader `auto` and the Stop hook share, and `workPlan(prd).blocked` names what each other story waits on. Point dependents at a setup story so they wait for the person, not retry against the missing key. |
 | `blockedReason` | `needs-setup` only: what is needed, the exact console URL or path, what done looks like. Written by `scripts/prd-mark-needs-setup.js`, never by hand; `acceptance` and `notes` are left untouched. |
-| `blockedAt` | `needs-setup` only: the date it was marked, so `status` can say how long it has waited. |
+| `blockedAt` | `needs-setup` only: the date it was marked, so the progress view can say how long it has waited. |
 
 ### Requirements and revisions
 
@@ -148,7 +148,7 @@ When ANY of these are true, run `archive` before starting new work:
 - prd.json > 50KB
 - Starting a new sprint while previous sprint's stories are all complete
 
-Run `archive-prd` within the existing mandate. Archive only eligible completed
+Run the archive steps in `auto/references/archive-prd.md` within the existing mandate. Archive only eligible completed
 records to its verified tracked `prd-archives/` destination; preserve unresolved
 stories and completed prerequisites still referenced by retained work. Age or
 size never authorizes deleting unfinished sprints. Commit the archive and PRD

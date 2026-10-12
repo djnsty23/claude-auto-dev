@@ -49,7 +49,7 @@ const fs = require('fs');
 const path = require('path');
 
 const ROOT = process.env.AUTODEV_ROOT || path.resolve(__dirname, '..');
-const SKILL = path.join(ROOT, 'plugins/autodev-core/skills/archive-prd/SKILL.md');
+const SKILL = path.join(ROOT, 'plugins/autodev-core/skills/auto/references/archive-prd.md');
 const STATES = path.join(ROOT, 'plugins/autodev-core/scripts/prd-states.js');
 
 const { VALID, isArchivable } = require(STATES);

@@ -1,7 +1,7 @@
 ---
 name: sessions
 description: Sweep Claude Code Desktop sessions — classify which are finished, check their worktrees are safe to discard, write resume stubs, and archive the safe ones. Use for "archive finished sessions", "session cleanup", "how many sessions do I have open".
-when_to_use: "Invoked when the user says \"sessions\", \"archive sessions\", or asks to clean up finished sessions."
+when_to_use: "Invoked when the user says \"sessions\", \"archive sessions\", asks to clean up finished sessions, says \"fleet\", or asks which sessions are waiting or blocked."
 allowed-tools: Bash, Read, Write, mcp__ccd_session_mgmt__archive_session, mcp__ccd_session_mgmt__send_message
 model: haiku
 user-invocable: true
@@ -217,6 +217,10 @@ So N pre-warmed sessions is N independent caches, each re-read on every turn. A
 resume doc pasted into a prompt makes it worse, because it lands in the *unique*
 part of the prefix and is re-billed every turn. Put context in the repo, where it
 is read on demand, and start a session when there is work for it.
+
+## Fleet
+
+Load [references/fleet.md](references/fleet.md) when asked what other sessions are doing, which are waiting on an unanswered question, or to open the fleet board.
 
 ## Config
 

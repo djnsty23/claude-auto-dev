@@ -181,7 +181,7 @@ check('recoveryHint names the parent commit, not the file that cannot exist', ()
 
 check('SKILL.md refuses the ignored path and names the real recovery', () => {
     const md = fs.readFileSync(
-        path.join(ROOT, 'plugins/autodev-core/skills/archive-prd/SKILL.md'), 'utf8');
+        path.join(ROOT, 'plugins/autodev-core/skills/auto/references/archive-prd.md'), 'utf8');
     assertionsRun += 4;
     assert.ok(md.includes('check-archive-path.js'),
         'the skill no longer runs the durability check before writing');
@@ -195,7 +195,7 @@ check('SKILL.md refuses the ignored path and names the real recovery', () => {
 
 check('the skill writes archives nowhere but the tracked destination', () => {
     const md = fs.readFileSync(
-        path.join(ROOT, 'plugins/autodev-core/skills/archive-prd/SKILL.md'), 'utf8');
+        path.join(ROOT, 'plugins/autodev-core/skills/auto/references/archive-prd.md'), 'utf8');
     // Prose mentions the old path when explaining the incident; what must not
     // survive is an INSTRUCTION to write there.
     const writesToClaude = /(Write to|cp prd\.json|mkdir -p)\s*:?\s*\.claude\/archives/i.test(md);

@@ -37,13 +37,12 @@
     {
       "name": "autodev-stack",
       "source": "./plugins/autodev-stack",
-      "description": "Opinionated integrations for a specific stack: Supabase, Doppler, Stripe, and Remotion.",
+      "description": "Opinionated integrations for a specific stack: Supabase, Doppler and Stripe.",
       "category": "integrations",
       "keywords": [
         "supabase",
         "doppler",
-        "stripe",
-        "remotion"
+        "stripe"
       ]
     }
   ]

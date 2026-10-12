@@ -11,5 +11,5 @@ days. Prose has told sessions to write the state since it was invented; the
 one session that did (a greenfield run, 2026-09-07) put the handback in a log
 file and pointed the story at it. The handback reference was written after a session retried
 a browser error that named the remedy for 2 h 10 m; its handback goes to the
-chat, which is gone when the session ends. The story is what `status`, `auto`
+chat, which is gone when the session ends. The story is what the progress view, `auto`
 and the Stop hook read, so the story is where the handback lives.

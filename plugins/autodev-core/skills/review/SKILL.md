@@ -54,7 +54,7 @@ right amount of review.
 **Read `.claude/project-rules.md` first if it exists** — it was measured from
 this codebase and outranks both the list below and the `standards` skill. A rule
 listed there as "Undecided" must not be flagged in either direction. If it does
-not exist, suggest `/autodev-init` once, then continue with the defaults below.
+not exist, suggest `setup-project` (its conventions step) once, then continue with the defaults below.
 
 Work through these against the changed files and affected callers/contracts;
 keep the review tied to the change’s reachable behavior.

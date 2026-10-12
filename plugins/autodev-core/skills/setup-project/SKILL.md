@@ -1,7 +1,7 @@
 ---
 name: setup-project
 description: Scaffolds new projects or onboards existing ones. Detects stack, creates monorepo/single-app, configures strict tooling. Use for greenfield or first-time setup.
-when_to_use: "Invoked when the user says \"setup project\", \"scaffold\", \"new project\", \"init project\"."
+when_to_use: "Invoked when the user says \"setup project\", \"scaffold\", \"new project\", \"init project\", \"autodev init\", \"learn my conventions\", \"preflight\", \"add a gate\" or \"gate this\"."
 allowed-tools: Bash, Read, Write, Edit, Glob, Grep, Agent, AskUserQuestion, mcp__Claude_Browser__*
 model: opus
 user-invocable: true
@@ -183,8 +183,7 @@ actual name. A package dependency does not prove the integration is available.
 | next | perf, seo |
 | tailwindcss | design |
 | vercel.json | ship plus the installed platform deployment skill |
-| playwright/cypress | test |
-| remotion | remotion |
+| playwright/cypress | prove |
 | @sentry/nextjs | production-radar or the installed observability capability |
 | Any auth | security |
 
@@ -224,6 +223,12 @@ selected versions and compatibility against official sources before scaffolding.
 Keep existing lockfile versions when onboarding unless upgrading is in scope.
 Record the resolved versions and successful install/build/behavior evidence;
 this skill does not maintain a second independent version table.
+
+## Conventions and the gate file
+
+Load [references/conventions.md](references/conventions.md) to derive an existing codebase's real conventions into `.claude/project-rules.md`, or when review findings keep contradicting how the code is written.
+
+Load [references/preflight.md](references/preflight.md) to scaffold or extend the executable gate file that fails the build on the bug families this project ships.
 
 ## Scaffold defaults learned from shipped fixes
 

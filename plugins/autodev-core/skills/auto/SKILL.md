@@ -1,7 +1,7 @@
 ---
 name: auto
 description: Autonomous task execution with testing and security. Works through all tasks without stopping.
-when_to_use: "Invoked when the user says \"auto\", \"iterate\", \"converge\" or \"sprint\", and the moment a tool error names a human decision rather than a fault."
+when_to_use: "Invoked when the user says \"auto\", \"iterate\", \"converge\", \"sprint\", \"progress\", \"archive\" or \"compact prd\", and the moment a tool error names a human decision rather than a fault."
 allowed-tools: Bash, Read, Write, Edit, Grep, Glob, Task, WebSearch, Agent, SendMessage, mcp__Claude_Browser__*
 model: opus
 user-invocable: true
@@ -335,7 +335,7 @@ these three things in the SAME turn, before touching anything else:
 
 3. **Move to the next ready story.** The selector above skips `needs-setup`
    and anything `blockedBy` it; the Stop hook does not count it as remaining
-   work; `status` prints it under "Blocked on you". Nothing retries it.
+   work; the progress view prints it under "Blocked on you". Nothing retries it.
 
 **When the operator says it is done:**
 
@@ -439,6 +439,10 @@ Load [references/sprint-transition.md](references/sprint-transition.md) at step 
 Load [references/sprint.md](references/sprint.md) when asked to create, advance or close a sprint in prd.json.
 
 Load [references/iterate.md](references/iterate.md) when asked to iterate or converge: the brainstorm, fix and re-scan loop, its scope and its exit condition.
+
+Load [references/progress.md](references/progress.md) when asked for progress: sprint and story counts, and what is blocked on the user.
+
+Load [references/archive-prd.md](references/archive-prd.md) when prd.json grows too large or asked to archive or compact it: the split, the keep list and the durability checks.
 
 ## Quick Reference
 

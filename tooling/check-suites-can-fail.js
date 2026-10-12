@@ -144,7 +144,18 @@ const SUBJECT_OVERRIDES = {
     // SKILL.md is not `.js` either, so no widening reaches it.
     'test-framework-radar-guidance.js': [
         'plugins/autodev-core/skills/rule-agent-concurrency/SKILL.md',
-        'plugins/autodev-core/skills/fleet/SKILL.md',
+        'plugins/autodev-core/skills/sessions/references/fleet.md',
+    ],
+
+    // The subject is each host SKILL.md that must link a merged skill's
+    // reference. Derivation found only two fixtures named in its EXEMPT table,
+    // and stubbing those left every check green, so the suite read as vacuous.
+    'test-merged-skills.js': [
+        'plugins/autodev-core/skills/auto/SKILL.md',
+        'plugins/autodev-core/skills/prove/SKILL.md',
+        'plugins/autodev-core/skills/sessions/SKILL.md',
+        'plugins/autodev-core/skills/setup-project/SKILL.md',
+        'plugins/autodev-memory/skills/mem-search/SKILL.md',
     ],
 
     // The subject is a hooks module (Claude Code function hooks): ES modules

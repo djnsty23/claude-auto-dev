@@ -27,7 +27,7 @@
  *   blockedReason -> the handback: what is needed, where, what done looks like.
  *                    The name auto/SKILL.md step 6 already used, and the one the
  *                    greenfield session reached for unprompted.
- *   blockedAt     -> the date, so `status` can say how long it has waited.
+ *   blockedAt     -> the date, so the progress view can say how long it has waited.
  *
  * `notes` is NOT touched. In a spec-generated backlog it is the acceptance
  * criterion — the thing `auto` reads to decide whether the story is finished —

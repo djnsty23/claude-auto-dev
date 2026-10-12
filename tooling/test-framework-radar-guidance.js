@@ -9,7 +9,7 @@ const path = require('path');
 
 const root = path.resolve(__dirname, '..', 'plugins', 'autodev-core', 'skills');
 const concurrency = fs.readFileSync(path.join(root, 'rule-agent-concurrency', 'SKILL.md'), 'utf8');
-const fleet = fs.readFileSync(path.join(root, 'fleet', 'SKILL.md'), 'utf8');
+const fleet = fs.readFileSync(path.join(root, 'sessions', 'references', 'fleet.md'), 'utf8');
 
 let passed = 0;
 let failed = 0;

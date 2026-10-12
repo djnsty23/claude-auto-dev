@@ -1,15 +1,20 @@
----
-name: fleet
-description: Shows every Claude Code session on this machine and which ones are blocked on an unanswered question. Use when asked what other sessions are doing, which are waiting, or to open the fleet board.
-when_to_use: "Invoked when the user says \"fleet\", asks which sessions are waiting or blocked, or asks to open the session board."
-allowed-tools: Bash
-user-invocable: true
----
+<!-- Merged from the former fleet skill (zero loads in 30 days, 2026-10-12). -->
+
+**When this applies:** Shows every Claude Code session on this machine and which ones are blocked on an unanswered question. Use when asked what other sessions are doing, which are waiting, or to open the fleet board. Invoked when the user says "fleet", asks which sessions are waiting or blocked, or asks to open the session board.
 
 # Fleet
 
 One view of every session on this machine, and the unanswered question each
 blocked one is sitting on.
+
+## Contents
+
+- The common case — just answer the question
+- The board
+- Notifications
+- Other machines
+- What to tell the user, and what not to
+- States
 
 ## The common case — just answer the question
 

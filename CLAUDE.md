@@ -62,7 +62,7 @@ State no skill, agent or hook-event counts here: they go stale silently. Count o
 
 ### The prd.json sprint system
 
-`prd.json` shares state between `auto`, `status`, Stop and drift audit. Its `stories` object is keyed by id. **`passes`** means:
+`prd.json` shares state between `auto`, its progress view, Stop and drift audit. Its `stories` object is keyed by id. **`passes`** means:
 
 | value | remaining work? | an agent can act on it? |
 |---|---|---|
