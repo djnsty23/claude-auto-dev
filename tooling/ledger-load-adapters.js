@@ -53,12 +53,15 @@ function prepare(writer, cwd, count) {
     if (name === 'stop-intent-record.js') {
         const intent = require('../plugins/autodev-core/scripts/fleet-intent.js');
         const records = path.join(cwd, 'records');
+        const head = git(ROOT, ['rev-parse', 'HEAD']);
         fs.mkdirSync(records);
         for (const id of ids(count)) {
             const repo = path.join(cwd, 'repo' + id);
             git(cwd, ['clone', '--shared', '--no-checkout', '-q', ROOT, repo]);
             git(repo, ['symbolic-ref', 'HEAD', 'refs/heads/probe']);
-            git(repo, ['update-ref', 'refs/heads/probe', 'refs/remotes/origin/HEAD']);
+            // A clone has no origin/HEAD when ROOT has no local branches, which is how
+            // actions/checkout leaves a pull request. ROOT's own HEAD always resolves.
+            git(repo, ['update-ref', 'refs/heads/probe', head]);
             json(intent.recordPath('repo' + id, 'probe', records), { branch: 'collision-control' });
             fixture.repos.push(repo);
             fixture.keys.push(intent.keyFor('repo' + id, 'probe'));
