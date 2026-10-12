@@ -45,7 +45,7 @@ Create a new sprint or advance to the next one.
 
 ## Auto-Archive Check
 
-Use `archive-prd` when completed history makes the PRD unwieldy. Inspect real
+Use [archive-prd.md](archive-prd.md) when completed history makes the PRD unwieldy. Inspect real
 file bytes/lines and the story population instead of counting commas as lines.
 Only eligible completed records may move, regardless of sprint age. Keep passed
 prerequisites that retained stories still reference, since the task planner reads

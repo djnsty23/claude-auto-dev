@@ -1,8 +1,8 @@
 ---
 name: prove
 description: "Capture the evidence a change actually works: the BEFORE state while the defect still reproduces, the AFTER state once it passes, both put where a reviewer sees them, so no completion claim rests on the author saying so."
-when_to_use: "Use before the first edit of a fix and again once it works. Use whenever asked to write a status line, summary, report or release note that says something is fixed, passing or done, whenever a claim would otherwise have no command output behind it, and on the word prove. Also at the START of long or unattended work, and when asked to show your work."
-allowed-tools: Bash, Read, Write, Grep, Glob, mcp__Claude_Browser__*
+when_to_use: "Use before the first edit of a fix and again once it works. Use whenever asked to write a status line, summary, report or release note that says something is fixed, passing or done, whenever a claim would otherwise have no command output behind it, and on the words prove, test, e2e, scan, qa and visual qa. Also at the START of long or unattended work, and when asked to show your work."
+allowed-tools: Bash, Read, Write, Edit, Grep, Glob, mcp__Claude_Browser__*
 model: opus
 # Tested 2026-10-03 on Sonnet 5.5 (xhigh) and Opus 5.5 (high), 9 of 9 scored steps each, 3 of 9 without the skill
 user-invocable: true
@@ -91,6 +91,12 @@ state in a sentence is one you have not checked.
 ## Work nobody is watching
 
 Load [references/show-your-work.md](references/show-your-work.md) at the start of an unattended or scheduled run, a multi-phase build or a fleet of agents: it keeps one reviewable row per decision as the work happens.
+
+## Running the evidence
+
+Load [references/run-tests.md](references/run-tests.md) to run the unit and browser tests on the latest changes.
+
+Load [references/live-scan.md](references/live-scan.md) to QA a running site in a real browser: visual, console, accessibility and performance regressions against baselines.
 
 ## What this does not do
 

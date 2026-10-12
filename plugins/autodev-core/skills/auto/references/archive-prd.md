@@ -1,17 +1,23 @@
----
-name: archive-prd
-description: Archives completed stories from prd.json to reduce token usage.
-when_to_use: "Invoked when the user says \"archive\", \"compact prd\", \"prd too large\"."
-allowed-tools: Read, Write, Edit, Bash
-model: haiku
-user-invocable: true
-argument-hint: "[status|S-ID|unarchive S-ID]"
----
+<!-- Merged from the former archive-prd skill (zero loads in 30 days, 2026-10-12). -->
+
+**When this applies:** Archives completed stories from prd.json to reduce token usage. Invoked when the user says "archive", "compact prd", "prd too large".
 
 # PRD Archival System
 
 Archive eligible completed stories to keep prd.json small while retaining every
 unresolved story and every prerequisite that retained work still needs.
+
+## Contents
+
+- "archive" Command
+- New prd.json Schema (After Archive)
+- Archive File Schema
+- When to Archive
+- Archive Process
+- Accessing Archived Stories
+- Quick Reference
+- Token Optimization
+- Proving the run
 
 ## "archive" Command
 

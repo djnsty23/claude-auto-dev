@@ -1,11 +1,6 @@
----
-name: status
-description: Shows sprint progress and task status. Use 'progress' (not 'status' - that's a built-in).
-when_to_use: "Invoked when the user says \"progress\"."
-allowed-tools: Bash, Read
-model: haiku
-user-invocable: true
----
+<!-- Merged from the former status skill (zero loads in 30 days, 2026-10-12). -->
+
+**When this applies:** Shows sprint progress and task status. Use 'progress' (not 'status' - that's a built-in). Invoked when the user says "progress".
 
 # Status
 

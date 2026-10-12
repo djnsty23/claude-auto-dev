@@ -322,7 +322,7 @@ function census(o) {
             totalHits++;
             // A built-in command is still the typed reader working, so it
             // counts toward the channel total the blindness guard reads, and
-            // never toward a skill row: /status is not the status skill (F3).
+            // never toward a skill row: /status is not a skill named status (F3).
             if (h.channel === 'model') modelHits++;
             else if (h.channel === 'preload') preloadHits++;
             else typedHits++;

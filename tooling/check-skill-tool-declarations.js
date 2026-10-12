@@ -176,7 +176,10 @@ function walk(dir, out = [], errors = []) {
     for (const e of entries) {
         const p = path.join(dir, e.name);
         if (e.isDirectory()) walk(p, out, errors);
-        else if (e.name === 'SKILL.md') out.push(p);
+        // A skill's references/ are instructions the skill loads, so they answer to
+        // its allowed-tools. Merged skills live there since 2026-10-11.
+        else if (e.name === 'SKILL.md' || (e.name.endsWith('.md') && path.basename(dir) === 'references'
+            && path.basename(path.dirname(path.dirname(dir))) === 'skills')) out.push(p);
     }
     return out;
 }
@@ -322,9 +325,11 @@ function negativeClass(sentence, line, token, prevLines, inFence) {
 // Scans one file. Returns { skill, declared, refs, findings }.
 function scanFile(file) {
     const text = fs.readFileSync(file, 'utf8');
-    const { fm, lines, bodyStart } = split(text);
-    const declared = declaredTools(fm);
-    const skill = path.basename(path.dirname(file));
+    const { lines, bodyStart } = split(text);
+    const isRef = path.basename(path.dirname(file)) === 'references';
+    const hostMd = isRef ? path.join(path.dirname(path.dirname(file)), 'SKILL.md') : file;
+    const declared = declaredTools(split(isRef ? fs.readFileSync(hostMd, 'utf8') : text).fm);
+    const skill = path.basename(path.dirname(hostMd));
     const refs = [];
     const aliases = aliasesIn(lines.slice(bodyStart));
     let inFence = false;
@@ -491,15 +496,17 @@ function main() {
     if (argv.includes('--selftest')) return selftest();
 
     const { results, errors } = scan();
-    const withDecl = results.filter((r) => r.declared !== null);
     const noDecl = results.filter((r) => r.declared === null);
     const refs = results.flatMap((r) => r.refs);
     const findings = results.flatMap((r) => r.findings);
 
     // Population first, so an empty scan is visible rather than reassuring.
+    // A skill counts once however many references/ files it holds.
     console.log('skill tool-declaration gate');
-    console.log('  ' + results.length + ' skills scanned, ' + withDecl.length
-        + ' declare allowed-tools, ' + noDecl.length + ' do not');
+    const skills = new Set(results.map((r) => r.skill));
+    const noDeclSkills = new Set(noDecl.map((r) => r.skill));
+    console.log('  ' + skills.size + ' skills scanned, ' + (skills.size - noDeclSkills.size)
+        + ' declare allowed-tools, ' + noDeclSkills.size + ' do not (' + results.length + ' files read, references/ included)');
     console.log('  ' + refs.length + ' tool references seen, '
         + refs.filter((r) => r.mandate).length + ' read as mandates, '
         + refs.filter((r) => r.negative).length + ' vetoed as mentions');
@@ -523,14 +530,14 @@ function main() {
 
     for (const f of findings) {
         const named = f.token === f.canonical ? f.token : f.token + ' (' + f.canonical + ')';
-        console.log('  ' + f.mandate + '  ' + f.skill + '/SKILL.md:' + f.line);
+        console.log('  ' + f.mandate + '  ' + path.relative(PLUGINS, f.file).replace(/\\/g, '/') + ':' + f.line);
         console.log('      mandates ' + named + ', which allowed-tools does not declare');
         console.log('      ' + f.text);
     }
 
     if (noDecl.length) {
         console.log('\n  ' + noDecl.length + ' skill(s) declare no allowed-tools at all:');
-        for (const r of noDecl) console.log('      ' + r.skill);
+        for (const s of noDeclSkills) console.log('      ' + s);
     }
 
     console.log('\nlimits: mandate and conditional read per sentence, negation per clause;');

@@ -90,7 +90,7 @@ that runs in preflight or CI and fails the build:
 | Copy / i18n drift | Hash the English string per key; fail when English changed and a locale's hash did not |
 | Lifecycle | Assert every `addEventListener` / `setInterval` / `requestAnimationFrame` has a matching teardown in the same file |
 
-Use `preflight` for a demonstrated missing check, preserving its gate-integrity
+Use `setup-project` (its gate-file step) for a demonstrated missing check, preserving its gate-integrity
 requirements. A request for analysis ends with measured proposals; an existing
 mandate to improve the harness authorizes implementing the justified winner
 without another planning-only handback. Do not add checks merely to fill the
@@ -116,7 +116,7 @@ the gate goes red. A gate never seen to fail is not known to work.
 
 Append the confirmed classes to `.claude/project-rules.md` under a
 `## What this project keeps getting wrong` heading, each with its count and date.
-`/autodev-init` owns that file; this skill adds a section to it rather than
+`setup-project` (its conventions step) owns that file; this skill adds a section to it rather than
 creating a competing one.
 
 Verify that the project actually loads this file and preserves it durably.

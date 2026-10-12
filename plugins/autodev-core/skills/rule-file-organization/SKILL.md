@@ -25,9 +25,9 @@ table is the fallback for a project with no such rule.
 |---|---|---|
 | Raw reports, temporary backups, handoffs | `.claude/reports/`, `.claude/archives/`, `.claude/handoffs/` | Local; append reports and retain while work depends on them |
 | Temporary screenshots | `.claude/screenshots/` | Local; remove only when no active evidence references them |
-| PRD archives needed by another session | `prd-archives/` | Tracked; follow `archive-prd` and preserve dependency-supporting records |
+| PRD archives needed by another session | `prd-archives/` | Tracked; follow `auto/references/archive-prd.md` and preserve dependency-supporting records |
 | Portable before/after proof | `.claude/evidence/<story>/` | Tracked after checking for secrets and private data; follow `prove` |
-| Project conventions | `.claude/project-rules.md` | Tracked, human edits preserved; follow `autodev-init` |
+| Project conventions | `.claude/project-rules.md` | Tracked, human edits preserved; follow `setup-project/references/conventions.md` |
 | Shared publish queue | `PUBLISH-QUEUE.md` | Tracked; follow `rule-local-first` |
 | Local agent memory and sprint notes | `.claude/agent-memory/`, `.claude/sprint-history.md` | Local unless the project deliberately shares a sanitized subset |
 | Session carriers | `.claude/memory-sessions/` | Verbatim prompts; never copy or commit; owned lifecycle cleanup only |

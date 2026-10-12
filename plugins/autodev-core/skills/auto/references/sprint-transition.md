@@ -15,7 +15,7 @@ When all pending tasks are done, auto handles the sprint lifecycle — but verif
 2. Log summary to .claude/sprint-history.md:
    "Sprint [N]: [done]/[total] tasks | [date] | [one-line summary of work]"
 
-3. Apply the archive-prd skill's split and durability checks:
+3. Apply the split and durability checks in [archive-prd.md](archive-prd.md):
    - Preserve unresolved stories, passed QA records, and the full prerequisite
      chain referenced by retained work; do not delete every passed record.
    - Prove a tracked archive destination before writing, read back the archive,

@@ -27,7 +27,7 @@ limits are not a present grant, prohibition or capability inventory.
 Discover the project's package manager and real gate command. Use its full
 verification chain, preserving each process's exit status and complete failure
 output. If there is no aggregate gate, run and record the necessary commands
-explicitly; use `preflight` to consolidate them when that change is in scope.
+explicitly; use `setup-project` (its gate-file step) to consolidate them when that change is in scope.
 Do not assume every repository uses npm, typecheck or a particular script name.
 
 For final delivery, commit the owned changes and run the full gate on that exact

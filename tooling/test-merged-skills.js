@@ -32,6 +32,21 @@ const MERGED = [
     { name: 'mem-dashboard', plugin: 'autodev-memory', host: 'mem-search', ref: 'dashboard.md' },
     { name: 'knowledge-agent', plugin: 'autodev-memory', host: 'mem-search', ref: 'knowledge-brief.md' },
     { name: 'memory-maintenance', plugin: 'autodev-memory', host: 'mem-search', ref: 'maintenance.md' },
+    // `[measured 2026-10-12]` the second pass (K1-K8 of .claude/reports/a7-skill-triage.md).
+    { name: 'archive-prd', plugin: 'autodev-core', host: 'auto', ref: 'archive-prd.md' },
+    { name: 'status', plugin: 'autodev-core', host: 'auto', ref: 'progress.md', generic: true },
+    { name: 'test', plugin: 'autodev-core', host: 'prove', ref: 'run-tests.md', generic: true },
+    { name: 'scan', plugin: 'autodev-core', host: 'prove', ref: 'live-scan.md' },
+    { name: 'fleet', plugin: 'autodev-core', host: 'sessions', ref: 'fleet.md' },
+    { name: 'autodev-init', plugin: 'autodev-core', host: 'setup-project', ref: 'conventions.md' },
+    { name: 'preflight', plugin: 'autodev-core', host: 'setup-project', ref: 'preflight.md' },
+];
+
+// Retired outright: no host, so only the first and third checks apply.
+// memory-backup is owned by the backup protocol's own script; remotion had no video work in 30 days.
+const RETIRED = [
+    { name: 'memory-backup', plugin: 'autodev-memory' },
+    { name: 'remotion', plugin: 'autodev-stack' },
 ];
 
 // Paths that record history rather than describe the shipped tree.
@@ -40,6 +55,12 @@ const HISTORY = [/^CHANGELOG\.md$/, /^docs\/(?!commands\.md$)/, /^\.claude\//, /
 
 // A name that is also a prd.json field. Each entry is file, name and reason.
 const EXEMPT = [
+    ['tooling/test-brain-panels.js', 'scan', 'a regex literal /scan:/ over panel output'],
+    ['tooling/test-superseded.js', 'scan', 'regex literals over the scan header the script prints'],
+    ['tooling/test-stop-intent-record.js', 'fleet', 'a regex literal /fleet-intent\\.js/, a script name'],
+    ['tooling/test-preflight-template.js', 'preflight', 'a regex literal /preflight: PASS/, the template output'],
+    ['plugins/autodev-core/scripts/pr-path-filters.js', 'preflight', 'names the CI workflow called preflight, not the skill'],
+    ['plugins/autodev-core/skills/rule-local-first/references/history-2026-09-09.md', 'preflight', 'dated history, true when written'],
     ['tooling/test-prd-container-class.js', 'sprint', 'names the prd.json `sprint` field, not the skill'],
     ['tooling/test-stop-failure-note.js', 'sprint', 'a regex literal /sprint still active/, not a slash command'],
 ];
@@ -48,13 +69,15 @@ const results = [];
 const check = (label, ok, detail) => results.push({ label, ok: !!ok, detail });
 
 const esc = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-function skillRefPattern(name) {
+// A generic name (status, test) is also a CLI verb, a built-in slash command and
+// a commit type, so a bare backtick or slash form says nothing about the skill.
+// Only the forms that can name nothing else count for those.
+function skillRefPattern(name, generic) {
     const n = esc(name);
     return new RegExp([
         'skills/' + n + '/',
-        '`/?' + n + '`',
+        ...(generic ? [] : ['`/?' + n + '`', '(?:^|[\\s|])/' + n + '\\b']),
         'autodev-(?:core|memory|stack):' + n + '\\b',
-        '(?:^|[\\s|])/' + n + '\\b',
         'Skill\\(\\s*[\'"]' + n + '[\'"]',
         '\\bthe ' + n + ' skill\\b',
     ].join('|'), 'm');
@@ -84,10 +107,14 @@ const positives = {
     sprint: 'see plugins/autodev-core/skills/sprint/SKILL.md',
     'show-your-work': 'type /show-your-work', 'mem-dashboard': 'autodev-memory:mem-dashboard',
     'knowledge-agent': "Skill('knowledge-agent')", 'memory-maintenance': 'the memory-maintenance skill',
+    'archive-prd': 'run `archive-prd` first', status: 'autodev-core:status', test: "Skill('test')",
+    scan: 'type /scan', fleet: 'plugins/autodev-core/skills/fleet/SKILL.md', 'autodev-init': 'start with `/autodev-init`',
+    preflight: 'the preflight skill', 'memory-backup': 'autodev-memory:memory-backup', remotion: 'load `remotion`',
 };
-for (const m of MERGED) {
-    check('control: pattern fires on a planted reference to ' + m.name, skillRefPattern(m.name).test(positives[m.name]));
+for (const m of [...MERGED, ...RETIRED]) {
+    check('control: pattern fires on a planted reference to ' + m.name, skillRefPattern(m.name, m.generic).test(positives[m.name]));
 }
+check('control: a generic name ignores the CLI verb and the built-in', !skillRefPattern('status', true).test('`status` reconstructs it; type /status'));
 check('control: pattern ignores prose use of a word', !skillRefPattern('iterate').test('we iterate freely on design'));
 
 const inv = inventory();
@@ -103,6 +130,10 @@ for (const m of MERGED) {
     const host = fs.existsSync(hostMd) ? fs.readFileSync(hostMd, 'utf8') : '';
     check(m.name + ': ' + m.host + '/SKILL.md links references/' + m.ref, host.includes('references/' + m.ref));
 }
+for (const m of RETIRED) {
+    check(m.name + ': retired skill directory removed', !fs.existsSync(path.join(PLUGINS, m.plugin, 'skills', m.name)));
+    check(m.name + ': not in the user-invocable inventory', !inv.includes(m.name));
+}
 
 const ls = spawnSync('git', ['ls-files', '-z'], { cwd: ROOT, encoding: 'utf8', windowsHide: true });
 const files = ls.status === 0 ? ls.stdout.split('\0').filter(Boolean) : [];
@@ -113,8 +144,8 @@ const hits = {};
 for (const f of scanned) {
     let text;
     try { text = fs.readFileSync(path.join(ROOT, f), 'utf8'); } catch { continue; }
-    for (const m of MERGED) {
-        const re = skillRefPattern(m.name);
+    for (const m of [...MERGED, ...RETIRED]) {
+        const re = skillRefPattern(m.name, m.generic);
         if (!re.test(text)) continue;
         text.split(/\r?\n/).forEach((line, i) => {
             if (EXEMPT.some(([ef, en]) => ef === f && en === m.name)) return;
@@ -122,7 +153,7 @@ for (const f of scanned) {
         });
     }
 }
-for (const m of MERGED) {
+for (const m of [...MERGED, ...RETIRED]) {
     const h = hits[m.name] || [];
     check(m.name + ': no surviving reference as a skill', h.length === 0, h.length + ' hit(s)' + (h.length ? '\n      ' + h.slice(0, 8).join('\n      ') : ''));
 }
@@ -132,7 +163,8 @@ for (const r of results) {
     if (!r.ok) failed++;
     console.log((r.ok ? '  ok   ' : '  FAIL ') + r.label + (r.detail !== undefined ? ' (' + r.detail + ')' : ''));
 }
-console.log('\npopulation: ' + inv.length + ' user-invocable skill(s), ' + MERGED.length + ' merged name(s), '
+console.log('\npopulation: ' + inv.length + ' user-invocable skill(s), ' + MERGED.length + ' merged and '
+    + RETIRED.length + ' retired name(s), '
     + scanned.length + ' shipped file(s) scanned for references');
 console.log(failed ? failed + ' of ' + results.length + ' check(s) failed' : 'all ' + results.length + ' checks passed');
 process.exitCode = failed ? 1 : 0;

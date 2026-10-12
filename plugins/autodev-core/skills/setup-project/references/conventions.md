@@ -1,12 +1,6 @@
----
-name: autodev-init
-description: Derive this project's actual conventions from its code and write them into a project-local rules file, so autodev enforces what this codebase already decided instead of a generic default.
-when_to_use: "Invoked when the user says \"autodev init\", \"init autodev\", \"learn my conventions\", \"generate project rules\", or when review/audit findings keep contradicting how this codebase is actually written."
-allowed-tools: Bash, Read, Write, Edit, Grep, Glob
-model: opus
-user-invocable: true
-argument-hint: "[refresh]"
----
+<!-- Merged from the former autodev-init skill (zero loads in 30 days, 2026-10-12). -->
+
+**When this applies:** Derive this project's actual conventions from its code and write them into a project-local rules file, so autodev enforces what this codebase already decided instead of a generic default. Invoked when the user says "autodev init", "init autodev", "learn my conventions", "generate project rules", or when review/audit findings keep contradicting how this codebase is actually written.
 
 # autodev-init
 
@@ -18,6 +12,18 @@ Output goes to **`.claude/project-rules.md`** in the project — not into the
 plugin. It is project-local, git-committed, and human-editable. The generic
 `standards` and `rule-*` skills stay as the fallback for anything you have not
 decided.
+
+## Contents
+
+- Rule one: observe, never assume
+- Step 1: Establish the stack
+- Step 2: Measure the conventions
+- Step 3: Find the boundaries
+- Step 4: Resolve contradictions with the user
+- Step 5: Write `.claude/project-rules.md`
+- Step 6: Wire it in
+- What not to do
+- Proving the run
 
 ## Rule one: observe, never assume
 

@@ -21,7 +21,7 @@ accessibility advice, which you already have.
 > **Current user instructions and repository guidance still apply.**
 > `.claude/project-rules.md` overrides the shipped defaults in this file. If it exists, read it and
 > follow it wherever the two disagree — it was measured from this codebase,
-> while everything below is a shipped default. Run `/autodev-init` to generate
+> while everything below is a shipped default. Run `setup-project` (its conventions step) to generate
 > it. Where a convention appears under "Undecided" there, do not flag either
 > form in review.
 

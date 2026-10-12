@@ -66,7 +66,7 @@ const opt = (name, dflt) => {
  * Claude Code's own slash commands. A bare `/status` is the built-in, not this
  * plugin's `status` skill. `[measured 2026-09-26]` six built-in `/status` runs
  * in 30 days were credited to the skill. A plugin-qualified name
- * (`/autodev-core:status`) is never in this set, so it still counts.
+ * (`/<plugin>:status`) is never in this set, so it still counts.
  */
 const BUILTIN_COMMANDS = new Set([
     'add-dir', 'agents', 'artifacts', 'bug', 'clear', 'compact', 'config', 'context',

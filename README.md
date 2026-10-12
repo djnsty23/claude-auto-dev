@@ -55,9 +55,9 @@ before installing — it clears those out.
 
 | Plugin | Contains | Install it if |
 |--------|----------|---------------|
-| **autodev-core** | The workflow — `brainstorm`, `auto`, `audit`, `review`, `ship`, `scan`, plus the `prd.json` sprint system, 4 subagents, and the sprint/typecheck/safety hooks | Always. This is the tool. |
-| **autodev-memory** | Cross-session project memory, with maintenance under `mem-search`: automatic observation capture, semantic search, domain-knowledge briefs, repo-backed backup | You want Claude to remember earlier sessions in a project |
-| **autodev-stack** | Supabase, Doppler, Stripe, and Remotion integrations | You use that stack |
+| **autodev-core** | The workflow — `brainstorm`, `auto`, `audit`, `review`, `ship`, `prove`, plus the `prd.json` sprint system, 4 subagents, and the sprint/typecheck/safety hooks | Always. This is the tool. |
+| **autodev-memory** | Cross-session project memory, with maintenance under `mem-search`: automatic observation capture, semantic search, domain-knowledge briefs | You want Claude to remember earlier sessions in a project |
+| **autodev-stack** | Supabase, Doppler and Stripe integrations | You use that stack |
 
 `autodev-core` stands alone. The other two are additive and can be removed
 without touching it.
@@ -68,9 +68,9 @@ without touching it.
 
 | Say | Does |
 |-----|------|
-| `autodev-init` | Read this codebase and write its real conventions to `.claude/project-rules.md` |
+| `autodev init` | Through `setup-project`: read this codebase and write its real conventions to `.claude/project-rules.md` |
 | `learn-from-fixes` | Rank what this project keeps shipping broken, from its own fix history |
-| `preflight` | Scaffold the executable gate file that fails the build on those classes |
+| `add a gate` | Through `setup-project`: scaffold the executable gate file that fails the build on those classes |
 | — | `scripts/find-orphan-checks.js` finds verification code nothing runs |
 | `brainstorm` | Scan codebase + live site, propose improvements |
 | `brainstorm apply` | Create stories from the last brainstorm |
@@ -80,10 +80,10 @@ without touching it.
 | `audit` | 7-agent parallel quality audit |
 | `review` | Runs `/code-review`, then this project's own checks |
 | `ship` | Build, test, review, deploy, verify |
-| `scan` / `qa` | Live site QA (visual + a11y + console) |
+| `scan it` / `qa` | Live site QA (visual + a11y + console), through `prove` |
 | `fix` | Runs `/debug`, then verifies the fix the way this project requires |
 | `commit` | Conventional commit + push + PR |
-| `test` | Unit + browser tests |
+| `run the tests` | Unit + browser tests, through `prove` |
 | `security` | Runs `/security-review`, then Supabase/RLS and cloud-key checks |
 | `perf` | Core Web Vitals audit |
 | `a11y` | WCAG 2.1 AA audit |
@@ -95,7 +95,7 @@ Plugin skills are namespaced, so `/autodev-core:audit` always works even if you
 have another `audit` skill installed. See [`docs/commands.md`](docs/commands.md)
 for the full list.
 
-**Start with `/autodev-init`.** It measures how your codebase is actually
+**Start with `autodev init`** (the conventions step of `setup-project`). It measures how your codebase is actually
 written — component style, data fetching, where auth is enforced, tokens vs raw
 colors — and writes `.claude/project-rules.md`. `review`, `audit`, and
 `standards` all defer to that file, so the tool enforces your conventions

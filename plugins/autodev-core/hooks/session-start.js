@@ -159,7 +159,7 @@ try {
             const c = summarise(stories);
             const actionable = entries.filter(([, s]) => isActionable(s));
 
-            // COMPLETED WORK LEAVES THIS FILE. `archive-prd` moves finished
+            // COMPLETED WORK LEAVES THIS FILE. auto's archive-prd.md moves finished
             // stories to .claude/archives/ and records the running total here,
             // so a count over `stories` alone is a count over the FILE, not over
             // the project. `[measured 2026-08-28]` a project that had shipped

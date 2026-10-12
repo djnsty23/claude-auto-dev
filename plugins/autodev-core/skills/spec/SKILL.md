@@ -166,7 +166,7 @@ kind of story that is born blocked:
   project; the payment flow depends on the Stripe account; the "no config"
   notice story depends on nothing.
 
-The operator sees these under "Blocked on you" in `status` from the first run,
+The operator sees these under "Blocked on you" in the progress view from the first run,
 which is the point: the accounts get created while the agent builds the parts
 that do not need them, instead of being discovered one at a time.
 
