@@ -36,10 +36,10 @@
         {
           "id": "release-protections",
           "kind": "fixture",
-          "probe": "node tooling/test-release-protections.js",
-          "expect": "^release_chain=verified direct_write=denied retag=denied delete_tag=denied install_hash=match rollback_hash=match$",
+          "probe": "node tooling/test-release-protection.js",
+          "expect": "^direct_write=DENIED tag_replace=DENIED tag_delete=DENIED authorized_publish=PASS$",
           "watch": [
-            "tooling/test-release-protections.js"
+            "tooling/test-release-protection.js"
           ],
           "weight": 8,
           "populationCount": "^(ok|PASS) "
@@ -58,14 +58,25 @@
       "name": "Security and authority",
       "criteria": [
         {
-          "id": "task-authority",
+          "id": "worker-authority",
           "kind": "fixture",
-          "probe": "node tooling/test-task-authority.js",
-          "expect": "^profiles=covered boundary_escapes=0 injected_authority_changes=0 undeclared_credentials=0 credential_policy=pass$",
+          "probe": "node tooling/test-worker-authority.js",
+          "expect": "^review_write=DENY local_push=DENY undeclared_secret=DENY child_escape=DENY injection_escalation=DENY authorized_control=PASS$",
           "watch": [
-            "tooling/test-task-authority.js"
+            "tooling/test-worker-authority.js"
           ],
-          "weight": 8,
+          "weight": 6,
+          "populationCount": "^(ok|PASS) "
+        },
+        {
+          "id": "credential-boundary",
+          "kind": "installed",
+          "weight": 2,
+          "probe": "node tooling/test-credential-boundary.js --installed",
+          "expect": "^authorized_scope=PASS foreign_scope=DENIED expiry=SET old_credential=REJECTED$",
+          "watch": [
+            "tooling/test-credential-boundary.js"
+          ],
           "populationCount": "^(ok|PASS) "
         },
         {
@@ -148,7 +159,7 @@
           "id": "instruction-envelope",
           "kind": "fixture",
           "probe": "node tooling/test-instruction-envelope.js",
-          "expect": "^always_on<=27200 project_instructions<=6963 required_rules=covered source_manifest=complete style_conflicts=0 oversize_update=blocked$",
+          "expect": "^oversize_update=BLOCKED required_rules=RETAINED source_manifest=PASS conflicting_styles=DETECTED$",
           "watch": [
             "tooling/test-instruction-envelope.js"
           ],
@@ -183,7 +194,7 @@
           "id": "skill-routing",
           "kind": "fixture",
           "probe": "node tooling/test-skill-routing.js",
-          "expect": "^critical_routes=100% heldout_routing>=95% outcome_noninferiority=pass$",
+          "expect": "^critical_routes=100% ambiguous_routes=EXPLICIT missing_skill_control=FAIL$",
           "watch": [
             "tooling/test-skill-routing.js"
           ],
@@ -279,15 +290,15 @@
       "name": "Queue",
       "criteria": [
         {
-          "id": "durable-ingestion",
+          "id": "queue-recovery",
           "kind": "fixture",
-          "probe": "node tooling/test-durable-ingestion.js",
-          "expect": "^accepted_tasks_retained=100% duplicate_dispatches=0 unresolved_effects_replayed=0 conflicts_preserved=100%$",
+          "probe": "node tooling/test-queue-recovery.js",
+          "expect": "^accepted=(?<population>\\d+) retained=\\k<population> duplicate_dispatches=0 conflicts_preserved=PASS uncertain_effects=HELD$",
           "watch": [
-            "tooling/test-durable-ingestion.js"
+            "tooling/test-queue-recovery.js"
           ],
           "weight": 8,
-          "populationCount": "^(ok|PASS) "
+          "populationLabel": "accepted tasks"
         },
         {
           "id": "queue-window",
@@ -303,15 +314,15 @@
       "name": "Visibility",
       "criteria": [
         {
-          "id": "receipted-asks",
+          "id": "owner-asks",
           "kind": "fixture",
-          "probe": "node tooling/test-receipted-asks.js",
-          "expect": "^sources=(?<population>\\d+)/\\k<population> stale_sources_hidden=0 urgent_canaries_receipted=100% unreceipted_overdue=0$",
+          "probe": "node tooling/test-owner-asks.js",
+          "expect": "^unchanged_asks=1 delivery_without_receipt=UNKNOWN stale_source=VISIBLE authority_from_silence=0$",
           "watch": [
-            "tooling/test-receipted-asks.js"
+            "tooling/test-owner-asks.js"
           ],
           "weight": 8,
-          "populationLabel": "sources"
+          "populationCount": "^(ok|PASS) "
         },
         {
           "id": "visibility-window",
@@ -451,12 +462,12 @@
       "name": "Owner time",
       "criteria": [
         {
-          "id": "owner-minutes",
+          "id": "owner-asks-time",
           "kind": "fixture",
-          "probe": "node tooling/test-owner-minutes.js",
-          "expect": "^minutes_capture>=95% duplicate_asks=0 unauthorized_silence_actions=0 urgent_misses=0$",
+          "probe": "node tooling/test-owner-asks.js",
+          "expect": "^unchanged_asks=1 delivery_without_receipt=UNKNOWN stale_source=VISIBLE authority_from_silence=0$",
           "watch": [
-            "tooling/test-owner-minutes.js"
+            "tooling/test-owner-asks.js"
           ],
           "weight": 8,
           "populationCount": "^(ok|PASS) "
@@ -475,12 +486,12 @@
       "name": "Recovery",
       "criteria": [
         {
-          "id": "restore-drill",
+          "id": "runtime-restore",
           "kind": "fixture",
-          "probe": "node tooling/test-release-restore.js",
-          "expect": "^clean_profile_restore=pass selected_release_hash=match rollback_with_newer_cache=pass queue_reconciled=pass$",
+          "probe": "node tooling/test-runtime-restore.js",
+          "expect": "^restore=PASS selected_hash=PASS newer_cache_ignored=PASS schema_rollback=PASS duplicate_schedulers=0$",
           "watch": [
-            "tooling/test-release-restore.js"
+            "tooling/test-runtime-restore.js"
           ],
           "weight": 8,
           "populationCount": "^(ok|PASS) "
