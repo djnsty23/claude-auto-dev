@@ -57,6 +57,12 @@
  * When it refuses (a pin changed, or no result head could be read), the judge
  * read only the report, so the verdict is written as escalate for a person.
  *
+ * RECEIPTS. The same write needs a receipt acceptance-receipt.js verified for the
+ * record's attempt and result tree. The judge's accept never stands in for one:
+ * with no receipt, or a failed one, the judge accept is written as escalate with
+ * the gate's named reason. The judge still makes the judgement calls (follow-up,
+ * escalate, and whether a verified result is what the brief meant).
+ *
  * WHAT IT IS NOT. It never merges, deploys, messages or deletes. A verdict is a
  * ledger field; what follows it is a queued task someone enqueued, or a Brain
  * turn. `compare` reads the Brain's decisions from what it did next (a same-stem
@@ -72,6 +78,7 @@ const claudePaths = require('./claude-paths.js');
 const uw = require('./unattended-worker.js');
 const hw = require('./headless-worker.js');
 const capacity = require('./capacity.js');
+const acceptance = require('./acceptance-receipt.js');
 
 const USAGE = [
     'Usage: node brain-judge.js tick [--live] [--budget-sec 180] [--judge-bin <path>] [--worker-bin <path>] [--headless-worker <file>] [--dev]',
@@ -611,9 +618,11 @@ const loginLine = (j) => `judge: stopped, the judge's login was refused (${j.log
  */
 const countsAgainstRecord = (r) => r.ok === false && !r.login && r.costUsd !== 0;
 
-// The pin check refuses an accept with these codes. The judge read only the
-// report, so a changed or unreadable pinned test goes to a person as escalate.
+// The pin check and the acceptance-receipt gate refuse an accept with these
+// codes. The judge read only the report, so a changed or unreadable pinned test,
+// or an accept no verified receipt backs, goes to a person as escalate.
 const PIN_REFUSALS = ['pin-changed', 'pin-unchecked'];
+const ACCEPT_REFUSALS = [...PIN_REFUSALS, ...acceptance.REFUSALS];
 
 /**
  * Write a verdict through unattended-worker verdict, so a judge accept meets the
@@ -626,8 +635,8 @@ function writeVerdict(p, taskId, decision, reason) {
     };
     try { return write(decision, reason); } catch (e) {
         const note = `${e.publicCode || 'internal'}: ${e.message}`;
-        if (decision !== 'accept' || !PIN_REFUSALS.includes(e.publicCode)) return { applied: false, note };
-        try { return { ...write('escalate', `the judge would accept, but ${e.message}`), decision: 'escalate', note }; } catch (e2) {
+        if (decision !== 'accept' || !ACCEPT_REFUSALS.includes(e.publicCode)) return { applied: false, note };
+        try { return { ...write('escalate', `the judge would accept, but ${e.publicCode}: ${e.message}`), decision: 'escalate', note }; } catch (e2) {
             return { applied: false, note: `${note}; escalate also refused: ${e2.publicCode || 'internal'}: ${e2.message}` };
         }
     }

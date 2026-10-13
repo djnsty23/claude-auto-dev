@@ -30,6 +30,7 @@ const SCRIPTS = path.join(__dirname, '..', 'plugins', 'autodev-core', 'scripts')
 const SUBJECT = path.join(SCRIPTS, 'brain-judge.js');
 const UW = path.join(SCRIPTS, 'unattended-worker.js');
 const HEADLESS = path.join(SCRIPTS, 'headless-worker.js');
+const RECEIPT = path.join(SCRIPTS, 'acceptance-receipt.js');
 const bj = require(SUBJECT);
 
 let pass = 0, fail = 0, unchecked = 0;
@@ -45,6 +46,7 @@ const home = path.join(scratch, 'home');
 fs.mkdirSync(home);
 const baseEnv = { ...process.env, HOME: home, USERPROFILE: home, GIT_TERMINAL_PROMPT: '0' };
 delete baseEnv.CLAUDE_CONFIG_DIR;
+delete baseEnv.AUTODEV_HEADLESS;
 const autodev = path.join(home, '.claude', 'autodev');
 const stateDir = path.join(autodev, 'brain-judge');
 const clockDir = path.join(autodev, 'brain-clock');
@@ -86,7 +88,8 @@ g(repo, 'fetch', '-q', 'origin');
 const briefFile = path.join(scratch, 'brief.md');
 // As long as the largest measured brief (10.7 KB on 2026-10-12), with its last ask at the end:
 // a 3 KB reader cut it, and the judge escalated asks it could not see.
-fs.writeFileSync(briefFile, 'MISSION. Add a guide.\n' + 'Context line for the worker.\n'.repeat(380) + 'LAST ASK. Open a pull request.\n');
+// A judge accept is written only on a verified receipt, so the brief names one checkable criterion.
+fs.writeFileSync(briefFile, 'MISSION. Add a guide.\n## Acceptance criteria\n- AC1: the readme is tracked\n  check: git ls-files --error-unmatch README.md\n' + 'Context line for the worker.\n'.repeat(380) + 'LAST ASK. Open a pull request.\n');
 
 const fakeWorker = path.join(scratch, 'fake-worker.js');
 fs.writeFileSync(fakeWorker, [
@@ -274,6 +277,9 @@ try {
         check('before the headless run is settled, nothing closes', !types(t5).includes('judge.closed') && recOf('worker-loop-a').state === 'started');
         const hs = spawnSync(process.execPath, [HEADLESS, 'settle', '--code', 'loop-a'], { encoding: 'utf8', env: baseEnv });
         check('fixture: headless-worker settles the run, as the clock does', hs.status === 0, hs.stdout.slice(0, 200));
+        g(repo, 'branch', 'claude/loop-a', 'main');
+        const ver = run(RECEIPT, ['verify', '--task-id', 'worker-loop-a', '--ledger', ledger]);
+        check('fixture: the coordinator verifies loop-a, so a judge accept has a receipt to stand on', ver.value && ver.value.complete === true, ver.stdout.slice(0, 300));
         const argvFile = path.join(scratch, 'judge-argv.json');
         const t6 = judge(['tick', ...liveArgs], { FAKE_JUDGE_ARGV: argvFile });
         const ev = t6.value ? t6.value.events : [];
@@ -333,8 +339,12 @@ try {
     const dryReport = path.join(scratch, 'dry-report.md');
     fs.writeFileSync(dryReport, 'work\nRESULT dry-one done: x\n');
     const nowIso = new Date().toISOString();
-    dl.records.push({ taskId: 'worker-dry-one', slug: 'dry-one', repo, state: 'closed', runStatus: 'succeeded', startedAt: nowIso, settledAt: nowIso, report: dryReport });
+    dl.records.push({ taskId: 'worker-dry-one', slug: 'dry-one', repo, state: 'closed', runStatus: 'succeeded', startedAt: nowIso, settledAt: nowIso, report: dryReport,
+        branch: 'claude/dry-one', briefFile, briefSha256: require('crypto').createHash('sha256').update(fs.readFileSync(briefFile)).digest('hex') });
     fs.writeFileSync(ledger, JSON.stringify(dl, null, 2));
+    g(repo, 'branch', 'claude/dry-one', 'main');
+    const dver = run(RECEIPT, ['verify', '--task-id', 'worker-dry-one', '--ledger', ledger]);
+    check('fixture: the coordinator verifies dry-one', dver.value && dver.value.complete === true, dver.stdout.slice(0, 300));
     const td = judge(['tick', ...liveArgs]);
     check('fixture: a dry tick judges the record and writes no verdict', types(td).includes('judge.verdict') && !recOf('worker-dry-one').verdict, td.stdout.slice(0, 300));
     judge(['switch', '--judge', 'live']);

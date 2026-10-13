@@ -253,7 +253,7 @@ try {
     g(repo, 'branch', 'claude/guide-a', 'main');
     const v2 = val(cli(['verdict', '--task-id', 'worker-guide-a', '--decision', 'accept', '--reason', 'fine', '--by', 'judge', '--ledger', ledger]));
     check('a second judge verdict never replaces the first', v2 && v2.verdict.applied === false && recOf('worker-guide-a').verdict.decision === 'follow-up');
-    const v3 = val(cli(['verdict', '--task-id', 'worker-guide-a', '--decision', 'accept', '--reason', 'read it myself', '--ledger', ledger]));
+    const v3 = val(cli(['verdict', '--task-id', 'worker-guide-a', '--decision', 'accept', '--reason', 'read it myself', '--accept-without-receipt', 'queue suite: receipts are tested elsewhere', '--ledger', ledger]));
     check('a Brain verdict replaces a judge one and returns what it replaced', v3 && v3.verdict.applied === true && v3.verdict.previous.by === 'judge' && recOf('worker-guide-a').verdict.by === 'brain');
     check('once accepted, the dependent task is ready', val(cli(['ready', '--ledger', ledger])).ready.includes('worker-guide-b'));
     check('verdict refuses an unknown decision', code(cli(['verdict', '--task-id', 'worker-guide-a', '--decision', 'maybe', '--reason', 'r', '--ledger', ledger])) === 'usage');

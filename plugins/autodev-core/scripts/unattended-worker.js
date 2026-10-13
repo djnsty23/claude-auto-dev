@@ -81,6 +81,11 @@
  * refused. brain-judge.js writes through this command, so a judge accept meets
  * the same check.
  *
+ * RECEIPTS. `verdict --decision accept` also needs a receipt from
+ * acceptance-receipt.js for the record's current attempt (`attemptId`, set by
+ * launch and record) and current result tree, verified from the brief whose hash
+ * brief or enqueue bound. See gateReceipt.
+ *
  * WHAT IT IS NOT. Only `launch` starts anything. It deletes nothing and
  * verifies no result. A `started` record means a session id or a supervisor
  * pid was returned, not that step 0 passed.
@@ -100,13 +105,14 @@
  *   node unattended-worker.js ready [--max-concurrent 2] [--max-per-hour 2] [--ledger <file>]
  *   node unattended-worker.js launch --task-id <id> [--model <id>] [--effort <level>] [--dry-run] [--headless-worker <file>] [--claude-bin <path>] [--dev] [--ledger <file>]
  *   node unattended-worker.js verdict --task-id <id> --decision accept|follow-up|escalate --reason <text> [--by judge|brain|operator]
- *        [--head <sha>] [--allow-pin-change <reason>] [--ledger <file>]
+ *        [--head <sha>] [--allow-pin-change <reason>] [--accept-without-receipt <reason>] [--ledger <file>]
  * Output: {"ok":true,"value":{...}} exit 0; {"ok":false,"error":{"code","message"}} exit 1.
  */
 const fs = require('node:fs');
 const path = require('node:path');
 const os = require('node:os');
 const claudePaths = require('./claude-paths.js');
+const acceptance = require('./acceptance-receipt.js');
 const { scriptPlacement, readLedger: readHeadlessLedger, namedTools } = require('./headless-worker.js');
 const crypto = require('node:crypto');
 const { spawnSync } = require('node:child_process');
@@ -144,6 +150,8 @@ const USAGE = [
     '       differs or is gone at the result head (--head, else the branch locally or on origin), and refused',
     '       (pin-unchecked) when no head can be read. --allow-pin-change "<reason>" overrides and stores the reason.',
     '       follow-up and escalate are never refused.',
+    '--accept-without-receipt "<reason>": accept needs a receipt acceptance-receipt.js verified for this attempt and result tree,',
+    '       and is refused with the gate reason otherwise. Brain and operator may override with a stored reason, a judge may not.',
     'The scheduled-task path starts nothing and deletes nothing: the coordinator makes those MCP calls.',
     `Default ledger: ${path.join('~', '.claude', 'autodev', 'unattended-workers.json')}`,
 ].join('\n') + '\n';
@@ -179,7 +187,7 @@ function parseArgs(argv) {
     const flags = ['help', 'report-read', 'dry-run', 'dev'];
     const known = ['_', ...flags, 'repo', 'slug', 'brief-file', 'return', 'report', 'base', 'task-id', 'title', 'ledger', 'session', 'run-status', 'reason',
         'after', 'model', 'effort', 'permission-mode', 'config-dir', 'headless-worker', 'claude-bin', 'decision', 'by', 'max-concurrent', 'max-per-hour',
-        'pin', 'allow-pin-change', 'head'];
+        'pin', 'allow-pin-change', 'head', 'accept-without-receipt'];
     for (let i = 0; i < argv.length; i++) {
         const a = argv[i];
         if (a === '--help' || a === '-h' || a === 'help') { out.help = true; continue; }
@@ -435,6 +443,24 @@ function gatePins(rec, { decision, allow, head }) {
 }
 
 /**
+ * ACCEPTANCE RECEIPTS. An accept is recorded only on a receipt acceptance-receipt.js
+ * verified for this attempt and this result tree, from the brief the ledger bound.
+ * The worker's report, however it reads, is never that evidence. A refusal faults
+ * with the gate's named reason (acceptance.REFUSALS). The Brain or the operator can
+ * override with --accept-without-receipt "<reason>", stored beside the refusal it
+ * overrode. A judge cannot: its accept reads only the worker's text.
+ */
+function gateReceipt(rec, { decision, by, allow, head }) {
+    if (allow !== undefined && decision !== 'accept') fault('usage', '--accept-without-receipt applies only to --decision accept');
+    if (allow !== undefined && by === 'judge') fault('usage', '--accept-without-receipt is refused for --by judge: a judge accept needs a verified receipt');
+    if (decision !== 'accept') return null;
+    const g = acceptance.gate(rec, { head });
+    if (g.ok) return { receipt: g.receipt };
+    if (allow !== undefined) return { receiptCheck: { code: g.code, why: g.why }, acceptWithoutReceipt: String(allow).slice(0, 2000) };
+    fault(g.code, `${g.why}; run acceptance-receipt.js verify --task-id ${rec.taskId}${by === 'judge' ? '' : ', or pass --accept-without-receipt "<reason>"'}`);
+}
+
+/**
  * Nothing already claims the slug: not the worktree path, the local branch, the
  * origin branch, nor another active ledger record. `self` is the task being
  * launched, whose own queued record is not a claim against itself.
@@ -483,8 +509,13 @@ function brief(opts) {
         const scratch = scratchFor(taskId);
         const report = opts.report ? path.resolve(opts.report) : path.join(scratch, 'REPORT.md');
         const prompt = composePrompt({ repo, worktree, branch, base, taskId, returnTo, report, slug: opts.slug, body, scratch, pins: pinned.pins });
+        // The acceptance gate reads the criteria from this copy and checks it against the hash.
+        fs.mkdirSync(scratch, { recursive: true });
+        const briefFile = path.join(scratch, 'BRIEF.md');
+        fs.writeFileSync(briefFile, body);
         const record = {
             taskId, repo, slug: opts.slug, branch, worktree, base, returnTo, report, state: 'composed', ...pinned,
+            briefFile, briefSha256: crypto.createHash('sha256').update(body).digest('hex'),
             composedAt: new Date().toISOString(), ...stamp('composed'),
             promptSha256: crypto.createHash('sha256').update(prompt).digest('hex'),
         };
@@ -707,10 +738,11 @@ function launch(opts) {
             if (dry) return { ledger: ledgerFile, dryRun: true, taskId: rec.taskId, files, headless: h.value };
             const at = new Date().toISOString();
             Object.assign(rec, pinned, {
-                state: 'started', startedAt: at, launchedAt: at, launch: launchOpts,
+                state: 'started', startedAt: at, launchedAt: at, launch: launchOpts, attemptId: crypto.randomUUID(),
                 promptSha256: crypto.createHash('sha256').update(prompt).digest('hex'),
                 headless: { code: rec.slug, pid: h.value.supervisorPid || null, log: files.log, ledger: h.value.ledger || null,
-                    startedAt: (h.value.record && h.value.record.startedAt) || null, version: (h.value.record && h.value.record.version) || null },
+                    startedAt: (h.value.record && h.value.record.startedAt) || null, version: (h.value.record && h.value.record.version) || null,
+                    keepTools: files.keepTools || [] },
             });
             delete rec.lastLaunchError;
             writeLedger(ledgerFile, ledger);
@@ -761,7 +793,7 @@ const COMMAND_FLAGS = {
     settle: ['task-id', 'run-status', 'report-read', 'ledger'],
     deleted: ['task-id', 'ledger'],
     retire: ['task-id', 'reason', 'ledger'],
-    verdict: ['task-id', 'decision', 'reason', 'by', 'head', 'allow-pin-change', 'ledger'],
+    verdict: ['task-id', 'decision', 'reason', 'by', 'head', 'allow-pin-change', 'accept-without-receipt', 'ledger'],
     ready: ['max-concurrent', 'max-per-hour', 'ledger'],
     status: ['task-id', 'ledger'],
 };
@@ -782,7 +814,7 @@ function run(argv) {
             if (rec.state !== 'composed') fault('bad-state', `task ${rec.taskId} is ${rec.state}, not composed`);
             // `version` and `dev` under the names headless-worker.js records use.
             const { startedVersion: version, startedDev: dev } = stamp('started');
-            Object.assign(rec, { state: 'started', sessionId: opts.session, startedAt: new Date().toISOString(), version, dev });
+            Object.assign(rec, { state: 'started', sessionId: opts.session, startedAt: new Date().toISOString(), version, dev, attemptId: crypto.randomUUID() });
             return {};
         });
     }
@@ -821,8 +853,12 @@ function run(argv) {
             if (!VERDICT_BY.includes(opts.by || 'brain')) fault('usage', `--by must be one of ${VERDICT_BY.join(', ')}`);
             if (!opts.reason || !String(opts.reason).trim()) fault('usage', '--reason is required');
             if (!FINISHED.includes(rec.state)) fault('bad-state', `task ${rec.taskId} is ${rec.state}; a verdict needs a finished run`);
+            const by = opts.by || 'brain';
+            // A judge never replaces a standing verdict, so there is nothing to gate.
+            if (rec.verdict && by === 'judge') return { verdict: applyVerdict(rec, { decision: opts.decision, reason: opts.reason, by }) };
             const pins = gatePins(rec, { decision: opts.decision, allow: opts['allow-pin-change'], head: opts.head });
-            return { verdict: applyVerdict(rec, { decision: opts.decision, reason: opts.reason, by: opts.by || 'brain', pins }) };
+            const receipt = gateReceipt(rec, { decision: opts.decision, by, allow: opts['accept-without-receipt'], head: opts.head });
+            return { verdict: applyVerdict(rec, { decision: opts.decision, reason: opts.reason, by, pins: { ...(pins || {}), ...(receipt || {}) } }) };
         });
     }
     if (cmd === 'ready') {
@@ -857,4 +893,4 @@ if (require.main === module) {
     }
 }
 
-module.exports = { resolvePins, checkPins, gatePins, composePrompt, decideSettle, parseArgs, run, planStarts, dependencyState, applyVerdict, pointerPrompt, headlessArgs, parseHeadless, recoverTimedOutStart, withLock, FINISHED, DECISIONS, TRANSIENT_LAUNCH_CODES };
+module.exports = { resolvePins, checkPins, gatePins, gateReceipt, composePrompt, decideSettle, parseArgs, run, planStarts, dependencyState, applyVerdict, pointerPrompt, headlessArgs, parseHeadless, recoverTimedOutStart, withLock, FINISHED, DECISIONS, TRANSIENT_LAUNCH_CODES };
