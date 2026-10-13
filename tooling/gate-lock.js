@@ -332,8 +332,16 @@ function runChainChild(root, sentinel, runId, token, waitGo = false, recordsBase
     const list = chainSteps(pkg);
     const worktree = ident.canonicalPath(root);
     let recordFault = false;
+    // AUTODEV_GATE_TEST_RECORD_FAULT=CODE[:N] (a test seam) fails every step
+    // record after the first N with CODE, as a disk that fills mid-run does.
+    const seam = /^([A-Z]+)(?::(\d+))?$/.exec(process.env.AUTODEV_GATE_TEST_RECORD_FAULT || '');
+    let recorded = 0;
     const record = recordsBase && runId
-        ? (e) => records.appendStep(recordsBase, runId, { ...e, token, worktree, runnerPid: process.pid })
+        ? (e) => {
+            if (seam && recorded >= Number(seam[2] || 0)) throw Object.assign(new Error(`${seam[1]} (test seam)`), { code: seam[1] });
+            records.appendStep(recordsBase, runId, { ...e, token, worktree, runnerPid: process.pid });
+            recorded++;
+        }
         : () => {};
     const scan = recovery.createScanner();
     // An output write that fails is evidence about the machine, recorded
@@ -364,6 +372,10 @@ function runChainChild(root, sentinel, runId, token, waitGo = false, recordsBase
     if (process.platform === 'win32') signals.push('SIGBREAK');
     for (const s of signals) process.on(s, () => run.kill(s === 'SIGBREAK' ? 'SIGTERM' : s));
     run.done.then((r) => {
+        // Whatever stopped the chain, the ledger of every step is printed: the
+        // step that stopped it, its exit and output tail, and NOT RUN for each
+        // step after it. It does not depend on the step records being written.
+        if (r.exit !== 0 || r.interrupted) for (const l of gateSteps.formatEvidence(r.evidence, TAG)) console.error(l);
         // A chain stopped by a forwarded signal, or a step that never started,
         // did not finish: no record.
         if (r.interrupted) { process.exitCode = 2; return; }
@@ -375,7 +387,7 @@ function runChainChild(root, sentinel, runId, token, waitGo = false, recordsBase
         const rec = { schema: 1, runId, token, originPid: process.ppid, runnerPid: process.pid, startUtc,
                       endUtc: new Date().toISOString(), exit: r.exit, signal: null, infra: scan.hits(), lastStep: scan.lastStep(),
                       failedStep: r.failed ? { index: r.failed.index, step: r.failed.step, signal: r.failed.signal } : null,
-                      outputFaults: faults };
+                      outputFaults: faults, evidence: r.evidence };
         let sentinelError = null;
         try { fs.writeFileSync(sentinel, `${JSON.stringify(rec)}\n`); } catch (e) { sentinelError = e.code || e.message; }
         process.exitCode = r.exit;
@@ -628,6 +640,14 @@ function main() {
         // step records the runner appended as each step started and ended.
         const lost = useLock && !v.finished ? recovery.lostStep(records.readSteps(base, runId)) : null;
         if (lost) v.why = `${v.why}; ${lost.why}`;
+        // Every step's state: the runner's ledger when it reported, else the
+        // one the step records on disk support (UNKNOWN where they say nothing).
+        let ledger = rec && Array.isArray(rec.evidence) ? rec.evidence : null;
+        if (!ledger && useLock && !v.finished) {
+            try { ledger = gateSteps.ledgerFromRecords(records.readSteps(base, runId), chainSteps(pkg)); } catch { ledger = null; }
+        }
+        const steps = gateSteps.summarizeLedger(ledger);
+        if (steps) v.why = `${v.why}; ${steps}`;
         const after = await waitForDescendants();
         const lingering = after.live;
         if (lingering.length) keepLane = lingering;
