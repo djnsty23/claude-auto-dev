@@ -71,6 +71,7 @@ const { spawnSync } = require('node:child_process');
 const claudePaths = require('./claude-paths.js');
 const uw = require('./unattended-worker.js');
 const hw = require('./headless-worker.js');
+const capacity = require('./capacity.js');
 
 const USAGE = [
     'Usage: node brain-judge.js tick [--live] [--budget-sec 180] [--judge-bin <path>] [--worker-bin <path>] [--headless-worker <file>] [--dev]',
@@ -536,7 +537,12 @@ function reportPathOf(rec, reportsDir) {
     return tries.find((f) => fs.existsSync(f)) || rec.report || null;
 }
 
-/** Run the judge for one record. Tool-less, capped in turns and dollars, prompt on stdin. */
+/**
+ * Run the judge for one record. Tool-less, capped in turns and dollars, prompt on stdin.
+ * Machine capacity (capacity.js, class judge) is reserved right before the spawn and
+ * settled in a finally. A deferral spawns nothing: { ok: false, capacity: true, costUsd: 0 },
+ * which never counts against the record.
+ */
 function judgeRecord(rec, { judgeBin, model = JUDGE_MODEL, cwd, reportsDir, configDir = null }) {
     const file = reportPathOf(rec, reportsDir);
     const report = file ? tailText(file, REPORT_TAIL_BYTES) : { text: null, size: 0, cut: false };
@@ -544,10 +550,17 @@ function judgeRecord(rec, { judgeBin, model = JUDGE_MODEL, cwd, reportsDir, conf
     const prompt = buildJudgePrompt(rec, report, brief);
     const plan = hw.spawnPlan(judgeArgv(hw.resolveClaudeBin(judgeBin || 'claude'), model));
     const { env } = hw.buildEnv(process.env, { code: 'brain-judge', configDir });
-    const started = Date.now();
     fs.mkdirSync(cwd, { recursive: true });
-    const r = spawnSync(plan.command, plan.args, { input: prompt, encoding: 'utf8', timeout: JUDGE_TIMEOUT_MS, windowsHide: true, env, cwd, maxBuffer: 16 * 1024 * 1024 });
-    return { ...parseJudgeOutput(r), durationMs: Date.now() - started, model, promptBytes: Buffer.byteLength(prompt), reportBytes: report.size };
+    const sizes = { model, promptBytes: Buffer.byteLength(prompt), reportBytes: report.size };
+    const c = capacity.admit({ cls: 'judge', path: cwd, note: String(rec.taskId || '') });
+    if (!c.admitted) return { ok: false, capacity: true, error: `capacity-deferred: ${c.why}`, costUsd: 0, turns: 0, durationMs: 0, ...sizes };
+    const started = Date.now();
+    try {
+        const r = spawnSync(plan.command, plan.args, { input: prompt, encoding: 'utf8', timeout: JUDGE_TIMEOUT_MS, windowsHide: true, env, cwd, maxBuffer: 16 * 1024 * 1024 });
+        return { ...parseJudgeOutput(r), durationMs: Date.now() - started, ...sizes };
+    } finally {
+        capacity.release(c.id);
+    }
 }
 
 const judgementKey = (rec) => `${rec.taskId}@${rec.startedAt}`;
@@ -582,6 +595,8 @@ function judgeStep(ctx) {
         if (ctx.left() < JUDGE_TIMEOUT_MS) { out.lines.push(`judge: deferred to the next tick, ${Math.round(ctx.left() / 1000)} s left of the budget`); break; }
         const j = judgeAndLog(rec, mode, ctx, 'tick');
         if (j.login) { out.lines.push(loginLine(j)); break; }
+        // Every other record would meet the same deferral this tick.
+        if (j.capacity) break;
     }
 }
 
@@ -652,6 +667,8 @@ function judgeAndLog(rec, mode, ctx, source) {
     const at = new Date().toISOString();
     const key = judgementKey(rec);
     const j = judgeRecord(rec, { judgeBin: ctx.opts['judge-bin'], model: ctx.opts.model || JUDGE_MODEL, cwd: p.state, reportsDir: p.reports, configDir: readSwitch(p.state).judgeConfigDir });
+    // No judge ran: not a run, not a failure, and it spends no cap. The record waits for the next tick.
+    if (j.capacity) { out.lines.push(`judge: ${rec.taskId} not judged, ${j.error}`); return j; }
     appendJsonl(path.join(p.state, 'runs.jsonl'), { at, key, taskId: rec.taskId, source, ok: j.ok, error: j.error || null, ...(j.login ? { login: j.login } : {}), ...(j.output ? { output: j.output } : {}), costUsd: j.costUsd ?? null, turns: j.turns ?? null, durationMs: j.durationMs });
     if (!j.ok) {
         out.events.push({ type: 'judge.error', key, detail: { taskId: rec.taskId, slug: rec.slug, error: j.error, ...(j.login ? { login: j.login } : {}), costUsd: j.costUsd ?? null } });
@@ -867,6 +884,7 @@ function backfill(opts) {
         const j = judgeAndLog(rec, 'backfill', ctx, 'backfill');
         results.push({ taskId: rec.taskId, ok: j.ok, decision: j.decision || null, error: j.error || null, costUsd: j.costUsd ?? null });
         if (j.login) { stopped = loginLine(j); break; }
+        if (j.capacity) { stopped = `judge: stopped, ${j.error}`; break; }
     }
     return { judged: results.length, results, ...(stopped ? { stopped } : {}) };
 }

@@ -1,5 +1,9 @@
 #!/usr/bin/env node
 'use strict';
+
+// Capacity admission (capacity.js) would probe this machine and write its
+// machine-wide ledger. Its behaviour is test-capacity-admission.js's subject.
+process.env.AUTODEV_CAPACITY = 'off';
 // Suite for plugins/autodev-core/scripts/brain-judge.js.
 //
 // WHY THIS SUITE EXISTS. `tick` runs from a cron with nobody watching, spends

@@ -37,6 +37,10 @@
  */
 'use strict';
 
+// Capacity admission (capacity.js) would probe this machine and write its
+// machine-wide ledger. Its behaviour is test-capacity-admission.js's subject.
+process.env.AUTODEV_CAPACITY = 'off';
+
 const fs = require('fs');
 const os = require('os');
 const net = require('net');

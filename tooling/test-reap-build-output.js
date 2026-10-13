@@ -38,6 +38,10 @@
  */
 'use strict';
 
+// Capacity admission (capacity.js) would probe this machine and write its
+// machine-wide ledger. Its behaviour is test-capacity-admission.js's subject.
+process.env.AUTODEV_CAPACITY = 'off';
+
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
@@ -45,7 +49,7 @@ const { spawn, spawnSync } = require('child_process');
 
 const SCRIPTS = path.join(__dirname, '..', 'plugins', 'autodev-core', 'scripts');
 const SUBJECT = path.join(SCRIPTS, 'reap-build-output.js');
-const LIBS = ['reap-build-output.js', 'full-gate-queue.js', 'gate-identity.js', 'gate-records.js'];
+const LIBS = ['reap-build-output.js', 'full-gate-queue.js', 'gate-identity.js', 'gate-records.js', 'capacity.js'];
 const ident = require(path.join(SCRIPTS, 'gate-identity.js'));
 const records = require(path.join(SCRIPTS, 'gate-records.js'));
 const WIN = process.platform === 'win32';
