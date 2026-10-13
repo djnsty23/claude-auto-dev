@@ -1,0 +1,33 @@
+{
+  "about": "PR facts as the injected reader returns them. revertedAt: when a revert of the PR merged. reopenedAt: when an issue the PR closed was reopened.",
+  "https://github.com/example-org/widget/pull/101": {
+    "state": "MERGED",
+    "mergedAt": "2026-09-14T12:00:00.000Z",
+    "revertedAt": null,
+    "reopenedAt": null
+  },
+  "https://github.com/example-org/widget/pull/102": {
+    "state": "MERGED",
+    "mergedAt": "2026-09-17T10:00:00.000Z",
+    "revertedAt": null,
+    "reopenedAt": null
+  },
+  "https://github.com/example-org/widget/pull/103": {
+    "state": "MERGED",
+    "mergedAt": "2026-09-18T10:00:00.000Z",
+    "revertedAt": null,
+    "reopenedAt": null
+  },
+  "https://github.com/example-org/widget/pull/104": {
+    "state": "MERGED",
+    "mergedAt": "2026-09-22T10:00:00.000Z",
+    "revertedAt": "2026-09-24T10:00:00.000Z",
+    "reopenedAt": null
+  },
+  "https://github.com/example-org/widget/pull/105": {
+    "state": "MERGED",
+    "mergedAt": "2026-09-26T10:00:00.000Z",
+    "revertedAt": null,
+    "reopenedAt": "2026-10-06T10:00:00.000Z"
+  }
+}
