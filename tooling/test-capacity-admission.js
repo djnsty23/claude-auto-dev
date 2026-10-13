@@ -194,6 +194,17 @@ function caseUnknown() {
     if (badCfg.admitted) anyAdmitted = true;
     note('unknown_probe', !badCfg.admitted, 'a malformed capacity config admitted');
 
+    // The real probes, read only: each answers { ok } or { ok: false, why } and never throws.
+    const realDisk = cap.probeDisk(path.join(fx.dir, 'not', 'made', 'yet'));
+    note('unknown_probe', realDisk.ok === true && realDisk.freeBytes >= 0 && realDisk.totalBytes > 0,
+        `the real disk probe did not read the nearest existing directory: ${JSON.stringify(realDisk)}`);
+    const realCommit = cap.probeCommit();
+    note('unknown_probe', realCommit.ok === true ? realCommit.freeBytes >= 0 : typeof realCommit.why === 'string',
+        `the real commit probe gave no answer: ${JSON.stringify(realCommit)}`);
+    const otherCommit = cap.probeCommit({ platform: 'sunos' });
+    note('unknown_probe', otherCommit.ok === true && otherCommit.source === 'os.freemem', `an unlisted platform did not read os.freemem: ${JSON.stringify(otherCommit)}`);
+    note('unknown_probe', cap.pollMs({ AUTODEV_CAPACITY_POLL_MS: '1' }) === 10 && cap.pollMs({}) >= 10, 'the poll interval is not floored at 10 ms');
+
     // AUTODEV_CAPACITY=off admits always, without a reservation, probe or no probe.
     const fxOff = fixture();
     writeProbe(fxOff, { diskFreeBytes: 'throw', diskTotalBytes: 1, commitFreeBytes: 'throw' });
