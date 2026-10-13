@@ -139,12 +139,16 @@ function measure(fn, rootPidOf) {
     return finish(value);
 }
 
-// spawnSync with the preload. Returns spawnSync's result with `cpu` added.
+// spawnSync with the preload. Returns spawnSync's result with `cpu` added, and
+// `wallMs`, the elapsed time of the spawn alone (not the record directory work
+// around it), for a caller that asks the wall-clock question as well.
 function spawnSyncCpu(command, args, options) {
     const dir = newDir();
     const o = Object.assign({}, options);
     o.env = envWithPreload(o.env || process.env, dir);
+    const t0 = process.hrtime.bigint();
     const res = spawnSync(command, args, o);
+    res.wallMs = Number(process.hrtime.bigint() - t0) / 1e6;
     res.cpu = collect(dir, res.pid || undefined);
     cleanup(dir);
     return res;
