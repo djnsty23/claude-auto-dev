@@ -14,6 +14,8 @@ try {
     const log = path.join(scratch, `${code}.log`);
     const report = path.join(scratch, `${code}.md`);
     fs.writeFileSync(log, Number.isInteger(exit) ? `CLAUDE_EXIT=${exit}\n` : 'worker started\n');
+    // The worker's own word: close re-reads it, never the ledger's settled result alone.
+    if (result) fs.writeFileSync(report, `RESULT ${code} ${result}: fixture.\n`);
     const h = { code, pid: process.pid, startedAt, state, exit, result, log, report };
     const r = { taskId: code, slug: code, state: 'started', channel: 'headless', launchedAt: startedAt,
       headless: { code, startedAt }, repo: scratch };

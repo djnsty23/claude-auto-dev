@@ -58,6 +58,30 @@ const write = (file, text) => {
     fs.mkdirSync(path.dirname(file), { recursive: true });
     fs.writeFileSync(file, text.replace(/\r\n/g, '\n'), 'utf8');
 };
+/**
+ * Turn a cache-shaped copy into a recorded install: commit its files to a
+ * marketplace clone and name that commit in installed_plugins.json, the way
+ * Claude Code records a real install. Returns the commit.
+ */
+function recordInstall(cfg, inst) {
+    const [mkt, plugin, version] = inst.split(/[\\/]+/).slice(-3);
+    const clone = path.join(cfg, 'plugins', 'marketplaces', mkt);
+    const g = (...a) => {
+        const r = require('child_process').spawnSync('git', ['-C', clone, '-c', 'core.autocrlf=false', '-c', 'user.name=fixture', '-c', 'user.email=fixture@example.invalid', ...a], { encoding: 'utf8', windowsHide: true });
+        if (r.status !== 0) throw new Error('git ' + a.join(' ') + ': ' + r.stderr);
+        return r.stdout.trim();
+    };
+    fs.mkdirSync(clone, { recursive: true });
+    g('init', '-q');
+    write(path.join(clone, '.claude-plugin', 'marketplace.json'), JSON.stringify({ name: mkt, plugins: [{ name: plugin, source: `./plugins/${plugin}` }] }));
+    fs.cpSync(inst, path.join(clone, 'plugins', plugin), { recursive: true });
+    g('add', '-A');
+    g('commit', '-q', '-m', 'fixture release');
+    const commit = g('rev-parse', 'HEAD');
+    write(path.join(cfg, 'plugins', 'installed_plugins.json'), JSON.stringify({ version: 2, plugins: { [`${plugin}@${mkt}`]: [{ scope: 'user', installPath: inst, version, gitCommitSha: commit }] } }));
+    return commit;
+}
+
 const read = (file) => { try { return fs.readFileSync(file, 'utf8'); } catch { return null; } };
 const sleep = (ms) => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
 
@@ -1330,11 +1354,26 @@ try {
         const inst = path.join(ROOT, 'cfg', 'plugins', 'cache', 'autodev', 'autodev-core', '9.9.9');
         write(path.join(inst, '.claude-plugin', 'plugin.json'), JSON.stringify({ name: 'autodev-core', version: '9.9.9' }));
         fs.mkdirSync(path.join(inst, 'scripts'), { recursive: true });
-        for (const f of ['headless-worker.js', 'claude-paths.js', 'capacity.js', 'gate-records.js']) fs.copyFileSync(path.join(path.dirname(SCRIPT), f), path.join(inst, 'scripts', f));
-        const installed = hw([...base, '--dry-run'], {}, { dev: false, script: path.join(inst, 'scripts', 'headless-worker.js') });
+        for (const f of ['headless-worker.js', 'claude-paths.js', 'capacity.js', 'gate-records.js', 'plugin-integrity.js']) fs.copyFileSync(path.join(path.dirname(SCRIPT), f), path.join(inst, 'scripts', f));
+        const instScript = path.join(inst, 'scripts', 'headless-worker.js');
+        // A cache-shaped path alone is no longer enough: with no install record
+        // and no marketplace commit to compare against, the copy is DENIED.
+        const unrecorded = hw([...base, '--dry-run'], {}, { dev: false, script: instScript });
+        check('26. a cache-shaped copy with no install record is refused with integrity-denied',
+            unrecorded.exit === 1 && !!unrecorded.json && !unrecorded.json.ok && unrecorded.json.error.code === 'integrity-denied', unrecorded.stdout.slice(0, 240));
+        const commit = recordInstall(path.join(ROOT, 'cfg'), inst);
+        const installed = hw([...base, '--dry-run'], {}, { dev: false, script: instScript });
         const iv = installed.json && installed.json.ok ? installed.json.value : {};
         check('26. the installed copy starts without --dev and names version 9.9.9',
             installed.exit === 0 && iv.installed === true && iv.dev === false && iv.version === '9.9.9', installed.stdout.slice(0, 200));
+        check('26. the dry run names the integrity verdict, the commit and the launcher hash',
+            !!iv.integrity && iv.integrity.verdict === 'ALLOWED' && iv.integrity.commit === commit && !!iv.integrity.launcher && iv.integrity.launcher.expected === iv.integrity.launcher.actual,
+            JSON.stringify(iv.integrity || null).slice(0, 240));
+        fs.appendFileSync(path.join(inst, 'scripts', 'capacity.js'), '\n// tampered\n');
+        const tampered = hw([...base, '--dry-run'], {}, { dev: false, script: instScript });
+        check('26. one changed byte in a loaded file is refused with integrity-denied before anything is reserved',
+            tampered.exit === 1 && !!tampered.json && !tampered.json.ok && tampered.json.error.code === 'integrity-denied' && /capacity\.js/.test(tampered.json.error.message) && !fs.existsSync(ledger),
+            tampered.stdout.slice(0, 240));
 
         const real = startFake('T26B');
         if (real.pid) waitForEnd(real.log, real.pid);

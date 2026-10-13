@@ -75,7 +75,7 @@ const { spawnSync } = require('child_process');
 const records = require(path.join(__dirname, 'gate-records.js'));
 
 const GIB = 1024 * 1024 * 1024;
-const CLASSES = ['gate', 'worker', 'judge', 'frontier', 'archive'];
+const CLASSES = ['gate', 'worker', 'judge', 'frontier', 'archive', 'verify'];
 
 // Default request sizes per class, in bytes. They start conservative and are
 // calibrated from observed peaks: once a class's peaks are measured, set
@@ -87,6 +87,8 @@ const DEFAULT_REQUESTS = Object.freeze({
     frontier: Object.freeze({ diskBytes: 2 * GIB, commitBytes: 4 * GIB }),
     // An archive asks for its own measured size (lifecycle.js passes diskBytes); this is the fallback.
     archive: Object.freeze({ diskBytes: 1 * GIB, commitBytes: GIB / 2 }),
+    // A verify runs a task's acceptance checks outside the worker (worker-reconcile.js): a gate-sized share.
+    verify: Object.freeze({ diskBytes: 4 * GIB, commitBytes: 4 * GIB }),
 });
 const DISK_RESERVE_MIN = 15 * GIB;
 const DISK_RESERVE_MAX = 64 * GIB;
@@ -496,9 +498,9 @@ module.exports = {
 function help() {
     console.log([
         'usage: node capacity.js status [--json]',
-        '       node capacity.js clear-breaker --class <gate|worker|judge|frontier|archive>',
+        '       node capacity.js clear-breaker --class <gate|worker|judge|frontier|archive|verify>',
         '',
-        'Machine capacity admission for gates, headless workers and judges. status lists',
+        'Machine capacity admission for gates, headless workers, judges and verifies. status lists',
         'the reservations and each class\'s deferral and crash breaker. clear-breaker is the',
         'operator\'s step after an admitted process died without settling its reservation.',
     ].join('\n'));
