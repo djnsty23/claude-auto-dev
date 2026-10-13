@@ -44,7 +44,7 @@
  *   node headless-worker.js start --code <CODE> --prompt-file <md> --log <file>
  *        [--report <file>] [--config-dir <dir>] [--model <id>] [--effort <level>]
  *        [--permission-mode <mode>] [--cwd <dir>] [--claude-bin <path>] [--ledger <file>] [--dry-run] [--dev]
- *        [--plugin-dir <dir>]
+ *        [--plugin-dir <dir>] [--keep-tools <Artifact,Workflow|all>]
  *   node headless-worker.js supervise --code <CODE> --log <file> --prompt-file <md> ...   (internal)
  *   node headless-worker.js status [--code <CODE>] [--ledger <file>] [--json]
  *   node headless-worker.js settle --code <CODE> [--started-at <iso>] [--lost] [--unreported] [--ledger <file>] [--json]
@@ -65,7 +65,7 @@ const USAGE = [
     'Usage: node headless-worker.js start --code <CODE> --prompt-file <md> --log <file>',
     '            [--report <file>] [--config-dir <dir>] [--model <id>] [--effort <level>]',
     '            [--permission-mode <mode>] [--cwd <dir>] [--claude-bin <path>] [--ledger <file>] [--dry-run] [--dev]',
-    '            [--plugin-dir <dir>]',
+    '            [--plugin-dir <dir>] [--keep-tools <Artifact,Workflow|all>]',
     '       node headless-worker.js supervise ... (internal: the detached child that owns claude)',
     '       node headless-worker.js status [--code <CODE>] [--ledger <file>] [--json]',
     '       node headless-worker.js settle --code <CODE> [--started-at <iso>] [--lost] [--unreported] [--ledger <file>] [--json]',
@@ -76,6 +76,7 @@ const USAGE = [
     '       a directory that does not exist, before anything is spawned or recorded.',
     '       --effort is one of low|medium|high|xhigh|max, passed to claude as --effort <level>; omitted, argv has no --effort.',
     '       --plugin-dir is passed to claude as --plugin-dir <dir>: a plugin, or a directory whose children are plugins.',
+    '       The Artifact tools and Workflow are disallowed unless the prompt names them; --keep-tools keeps them.',
     '       It must be a directory. A run that pins its plugins this way loads that tree, whatever the config dir installed.',
     '       start refuses a script outside a plugin cache, because a worker started from a checkout runs code no',
     '       release shipped. --dev runs the checkout on purpose. Every record names the version and script that ran.',
@@ -228,7 +229,7 @@ function parseArgs(argv) {
     const out = { _: [] };
     const flags = ['help', 'dry-run', 'json', 'lost', 'unreported', 'dev'];
     const known = ['_', ...flags, 'code', 'started-at', 'prompt-file', 'log', 'report', 'config-dir', 'model', 'effort',
-        'permission-mode', 'cwd', 'claude-bin', 'ledger', 'plugin-dir'];
+        'permission-mode', 'cwd', 'claude-bin', 'ledger', 'plugin-dir', 'keep-tools'];
     for (let i = 0; i < argv.length; i++) {
         const a = argv[i];
         if (a === '--help' || a === '-h' || a === 'help') { out.help = true; continue; }
@@ -427,10 +428,46 @@ function readPrompt(file, scratchDir, o = {}) {
     return prompt;
 }
 
-function buildArgv({ claudeBin, prompt, model, effort, permissionMode, pluginDir = null }) {
+/**
+ * Tools a headless worker starts without unless its prompt names them.
+ * `[measured 2026-10-13]` on a 71.2k turn 1, one headless probe per arm: the
+ * three Artifact tools cost 11.4k tokens and Workflow 2.0k, before the worker
+ * reads a word of its brief. Desktop sessions keep them. A worker whose prompt
+ * names a tool, or links a claude.ai artifact, keeps that family. `--keep-tools`
+ * keeps one by name, or `all` keeps every one.
+ */
+const HEAVY_TOOLS = Object.freeze({
+    Artifact: Object.freeze({ tools: ['Artifact', 'ArtifactComments', 'ArtifactData'], named: /\bArtifact(?:Data|Comments)?\b|claude\.ai\/(?:code\/)?artifact\//i }),
+    Workflow: Object.freeze({ tools: ['Workflow'], named: /\bWorkflow\b|\bultracode\b/ }),
+});
+
+function parseKeepTools(value) {
+    if (!value) return [];
+    const names = value.split(',').map((n) => n.trim()).filter(Boolean);
+    if (names.length === 1 && names[0] === 'all') return Object.keys(HEAVY_TOOLS);
+    const unknown = names.filter((n) => !Object.prototype.hasOwnProperty.call(HEAVY_TOOLS, n));
+    if (unknown.length || !names.length) fault('usage', `--keep-tools takes ${Object.keys(HEAVY_TOOLS).join(', ')} or all; got ${value}`);
+    return [...new Set(names)];
+}
+
+/** The heavy families a text names. A caller that hands this script a pointer prompt passes them as --keep-tools. */
+function namedTools(text) {
+    return Object.entries(HEAVY_TOOLS).filter(([, spec]) => spec.named.test(text)).map(([family]) => family);
+}
+
+/** The tool names this worker starts without: every heavy family its prompt does not name and --keep-tools does not keep. */
+function droppedTools(prompt, keepTools = []) {
+    return Object.entries(HEAVY_TOOLS)
+        .filter(([family, spec]) => !keepTools.includes(family) && !spec.named.test(prompt))
+        .flatMap(([, spec]) => spec.tools);
+}
+
+function buildArgv({ claudeBin, prompt, model, effort, permissionMode, pluginDir = null, keepTools = [] }) {
+    const dropped = droppedTools(prompt, keepTools);
     return [claudeBin, '-p', prompt, ...(model ? ['--model', model] : []), ...(effort ? ['--effort', effort] : []),
         ...(pluginDir ? ['--plugin-dir', pluginDir] : []),
-        '--permission-mode', permissionMode, '--output-format', 'stream-json', '--verbose'];
+        '--permission-mode', permissionMode, '--output-format', 'stream-json', '--verbose',
+        ...(dropped.length ? ['--disallowedTools', dropped.join(',')] : [])];
 }
 
 function requireEffort(value) {
@@ -538,6 +575,7 @@ function startOptions(opts) {
         model: opts.model || null,
         effort: opts.effort ? requireEffort(opts.effort) : null,
         pluginDir: opts['plugin-dir'] ? path.resolve(opts['plugin-dir']) : null,
+        keepTools: parseKeepTools(opts['keep-tools']),
         permissionMode: opts['permission-mode'] || 'default',
         cwd: opts.cwd ? path.resolve(opts.cwd) : process.cwd(),
         claudeBin: resolveClaudeBin(opts['claude-bin'] || 'claude'),
@@ -560,6 +598,7 @@ function supervisorFlags(o) {
     if (o.effort) flags.push('--effort', o.effort);
     if (o.configDir) flags.push('--config-dir', o.configDir);
     if (o.pluginDir) flags.push('--plugin-dir', o.pluginDir);
+    if (o.keepTools.length) flags.push('--keep-tools', o.keepTools.join(','));
     return flags;
 }
 
@@ -573,13 +612,13 @@ function start(opts) {
     if (o.configDir) requireConfigDirExists(o.configDir);
     if (o.pluginDir && !isDir(o.pluginDir)) fault('plugin-dir-missing', `--plugin-dir resolved to ${o.pluginDir}, which is not a directory`);
     const prompt = readPrompt(o.promptFile, scratchDirFor(o), o);
-    const argv = buildArgv({ claudeBin: o.claudeBin, prompt, model: o.model, effort: o.effort, permissionMode: o.permissionMode, pluginDir: o.pluginDir });
+    const argv = buildArgv({ claudeBin: o.claudeBin, prompt, model: o.model, effort: o.effort, permissionMode: o.permissionMode, pluginDir: o.pluginDir, keepTools: o.keepTools });
     const plan = buildEnv(process.env, { code: o.code, configDir: o.configDir });
     if (opts['dry-run']) {
         return {
             dryRun: true, code: o.code, argv, command: spawnPlan(argv).command,
             envSet: plan.set, envDeleted: plan.deleted, envScrubList: plan.scrubList,
-            configDir: o.configDir, effort: o.effort, pluginDir: o.pluginDir,
+            configDir: o.configDir, effort: o.effort, pluginDir: o.pluginDir, droppedTools: droppedTools(prompt, o.keepTools),
             script: placement.script, version: placement.version, installed: placement.installed, dev: o.dev,
             log: o.log, report: o.report, scratchDir: scratchDirFor(o), ledger: o.ledger, cwd: o.cwd, spawned: false,
             wouldMoveAside: priorRunFiles(o),
@@ -595,7 +634,7 @@ function start(opts) {
         log: o.log, report: o.report, promptFile: o.promptFile,
         configDir: o.configDir ? path.basename(o.configDir) : null,
         version: placement.version, script: placement.script, dev: !placement.installed,
-        model: o.model, effort: o.effort, permissionMode: o.permissionMode, cwd: o.cwd, pluginDir: o.pluginDir, state: 'starting',
+        model: o.model, effort: o.effort, permissionMode: o.permissionMode, cwd: o.cwd, pluginDir: o.pluginDir, droppedTools: droppedTools(prompt, o.keepTools), state: 'starting',
     };
     const isReservation = (r) => r.code === o.code && r.state === 'starting' && r.startedAt === record.startedAt;
     withLedger(o.ledger, (ledger) => {
@@ -639,7 +678,7 @@ function start(opts) {
 function supervise(opts) {
     const o = startOptions(opts);
     const prompt = readPrompt(o.promptFile, scratchDirFor(o), o);
-    const argv = buildArgv({ claudeBin: o.claudeBin, prompt, model: o.model, effort: o.effort, permissionMode: o.permissionMode, pluginDir: o.pluginDir });
+    const argv = buildArgv({ claudeBin: o.claudeBin, prompt, model: o.model, effort: o.effort, permissionMode: o.permissionMode, pluginDir: o.pluginDir, keepTools: o.keepTools });
     const { env } = buildEnv(process.env, { code: o.code, configDir: o.configDir });
     const plan = spawnPlan(argv);
     fs.mkdirSync(path.dirname(o.log), { recursive: true });
@@ -1142,6 +1181,7 @@ module.exports = {
     HEADLESS_NOTE, DENIED_NOTE, PROMPT_MAX, CODE_RE, placementNote, resultNote, scriptPlacement, otherResultCode, SCRUBBED_ENV, RETENTION_MS, SETTLED_RESULTS,
     AUTH_REFUSAL_PATTERNS, matchAuthRefusal, authRefusal, resolveConfigDir,
     askFiles, askNote, askState, scratchDirFor, priorRunFiles, moveAside, readLedger, settle, start,
+    HEAVY_TOOLS, droppedTools, namedTools, parseKeepTools,
     parseArgs, composePrompt, buildArgv, buildEnv, spawnPlan, resolveClaudeBin, exitCodeOf, parseResult,
     livenessFromError, pidLiveness, pidImage, isSupervisorImage, supervisorLiveness, bootAt, pruneSettled, laterRuns, recordStatus, lostReason, lostGateStep, run,
 };

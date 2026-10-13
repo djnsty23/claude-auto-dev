@@ -107,7 +107,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const os = require('node:os');
 const claudePaths = require('./claude-paths.js');
-const { scriptPlacement, readLedger: readHeadlessLedger } = require('./headless-worker.js');
+const { scriptPlacement, readLedger: readHeadlessLedger, namedTools } = require('./headless-worker.js');
 const crypto = require('node:crypto');
 const { spawnSync } = require('node:child_process');
 
@@ -616,6 +616,9 @@ function headlessArgs(rec, files, opts) {
     if (l.effort) args.push('--effort', l.effort);
     if (l.configDir) args.push('--config-dir', l.configDir);
     if (opts['claude-bin']) args.push('--claude-bin', opts['claude-bin']);
+    // The worker reads its brief through a pointer, so headless-worker cannot see
+    // which tool families the brief names: launch passes them.
+    if (files.keepTools && files.keepTools.length) args.push('--keep-tools', files.keepTools.join(','));
     if (opts.dev) args.push('--dev');
     if (opts['dry-run']) args.push('--dry-run');
     return args;
@@ -687,7 +690,7 @@ function launch(opts) {
             const pinned = rec.pins && rec.pins.length ? resolvePins(rec.pins.map((p) => p.path).join(','), rec.repo, rec.base) : {};
             const prompt = composePrompt({ repo: rec.repo, worktree, branch, base: rec.base, taskId: rec.taskId, returnTo: rec.returnTo,
                 report: rec.report, slug: rec.slug, body, scratch, channel: 'headless', pins: pinned.pins });
-            const files = { prompt: path.join(scratch, 'PROMPT.md'), pointer: path.join(scratch, 'POINTER.md'), log: path.join(scratch, 'worker.log') };
+            const files = { prompt: path.join(scratch, 'PROMPT.md'), pointer: path.join(scratch, 'POINTER.md'), log: path.join(scratch, 'worker.log'), keepTools: namedTools(prompt) };
             fs.writeFileSync(files.prompt, prompt);
             fs.writeFileSync(files.pointer, pointerPrompt(files.prompt));
             // --model and --effort on launch override the queued values, and the
