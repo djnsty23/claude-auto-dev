@@ -113,6 +113,38 @@ if (process.argv.includes('--help') || process.argv.includes('-h')) {
 
 const BLOCKED_SUBCOMMANDS = new Set(['commit', 'push', 'merge', 'rebase']);
 
+/**
+ * WHO IS ASKING. `[measured 2026-10-14]` this ban blocked two of the Brain's own
+ * dispatched workers committing in throwaway repos they had built under
+ * ~/.claude/autodev/reports/<run>/<code>/ to test their change. A subagent's
+ * hook payload carries the PARENT's session_id, so the role file's claim
+ * matched and the worker was judged as the coordinator.
+ *
+ * A dispatched subagent is the "session that owns that repo" the block message
+ * tells the coordinator to brief, so it is not the coordinator. The Claude Code
+ * hooks reference: `agent_id` is present only when the hook fires inside a
+ * subagent call, and is the field for telling subagent calls from main-thread
+ * calls. `agent_type` is NOT the signal, because it is also present on the main
+ * thread of a session started with `--agent`. The harness writes the payload,
+ * so nothing in the command text can forge this field.
+ */
+const isSubagent = (data) => typeof data.agent_id === 'string' && data.agent_id.length > 0;
+
+/**
+ * Directories that hold scratch repos, never product repos: the autodev reports
+ * dir that fleet briefs name for scratch output, and Claude Code's session
+ * scratchpad root under the OS temp dir. A commit, merge or rebase in a repo
+ * there writes nothing anyone else reads.
+ *
+ * PUSH IS NOT EXEMPT. A scratch clone of a product repo pushes to the product's
+ * remote, which is the incident this rail exists for, so a push from scratch is
+ * judged like any other.
+ */
+const SCRATCH_LOCAL_VERBS = new Set(['commit', 'merge', 'rebase']);
+function scratchRoots() {
+    return [path.join(configDir(), 'autodev', 'reports'), path.join(os.tmpdir(), 'claude')];
+}
+
 /** The role file this run consults. Env first so the suite can point it at a fixture. */
 function roleFilePath() {
     return process.env.AUTODEV_BRAIN_ROLE_FILE
@@ -688,6 +720,11 @@ try {
         allow();
     }
 
+    // A dispatched worker is not the coordinator, even though it carries the
+    // coordinator's session_id. See isSubagent above.
+    if (isSubagent(data)) allow();
+
+    const scratch = scratchRoots();
     const hits = [];
     let here = cwd;                       // moves with each `cd` segment
     for (const seg of segments) {
@@ -701,7 +738,8 @@ try {
         // one that was caught rather than a generic directory.
         const foreign = [g.dir, g.gitDir]
             .filter(Boolean)
-            .filter((d) => !homes.some((h) => isInside(h, d)));
+            .filter((d) => !homes.some((h) => isInside(h, d)))
+            .filter((d) => !(SCRATCH_LOCAL_VERBS.has(g.sub) && scratch.some((s) => isInside(s, d))));
         if (!foreign.length) continue;
         hits.push({ ...g, at: foreign[0] });
     }
