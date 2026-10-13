@@ -509,9 +509,11 @@ function run() {
         byTitle['job-seed is asking'] === 'Seeded or production?  (2 options)' && byTitle['W-ASK is asking'] === 'Which base?',
         `got ${JSON.stringify(byTitle)}`);
     const st1 = readJson(stateFile(hAsk)) || {};
-    check('each ask is recorded under its own file, stamped with its mtime',
-        st1['ask:' + runAskFile] === fs.statSync(runAskFile).mtime.toISOString()
-        && st1['ask:' + wAskFile] === fs.statSync(wAskFile).mtime.toISOString(),
+    // U11: the stamp is the ask's decision and input version (owner-asks.js),
+    // never its mtime, so rewriting the same question does not re-raise it.
+    check('each ask is recorded under its own file, stamped with its decision and input version',
+        /^runs:job-seed@[0-9a-f]{16}$/.test(st1['ask:' + runAskFile] || '')
+        && /^headless-worker:W-ASK@[0-9a-f]{16}$/.test(st1['ask:' + wAskFile] || ''),
         `state=${JSON.stringify(st1)}`);
     const km = readJson(markerFile(hAsk)) || {};
     check('the marker counts the asks and says what each source read',

@@ -19,7 +19,10 @@
  * ask.json, and before 2026-09-24 only fleet-view.js showed it, on a page you had to
  * open. The asks come from fleet-view's own openAsks(), so the toast and the
  * page read the same files through the same code. An ask is keyed on its file
- * and stamped with its mtime: once per ask, again if the worker rewrites it.
+ * and stamped with its decision and input version (owner-asks.js), never its
+ * mtime: once per ask, again only if the worker changes what it asks. Each toast
+ * that returns is recorded as os-submitted, which owner-asks reads as delivery
+ * UNKNOWN until the owner's own receipt or answer is recorded.
  *
  * THE QUOTA TRIPWIRE RIDES THE SAME PASS. quota-tripwire.js was written to run
  * under a Monitor, which only exists while a session is open, so at night it
@@ -50,6 +53,7 @@ const claudePaths = require('./claude-paths.js');
 const { execFile, execFileSync, spawnSync } = require('child_process');
 const { scanFleet } = require(path.join(__dirname, 'fleet-status.js'));
 const fleetView = require(path.join(__dirname, 'fleet-view.js'));
+const owner = require(path.join(__dirname, 'owner-asks.js'));
 
 // Overridable so the dedup test can exercise real state writes without touching
 // the live file. The dedup is the load-bearing behaviour here, so it has to be
@@ -175,14 +179,18 @@ function askItems() {
         return { items: [], sources: [`asks: COULD NOT READ (${e.message})`] };
     }
     const items = found.rows.map((r) => {
-        let stamp = 'unknown';
-        try { stamp = fs.statSync(r.askFile).mtime.toISOString(); } catch { /* removed since the read: 'unknown' still dedups */ }
+        // Stamped with the ask's decision and input version, never its mtime: a
+        // worker rewriting the same question is the same ask (owner-asks.js).
+        const id = owner.identityOfFile(r.askFile, fleetView.askDecision(r));
+        let ask = null;
+        try { ask = JSON.parse(fs.readFileSync(r.askFile, 'utf8')); } catch { /* the identity already covers an unparsed ask */ }
         const n = r.question.options.length;
         const name = r.configDir ? `${r.code} [${r.configDir}]` : r.code;
         return {
-            key: 'ask:' + r.askFile, stamp, due: true,
+            key: 'ask:' + r.askFile, stamp: id ? id.key : 'unknown', due: true,
             title: `${name} is asking`, body: `${r.question.text}${n ? `  (${n} options)` : ''}`,
-            short: name, name,
+            short: name, name, owner: id ? { id, ask, source: r.source,
+                ledger: owner.ledgerPath(r.configDir ? path.join(r.configDir, 'autodev') : settings.autodev) } : null,
         };
     });
     return { items, sources: found.sources.map((src) => src.population) };
@@ -269,7 +277,33 @@ function pass() {
     }
     const didPrune = Object.keys(state).length !== before;
 
-    const fresh = items.filter((i) => state[i.key] !== i.stamp).filter((i) => i.due);
+    const due = items.filter((i) => state[i.key] !== i.stamp).filter((i) => i.due);
+    // Every fresh worker ask is raised in the owner-asks ledger before any toast,
+    // so a toast the OS refuses leaves it queued. An unchanged ask the owner was
+    // already sent (a rerun's new ask.json, same decision and input) is recorded
+    // as a re-raise and not toasted again. Never under --dry.
+    const reraised = new Set();
+    if (!DRY) {
+        const summaries = new Map();
+        for (const i of due.filter((x) => x.owner)) {
+            try {
+                const o = i.owner;
+                if (!summaries.has(o.ledger)) summaries.set(o.ledger, owner.summarise(owner.readLedger(o.ledger).events));
+                const prior = summaries.get(o.ledger).asks.find((a) => a.key === o.id.key);
+                owner.raise(o.ledger, o.id, { ask: o.ask, source: o.source });
+                if (prior && (prior.state === 'os-submitted' || prior.state === 'receipted')) reraised.add(i);
+            } catch (e) { console.error(`  owner-asks ledger not written: ${e.code || e.message}`); }
+        }
+    }
+    const fresh = due.filter((i) => !reraised.has(i));
+    for (const i of reraised) { state[i.key] = i.stamp; console.log(`  re-raised, not re-sent: ${i.name} (${i.stamp})`); }
+    const markSubmitted = (list, via) => {
+        if (DRY) return;
+        for (const i of list) {
+            if (!i.owner) continue;
+            try { owner.submitted(i.owner.ledger, i.owner.id.key, via, 0); } catch (e) { console.error(`  owner-asks ledger not written: ${e.code || e.message}`); }
+        }
+    };
 
     // Population every pass: a report that prints only a verdict cannot be told
     // apart from a probe that returned nothing.
@@ -304,13 +338,15 @@ function pass() {
     // unblocks stays marked seen forever and re-blocking is silent. Returning
     // early here without writing was a real bug, caught by the dedup test.
     if (!fresh.length) {
-        if (didPrune && !DRY) writeState(state);
+        if ((didPrune || reraised.size) && !DRY) writeState(state);
         return 0;
     }
 
     // A quota toast always stands alone: "4 sessions are waiting on you" must
     // never be where a PREP HANDOVER ends up.
     const waiting = fresh.filter((i) => !i.quota);
+    // os-submitted means the notifier returned. It is not a delivery: owner-asks reads UNKNOWN until a receipt.
+    const via = notifier ? 'notifier-seam' : 'toast.ps1';
     let fired = 0;
     try {
         for (const i of fresh.filter((x) => x.quota)) {
@@ -322,10 +358,12 @@ function pass() {
             toast(`${waiting.length} sessions are waiting on you`,
                 `${names} and ${waiting.length - 3} more. Open the fleet board.`);
             fired++;
+            markSubmitted(waiting, via + ' (summary)');
         } else {
             for (const i of waiting) {
                 toast(i.title, i.body);
                 fired++;
+                markSubmitted([i], via);
             }
         }
     } catch {

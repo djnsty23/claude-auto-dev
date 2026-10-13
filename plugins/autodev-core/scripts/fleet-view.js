@@ -49,6 +49,7 @@ const crypto = require('node:crypto');
 const { spawn, spawnSync } = require('node:child_process');
 const HW = require('./headless-worker.js');
 const DELIVERY = require('./delivery-outcomes.js');
+const OWNER = require('./owner-asks.js');
 
 const USAGE = [
     'Usage: node fleet-view.js [serve] [--port 8766] [--hours 48] [--takeover-script <file>] [--no-launch] [--until-stdin-closes]',
@@ -499,7 +500,36 @@ function collect(s, now = Date.now()) {
         src.population += `, ${shown} shown`;
     }
     rows.sort((a, b) => rank(a) - rank(b) || (b.lastAt || 0) - (a.lastAt || 0));
-    return { sources, rows, window: `live, asking, or touched in the last ${s.hours} h`, at: new Date(now).toISOString(), delivery: deliverySummary(s) };
+    return { sources, rows, window: `live, asking, or touched in the last ${s.hours} h`, at: new Date(now).toISOString(), delivery: deliverySummary(s),
+        ownerAsks: ownerAsksViews(s, sources, now) };
+}
+
+/**
+ * The owner-asks ledger and its source inventory, one view per selected config
+ * directory. Every expected source is listed with its state, so a stale notifier
+ * or an unreadable ledger is a line on the page, never an absence (owner-asks.js).
+ */
+function ownerAsksViews(s, sources, now) {
+    const envState = process.env.AUTODEV_FLEET_STATE;
+    return (s.configDirs || [null]).map((configDir) => {
+        const autodev = configDir ? path.join(configDir, 'autodev') : s.autodev;
+        const notifyDir = envState ? path.dirname(path.resolve(envState)) : path.join(configDir || path.join(s.home, '.claude'), 'fleet');
+        const askSources = sources.filter((src) => (src.configDir || null) === configDir && ['runs', 'headless-worker', 'config-dir'].includes(src.source));
+        try {
+            const v = OWNER.view({ autodev, notifyDir, askSources, now });
+            v.configDir = configDir;
+            return v;
+        } catch (e) { return { configDir, error: `owner-asks: COULD NOT READ ${OWNER.ledgerPath(autodev)}: ${e.message}` }; }
+    });
+}
+
+function ownerAsksLines(view) {
+    const out = [];
+    for (const v of view.ownerAsks || []) {
+        const pre = v.configDir ? `[${v.configDir}] ` : '';
+        for (const l of v.error ? [v.error] : OWNER.viewLines(v)) out.push(pre + l);
+    }
+    return out;
 }
 
 /** One read-only line from delivery-outcomes.js's store, or null when there is no store yet (nothing is printed then). */
@@ -523,6 +553,9 @@ function openAsks(s) {
     const sources = readSources(s, [['runs', runsSource], ['headless-worker', headlessSource]]);
     return { sources, rows: sources.flatMap((src) => src.rows.filter((r) => r.question)) };
 }
+
+/** The decision an ask belongs to when ask.json names none: its channel, so a rerun asking the same thing is the same decision. */
+function askDecision(r) { return `${r.source}:${r.code}`; }
 
 function rank(r) { return r.process === 'COULD-NOT-READ' ? 0 : r.question ? 1 : r.live ? 2 : 3; }
 
@@ -633,7 +666,17 @@ function doAction(s, action, key, fields) {
         // A row whose answer.json exists has no open question, so the action gate above already
         // refuses a second answer. The exclusive create covers the race between that read and this write.
         fs.writeFileSync(row.answerFile, JSON.stringify({ label, note: String(fields.note || '').slice(0, 4000), at: new Date().toISOString(), via: 'fleet-view' }, null, 2) + '\n', { encoding: 'utf8', flag: 'wx' });
-        return { row, detail: `wrote ${row.answerFile}` };
+        // The answer is the owner's own act, so it is the one place a resolution is recorded from.
+        let resolved = '';
+        const id = OWNER.identityOfFile(row.askFile, askDecision(row));
+        if (id) {
+            try {
+                const ledger = OWNER.ledgerPath(row.configDir ? path.join(row.configDir, 'autodev') : s.autodev);
+                OWNER.resolve(ledger, id.key, label, 'fleet-view answer');
+                resolved = `, resolved ${id.key}`;
+            } catch (e) { resolved = `, owner-asks ledger not written: ${e.code || e.message}`; }
+        }
+        return { row, detail: `wrote ${row.answerFile}${resolved}` };
     }
     if (action === 'settle') {
         const v = hwCli(['settle', '--code', row.code, '--ledger', row.ledger]);
@@ -697,6 +740,7 @@ function age(ms, now = Date.now()) {
 function listLines(view) {
     const out = view.sources.map((src) => src.population);
     if (view.delivery) out.push(view.delivery);
+    out.push(...ownerAsksLines(view));
     out.push(`window: ${view.window}. ${view.rows.length} row(s).`);
     for (const r of view.rows) {
         out.push([r.code, r.project || '-', r.account || '-', r.kind, r.process + (r.exit !== null && r.exit !== undefined ? ` ${r.exit}` : ''),
@@ -733,6 +777,7 @@ function renderPage(view, token, flash) {
 body{margin:0;background:var(--bg);color:var(--fg);font:14px/1.45 system-ui,sans-serif}
 main{padding:16px;max-width:1600px;margin:0 auto}h1{font-size:18px;margin:0 0 4px}
 .sub{color:var(--muted);font-size:12px}.pop{font-size:12px;color:var(--muted);margin:8px 0 12px;padding-left:16px}
+.pop li.warn{color:var(--fg);font-weight:600}
 .flash{padding:8px 12px;border:1px solid var(--line);border-radius:6px;margin:8px 0}
 .wrap{overflow-x:auto;border:1px solid var(--line);border-radius:8px}table{border-collapse:collapse;width:100%;min-width:1100px}
 th,td{text-align:left;vertical-align:top;padding:6px 8px;border-bottom:1px solid var(--line)}th{font-size:12px;color:var(--muted);font-weight:600}
@@ -743,7 +788,7 @@ input,select{font:inherit;padding:3px 6px;border:1px solid var(--line);border-ra
 a{color:var(--accent)}</style></head><body><main>
 <h1>Fleet View</h1><div class="sub">${esc(view.at)} · ${esc(view.window)} · <a href="/">Refresh</a></div>
 ${flash ? `<div class="flash">${esc(flash)}</div>` : ''}
-<ul class="pop">${view.sources.map((src) => `<li>${esc(src.population)}</li>`).join('')}</ul>
+<ul class="pop">${view.sources.map((src) => `<li>${esc(src.population)}</li>`).join('')}${ownerAsksLines(view).map((l) => `<li${/: (STALE|INACCESSIBLE) \(/.test(l) ? ' class="warn"' : ''}>${esc(l)}</li>`).join('')}</ul>
 <div class="wrap"><table><thead><tr><th>Code</th><th>Project</th><th>Account</th><th>Kind</th><th>Process</th><th>Result</th><th>Last progress</th><th>Age</th><th>PR</th><th>Question</th><th>Actions</th></tr></thead>
 <tbody>${rows}</tbody></table></div></main></body></html>`;
 }
@@ -885,4 +930,4 @@ if (require.main === module) {
     }
 }
 
-module.exports = { parseArgs, settings, collect, openAsks, doAction, processMatches, progressOf, lastPr, nextCode, renderPage, listLines, selftest, esc, deliverySummary };
+module.exports = { parseArgs, settings, collect, openAsks, askDecision, ownerAsksLines, doAction, processMatches, progressOf, lastPr, nextCode, renderPage, listLines, selftest, esc, deliverySummary };
