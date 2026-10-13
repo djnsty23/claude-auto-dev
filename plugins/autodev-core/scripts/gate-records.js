@@ -417,7 +417,8 @@ function readSteps(base, runId) {
         } else if (e.event === 'end') {
             const s = steps.filter((x) => x.index === e.index && !x.ended).pop();
             if (!s) { bad++; continue; }
-            Object.assign(s, { endUtc: e.endUtc || null, exit: Number.isInteger(e.exit) ? e.exit : null, signal: e.signal || null, ended: true });
+            Object.assign(s, { endUtc: e.endUtc || null, exit: Number.isInteger(e.exit) ? e.exit : null, signal: e.signal || null, ended: true,
+                               tail: e.tail && typeof e.tail.text === 'string' ? e.tail : null });
         } else bad++;
     }
     return { state: 'ok', steps, bad };
