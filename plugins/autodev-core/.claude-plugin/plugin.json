@@ -64,6 +64,12 @@
       "title": "autodev: fleet intent nudge",
       "description": "When a turn ends on a branch with work, ask for a fleet-intent claim and refresh the record's observed facts.",
       "default": true
+    },
+    "instruction_envelope": {
+      "type": "boolean",
+      "title": "autodev: instruction envelope check",
+      "description": "At session start, say when the always-on rules are over budget, a required rule is missing, or two sources set conflicting styles.",
+      "default": true
     }
   }
 }
