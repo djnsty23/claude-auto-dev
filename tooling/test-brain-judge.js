@@ -157,7 +157,8 @@ try {
     const hrecs = [{ code: 's', startedAt: '2026-09-28T10:00:00Z', state: 'settled', result: 'done' }, { code: 's', startedAt: '2026-09-28T12:00:00Z', state: 'running' }];
     check('headlessRunOf takes the run with the recorded start', bj.headlessRunOf({ slug: 's', headless: { code: 's', startedAt: '2026-09-28T10:00:00Z' } }, hrecs).state === 'settled');
     check('headlessRunOf, with no recorded start, ignores a run older than the launch', bj.headlessRunOf({ slug: 's', launchedAt: '2026-09-28T11:59:30Z' }, hrecs).state === 'running');
-    check('done and stopped with zero exit close as succeeded, the rest as failed', ['done', 'stopped'].every((r) => bj.runStatusOfHeadless(r, 0) === 'succeeded') && ['failed', 'lost', 'unreported'].every((r) => bj.runStatusOfHeadless(r, 0) === 'failed'));
+    check('done and stopped with zero exit close as succeeded, lost as unknown, the rest as failed', ['done', 'stopped'].every((r) => bj.runStatusOfHeadless(r, 0) === 'succeeded')
+        && ['failed', 'unreported'].every((r) => bj.runStatusOfHeadless(r, 0) === 'failed') && bj.runStatusOfHeadless('lost', 0) === 'unknown');
     const pMissing = bj.buildJudgePrompt({ taskId: 't', slug: 's', repo: '/x/r' }, { text: null, size: 0, cut: false }, null);
     check('a missing report is named in the judge prompt', pMissing.startsWith(bj.RUBRIC) && pMissing.includes('REPORT: missing') && pMissing.includes('BRIEF: not stored'));
     // `[measured 2026-10-12]` the old rubric sent every "Release window" and every listed option to a person,
@@ -453,12 +454,14 @@ try {
     const heldRe = /^start \(dry\): held, nothing starts: the newest settled headless run (\S+) \(started [^)]*\) was refused its login: "Your organization has disabled Claude subscription access[^"]*"\. A claude -p probe must pass first: node brain-judge\.js probe$/;
 
     const ta = aTick();
-    const closedEv = (ta.value ? ta.value.events : []).find((e) => e.type === 'judge.closed');
-    check('the tick closes the refused run as failed in the unattended ledger, and its event names the refusal',
-        closedEv && closedEv.detail.result === 'auth-refused' && closedEv.detail.reason === INCIDENT && aRec('worker-auth-a').state === 'closed' && aRec('worker-auth-a').runStatus === 'failed', ta.stdout.slice(0, 500));
-    check('the refused run is not judged: no verdict, no judge run spent, and the judge line says why',
+    const heldEv = (ta.value ? ta.value.events : []).find((e) => e.type === 'judge.held');
+    check('the tick holds the refused run in the unattended ledger, never closes it as a failure, and its event names the refusal',
+        heldEv && heldEv.detail.result === 'auth-refused' && heldEv.detail.reason === INCIDENT && heldEv.detail.outcome === 'HELD'
+            && aRec('worker-auth-a').state === 'held' && aRec('worker-auth-a').runStatus === undefined
+            && aRec('worker-auth-a').attempts.length === 1 && aRec('worker-auth-a').attempts[0].outcome === 'auth-refused', ta.stdout.slice(0, 500));
+    check('the refused run is not judged: no verdict, no judge run spent, and it awaits no verdict',
         !types(ta).includes('judge.verdict') && !types(ta).includes('judge.error') && !fs.existsSync(path.join(aState, 'runs.jsonl'))
-            && ta.value.lines.some((l) => /^judge \(dry\): 0 awaiting a verdict, .*1 skipped: their login was refused/.test(l)), ta.value && ta.value.lines.join(' | '));
+            && ta.value.lines.some((l) => /^judge \(dry\): 0 awaiting a verdict/.test(l)), ta.value && ta.value.lines.join(' | '));
     check('start is held: one line naming the refused run, its text and the probe, and nothing would start',
         (startLine(ta).match(heldRe) || [])[1] === 'auth-a' && !types(ta).includes('judge.would-start') && aRec('worker-auth-next').state === 'queued', startLine(ta));
     check('the exit code and {"ok":...} contract hold while start is held', ta.status === 0 && ta.json && ta.json.ok === true);
