@@ -36,6 +36,12 @@ const home = path.join(scratch, 'home');
 fs.mkdirSync(home);
 const env = { ...process.env, HOME: home, USERPROFILE: home, GIT_TERMINAL_PROMPT: '0', AUTODEV_LEDGER_LOCK_WAIT_MS: '300' };
 delete env.CLAUDE_CONFIG_DIR;
+delete env.AUTODEV_HEADLESS;
+// brain-judge's writeVerdict runs in this process, and the acceptance gate reads
+// receipts under the config dir: point this process at the temp home too.
+process.env.HOME = home;
+process.env.USERPROFILE = home;
+delete process.env.CLAUDE_CONFIG_DIR;
 
 function cli(args) {
     const r = spawnSync(process.execPath, [SUBJECT, ...args], { encoding: 'utf8', env, stdio: ['ignore', 'pipe', 'pipe'] });
@@ -71,7 +77,8 @@ const baseSha = g(repo, 'rev-parse', 'origin/main');
 const pinBlob = g(repo, 'rev-parse', `origin/main:${PIN}`);
 const ledger = path.join(scratch, 'ledger.json');
 const briefFile = path.join(scratch, 'brief.md');
-fs.writeFileSync(briefFile, 'MISSION. Make add() add.\nACCEPTANCE. tests/acceptance.test.js passes.\n');
+fs.writeFileSync(briefFile, 'MISSION. Make add() add.\nACCEPTANCE. tests/acceptance.test.js passes.\n\n## Acceptance criteria\n'
+    + '- AC1: the pinned acceptance test is still tracked\n  check: git ls-files --error-unmatch tests/acceptance.test.js\n');
 const readLedger = () => (fs.existsSync(ledger) ? JSON.parse(fs.readFileSync(ledger, 'utf8')).records : []);
 const recOf = (id) => readLedger().find((r) => r.taskId === id) || {};
 const session = (n) => `local_0000000${n}-0000-4000-8000-000000000000`;
@@ -94,7 +101,10 @@ function workOn(slug, edit) {
     g(wt, 'commit', '-q', '-m', 'work');
     return wt;
 }
-const accept = (taskId, extra = []) => cli(['verdict', '--task-id', taskId, '--decision', 'accept', '--reason', 'report reads done', '--ledger', ledger, ...extra]);
+// Pins are this suite's subject. The receipt gate is test-acceptance-receipt.js's, so a
+// Brain accept here takes the stored override; the judge cases below meet the gate.
+const accept = (taskId, extra = []) => cli(['verdict', '--task-id', taskId, '--decision', 'accept', '--reason', 'report reads done', '--ledger', ledger,
+    '--accept-without-receipt', 'pinned-test suite: receipts are tested elsewhere', ...extra]);
 
 try {
     // ---- brief and enqueue store the pin with its blob at the base -------------
@@ -180,8 +190,18 @@ try {
     const vf = recOf(f.taskId).verdict;
     check('a judge accept on a changed pin is written as escalate, naming the path',
         w.applied === true && vf && vf.decision === 'escalate' && vf.by === 'judge' && vf.reason.includes(PIN), JSON.stringify({ w, vf }));
+    const nr = finished('judge-noreceipt');
+    workOn('judge-noreceipt');
+    const w0 = bj.writeVerdict({ ledger }, nr.taskId, 'accept', 'the report shows every ask done');
+    const v0 = recOf(nr.taskId).verdict;
+    check('a judge accept on an untouched pin with no verified receipt is written as escalate, naming the reason',
+        w0.applied === true && v0 && v0.decision === 'escalate' && /receipt-missing/.test(v0.reason), JSON.stringify({ w0, v0 }));
     const h = finished('judge-clean');
     workOn('judge-clean');
+    fs.mkdirSync(path.dirname(recOf(h.taskId).report), { recursive: true });
+    fs.writeFileSync(recOf(h.taskId).report, 'did it\nRESULT judge-clean done: x\n');
+    const ver = spawnSync(process.execPath, [path.join(SCRIPTS, 'acceptance-receipt.js'), 'verify', '--task-id', h.taskId, '--ledger', ledger], { encoding: 'utf8', env });
+    check('fixture: the coordinator verifies judge-clean against its brief', ver.status === 0 && /"complete": true/.test(ver.stdout), (ver.stdout || '').slice(0, 300));
     const w2 = bj.writeVerdict({ ledger }, h.taskId, 'accept', 'the report shows every ask done');
     check('  and a judge accept on an untouched pin is written as accept', w2.applied === true && recOf(h.taskId).verdict.decision === 'accept', JSON.stringify(w2));
 
