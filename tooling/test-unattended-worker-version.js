@@ -1,5 +1,9 @@
 #!/usr/bin/env node
 'use strict';
+
+// Capacity admission (capacity.js) would probe this machine and write its
+// machine-wide ledger. Its behaviour is test-capacity-admission.js's subject.
+process.env.AUTODEV_CAPACITY = 'off';
 // Suite for the version stamp in plugins/autodev-core/scripts/unattended-worker.js.
 //
 // WHY THIS SUITE EXISTS. [measured 2026-09-28] the unattended ledger held 50
@@ -40,7 +44,7 @@ delete env.CLAUDE_CONFIG_DIR;
 function plant(pluginDir, manifest) {
     fs.mkdirSync(path.join(pluginDir, 'scripts'), { recursive: true });
     fs.mkdirSync(path.join(pluginDir, '.claude-plugin'), { recursive: true });
-    for (const f of ['unattended-worker.js', 'headless-worker.js', 'claude-paths.js', 'ledger-temp-sweep.js']) {
+    for (const f of ['unattended-worker.js', 'headless-worker.js', 'claude-paths.js', 'ledger-temp-sweep.js', 'capacity.js', 'gate-records.js']) {
         fs.copyFileSync(path.join(SCRIPTS, f), path.join(pluginDir, 'scripts', f));
     }
     fs.writeFileSync(path.join(pluginDir, '.claude-plugin', 'plugin.json'), JSON.stringify(manifest));

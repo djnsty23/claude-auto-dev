@@ -124,6 +124,17 @@
  *   AUTODEV_GATE_LOCK_POLL_MS=N        wait's poll interval (default 5000)
  *   AUTODEV_GATE_LOCK_REPORT_MS=N      how often wait re-prints its place (default 180000)
  *   AUTODEV_GATE_QUEUE_STALE_MS=N      heartbeat age at which a ticket is dropped (default 600000)
+ *
+ * CAPACITY (capacity.js). A caller that passes `capacity` (take and wait
+ * always do, as class gate) is admitted only when the machine has room for it.
+ * The check runs at the one moment a lane would be taken: the ticket is at the
+ * front and the lane is open. A deferral returns as queued with `capacity`,
+ * and the ticket keeps its file, its arrival and so its place: nothing behind
+ * it moves up, because only the front may take a lane. A release first
+ * settles the holder's reservation, never refused for capacity, then hands
+ * the lane on only when the next ticket is admitted; otherwise the lane is
+ * freed and that ticket stays at the front. The reservation id rides in the
+ * lock's meta line as `capacityId`. AUTODEV_CAPACITY=off admits always.
  */
 'use strict';
 
@@ -133,6 +144,7 @@ const path = require('path');
 const { spawnSync } = require('child_process');
 const ident = require(path.join(__dirname, 'gate-identity.js'));
 const records = require(path.join(__dirname, 'gate-records.js'));
+const cap = require(path.join(__dirname, 'capacity.js'));
 
 const TAG = 'full-gate-queue:';
 const EXIT_QUEUED = 3;
@@ -665,7 +677,7 @@ function testPause() {
  * The meta a lock records for the ticket it admits. `owner` is a full
  * identity when the caller could take one, else the ticket's own.
  */
-function admissionMeta({ ticket, lockPath, lockPaths, cls, owner, runId }) {
+function admissionMeta({ ticket, lockPath, lockPaths, cls, owner, runId, capacityId = null }) {
     const tm = (ticket && ticket.meta) || {};
     return {
         runId: runId || tm.runId || null,
@@ -676,7 +688,27 @@ function admissionMeta({ ticket, lockPath, lockPaths, cls, owner, runId }) {
         cls,
         owner: owner || tm.owner || (ticket ? { pid: ticket.pid, startUtc: null, bootId: (bootNow(lockPaths[0]) || {}).id || null } : null),
         repo: tm.repo || null,
+        ...(capacityId ? { capacityId } : {}),
     };
+}
+
+/**
+ * Capacity admission for the ticket about to take a lane (CAPACITY in the
+ * header). `request` is { cls, path, diskBytes?, commitBytes? } or null for
+ * none. `memo` carries one attempt's deferral across lanes, so a waiter in
+ * every lane probes once per poll. Returns capacity.admit's result.
+ */
+function admitCapacity(request, pid, lockPaths, memo = null) {
+    if (!request) return { admitted: true, id: null };
+    if (memo && memo.deferred) return memo.deferred;
+    const c = cap.admit({ ...request, pid }, { base: lockPaths[0], isAlive });
+    if (!c.admitted && memo) memo.deferred = c;
+    return c;
+}
+
+/** Settles a reservation; never refused for capacity, and never throws. */
+function settleCapacity(id, lockPaths) {
+    return id ? cap.release(id, { base: lockPaths[0], isAlive }) : { released: true, why: null };
 }
 
 /** The identity to record for `pid`, from a snapshot no older than the reuse window. */
@@ -749,9 +781,12 @@ function handToOlderVersion({ lockPath, lockPaths, live, held, log }) {
  * order never takes the lock, however free it is. A harness ticket at the
  * front is still refused a lane its class may not hold (`reserved`). The
  * whole attempt runs under the admission mutex, so the cap check and the
- * create it permits are one step.
+ * create it permits are one step. With `capacity`, the front is also refused
+ * a lane the machine has no room for (`capacity`, capacity.admit's result),
+ * and its ticket stays where it is.
  */
-function takeTurn({ lockPath, lockPaths = [lockPath], pid, what, cls = PRODUCT, body: givenBody, staleMs, log, runId = null, repo = null, arrivedMs = null }) {
+function takeTurn({ lockPath, lockPaths = [lockPath], pid, what, cls = PRODUCT, body: givenBody, staleMs, log, runId = null, repo = null, arrivedMs = null,
+    capacity = null, capMemo = null }) {
     return admitted(lockPaths, () => {
         const queueDir = queueDirFor(lockPath);
         fs.mkdirSync(path.dirname(lockPath), { recursive: true });
@@ -762,7 +797,8 @@ function takeTurn({ lockPath, lockPaths = [lockPath], pid, what, cls = PRODUCT, 
         }
         const boot = bootNow(lockPaths[0]);
         const own = ensureTicket(queueDir, pid, what, cls,
-            { runId: runId || mintRunId(pid), cls, bootId: boot ? boot.id : null, owner: { pid, startUtc: null, bootId: boot ? boot.id : null }, repo }, arrivedMs);
+            { runId: runId || mintRunId(pid), cls, bootId: boot ? boot.id : null, owner: { pid, startUtc: null, bootId: boot ? boot.id : null }, repo,
+              ...(capacity ? { capacity } : {}) }, arrivedMs);
         const live = servingOrder(liveQueue(queueDir, staleMs, log, lockPaths[0]));
         const mine = live.findIndex((t) => t.pid === pid);
         const queued = (holder, extra) => ({ acquired: false, position: mine + 1, of: live.length, holder, ...extra });
@@ -774,13 +810,15 @@ function takeTurn({ lockPath, lockPaths = [lockPath], pid, what, cls = PRODUCT, 
         if (!open()) return queued(held);
         const reserved = live[0].cls === HARNESS ? harnessReserve(lockPaths, lockPath, staleMs, log) : null;
         if (reserved) return queued(held, { reserved });
+        const c = admitCapacity(capacity, pid, lockPaths, capMemo);
+        if (!c.admitted) return queued(held, { capacity: c });
         testPause();
         const owner = ownerIdentity(pid);
         const ticket = live[0];
-        const meta = admissionMeta({ ticket, lockPath, lockPaths, cls: ticket.cls, owner, runId: runId || (own.meta && own.meta.runId) });
+        const meta = admissionMeta({ ticket, lockPath, lockPaths, cls: ticket.cls, owner, runId: runId || (own.meta && own.meta.runId), capacityId: c.id });
         const body = givenBody ? withMeta(givenBody, meta) : lockBody(pid, what, ticket.cls, meta);
         const got = held ? takeOverStale(lockPath, held, body, log, lockPaths[0]) : tryCreate(lockPath, body);
-        if (!got) return queued(readLock(lockPath));
+        if (!got) { settleCapacity(c.id, lockPaths); return queued(readLock(lockPath)); }
         removeTicket(queueDir, pid);
         return { acquired: true, handedOver: false, token: meta.token, runId: meta.runId };
     });
@@ -793,7 +831,10 @@ function takeTurn({ lockPath, lockPaths = [lockPath], pid, what, cls = PRODUCT, 
  * lane, for the harness cap. With `token` (and `runId`), the lock must carry
  * the same ones: a release from an earlier admission frees nothing. Returns
  * { released, to, aside, reserved, waiting, fenced, why }: `reserved` and
- * `waiting` say a harness ticket waits that the cap kept out.
+ * `waiting` say a harness ticket waits that the cap kept out. The holder's
+ * capacity reservation is settled first and never refused; the lane goes to
+ * the next ticket only when capacity admits it, else it is freed and
+ * `capacity` and `waiting` name the ticket that keeps its place at the front.
  */
 function releaseLock({ lockPath, lockPaths = [lockPath], pid, staleMs, log, runId = null, token = null }) {
     return admitted(lockPaths, () => {
@@ -804,18 +845,21 @@ function releaseLock({ lockPath, lockPaths = [lockPath], pid, staleMs, log, runI
         }
         const fence = fenceMismatch(held, runId, token);
         if (fence) return { released: false, fenced: true, why: fence };
+        const settled = settleCapacity(held.meta && held.meta.capacityId, lockPaths);
+        if (!settled.released) log(`${TAG} the capacity reservation ${held.meta.capacityId} was not settled: ${settled.why}`);
         const queueDir = queueDirFor(lockPath);
         const live = servingOrder(liveQueue(queueDir, staleMs, log, lockPaths[0]).filter((t) => t.pid !== pid));
         const aside = asideName(lockPath, 'released');
         const next = live[0];
         const reserved = next && next.cls === HARNESS ? harnessReserve(lockPaths, lockPath, staleMs, log) : null;
         testPause();
-        if (!next || reserved) {
+        const c = next && !reserved ? admitCapacity(next.meta && next.meta.capacity, next.pid, lockPaths) : { admitted: true, id: null };
+        if (!next || reserved || !c.admitted) {
             records.renameRetry(lockPath, aside);
-            return { released: true, to: null, aside, reserved, waiting: reserved ? next : null };
+            return { released: true, to: null, aside, reserved, waiting: reserved || !c.admitted ? next : null, ...(c.admitted ? {} : { capacity: c }) };
         }
         fs.copyFileSync(lockPath, aside, fs.constants.COPYFILE_EXCL);
-        const meta = admissionMeta({ ticket: next, lockPath, lockPaths, cls: next.cls });
+        const meta = admissionMeta({ ticket: next, lockPath, lockPaths, cls: next.cls, capacityId: c.id });
         replaceInPlace(lockPath, lockBody(next.pid, `${next.what}, handed over by the queue`, next.cls, meta));
         try { fs.unlinkSync(next.file); } catch { /* its waiter saw the handoff first */ }
         return { released: true, to: next, aside, token: meta.token };
@@ -856,9 +900,11 @@ function releaseLanes({ lockPaths, pid, staleMs, log, keep = null, runId = null,
  * waiter never sits on two lanes. Returns { acquired, lockPath, token, runId }
  * or, queued, the lane where it stands best (a lane kept from its class first
  * among equal places, since that is the one that would otherwise be free):
- * { acquired: false, lockPath, position, of, holder, reserved?, lanes }.
+ * { acquired: false, lockPath, position, of, holder, reserved?, capacity?, lanes }.
+ * `capacity` is the deferral when capacity admission refused the front.
  */
-function takeAnyLane({ lockPaths, pid, what, cls = PRODUCT, body, staleMs, log, runId = null, repo = null, arrivedMs = null }) {
+function takeAnyLane({ lockPaths, pid, what, cls = PRODUCT, body, staleMs, log, runId = null, repo = null, arrivedMs = null, capacity = null }) {
+    const capMemo = { deferred: null };
     return admitted(lockPaths, () => {
         const settle = (lockPath, r) => {
             const others = lockPaths.filter((p) => p !== lockPath);
@@ -881,12 +927,12 @@ function takeAnyLane({ lockPaths, pid, what, cls = PRODUCT, body, staleMs, log, 
         }
         const queued = [];
         for (const lane of lockPaths) {
-            const r = takeTurn({ lockPath: lane, lockPaths, pid, what, cls, body, staleMs, log, runId, repo, arrivedMs });
+            const r = takeTurn({ lockPath: lane, lockPaths, pid, what, cls, body, staleMs, log, runId, repo, arrivedMs, capacity, capMemo });
             if (r.acquired) return settle(lane, r);
             queued.push({ ...r, lockPath: lane });
         }
         const best = queued.slice().sort((a, b) => a.position - b.position || Number(Boolean(b.reserved)) - Number(Boolean(a.reserved)))[0];
-        return { ...best, lanes: queued };
+        return { ...best, lanes: queued, ...(capMemo.deferred ? { capacity: capMemo.deferred } : {}) };
     });
 }
 
@@ -945,7 +991,9 @@ machine), so one lane stays open to it. With none waiting, a harness gate
 borrows any free lane. A running holder is never preempted.
 
   take     one attempt. Exit 0: --pid holds a lane. Exit 3: queued, place printed.
-  wait     take until a lane is held. Exit 0, or 3 when --timeout-ms runs out.
+  wait     take until a lane is held. Exit 0, or 3 when --timeout-ms runs out,
+           or 2 (INDETERMINATE) when capacity admission (capacity.js) keeps
+           deferring past AUTODEV_CAPACITY_WAIT_MS or its crash breaker is tripped.
   release  hand each lane --pid holds to the ticket at its front, or rename the
            lock to .released-HHMM when nobody it may go to waits. Exit 1 when
            it holds none.
@@ -1050,8 +1098,15 @@ function printStatus(s, json) {
     s.lanes.forEach((lane, i) => printLane(lane, i + 1, s.laneCount));
 }
 
+/** A deferral's kind, for deciding when a waiting line is worth printing again. */
+function capacityKind(c) {
+    if (!c) return '';
+    return c.breaker ? 'breaker' : c.resuming ? 'resuming' : c.unknown ? 'unknown' : 'short';
+}
+
 function holderLine(r) {
     if (r.reserved) return `nobody (free, but ${reservedLine(r.reserved)})`;
+    if (r.capacity && r.position === 1 && !r.holder) return `nobody (free, but capacity admission deferred it: ${r.capacity.why})`;
     return r.holder ? `pid ${r.holder.pid}: ${r.holder.what}` : 'nobody (free, but a ticket ahead goes first)';
 }
 
@@ -1139,6 +1194,7 @@ async function main() {
             if (r.fenced) { console.error(`${TAG} not released${inLane(r.lockPath)}: ${r.why}`); process.exitCode = 1; continue; }
             if (r.to) log(`${TAG} released${inLane(r.lockPath)}; the lock was handed to ${r.to.cls} pid ${r.to.pid}, queued since ${r.to.arrived} (record ${path.basename(r.aside)})`);
             else if (r.reserved) log(`${TAG} released${inLane(r.lockPath)} to ${path.basename(r.aside)} and not handed to harness pid ${r.waiting.pid}, because the lane is ${reservedLine(r.reserved)}`);
+            else if (r.capacity) log(`${TAG} released${inLane(r.lockPath)} to ${path.basename(r.aside)} and not handed to pid ${r.waiting.pid}, which keeps its place: ${r.capacity.why}`);
             else log(`${TAG} released${inLane(r.lockPath)} to ${path.basename(r.aside)}; nobody was queued`);
         }
         return;
@@ -1158,7 +1214,9 @@ async function main() {
     const cls = repo.harness ? HARNESS : declared.cls;
     if (repo.harness && declared.cls === PRODUCT) log(`${TAG} note: queued as harness, not product: ${repo.why}`);
     const repoMeta = { worktree: repo.worktree, commonDir: repo.commonDir, origin: repo.origin, derivedClass: repo.harness ? HARNESS : PRODUCT };
-    const attempt = () => { resetProbes(); return takeAnyLane({ lockPaths, pid, what, cls, staleMs, log, runId: args.runId, repo: repoMeta }); };
+    // Capacity is reserved in the pid's name for the volume the gate runs on.
+    const capacity = { cls: 'gate', path: repo.worktree || path.resolve(args.repo || process.cwd()) };
+    const attempt = () => { resetProbes(); return takeAnyLane({ lockPaths, pid, what, cls, staleMs, log, runId: args.runId, repo: repoMeta, capacity }); };
 
     if (args.cmd === 'take') {
         const r = attempt();
@@ -1175,6 +1233,7 @@ async function main() {
     let stopped = null;
     for (const s of ['SIGINT', 'SIGTERM', 'SIGHUP']) process.on(s, () => { stopped = s; });
     let errors = 0;
+    let capSince = null;
     for (;;) {
         let r;
         try {
@@ -1199,11 +1258,22 @@ async function main() {
             log(`${TAG} pid ${pid} holds ${r.lockPath} after ${Math.round((Date.now() - started) / 1000)} s${r.token ? ` (run ${r.runId}, token ${r.token})` : ''}`);
             return;
         }
-        const key = `${r.lockPath}/${r.position}/${r.of}/${r.holder ? r.holder.pid : '-'}/${r.reserved ? 'reserved' : ''}`;
+        const key = `${r.lockPath}/${r.position}/${r.of}/${r.holder ? r.holder.pid : '-'}/${r.reserved ? 'reserved' : ''}/${capacityKind(r.capacity)}`;
         if (key !== lastKey || Date.now() - lastReport >= reportMs) {
             log(`${TAG} waiting: place ${r.position} of ${r.of}${inLane(r.lockPath)} as ${cls}. Holder: ${holderLine(r)}`);
             lastKey = key;
             lastReport = Date.now();
+        }
+        // A capacity deferral keeps the ticket while it waits. A tripped crash
+        // breaker needs an operator, and a deferral past the capacity wait
+        // cannot resolve: both give up as INDETERMINATE (exit 2).
+        capSince = r.capacity ? (capSince === null ? Date.now() : capSince) : null;
+        const capStuck = r.capacity && (r.capacity.breaker || Date.now() - capSince >= cap.waitMs(env));
+        if (capStuck) {
+            leaveQueues(lockPaths, pid);
+            console.error(`${TAG} gave up, INDETERMINATE: capacity admission deferred this gate for ${Math.round((Date.now() - capSince) / 1000)} s: ${r.capacity.why}; ticket removed, lock NOT taken`);
+            process.exitCode = 2;
+            return;
         }
         const timedOut = args.timeoutMs !== null && Date.now() - started >= args.timeoutMs;
         if (stopped || timedOut) {

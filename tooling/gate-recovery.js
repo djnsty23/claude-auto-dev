@@ -38,6 +38,13 @@
  * maxReadmissions times per worktree and head, counted in a file that outlives
  * the process. The re-queued ticket keeps the run's original arrival.
  *
+ * CAPACITY. A gate that capacity admission (autodev-core capacity.js) kept
+ * deferring past its wait, or whose class crash breaker is tripped, never ran:
+ * capacityVerdict() makes that INDETERMINATE (exit 2) with the deferral as the
+ * evidence line, never a pass or a fail. Re-admission stops while the gate
+ * class's breaker is tripped (readmissionBlocked names it): a process that was
+ * admitted and died without settling is not retried by itself.
+ *
  * TEST SEAM. AUTODEV_GATE_EVENTS_FIXTURE names a JSON file of events
  * ({ "times": [iso...] } or { "status": "failed" }) read in place of the event
  * log; the window filter still applies. AUTODEV_GATE_HEADROOM_FIXTURE names a
@@ -424,6 +431,22 @@ function spendReadmission(file, worktree, head, max) {
  * null when every recorded step ended or there are no records. `stepsRead` is
  * gate-records.js readSteps(base, runId).
  */
+/**
+ * The verdict for a gate whose lane capacity admission would not give it:
+ * { exit: 2, finished: false, cause: null, why }. `got` is { capacity, waitedMs }.
+ */
+function capacityVerdict(got) {
+    const c = (got && got.capacity) || {};
+    const secs = Math.round(((got && got.waitedMs) || 0) / 1000);
+    const how = c.breaker ? 'its crash breaker is tripped' : `it could not be resolved within the wait (${secs} s)`;
+    return { exit: 2, finished: false, cause: null, why: `capacity admission deferred the gate and ${how}: ${c.why || 'no reason given'}; the chain did NOT run` };
+}
+
+/** Why an indeterminate attempt is not queued again while `breaker` (capacity.breakerFor) is tripped. */
+function readmissionBlocked(breaker) {
+    return `not queued again: ${breaker.why}`;
+}
+
 function lostStep(stepsRead) {
     if (!stepsRead || stepsRead.state !== 'ok' || !stepsRead.steps.length) return null;
     const s = stepsRead.steps[stepsRead.steps.length - 1];
@@ -433,7 +456,7 @@ function lostStep(stepsRead) {
 }
 
 module.exports = {
-    lostStep, CRASH_EXITS, DEFAULT_DISK_FLOOR, createScanner, memoryEvents, commitHeadroom, diskFree, portState,
+    lostStep, capacityVerdict, readmissionBlocked, CRASH_EXITS, DEFAULT_DISK_FLOOR, createScanner, memoryEvents, commitHeadroom, diskFree, portState,
     readRecoveryConfig, runsSuiteRunner, runnerRows, classify, sample, awaitClearance, counterFile, readmissionsSpent, spendReadmission,
 };
 

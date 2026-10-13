@@ -35,6 +35,15 @@
  *   4. Runs `npm run gate:chain`, then releases, whatever the outcome: to the
  *      next ticket when one waits, else by rename to `.released-HHMM`.
  *
+ * CAPACITY. The lane is taken only when capacity admission (autodev-core
+ * capacity.js, class gate) has room for the gate, checked under the queue's
+ * admission mutex as the lane is taken. A deferral keeps this run's tickets
+ * and place. A deferral still standing after AUTODEV_CAPACITY_WAIT_MS, or a
+ * tripped crash breaker, ends the run INDETERMINATE (exit 2) with the deferral
+ * as its evidence line, and the chain does NOT run. Re-admission after an
+ * indeterminate attempt stops while the gate class's breaker is tripped. The
+ * reservation is settled on every release, lingering or not.
+ *
  * EXIT STATUS. The chain's own exit code, exactly: 0, 1 and 2 stay three
  * states. A chain this script did not see finish (killed by a signal, a null
  * exit code, a spawn error, or this script interrupted) exits 2, INDETERMINATE,
@@ -106,6 +115,7 @@ const SCRIPTS = path.join(__dirname, '..', 'plugins', 'autodev-core', 'scripts')
 const queue = require(path.join(SCRIPTS, 'full-gate-queue.js'));
 const ident = require(path.join(SCRIPTS, 'gate-identity.js'));
 const records = require(path.join(SCRIPTS, 'gate-records.js'));
+const cap = require(path.join(SCRIPTS, 'capacity.js'));
 const recovery = require('./gate-recovery.js');
 const gateSteps = require('./gate-steps.js');
 
@@ -124,6 +134,7 @@ function whyWaiting(r) {
     const ahead = r.position - 1;
     const behind = ahead > 0 ? ` (place ${r.position} of ${r.of} in its queue)` : '';
     if (r.reserved) return `free, but ${queue.reservedLine(r.reserved)}`;
+    if (r.capacity && r.position === 1 && !h) return `free, but capacity admission deferred it (its place is kept): ${r.capacity.why}`;
     if (!h) return `free, but ${ahead} waiter(s) go first${behind}`;
     if (h.pid === null) {
         return `line 1 is not a pid, so its holder cannot be checked; move it aside by hand if nobody holds it${behind}`;
@@ -141,20 +152,31 @@ function whyWaiting(r) {
  * retried; MAX_POLL_ERRORS in a row reject.
  */
 function acquire(lockPaths, body, what, opts) {
-    const { pollMs, reportMs, log, isStopped, runId, arrivedMs = null } = opts;
+    const { pollMs, reportMs, log, isStopped, runId, arrivedMs = null, capacity = null, capacityWaitMs = cap.waitMs() } = opts;
     const pid = process.pid;
     let lastReport = 0;
     let lastSeen = null;
     let errors = 0;
+    let capSince = null;
     return new Promise((resolve, reject) => {
         const attempt = () => {
             if (isStopped()) { queue.leaveQueues(lockPaths, pid); resolve(null); return; }
             try {
                 queue.resetProbes();
-                const r = queue.takeAnyLane({ lockPaths, pid, what, cls: GATE_CLASS, body, staleMs: STALE_MS, log, runId, arrivedMs });
+                const r = queue.takeAnyLane({ lockPaths, pid, what, cls: GATE_CLASS, body, staleMs: STALE_MS, log, runId, arrivedMs, capacity });
                 errors = 0;
                 if (r.acquired) { resolve(r.lockPath); return; }
-                const seen = `${r.lockPath}|${r.position}|${r.holder ? r.holder.text : ''}|${r.reserved ? 'reserved' : ''}`;
+                // A deferral keeps the tickets while it can still resolve. A
+                // tripped breaker needs an operator, and one past the wait
+                // cannot: both leave the queues and end INDETERMINATE.
+                capSince = r.capacity ? (capSince === null ? Date.now() : capSince) : null;
+                if (r.capacity && (r.capacity.breaker || Date.now() - capSince >= capacityWaitMs)) {
+                    queue.leaveQueues(lockPaths, pid);
+                    resolve({ capacity: r.capacity, waitedMs: Date.now() - capSince });
+                    return;
+                }
+                const capKind = r.capacity ? (r.capacity.resuming ? 'resuming' : r.capacity.unknown ? 'unknown' : 'short') : '';
+                const seen = `${r.lockPath}|${r.position}|${r.holder ? r.holder.text : ''}|${r.reserved ? 'reserved' : ''}|${capKind}`;
                 const now = Date.now();
                 if (seen !== lastSeen || now - lastReport >= reportMs) {
                     const says = r.holder ? r.holder.what : '(no lock)';
@@ -505,6 +527,7 @@ function main() {
     let done = false;
     let heartbeat = null;
     let attempt = 0;
+    let capacityId = null;
 
     // Is another run's lease on this worktree still running? Judged like a
     // lane holder: its owner and its journaled execution. Unknown is alive.
@@ -557,10 +580,20 @@ function main() {
     // them, so a waiter judges the lane held until they exit, then takes it as
     // a dead holder's.
     let keepLane = null;
+    // The capacity reservation is settled on every release. The queue's
+    // release settles it too; a lane kept for lingering processes does not
+    // pass through it, so it is settled here, and a second release is a no-op.
+    const settleCapacity = () => {
+        if (!capacityId) return;
+        const s = cap.release(capacityId, { base, isAlive: queue.isAlive });
+        if (!s.released) log(`${TAG} capacity reservation ${capacityId} not settled: ${s.why}`);
+        capacityId = null;
+    };
     const releaseOnce = () => {
         if (!useLock || released) return;
         released = true;
         if (heartbeat) { clearInterval(heartbeat); heartbeat = null; }
+        settleCapacity();
         if (keepLane) { writeLease('lingering', { lingering: keepLane.map((p) => ({ pid: p.pid, startUtc: p.startUtc })) }); return; }
         releaseNow({ quiet: !held });
         writeLease('released');
@@ -646,6 +679,8 @@ function main() {
         if (!c.cause || interrupted) { finishWith({ ...c, why: `${c.why}${keptWhy}` }); return; }
         log(`${TAG} attempt ${attempt} is INDETERMINATE: ${c.why}`);
         if (!cfg.config) { finishWith({ ...c, why: `${c.why}; ${cfg.why}${keptWhy}` }); return; }
+        const breaker = cap.breakerFor('gate', { base, isAlive: queue.isAlive });
+        if (breaker) { finishWith({ ...c, why: `${c.why}; ${recovery.readmissionBlocked(breaker)}${keptWhy}` }); return; }
         if (lingering.length) { finishWith({ ...c, why: `${c.why}; not queued again${keptWhy}` }); return; }
         if (after.unknown) { finishWith({ ...c, why: `${c.why}; not queued again: whether the chain's processes exited is unknown (${after.unknown})` }); return; }
         const head = git(root, ['rev-parse', 'HEAD']) || 'no-head';
@@ -766,9 +801,10 @@ function main() {
     // anything starts under it, and publish the lease before the chain.
     const admit = (arrivedMs) => {
         released = false;
-        acquire(lockPaths, body, what, { pollMs, reportMs, log, isStopped: () => Boolean(interrupted), runId, arrivedMs })
+        acquire(lockPaths, body, what, { pollMs, reportMs, log, isStopped: () => Boolean(interrupted), runId, arrivedMs, capacity: { cls: 'gate', path: root } })
             .then((got) => {
                 if (!got) return;
+                if (typeof got === 'object') { finishWith(recovery.capacityVerdict(got)); return; }
                 held = true;
                 lane = got;
                 const own = queue.confirmOwnership({ lockPath: got, lockPaths, pid: process.pid, runId });
@@ -783,6 +819,7 @@ function main() {
                     return;
                 }
                 token = own.meta.token;
+                capacityId = own.meta.capacityId || null;
                 arrival = arrival || own.meta.arrival;
                 owner = own.meta.owner || null;
                 log(`${TAG} lock taken: ${got} (pid ${process.pid}) run ${runId} token ${token}${own.adopted ? ", adopted from a lock without a record" : ""}`);

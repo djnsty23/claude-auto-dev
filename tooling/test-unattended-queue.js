@@ -1,5 +1,9 @@
 #!/usr/bin/env node
 'use strict';
+
+// Capacity admission (capacity.js) would probe this machine and write its
+// machine-wide ledger. Its behaviour is test-capacity-admission.js's subject.
+process.env.AUTODEV_CAPACITY = 'off';
 // Suite for the queue half of plugins/autodev-core/scripts/unattended-worker.js:
 // enqueue, ready (planStarts), launch, verdict, the headless settle that ends in
 // `closed`, and the ledger lock.
