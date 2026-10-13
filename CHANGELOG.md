@@ -1,5 +1,13 @@
 # Changelog
 
+## [8.190.0]
+
+### Fleet
+
+- Headless workers start without the Artifact tools and Workflow unless the brief
+  names them. A turn-1 probe measured about 13.4k tokens for these families;
+  with the trimmed memory index, turn 1 measured 51.3k, down from 71.2k.
+
 ## [8.189.0]
 
 ### Brain
