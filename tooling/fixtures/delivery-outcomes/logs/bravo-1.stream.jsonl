@@ -1,0 +1,3 @@
+{"type":"result","subtype":"success","is_error":false,"result":"done","session_id":"s-b1","total_cost_usd":0.6}
+{"type":"assistant","message":"resumed after an answered ask"}
+{"type":"result","subtype":"success","is_error":false,"result":"done","session_id":"s-b1","total_cost_usd":0.5}

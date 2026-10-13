@@ -1,0 +1,119 @@
+{
+  "version": 1,
+  "records": [
+    {
+      "taskId": "alpha",
+      "repo": "widget",
+      "slug": "alpha",
+      "state": "settled",
+      "channel": "headless",
+      "runStatus": "succeeded",
+      "startedAt": "2026-09-13T10:00:00.000Z",
+      "launchedAt": "2026-09-13T10:00:00.000Z",
+      "headless": {
+        "code": "alpha",
+        "startedAt": "2026-09-13T10:00:02.000Z"
+      },
+      "verdict": {
+        "decision": "accept",
+        "reason": "every ask done with evidence",
+        "by": "brain",
+        "at": "2026-09-14T09:00:00.000Z"
+      }
+    },
+    {
+      "taskId": "bravo",
+      "repo": "widget",
+      "slug": "bravo",
+      "state": "settled",
+      "channel": "headless",
+      "runStatus": "succeeded",
+      "startedAt": "2026-09-16T09:00:00.000Z",
+      "launchedAt": "2026-09-16T09:00:00.000Z",
+      "headless": {
+        "code": "bravo",
+        "startedAt": "2026-09-16T09:00:02.000Z"
+      },
+      "verdict": {
+        "decision": "accept",
+        "reason": "both PRs gated",
+        "by": "brain",
+        "at": "2026-09-16T18:00:00.000Z"
+      }
+    },
+    {
+      "taskId": "charlie",
+      "repo": "widget",
+      "slug": "charlie",
+      "state": "settled",
+      "channel": "headless",
+      "runStatus": "succeeded",
+      "startedAt": "2026-09-21T09:00:00.000Z",
+      "launchedAt": "2026-09-21T09:00:00.000Z",
+      "headless": {
+        "code": "charlie",
+        "startedAt": "2026-09-21T09:00:02.000Z"
+      },
+      "verdict": {
+        "decision": "accept",
+        "reason": "report shows the fix and its test",
+        "by": "judge",
+        "at": "2026-09-21T15:00:00.000Z"
+      }
+    },
+    {
+      "taskId": "delta",
+      "repo": "widget",
+      "slug": "delta",
+      "state": "settled",
+      "channel": "headless",
+      "runStatus": "succeeded",
+      "startedAt": "2026-09-25T09:00:00.000Z",
+      "launchedAt": "2026-09-25T09:00:00.000Z",
+      "headless": {
+        "code": "delta",
+        "startedAt": "2026-09-25T09:00:02.000Z"
+      },
+      "verdict": {
+        "decision": "accept",
+        "reason": "done",
+        "by": "brain",
+        "at": "2026-09-25T17:00:00.000Z"
+      }
+    },
+    {
+      "taskId": "echo",
+      "repo": "widget",
+      "slug": "echo",
+      "state": "settled",
+      "channel": "headless",
+      "runStatus": "failed",
+      "startedAt": "2026-09-11T09:00:00.000Z",
+      "launchedAt": "2026-09-11T09:00:00.000Z",
+      "headless": {
+        "code": "echo",
+        "startedAt": "2026-09-11T09:00:02.000Z"
+      },
+      "verdict": {
+        "decision": "escalate",
+        "reason": "failed twice on the same missing credential",
+        "by": "brain",
+        "at": "2026-09-11T20:00:00.000Z"
+      }
+    },
+    {
+      "taskId": "foxtrot",
+      "repo": "widget",
+      "slug": "foxtrot",
+      "state": "settled",
+      "channel": "headless",
+      "runStatus": "succeeded",
+      "startedAt": "2026-09-01T09:00:00.000Z",
+      "launchedAt": "2026-09-01T09:00:00.000Z",
+      "headless": {
+        "code": "foxtrot",
+        "startedAt": "2026-09-01T09:00:02.000Z"
+      }
+    }
+  ]
+}

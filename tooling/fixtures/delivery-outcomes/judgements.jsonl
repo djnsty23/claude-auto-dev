@@ -1,0 +1,2 @@
+{"at":"2026-09-15T11:00:00.000Z","key":"bravo@2026-09-15T09:00:00.000Z","taskId":"bravo","slug":"bravo","repo":"widget","runStatus":"succeeded","mode":"live","decision":"follow-up","reason":"the second PR the brief asked for is not open","applied":true,"costUsd":0.05}
+{"at":"2026-09-21T11:00:00.000Z","key":"charlie@2026-09-21T09:00:00.000Z","taskId":"charlie","slug":"charlie","repo":"widget","runStatus":"succeeded","mode":"live","decision":"accept","reason":"report shows the fix and its test","applied":true,"costUsd":0.04}

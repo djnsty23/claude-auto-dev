@@ -1,0 +1,19 @@
+{
+  "about": "Hand-labelled outcomes for the six tasks in this directory, frozen before delivery-outcomes.js was written. Every field is checked per task by tooling/test-delivery-outcomes.js. costUsd sums every attempt's worker cost (failed ones included) plus judge cost; null means some attempt's cost cannot be read.",
+  "now": "2026-10-13T12:00:00.000Z",
+  "summary": "tasks=6 attempts=9 first_attempt_accepted=2 accepted=4 standing_day7=3 unknown=1",
+  "tasks": {
+    "alpha": { "attempts": 1, "costUsd": 0.8, "firstAttemptAccepted": true, "accepted": true, "standingDay7": true, "status": "standing",
+      "reason": "one attempt accepted by the Brain, PR 101 merged and neither reverted nor reopened in the 7 days after merge" },
+    "bravo": { "attempts": 2, "costUsd": 2.05, "firstAttemptAccepted": false, "accepted": true, "standingDay7": true, "status": "standing",
+      "reason": "attempt 1 judged follow-up (its 0.05 judge cost counts), attempt 2 accepted and landed through PRs 102 and 103, both merged and clean for 7 days" },
+    "charlie": { "attempts": 2, "costUsd": 1.74, "firstAttemptAccepted": false, "accepted": true, "standingDay7": false, "status": "not-standing",
+      "reason": "attempt 1 failed (its 0.40 counts), attempt 2 accepted by the judge (0.04), PR 104 merged then reverted two days later" },
+    "delta": { "attempts": 1, "costUsd": 0.7, "firstAttemptAccepted": true, "accepted": true, "standingDay7": true, "status": "standing",
+      "reason": "one attempt accepted, PR 105 merged; its issue was reopened 10 days after merge, outside the 7-day window, so it stood on day 7" },
+    "echo": { "attempts": 2, "costUsd": 0.8, "firstAttemptAccepted": false, "accepted": false, "standingDay7": false, "status": "abandoned",
+      "reason": "both attempts failed, the Brain escalated the second, and nothing was tried for over 7 days: abandoned" },
+    "foxtrot": { "attempts": 1, "costUsd": null, "firstAttemptAccepted": null, "accepted": null, "standingDay7": null, "status": "unknown",
+      "reason": "a 42-day-old run that succeeded but never got a verdict and whose log is gone: unknown, neither a success nor a failure" }
+  }
+}
