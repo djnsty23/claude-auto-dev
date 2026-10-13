@@ -47,6 +47,16 @@ const PREFIX_TRAP = HOME_REPO + '-extra';
 
 function writeRole(obj) { fs.writeFileSync(ROLE, JSON.stringify(obj)); }
 
+// The hook exempts scratch repos under <configDir>/autodev/reports and
+// <os.tmpdir()>/claude. This fixture itself lives under the suite's os.tmpdir(),
+// which inside a Claude Code session can BE <TEMP>/claude/..., and then every
+// "foreign" repo above would read as scratch and every block would turn into an
+// allow. So every child gets its own config dir and temp dir inside the fixture,
+// and the real ~/.claude is never consulted for either.
+const CFG_DIR = path.join(fixture, 'cfg');
+const TMP_DIR = path.join(fixture, 'tmp');
+const HERMETIC_DIRS = { CLAUDE_CONFIG_DIR: CFG_DIR, TEMP: TMP_DIR, TMP: TMP_DIR, TMPDIR: TMP_DIR };
+
 /**
  * Drive the hook as a subprocess. `roleFile` may point at a path that is absent.
  *
@@ -72,7 +82,7 @@ function run({ roleFile = ROLE, payload, raw = null, args = [], env = {} }) {
         encoding: 'utf8',
         // The ATTENDED spelling of the two unattended-run signals is pinned, so
         // the ask cases below hold when this suite itself runs under `claude -p`.
-        env: { ...process.env, AI_AGENT: 'claude-code_suite_agent', CLAUDE_CODE_ENTRYPOINT: 'cli', AUTODEV_BRAIN_ROLE_FILE: roleFile, ...env },
+        env: { ...process.env, AI_AGENT: 'claude-code_suite_agent', CLAUDE_CODE_ENTRYPOINT: 'cli', AUTODEV_BRAIN_ROLE_FILE: roleFile, ...HERMETIC_DIRS, ...env },
         timeout: 20000,
         // Contention is clamped at 20, so cap the widened retry: a contended
         // machine gives an indeterminate run either way, and the cap only
@@ -1102,6 +1112,95 @@ expectAsk('role held + push INSIDE the home repo with --no-verify still asks',
         `armed exit ${armed.exit}; disarmed exit ${disarmed.exit} ${disarmed.stdout.length}B out ${disarmed.stderr.length}B err`);
 }
 
+// ---------------------------------------------------------------------------
+// L. SUBAGENTS AND SCRATCH REPOS. Added 2026-10-14.
+//
+//    [measured 2026-10-14] two of the Brain's own dispatched workers were
+//    blocked committing in throwaway repos under
+//    ~/.claude/autodev/reports/<run>/<code>/. A subagent's hook payload carries
+//    the parent's session_id, so the role claim matched and the worker was
+//    judged as the coordinator. The Claude Code hooks reference names the
+//    discriminator: `agent_id`, present only when the hook fires inside a
+//    subagent. `agent_type` is NOT it, because a main thread started with
+//    `--agent` carries it too.
+//
+//    The ban's purpose survives both exemptions: the coordinator's MAIN thread
+//    committing in a foreign product repo still blocks, and a push from a
+//    scratch clone still blocks, because that push lands on a product remote.
+//
+//    The last line of this suite prints the four verdicts this package was
+//    accepted on, so a reader sees them without scrolling the PASS lines.
+// ---------------------------------------------------------------------------
+const verdicts = {};
+{
+    writeRole({ session_id: 'SESSION-A', home_repos: [HOME_REPO] });
+    const scratchRepo = path.join(CFG_DIR, 'autodev', 'reports', 'brain39-w1', 'U3', 'repo');
+    const padRepo = path.join(TMP_DIR, 'claude', 'proj', 'SESSION-A', 'scratchpad', 'repo');
+    const sub = { agent_id: 'a1b2c3', agent_type: 'general-purpose' };
+    const allowed = (r) => r.exit === 0 && r.stdout.length === 0 && r.stderr.length === 0;
+
+    // The incident, as it was measured: a subagent committing in a scratch repo.
+    const subScratch = run({ payload: bash('git commit -m "x"', { cwd: scratchRepo, ...sub }) });
+    expectSilentAllow('L. a dispatched subagent committing in a scratch repo under autodev/reports is allowed', subScratch);
+    verdicts.subagent_scratch = allowed(subScratch) ? 'ALLOW' : subScratch.exit === 2 ? 'BLOCK' : 'ERROR';
+
+    // The ban's purpose: the coordinator's main thread in a foreign product repo.
+    const mainForeign = run({ payload: bash('git commit -m "x"') });
+    expectBlock('L. the coordinator main thread committing in a foreign product repo still blocks', mainForeign, /git commit/);
+    verdicts.main_thread_foreign = mainForeign.exit === 2 ? 'BLOCK' : allowed(mainForeign) ? 'ALLOW' : 'ERROR';
+
+    // A dispatched worker in a product repo is the session the block message
+    // tells the coordinator to brief, so it is allowed.
+    const subForeign = run({ payload: bash('git commit -m "x"', sub) });
+    expectSilentAllow('L. a dispatched subagent committing in a foreign product repo is allowed (it is the briefed owner)', subForeign);
+    const subPush = run({ payload: bash('git push origin HEAD', sub) });
+    expectSilentAllow('L. a dispatched subagent pushing from a foreign product repo is allowed', subPush);
+    verdicts.subagent_foreign_product = allowed(subForeign) && allowed(subPush) ? 'ALLOW'
+        : subForeign.exit === 2 ? 'BLOCK' : 'ERROR';
+
+    // agent_type alone is the --agent main thread, not a subagent. An empty or
+    // non-string agent_id is not a subagent either: an absent signal fails closed.
+    expectBlock('L. agent_type without agent_id (a main thread started with --agent) still blocks',
+        run({ payload: bash('git commit -m "x"', { agent_type: 'general-purpose' }) }), /git commit/);
+    expectBlock('L. an empty agent_id is not a subagent',
+        run({ payload: bash('git commit -m "x"', { agent_id: '' }) }), /git commit/);
+    expectBlock('L. a non-string agent_id is not a subagent',
+        run({ payload: bash('git commit -m "x"', { agent_id: { id: 'x' } }) }), /git commit/);
+
+    // Scratch repos for the MAIN thread: local writes allowed, push still judged.
+    expectSilentAllow('L. the main thread committing in a scratch repo under autodev/reports is allowed',
+        run({ payload: bash('git commit -m "x"', { cwd: scratchRepo }) }));
+    expectSilentAllow('L. the main thread rebasing in a session scratchpad repo is allowed',
+        run({ payload: bash('git rebase main', { cwd: padRepo }) }));
+    expectSilentAllow('L. `git -C <scratch> merge` from a foreign cwd is allowed',
+        run({ payload: bash(`git -C "${scratchRepo}" merge topic`) }));
+    expectBlock('L. a push from a scratch clone still blocks: it lands on a product remote',
+        run({ payload: bash('git push origin HEAD', { cwd: scratchRepo }) }), /git push/);
+    // A sibling sharing the reports dir's name prefix is not scratch.
+    expectBlock('L. a sibling of the reports dir sharing its name prefix is not scratch',
+        run({ payload: bash('git commit -m "x"', { cwd: path.join(CFG_DIR, 'autodev', 'reports-extra', 'repo') }) }), /git commit/);
+    // One chain, two repos: a scratch commit does not launder a foreign one.
+    expectBlock('L. a scratch commit chained with a foreign commit still blocks on the foreign one',
+        run({ payload: bash(`git -C "${scratchRepo}" commit -m a && git -C "${OTHER_REPO}" commit -m b`) }), /product/);
+
+    // FAIL OPEN on the new paths. The subagent check reads the payload only
+    // after the existing parse guards, so a truncated payload, a null payload
+    // and a broken role file still exit 0 with nothing on stdout.
+    const fo = [
+        run({ raw: '{"tool_name":"Bash","agent_id":', payload: null }),
+        run({ raw: 'null', payload: null }),
+    ];
+    fs.writeFileSync(ROLE, '{ this is not json');
+    const brokenRole = run({ payload: bash('git commit -m "x"', sub) });
+    writeRole({ session_id: 'SESSION-A', home_repos: [HOME_REPO] });
+    // stderr may carry the hook's own "NOT guarded" or "skipped" note here, and
+    // should: what fail-open forbids is a block or a decision on stdout.
+    const foOk = [...fo, brokenRole].every((r) => r.exit === 0 && r.stdout.length === 0);
+    check('L. FAIL OPEN: a truncated subagent payload, a null payload and a broken role file all exit 0', foOk,
+        `exits ${fo.map((r) => r.exit).join(',')},${brokenRole.exit}; stdout ${fo.map((r) => r.stdout.length).join(',')},${brokenRole.stdout.length}B`);
+    verdicts.fail_open = foOk ? 'PASS' : 'FAIL';
+}
+
 fs.rmSync(fixture, { recursive: true, force: true });
 
 // The population, not a bare verdict: what was driven, and how. Without it a
@@ -1110,8 +1209,11 @@ console.log(`\n${tally(pass, fail, infra)}`);
 console.log(`subject: ${path.relative(path.resolve(__dirname, '..'), HOOK)}, `
     + `driven as a subprocess ${pass + fail} times over `
     + `${['inert-without-role', 'the ban', 'mention-is-not-execution', 'cwd escapes',
-        'role ownership', 'dead claim', 'fail-open', 'home-prefix expansion', 'no-verify ask', 'merge-lock', 'mutation'].length} case groups; `
+        'role ownership', 'dead claim', 'fail-open', 'home-prefix expansion', 'no-verify ask', 'merge-lock', 'subagent and scratch', 'mutation'].length} case groups; `
     + `every allow asserted zero bytes on BOTH stdout and stderr.`);
 if (fail) console.log(`failed: ${failures.join(' | ')}`);
 if (infra) console.log(`indeterminate: ${indeterminate.join(' | ')}`);
+// The acceptance line for package H1, last so it is what a reader sees first.
+console.log(`subagent_scratch=${verdicts.subagent_scratch} main_thread_foreign=${verdicts.main_thread_foreign} `
+    + `subagent_foreign_product=${verdicts.subagent_foreign_product} fail_open=${verdicts.fail_open}`);
 process.exit(exitCode(fail, infra));
