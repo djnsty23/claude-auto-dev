@@ -59,6 +59,7 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const claudePaths = require('./claude-paths.js');
+const capacity = require('./capacity.js');
 const { spawn, spawnSync } = require('node:child_process');
 
 const USAGE = [
@@ -674,6 +675,15 @@ function start(opts) {
  * worker itself cannot: how the process ended. A child that never started
  * (missing binary, EACCES) gets a CLAUDE_SPAWN_ERROR line and an exit of -1,
  * so a poller is never left waiting on a process that does not exist.
+ *
+ * CAPACITY. Immediately before the spawn, the supervisor reserves machine
+ * capacity (capacity.js, class worker) in its own pid's name, since it lives as
+ * long as the child. A deferral is written to the log as CAPACITY_WAIT=<why>
+ * when its kind changes, and asked again every AUTODEV_CAPACITY_POLL_MS. One
+ * still standing after AUTODEV_CAPACITY_WAIT_MS, or a tripped crash breaker,
+ * ends the run with CAPACITY_DEFERRED=<why> and CLAUDE_EXIT=-1, and claude never
+ * starts. The reservation is settled on every way out: the child's exit, a
+ * spawn error, and this process exiting.
  */
 function supervise(opts) {
     const o = startOptions(opts);
@@ -684,26 +694,55 @@ function supervise(opts) {
     fs.mkdirSync(path.dirname(o.log), { recursive: true });
     const fd = fs.openSync(o.log, 'a');
     let finished = false;
+    let reservation = null;
+    const settleCapacity = () => {
+        if (!reservation) return;
+        const id = reservation;
+        reservation = null;
+        capacity.release(id);
+    };
+    process.on('exit', settleCapacity);
     const finish = (lines, exitCode) => {
         if (finished) return;
         finished = true;
+        settleCapacity();
         try { fs.writeSync(fd, '\n' + lines.join('\n') + '\n'); } catch { /* the log is gone; nothing left to say */ }
         try { fs.closeSync(fd); } catch { /* already closed */ }
         process.exitCode = exitCode;
     };
-    let child;
-    try {
-        child = spawn(plan.command, plan.args, { cwd: o.cwd, env, stdio: ['ignore', fd, fd], windowsHide: true });
-    } catch (e) {
-        finish([`CLAUDE_SPAWN_ERROR=${e.code || e.message}`, 'CLAUDE_EXIT=-1'], 1);
-        return { supervising: false, code: o.code };
-    }
-    child.on('error', (e) => finish([`CLAUDE_SPAWN_ERROR=${e.code || e.message}`, 'CLAUDE_EXIT=-1'], 1));
-    child.on('exit', (code, signal) => {
-        if (code === null) finish([`CLAUDE_SIGNAL=${signal}`, 'CLAUDE_EXIT=-1'], 1);
-        else finish([`CLAUDE_EXIT=${code}`], code === 0 ? 0 : 1);
-    });
-    return { supervising: true, code: o.code, childPid: child.pid };
+    const launch = () => {
+        let child;
+        try {
+            child = spawn(plan.command, plan.args, { cwd: o.cwd, env, stdio: ['ignore', fd, fd], windowsHide: true });
+        } catch (e) {
+            finish([`CLAUDE_SPAWN_ERROR=${e.code || e.message}`, 'CLAUDE_EXIT=-1'], 1);
+            return { supervising: false, code: o.code };
+        }
+        child.on('error', (e) => finish([`CLAUDE_SPAWN_ERROR=${e.code || e.message}`, 'CLAUDE_EXIT=-1'], 1));
+        child.on('exit', (code, signal) => {
+            if (code === null) finish([`CLAUDE_SIGNAL=${signal}`, 'CLAUDE_EXIT=-1'], 1);
+            else finish([`CLAUDE_EXIT=${code}`], code === 0 ? 0 : 1);
+        });
+        return { supervising: true, code: o.code, childPid: child.pid };
+    };
+    const since = Date.now();
+    let said = null;
+    const admitThenLaunch = () => {
+        const c = capacity.admit({ cls: 'worker', path: o.cwd, note: o.code });
+        if (c.admitted) { reservation = c.id; return launch(); }
+        const kind = c.breaker ? 'breaker' : c.resuming ? 'resuming' : 'deferred';
+        if (kind !== said) {
+            said = kind;
+            try { fs.writeSync(fd, `CAPACITY_WAIT=${c.why}\n`); } catch { /* the log is gone */ }
+        }
+        if (c.breaker || Date.now() - since >= capacity.waitMs()) {
+            finish([`CAPACITY_DEFERRED=${c.why}`, 'CLAUDE_EXIT=-1'], 1);
+            return { supervising: false, code: o.code, capacity: c.why };
+        }
+        setTimeout(admitThenLaunch, capacity.pollMs());
+        return { supervising: true, code: o.code, capacity: c.why };
+    };
+    return admitThenLaunch();
 }
 
 // ---------------------------------------------------------------- status

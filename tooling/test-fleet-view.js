@@ -1,5 +1,9 @@
 #!/usr/bin/env node
 'use strict';
+
+// Capacity admission (capacity.js) would probe this machine and write its
+// machine-wide ledger. Its behaviour is test-capacity-admission.js's subject.
+process.env.AUTODEV_CAPACITY = 'off';
 // Tests for plugins/autodev-core/scripts/fleet-view.js, the local page that
 // merges every worker ledger and both desktop stores.
 // Run: node tooling/test-fleet-view.js

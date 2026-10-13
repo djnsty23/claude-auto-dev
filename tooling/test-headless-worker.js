@@ -1,5 +1,9 @@
 #!/usr/bin/env node
 'use strict';
+
+// Capacity admission (capacity.js) would probe this machine and write its
+// machine-wide ledger. Its behaviour is test-capacity-admission.js's subject.
+process.env.AUTODEV_CAPACITY = 'off';
 // Tests for plugins/autodev-core/scripts/headless-worker.js, the dispatcher of
 // a `claude -p` worker that outlives its caller.
 // Run: node tooling/test-headless-worker.js
@@ -1326,7 +1330,7 @@ try {
         const inst = path.join(ROOT, 'cfg', 'plugins', 'cache', 'autodev', 'autodev-core', '9.9.9');
         write(path.join(inst, '.claude-plugin', 'plugin.json'), JSON.stringify({ name: 'autodev-core', version: '9.9.9' }));
         fs.mkdirSync(path.join(inst, 'scripts'), { recursive: true });
-        for (const f of ['headless-worker.js', 'claude-paths.js']) fs.copyFileSync(path.join(path.dirname(SCRIPT), f), path.join(inst, 'scripts', f));
+        for (const f of ['headless-worker.js', 'claude-paths.js', 'capacity.js', 'gate-records.js']) fs.copyFileSync(path.join(path.dirname(SCRIPT), f), path.join(inst, 'scripts', f));
         const installed = hw([...base, '--dry-run'], {}, { dev: false, script: path.join(inst, 'scripts', 'headless-worker.js') });
         const iv = installed.json && installed.json.ok ? installed.json.value : {};
         check('26. the installed copy starts without --dev and names version 9.9.9',
