@@ -224,6 +224,19 @@ function scriptPlacement(file = __filename) {
     return { script, installed, version };
 }
 
+function installIntegrity(placement, o) {
+    if (o.dev || !placement.installed) return { verdict: 'UNVERIFIED', code: 'dev', why: 'a --dev run is not checked against a release' };
+    try {
+        return require('./plugin-integrity.js').verifyInstall({ pluginRoot: path.join(path.dirname(placement.script), '..'), launcher: placement.script });
+    } catch (e) {
+        return { verdict: 'DENIED', code: 'integrity-unavailable', why: `plugin-integrity.js could not run: ${e.code || e.message}` };
+    }
+}
+
+function integritySummary(r) {
+    return { verdict: r.verdict, code: r.code, commit: r.commit || null, checked: r.checked || 0, launcher: r.launcher || null };
+}
+
 function fault(code, message) { const e = new Error(message || code); e.publicCode = code; throw e; }
 
 function parseArgs(argv) {
@@ -610,6 +623,14 @@ function start(opts) {
         fault('not-installed', `${placement.script} is not inside a plugin cache, so a worker started from it runs code no release shipped. `
             + 'Run the installed copy under <config dir>/plugins/cache/, or pass --dev to run this checkout on purpose');
     }
+    // A cache-shaped path is a name, not evidence. The installed copy must hash
+    // to the commit installed_plugins.json names (plugin-integrity.js), or the
+    // start is refused before anything is reserved or spawned.
+    const integrity = installIntegrity(placement, o);
+    if (integrity.verdict === 'DENIED') {
+        fault('integrity-denied', `${placement.script} is in a plugin cache but does not match the release it claims: ${integrity.why}. `
+            + 'Reinstall the plugin, or pass --dev to run this copy on purpose');
+    }
     if (o.configDir) requireConfigDirExists(o.configDir);
     if (o.pluginDir && !isDir(o.pluginDir)) fault('plugin-dir-missing', `--plugin-dir resolved to ${o.pluginDir}, which is not a directory`);
     const prompt = readPrompt(o.promptFile, scratchDirFor(o), o);
@@ -620,7 +641,7 @@ function start(opts) {
             dryRun: true, code: o.code, argv, command: spawnPlan(argv).command,
             envSet: plan.set, envDeleted: plan.deleted, envScrubList: plan.scrubList,
             configDir: o.configDir, effort: o.effort, pluginDir: o.pluginDir, droppedTools: droppedTools(prompt, o.keepTools),
-            script: placement.script, version: placement.version, installed: placement.installed, dev: o.dev,
+            script: placement.script, version: placement.version, installed: placement.installed, dev: o.dev, integrity: integritySummary(integrity),
             log: o.log, report: o.report, scratchDir: scratchDirFor(o), ledger: o.ledger, cwd: o.cwd, spawned: false,
             wouldMoveAside: priorRunFiles(o),
         };
@@ -634,7 +655,7 @@ function start(opts) {
         code: o.code, pid: null, supervisorImage: path.basename(process.execPath).toLowerCase(), startedAt: new Date().toISOString(),
         log: o.log, report: o.report, promptFile: o.promptFile,
         configDir: o.configDir ? path.basename(o.configDir) : null,
-        version: placement.version, script: placement.script, dev: !placement.installed,
+        version: placement.version, script: placement.script, dev: !placement.installed, integrity: integritySummary(integrity),
         model: o.model, effort: o.effort, permissionMode: o.permissionMode, cwd: o.cwd, pluginDir: o.pluginDir, droppedTools: droppedTools(prompt, o.keepTools), state: 'starting',
     };
     const isReservation = (r) => r.code === o.code && r.state === 'starting' && r.startedAt === record.startedAt;

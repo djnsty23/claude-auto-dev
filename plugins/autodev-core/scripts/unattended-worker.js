@@ -67,7 +67,14 @@
  *   verdict records accept, follow-up or escalate for a finished task. A judge
  *           verdict never replaces an existing one; the Brain's or the operator's does.
  *   settle  on a headless record ends in `closed`: no scheduled task exists, so
- *           there is nothing for `deleted` to record.
+ *           there is nothing for `deleted` to record. --run-status unknown
+ *           closes a run whose supervision was lost: never success, never a
+ *           verdict on the task.
+ *   hold    parks a started headless record whose run was refused its login.
+ *           The attempt moves to `attempts[]` with outcome auth-refused, and the
+ *           record waits in `held`: not failed, not queued, not retried.
+ *   release moves a held record back to queued once the login works again.
+ *           worker-reconcile.js calls it only when brain-judge authHold clears.
  *
  * PINS. `brief` and `enqueue` take `--pin <path>[,<path>...]`, repo-relative
  * acceptance tests the worker must not change. The record stores each path with
@@ -95,9 +102,11 @@
  *        [--pin <path>[,<path>]] [--report <file>]   (default ~/.claude/autodev/reports/<task id>/REPORT.md)
  *        [--base origin/main] [--task-id <id>] [--title <text>] [--ledger <file>]
  *   node unattended-worker.js record --task-id <id> --session <local_uuid> [--ledger <file>]
- *   node unattended-worker.js settle --task-id <id> --run-status running|succeeded|failed [--report-read] [--ledger <file>]
+ *   node unattended-worker.js settle --task-id <id> --run-status running|succeeded|failed|unknown [--report-read] [--reason <text>] [--ledger <file>]
  *   node unattended-worker.js deleted --task-id <id> [--ledger <file>]
  *   node unattended-worker.js retire --task-id <id> [--reason <text>] [--ledger <file>]
+ *   node unattended-worker.js hold --task-id <id> --reason <text> [--ledger <file>]
+ *   node unattended-worker.js release --task-id <id> --reason <text> [--ledger <file>]
  *   node unattended-worker.js status [--task-id <id>] [--ledger <file>]
  *   node unattended-worker.js enqueue --repo <dir> --slug <topic> --brief-file <md> --return <address>
  *        [--after <task id>[,<task id>]] [--pin <path>[,<path>]] [--base origin/main] [--task-id <id>] [--title <text>]
@@ -124,9 +133,11 @@ const SHARED_INSTALL = path.join(__dirname, 'shared-install.js');
 const USAGE = [
     'Usage: node unattended-worker.js brief --repo <dir> --slug <topic> --brief-file <md> --return <address> [--pin <path>[,<path>]] [--report <file>] [--base origin/main] [--task-id <id>] [--title <text>] [--ledger <file>]',
     '       node unattended-worker.js record --task-id <id> --session <local_uuid> [--ledger <file>]',
-    '       node unattended-worker.js settle --task-id <id> --run-status running|succeeded|failed [--report-read] [--ledger <file>]',
+    '       node unattended-worker.js settle --task-id <id> --run-status running|succeeded|failed|unknown [--report-read] [--reason <text>] [--ledger <file>]',
     '       node unattended-worker.js deleted --task-id <id> [--ledger <file>]',
     '       node unattended-worker.js retire --task-id <id> [--reason <text>] [--ledger <file>]',
+    '       node unattended-worker.js hold --task-id <id> --reason <text> [--ledger <file>]',
+    '       node unattended-worker.js release --task-id <id> --reason <text> [--ledger <file>]',
     '       node unattended-worker.js status [--task-id <id>] [--ledger <file>]',
     'brief: refuse a slug already claimed (worktree path, local branch, origin branch, active ledger record),',
     '       then print create_scheduled_task arguments whose prompt opens with git worktree add.',
@@ -138,7 +149,10 @@ const USAGE = [
     '       node unattended-worker.js launch --task-id <id> [--model <id>] [--effort <level>] [--dry-run] [--headless-worker <file>] [--claude-bin <path>] [--dev] [--ledger <file>]',
     '       node unattended-worker.js verdict --task-id <id> --decision accept|follow-up|escalate --reason <text> [--by judge|brain|operator]',
     '            [--head <sha>] [--allow-pin-change <reason>] [--ledger <file>]',
-    'retire: close a composed or queued record whose task never ran, freeing its slug and task id.',
+    'retire: close a composed, queued or held record whose task never ran, freeing its slug and task id.',
+    'hold: a started headless run was refused its login. The attempt is kept in attempts[] and the record waits in held,',
+    '      counted as neither a failure nor a launch refusal. release returns it to queued once the login works.',
+    'settle --run-status unknown: the run lost its supervisor (a reboot, a killed supervisor). It never reads as success.',
     'enqueue: queue a brief for the headless channel. The slug is at most 24 characters: it becomes the headless code.',
     'ready: queued tasks whose dependencies were accepted, within the concurrency and per-hour caps.',
     'launch: the only command that starts anything. It re-runs the brief checks and calls headless-worker.js start.',
@@ -156,10 +170,11 @@ const USAGE = [
     `Default ledger: ${path.join('~', '.claude', 'autodev', 'unattended-workers.json')}`,
 ].join('\n') + '\n';
 
-const ACTIVE = ['queued', 'composed', 'started', 'settled'];
+const ACTIVE = ['queued', 'composed', 'started', 'settled', 'held'];
 // A record that ran and ended: the states a verdict and a dependency can read.
 const FINISHED = ['settled', 'closed', 'deleted'];
-const RUN_STATUSES = ['running', 'succeeded', 'failed'];
+// unknown: the run's supervision was lost, so how it ended cannot be read. Never success.
+const RUN_STATUSES = ['running', 'succeeded', 'failed', 'unknown'];
 const DECISIONS = ['accept', 'follow-up', 'escalate'];
 const VERDICT_BY = ['judge', 'brain', 'operator'];
 const SLUG = /^[a-z0-9][a-z0-9-]{1,48}$/;
@@ -331,6 +346,7 @@ function decideSettle(record, runStatus, reportRead) {
     if (record.state === 'deleted') return { deleteSafe: false, reason: 'already deleted' };
     if (record.state === 'closed') return { deleteSafe: false, reason: 'already closed' };
     if (record.state === 'retired') return { deleteSafe: false, reason: 'retired before it ran: there is no run to settle' };
+    if (record.state === 'held') return { deleteSafe: false, reason: 'held after a refused login: its attempt is recorded, and release returns it to queued' };
     if (runStatus === 'running') return { deleteSafe: false, reason: 'the run is still going, and deleting the task archives its session' };
     if (!reportRead) return { deleteSafe: false, reason: `the run ${runStatus} but its result was not read: read list_events for ${record.sessionId}, then pass --report-read` };
     return { deleteSafe: true, reason: `the run ${runStatus} and its result was read` };
@@ -790,9 +806,11 @@ const COMMAND_FLAGS = {
     enqueue: ['repo', 'slug', 'brief-file', 'return', 'after', 'pin', 'base', 'task-id', 'title', 'model', 'effort', 'permission-mode', 'config-dir', 'ledger'],
     launch: ['task-id', 'model', 'effort', 'dry-run', 'headless-worker', 'claude-bin', 'dev', 'ledger'],
     record: ['task-id', 'session', 'ledger'],
-    settle: ['task-id', 'run-status', 'report-read', 'ledger'],
+    settle: ['task-id', 'run-status', 'report-read', 'reason', 'ledger'],
     deleted: ['task-id', 'ledger'],
     retire: ['task-id', 'reason', 'ledger'],
+    hold: ['task-id', 'reason', 'ledger'],
+    release: ['task-id', 'reason', 'ledger'],
     verdict: ['task-id', 'decision', 'reason', 'by', 'head', 'allow-pin-change', 'accept-without-receipt', 'ledger'],
     ready: ['max-concurrent', 'max-per-hour', 'ledger'],
     status: ['task-id', 'ledger'],
@@ -823,7 +841,7 @@ function run(argv) {
             const decision = decideSettle(rec, opts['run-status'], opts['report-read'] === true);
             if (decision.deleteSafe && rec.channel === 'headless') {
                 // No scheduled task stands behind a headless run: settling it is the end.
-                Object.assign(rec, { state: 'closed', settledAt: new Date().toISOString(), runStatus: opts['run-status'], ...stamp('settled') });
+                Object.assign(rec, { state: 'closed', settledAt: new Date().toISOString(), runStatus: opts['run-status'], ...stamp('settled'), ...(opts.reason ? { settleReason: String(opts.reason).slice(0, 500) } : {}) });
                 decision.reason += ', and a headless run has no scheduled task to delete: closed';
             } else if (decision.deleteSafe) {
                 Object.assign(rec, { state: 'settled', settledAt: new Date().toISOString(), runStatus: opts['run-status'], ...stamp('settled') });
@@ -841,8 +859,35 @@ function run(argv) {
     }
     if (cmd === 'retire') {
         return mutate(opts, (rec) => {
-            if (rec.state !== 'composed' && rec.state !== 'queued') fault('bad-state', `task ${rec.taskId} is ${rec.state}; retire is only for a record with no run behind it`);
+            if (!['composed', 'queued', 'held'].includes(rec.state)) fault('bad-state', `task ${rec.taskId} is ${rec.state}; retire is only for a record with no run behind it`);
             Object.assign(rec, { state: 'retired', retiredAt: new Date().toISOString(), reason: opts.reason || 'never ran' });
+            return {};
+        });
+    }
+    if (cmd === 'hold') {
+        if (!opts.reason || !String(opts.reason).trim()) fault('usage', '--reason is required');
+        return mutate(opts, (rec) => {
+            if (rec.state !== 'started' || rec.channel !== 'headless') fault('bad-state', `task ${rec.taskId} is ${rec.state} on ${rec.channel || 'no'} channel; hold is only for a started headless run`);
+            const at = new Date().toISOString();
+            // The attempt is history, not a result: the worker never ran, so the
+            // task keeps no runStatus and its launch count is untouched.
+            rec.attempts = [...(Array.isArray(rec.attempts) ? rec.attempts : []), {
+                attemptId: rec.attemptId || null, startedAt: rec.startedAt || null, launchedAt: rec.launchedAt || null,
+                headless: rec.headless || null, outcome: 'auth-refused', reason: String(opts.reason).slice(0, 500), at,
+            }];
+            rec.held = { at, reason: String(opts.reason).slice(0, 500), configDir: (rec.launch && rec.launch.configDir) || null };
+            rec.state = 'held';
+            delete rec.attemptId; delete rec.startedAt; delete rec.headless;
+            return {};
+        });
+    }
+    if (cmd === 'release') {
+        if (!opts.reason || !String(opts.reason).trim()) fault('usage', '--reason is required');
+        return mutate(opts, (rec) => {
+            if (rec.state !== 'held') fault('bad-state', `task ${rec.taskId} is ${rec.state}, not held`);
+            rec.released = { at: new Date().toISOString(), reason: String(opts.reason).slice(0, 500), heldAt: rec.held ? rec.held.at : null };
+            rec.state = 'queued';
+            delete rec.held;
             return {};
         });
     }
@@ -893,4 +938,4 @@ if (require.main === module) {
     }
 }
 
-module.exports = { resolvePins, checkPins, gatePins, gateReceipt, composePrompt, decideSettle, parseArgs, run, planStarts, dependencyState, applyVerdict, pointerPrompt, headlessArgs, parseHeadless, recoverTimedOutStart, withLock, FINISHED, DECISIONS, TRANSIENT_LAUNCH_CODES };
+module.exports = { RUN_STATUSES, ACTIVE, resolvePins, checkPins, gatePins, gateReceipt, composePrompt, decideSettle, parseArgs, run, planStarts, dependencyState, applyVerdict, pointerPrompt, headlessArgs, parseHeadless, recoverTimedOutStart, withLock, FINISHED, DECISIONS, TRANSIENT_LAUNCH_CODES };

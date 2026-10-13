@@ -22,8 +22,13 @@
  * the clock appends to its events.jsonl:
  *
  *   close   a headless-channel record whose headless run settled is closed in
- *           the unattended ledger (done or stopped read succeeded, anything
- *           else failed), through unattended-worker.js's own settle.
+ *           the unattended ledger through unattended-worker.js's own settle,
+ *           by worker-reconcile.js closeDecision: succeeded only on exit 0 and a
+ *           RESULT done|stopped line written after the attempt started, unknown
+ *           for a run whose supervision was lost, failed otherwise. A run
+ *           refused its login is held (unattended-worker hold), never closed as
+ *           a failure of the task. worker-reconcile.js tick settles the headless
+ *           runs themselves and runs verify; this step only mirrors.
  *   judge   at most JUDGE_PER_TICK finished records a tick and JUDGE_PER_HOUR an
  *           hour get a verdict: accept, follow-up or escalate, from a tool-less
  *           `claude -p` capped at JUDGE_MAX_TURNS turns and JUDGE_BUDGET_USD.
@@ -320,8 +325,14 @@ function headlessRunOf(rec, headlessRecords) {
     return same.filter((h) => launched !== null && ms(h.startedAt) !== null && ms(h.startedAt) >= launched - 60 * 1000).pop() || null;
 }
 
-/** A normal report and a recorded zero exit are both required for success. */
-function runStatusOfHeadless(result, exit) { return exit === 0 && (result === 'done' || result === 'stopped') ? 'succeeded' : 'failed'; }
+/**
+ * A normal report and a recorded zero exit are both required for success. A run
+ * whose supervision was lost reads unknown: how it ended cannot be known.
+ */
+function runStatusOfHeadless(result, exit) {
+    if (result === 'lost') return 'unknown';
+    return exit === 0 && (result === 'done' || result === 'stopped') ? 'succeeded' : 'failed';
+}
 
 // ---------------------------------------------------------------- a refused login
 // `[measured 2026-10-10]` two headless workers were refused their login after
@@ -429,19 +440,24 @@ function closeStep(ctx) {
             }
             continue;
         }
-        const runStatus = runStatusOfHeadless(h.result, h.exit);
-        const detail = { taskId: rec.taskId, slug: rec.slug, result: h.result, runStatus, sentence: String(h.sentence || '').slice(0, 200),
-            ...(h.result === 'auth-refused' ? { reason: String(h.reason || '').slice(0, 200) } : {}) };
+        // One rule for both closers: the files are read again, never the ledger's word alone.
+        const d = require('./worker-reconcile.js').closeDecision(h, headless);
+        const hold = d.action === 'hold';
+        const runStatus = hold ? null : d.runStatus;
+        const detail = { taskId: rec.taskId, slug: rec.slug, result: h.result, runStatus, outcome: d.outcome, why: String(d.why || '').slice(0, 200),
+            sentence: String(h.sentence || '').slice(0, 200), ...(h.result === 'auth-refused' ? { reason: String(h.reason || '').slice(0, 200) } : {}) };
         if (mode === 'dry') {
             closed++;
-            if (state.reported[`would-close:${key}`]) continue;
-            state.reported[`would-close:${key}`] = new Date().toISOString();
-            out.events.push({ type: 'judge.would-close', key, detail });
+            const k = `${hold ? 'would-hold' : 'would-close'}:${key}`;
+            if (state.reported[k]) continue;
+            state.reported[k] = new Date().toISOString();
+            out.events.push({ type: hold ? 'judge.would-hold' : 'judge.would-close', key, detail });
             continue;
         }
         try {
-            uw.run(['settle', '--task-id', rec.taskId, '--run-status', runStatus, '--report-read', '--ledger', p.ledger]);
-            out.events.push({ type: 'judge.closed', key, detail });
+            if (hold) uw.run(['hold', '--task-id', rec.taskId, '--reason', d.why, '--ledger', p.ledger]);
+            else uw.run(['settle', '--task-id', rec.taskId, '--run-status', runStatus, '--report-read', '--reason', `${d.outcome}: ${d.why}`, '--ledger', p.ledger]);
+            out.events.push({ type: hold ? 'judge.held' : 'judge.closed', key, detail });
             closed++;
         } catch (e) {
             out.events.push({ type: 'judge.close-failed', key, detail: { ...detail, error: e.publicCode || 'internal', message: e.message } });
@@ -994,6 +1010,6 @@ if (require.main === module) {
 module.exports = {
     parseArgs, readSwitch, effectiveMode, reportPathOf, breaker, takeLock, headlessRunOf, runStatusOfHeadless, buildJudgePrompt, judgeArgv,
     parseJudgeOutput, judgeCandidates, revealedDecision, stem, readJsonl, run, pruneReported, tickRuns, writeVerdict, VERDICT_SCHEMA, RUBRIC, BRIEF_HEAD_BYTES,
-    authHold, authRefusedKeys, probeArgv, countsAgainstRecord,
+    authHold, authRefusedKeys, probeArgv, countsAgainstRecord, cfgKey, readProbes, pathsFor,
     JUDGE_PER_TICK, JUDGE_PER_HOUR, JUDGE_FAILS_PER_RECORD, START_MAX_CONCURRENT, START_MAX_PER_HOUR,
 };
