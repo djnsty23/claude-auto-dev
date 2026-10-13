@@ -1,0 +1,498 @@
+{
+  "description": "Evidence-bound criteria for the harness scorecard (A1 to A17). Read by tooling/scorecard.js. Fixture criteria carry weight 8 per aspect and the operational criterion weight 2, so an aspect proven only by fixtures scores at most 8, and 9 or 10 need operational evidence. A criterion whose suite does not exist yet stays UNKNOWN until its package lands. Policy frozen 2026-10-14, before evaluation.",
+  "root": "..",
+  "aspects": [
+    {
+      "id": "A1",
+      "name": "Gate",
+      "criteria": [
+        {
+          "id": "gate-evidence",
+          "kind": "fixture",
+          "probe": "node tooling/test-gate-evidence.js",
+          "expect": "^failure_steps=13/13 evidence=13/13 critical_mutants=(?<population>\\d+)/\\k<population> wrong_reason=0$",
+          "watch": [
+            "tooling/test-gate-evidence.js",
+            "tooling/gate-steps.js",
+            "tooling/gate-lock.js",
+            "tooling/gate-records.js"
+          ],
+          "weight": 8,
+          "populationLabel": "critical mutants killed"
+        },
+        {
+          "id": "gate-window",
+          "kind": "operational",
+          "weight": 2,
+          "needs": "14 days of merged-tree gate receipts, every red step with complete evidence",
+          "watch": []
+        }
+      ]
+    },
+    {
+      "id": "A2",
+      "name": "Release",
+      "criteria": [
+        {
+          "id": "release-protections",
+          "kind": "fixture",
+          "probe": "node tooling/test-release-protections.js",
+          "expect": "^release_chain=verified direct_write=denied retag=denied delete_tag=denied install_hash=match rollback_hash=match$",
+          "watch": [
+            "tooling/test-release-protections.js"
+          ],
+          "weight": 8,
+          "populationCount": "^(ok|PASS) "
+        },
+        {
+          "id": "release-window",
+          "kind": "operational",
+          "weight": 2,
+          "needs": "owner-set branch and tag protection observed on GitHub for 14 days",
+          "watch": []
+        }
+      ]
+    },
+    {
+      "id": "A3",
+      "name": "Security and authority",
+      "criteria": [
+        {
+          "id": "task-authority",
+          "kind": "fixture",
+          "probe": "node tooling/test-task-authority.js",
+          "expect": "^profiles=covered boundary_escapes=0 injected_authority_changes=0 undeclared_credentials=0 credential_policy=pass$",
+          "watch": [
+            "tooling/test-task-authority.js"
+          ],
+          "weight": 8,
+          "populationCount": "^(ok|PASS) "
+        },
+        {
+          "id": "authority-window",
+          "kind": "operational",
+          "weight": 2,
+          "needs": "14 days of worker runs with zero boundary escapes",
+          "watch": []
+        }
+      ]
+    },
+    {
+      "id": "A4",
+      "name": "Hooks",
+      "criteria": [
+        {
+          "id": "hook-budget",
+          "kind": "fixture",
+          "probe": "node tooling/test-hook-budget.js --report",
+          "expect": "^sleep_control_cpu=PASS sleep_control_wall=FAIL timeout_descendants=0$[\\s\\S]*^(?<population>\\d+) passed, 0 failed$",
+          "watch": [
+            "tooling/test-hook-budget.js",
+            "tooling/cpu-telemetry.js",
+            "plugins/autodev-core/hooks/hooks.json"
+          ],
+          "weight": 7,
+          "populationLabel": "hook checks"
+        },
+        {
+          "id": "hook-budget-installed",
+          "kind": "installed",
+          "weight": 1,
+          "probe": "node tooling/test-hook-budget.js --installed --report",
+          "expect": "^sleep_control_cpu=PASS sleep_control_wall=FAIL timeout_descendants=0$[\\s\\S]*^(?<population>\\d+) passed, 0 failed$",
+          "watch": [
+            "tooling/test-hook-budget.js"
+          ],
+          "populationLabel": "installed hook checks"
+        },
+        {
+          "id": "hook-window",
+          "kind": "operational",
+          "weight": 2,
+          "needs": "wall p95 within budget on installed profiles under idle and representative load for 14 days",
+          "watch": []
+        }
+      ]
+    },
+    {
+      "id": "A5",
+      "name": "Workers",
+      "criteria": [
+        {
+          "id": "worker-reconciliation",
+          "kind": "fixture",
+          "probe": "node tooling/test-worker-reconciliation.js",
+          "expect": "^wrong_hash=DENIED exited=SETTLED auth_refused=HELD reboot_loss=UNKNOWN stale_success=REJECT$",
+          "watch": [
+            "tooling/test-worker-reconciliation.js",
+            "plugins/autodev-core/scripts/headless-worker.js",
+            "plugins/autodev-core/scripts/unattended-worker.js"
+          ],
+          "weight": 8,
+          "populationCount": "^(ok|PASS) "
+        },
+        {
+          "id": "worker-window",
+          "kind": "operational",
+          "weight": 2,
+          "needs": "every reserved attempt reconciled within two clock intervals for 14 days",
+          "watch": []
+        }
+      ]
+    },
+    {
+      "id": "A6",
+      "name": "Instructions",
+      "criteria": [
+        {
+          "id": "instruction-envelope",
+          "kind": "fixture",
+          "probe": "node tooling/test-instruction-envelope.js",
+          "expect": "^always_on<=27200 project_instructions<=6963 required_rules=covered source_manifest=complete style_conflicts=0 oversize_update=blocked$",
+          "watch": [
+            "tooling/test-instruction-envelope.js"
+          ],
+          "weight": 8,
+          "populationCount": "^(ok|PASS) "
+        },
+        {
+          "id": "instruction-window",
+          "kind": "operational",
+          "weight": 2,
+          "needs": "fresh sessions on every host profile measured inside the envelope",
+          "watch": []
+        }
+      ]
+    },
+    {
+      "id": "A7",
+      "name": "Skills",
+      "criteria": [
+        {
+          "id": "skill-dispositions",
+          "kind": "fixture",
+          "probe": "node tooling/test-skill-dispositions.js",
+          "expect": "^inventoried=classified orphan_references=0 retained_emergency_drills=PASS$",
+          "watch": [
+            "tooling/test-skill-dispositions.js"
+          ],
+          "weight": 4,
+          "populationCount": "^(ok|PASS) "
+        },
+        {
+          "id": "skill-routing",
+          "kind": "fixture",
+          "probe": "node tooling/test-skill-routing.js",
+          "expect": "^critical_routes=100% heldout_routing>=95% outcome_noninferiority=pass$",
+          "watch": [
+            "tooling/test-skill-routing.js"
+          ],
+          "weight": 4,
+          "populationCount": "^(ok|PASS) "
+        },
+        {
+          "id": "skill-window",
+          "kind": "operational",
+          "weight": 2,
+          "needs": "held-out routing and outcome non-inferiority over 14 days",
+          "watch": []
+        }
+      ]
+    },
+    {
+      "id": "A8",
+      "name": "Cost",
+      "criteria": [
+        {
+          "id": "execution-budget",
+          "kind": "fixture",
+          "probe": "node tooling/test-execution-budget.js",
+          "expect": "^runaway=STOPPED descendants=0 evidence=RETAINED shared_reservations=PASS same_attempt_restart=DENY$",
+          "watch": [
+            "tooling/test-execution-budget.js",
+            "plugins/autodev-core/scripts/headless-worker.js",
+            "plugins/autodev-core/scripts/brain-judge.js"
+          ],
+          "weight": 4,
+          "populationCount": "^(ok|PASS) "
+        },
+        {
+          "id": "worker-profiles",
+          "kind": "fixture",
+          "probe": "node tooling/test-worker-profiles.js",
+          "expect": "^required_tools=PASS discovery=PASS actual_init_manifest=PASS hidden_expansion=0$",
+          "watch": [
+            "tooling/test-worker-profiles.js"
+          ],
+          "weight": 4,
+          "populationCount": "^(ok|PASS) "
+        },
+        {
+          "id": "cost-window",
+          "kind": "operational",
+          "weight": 2,
+          "needs": "cost per accepted task reported with matched repeats and quality non-inferiority",
+          "watch": []
+        }
+      ]
+    },
+    {
+      "id": "A9",
+      "name": "Acceptance",
+      "criteria": [
+        {
+          "id": "judge-exit",
+          "kind": "fixture",
+          "probe": "node tooling/test-brain-judge.js",
+          "expect": "^(?<population>\\d+) passed, 0 failed, 0 could not check$",
+          "watch": [
+            "tooling/test-brain-judge.js",
+            "plugins/autodev-core/scripts/brain-judge.js"
+          ],
+          "weight": 4,
+          "populationLabel": "judge checks"
+        },
+        {
+          "id": "acceptance-receipt",
+          "kind": "fixture",
+          "probe": "node tooling/test-acceptance-receipt.js",
+          "expect": "^missing_or_changed=REJECT forged_receipt=REJECT verified_complete=ACCEPT$",
+          "watch": [
+            "tooling/test-acceptance-receipt.js",
+            "plugins/autodev-core/scripts/acceptance-receipt.js",
+            "plugins/autodev-core/scripts/unattended-worker.js"
+          ],
+          "weight": 4,
+          "populationCount": "^ok "
+        },
+        {
+          "id": "acceptance-window",
+          "kind": "operational",
+          "weight": 2,
+          "needs": "zero unsafe accepts and 99.5% enabled host ticks over 14 days, plus a recovery drill",
+          "watch": []
+        }
+      ]
+    },
+    {
+      "id": "A10",
+      "name": "Queue",
+      "criteria": [
+        {
+          "id": "durable-ingestion",
+          "kind": "fixture",
+          "probe": "node tooling/test-durable-ingestion.js",
+          "expect": "^accepted_tasks_retained=100% duplicate_dispatches=0 unresolved_effects_replayed=0 conflicts_preserved=100%$",
+          "watch": [
+            "tooling/test-durable-ingestion.js"
+          ],
+          "weight": 8,
+          "populationCount": "^(ok|PASS) "
+        },
+        {
+          "id": "queue-window",
+          "kind": "operational",
+          "weight": 2,
+          "needs": "account switch drill passed and no lost task over 14 days",
+          "watch": []
+        }
+      ]
+    },
+    {
+      "id": "A11",
+      "name": "Visibility",
+      "criteria": [
+        {
+          "id": "receipted-asks",
+          "kind": "fixture",
+          "probe": "node tooling/test-receipted-asks.js",
+          "expect": "^sources=(?<population>\\d+)/\\k<population> stale_sources_hidden=0 urgent_canaries_receipted=100% unreceipted_overdue=0$",
+          "watch": [
+            "tooling/test-receipted-asks.js"
+          ],
+          "weight": 8,
+          "populationLabel": "sources"
+        },
+        {
+          "id": "visibility-window",
+          "kind": "operational",
+          "weight": 2,
+          "needs": "owner acknowledgment drill passed",
+          "watch": []
+        }
+      ]
+    },
+    {
+      "id": "A12",
+      "name": "Locking",
+      "criteria": [
+        {
+          "id": "operating-lock",
+          "kind": "fixture",
+          "probe": "node tooling/test-operating-lock.js",
+          "expect": "^writers=(?<population>\\d+) committed=\\k<population> overlap=0 foreign_release=0 crash_points=PASS$",
+          "watch": [
+            "tooling/test-operating-lock.js",
+            "plugins/autodev-core/scripts/ledger-lock.js"
+          ],
+          "weight": 4,
+          "populationLabel": "writers"
+        },
+        {
+          "id": "ledger-lock",
+          "kind": "fixture",
+          "probe": "node tooling/test-ledger-lock.js",
+          "expect": "^PASS (?<population>\\d+)/\\k<population> ledger lock controls, 0 failed$",
+          "watch": [
+            "tooling/test-ledger-lock.js",
+            "plugins/autodev-core/scripts/ledger-lock.js"
+          ],
+          "weight": 4,
+          "populationLabel": "lock controls"
+        },
+        {
+          "id": "locking-window",
+          "kind": "operational",
+          "weight": 2,
+          "needs": "every inventoried writer exercised on the installed operating layer",
+          "watch": []
+        }
+      ]
+    },
+    {
+      "id": "A13",
+      "name": "Learning",
+      "criteria": [
+        {
+          "id": "frontier-compare",
+          "kind": "fixture",
+          "probe": "node tooling/frontier/run.js compare --plan tooling/frontier/path-to-10.json --fixtures",
+          "expect": "^arms=3 independent_oracles=PASS leakage_controls=PASS missing_runs=UNKNOWN$",
+          "watch": [
+            "tooling/frontier/run.js",
+            "tooling/frontier/frontier.js"
+          ],
+          "weight": 8,
+          "populationCount": "^(ok|PASS) "
+        },
+        {
+          "id": "learning-window",
+          "kind": "operational",
+          "weight": 2,
+          "needs": "108 bounded calibration runs with sealed held-out tasks",
+          "watch": []
+        }
+      ]
+    },
+    {
+      "id": "A14",
+      "name": "Delivery",
+      "criteria": [
+        {
+          "id": "delivery-outcomes",
+          "kind": "fixture",
+          "probe": "node tooling/test-delivery-outcomes.js",
+          "expect": "^tasks=(?<population>6) attempts=9 first_attempt_accepted=2 accepted=4 standing_day7=3 unknown=1$",
+          "watch": [
+            "tooling/test-delivery-outcomes.js",
+            "plugins/autodev-core/scripts/delivery-outcomes.js"
+          ],
+          "weight": 8,
+          "populationLabel": "fixture tasks"
+        },
+        {
+          "id": "delivery-window",
+          "kind": "operational",
+          "weight": 2,
+          "needs": "at least 30 real tasks over 14 days with first-attempt acceptance of 90% or more",
+          "watch": []
+        }
+      ]
+    },
+    {
+      "id": "A15",
+      "name": "Machine capacity",
+      "criteria": [
+        {
+          "id": "capacity-admission",
+          "kind": "fixture",
+          "probe": "node tooling/test-capacity-admission.js",
+          "expect": "^(?<population>\\d+) checks\\r?\\noversubscriptions=0 unknown_probe=DEFER queue_preserved=PASS settlement_allowed=PASS crash_breaker=PASS$",
+          "watch": [
+            "tooling/test-capacity-admission.js",
+            "plugins/autodev-core/scripts/capacity.js"
+          ],
+          "weight": 4,
+          "populationLabel": "capacity checks"
+        },
+        {
+          "id": "capacity-lifecycle",
+          "kind": "fixture",
+          "probe": "node tooling/test-capacity-lifecycle.js",
+          "expect": "^growth_reconciled=PASS expired_eligible=REMOVED protected=KEPT missed_retention=DETECTED lifecycle_recovery=PASS$",
+          "watch": [
+            "tooling/test-capacity-lifecycle.js",
+            "plugins/autodev-core/scripts/capacity.js"
+          ],
+          "weight": 4,
+          "populationCount": "^(ok|PASS) "
+        },
+        {
+          "id": "capacity-window",
+          "kind": "operational",
+          "weight": 2,
+          "needs": "zero admission breaches, zero protected deletions and a stable trend over 14 days",
+          "watch": []
+        }
+      ]
+    },
+    {
+      "id": "A16",
+      "name": "Owner time",
+      "criteria": [
+        {
+          "id": "owner-minutes",
+          "kind": "fixture",
+          "probe": "node tooling/test-owner-minutes.js",
+          "expect": "^minutes_capture>=95% duplicate_asks=0 unauthorized_silence_actions=0 urgent_misses=0$",
+          "watch": [
+            "tooling/test-owner-minutes.js"
+          ],
+          "weight": 8,
+          "populationCount": "^(ok|PASS) "
+        },
+        {
+          "id": "owner-window",
+          "kind": "operational",
+          "weight": 2,
+          "needs": "owner minutes per accepted task at most 0.8 of baseline",
+          "watch": []
+        }
+      ]
+    },
+    {
+      "id": "A17",
+      "name": "Recovery",
+      "criteria": [
+        {
+          "id": "restore-drill",
+          "kind": "fixture",
+          "probe": "node tooling/test-release-restore.js",
+          "expect": "^clean_profile_restore=pass selected_release_hash=match rollback_with_newer_cache=pass queue_reconciled=pass$",
+          "watch": [
+            "tooling/test-release-restore.js"
+          ],
+          "weight": 8,
+          "populationCount": "^(ok|PASS) "
+        },
+        {
+          "id": "recovery-window",
+          "kind": "operational",
+          "weight": 2,
+          "needs": "a real restore drill inside 60 minutes with no acknowledged intent lost",
+          "watch": []
+        }
+      ]
+    }
+  ]
+}
