@@ -1,0 +1,2 @@
+{"at":"2026-09-15T11:00:00.000Z","key":"bravo@2026-09-15T09:00:00.000Z","taskId":"bravo","source":"tick","ok":true,"error":null,"costUsd":0.05,"turns":1,"durationMs":9000}
+{"at":"2026-09-21T11:00:00.000Z","key":"charlie@2026-09-21T09:00:00.000Z","taskId":"charlie","source":"tick","ok":true,"error":null,"costUsd":0.04,"turns":1,"durationMs":8000}

@@ -48,6 +48,7 @@ const http = require('node:http');
 const crypto = require('node:crypto');
 const { spawn, spawnSync } = require('node:child_process');
 const HW = require('./headless-worker.js');
+const DELIVERY = require('./delivery-outcomes.js');
 
 const USAGE = [
     'Usage: node fleet-view.js [serve] [--port 8766] [--hours 48] [--takeover-script <file>] [--no-launch] [--until-stdin-closes]',
@@ -498,7 +499,17 @@ function collect(s, now = Date.now()) {
         src.population += `, ${shown} shown`;
     }
     rows.sort((a, b) => rank(a) - rank(b) || (b.lastAt || 0) - (a.lastAt || 0));
-    return { sources, rows, window: `live, asking, or touched in the last ${s.hours} h`, at: new Date(now).toISOString() };
+    return { sources, rows, window: `live, asking, or touched in the last ${s.hours} h`, at: new Date(now).toISOString(), delivery: deliverySummary(s) };
+}
+
+/** One read-only line from delivery-outcomes.js's store, or null when there is no store yet (nothing is printed then). */
+function deliverySummary(s) {
+    const file = path.join(s.autodev, 'delivery', 'outcomes.jsonl');
+    if (!fs.existsSync(file)) return null;
+    try {
+        const r = DELIVERY.report({ paths: { store: file } });
+        return `delivery: ${r.summary} (${r.counts.tasks} task outcome(s) in ${file})`;
+    } catch (e) { return `delivery: COULD NOT READ ${file}: ${e.message}`; }
 }
 
 /**
@@ -685,6 +696,7 @@ function age(ms, now = Date.now()) {
 
 function listLines(view) {
     const out = view.sources.map((src) => src.population);
+    if (view.delivery) out.push(view.delivery);
     out.push(`window: ${view.window}. ${view.rows.length} row(s).`);
     for (const r of view.rows) {
         out.push([r.code, r.project || '-', r.account || '-', r.kind, r.process + (r.exit !== null && r.exit !== undefined ? ` ${r.exit}` : ''),
@@ -873,4 +885,4 @@ if (require.main === module) {
     }
 }
 
-module.exports = { parseArgs, settings, collect, openAsks, doAction, processMatches, progressOf, lastPr, nextCode, renderPage, listLines, selftest, esc };
+module.exports = { parseArgs, settings, collect, openAsks, doAction, processMatches, progressOf, lastPr, nextCode, renderPage, listLines, selftest, esc, deliverySummary };
