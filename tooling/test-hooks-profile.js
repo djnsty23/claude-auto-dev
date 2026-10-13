@@ -48,6 +48,9 @@ const ADVISORY = {
     // The nudge is advice, and the refreshed block has no reader — nothing in this repo
     // reads `record.observed`; `--read` recomputes the facts live. So it advises.
     'stop-intent-record.js': 'intent_record',
+    // SessionStart note on the always-on rules: over budget, a required rule gone, or
+    // conflicting styles. The block lives in instruction-envelope.js apply, not here.
+    'instruction-envelope.js': 'instruction_envelope',
 };
 // Hooks that guard, block, or keep state the sprint and the Brain depend on.
 const GUARDING = [

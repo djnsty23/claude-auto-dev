@@ -21,6 +21,12 @@
             "command": "node",
             "args": ["${CLAUDE_PLUGIN_ROOT}/hooks/session-register.js"],
             "timeout": 5
+          },
+          {
+            "type": "command",
+            "command": "node",
+            "args": ["${CLAUDE_PLUGIN_ROOT}/hooks/instruction-envelope.js"],
+            "timeout": 5
           }
         ]
       },
