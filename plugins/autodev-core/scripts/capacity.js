@@ -1,8 +1,9 @@
 #!/usr/bin/env node
 /**
  * capacity.js - atomic machine capacity admission for full gates, headless
- * workers and judges. A library; it prints nothing on import and nothing on a
- * no-op. The CLI only reads the ledger or clears a crash breaker.
+ * workers, judges and archives (lifecycle.js asks before it writes one). A
+ * library; it prints nothing on import and nothing on a no-op. The CLI only
+ * reads the ledger or clears a crash breaker.
  *
  * WHY. Gates (full-gate-queue.js), headless workers (headless-worker.js) and
  * judges (brain-judge.js) each used to launch without reserving anything.
@@ -74,7 +75,7 @@ const { spawnSync } = require('child_process');
 const records = require(path.join(__dirname, 'gate-records.js'));
 
 const GIB = 1024 * 1024 * 1024;
-const CLASSES = ['gate', 'worker', 'judge', 'frontier'];
+const CLASSES = ['gate', 'worker', 'judge', 'frontier', 'archive'];
 
 // Default request sizes per class, in bytes. They start conservative and are
 // calibrated from observed peaks: once a class's peaks are measured, set
@@ -84,6 +85,8 @@ const DEFAULT_REQUESTS = Object.freeze({
     worker: Object.freeze({ diskBytes: 2 * GIB, commitBytes: 2 * GIB }),
     judge: Object.freeze({ diskBytes: GIB / 2, commitBytes: 1 * GIB }),
     frontier: Object.freeze({ diskBytes: 2 * GIB, commitBytes: 4 * GIB }),
+    // An archive asks for its own measured size (lifecycle.js passes diskBytes); this is the fallback.
+    archive: Object.freeze({ diskBytes: 1 * GIB, commitBytes: GIB / 2 }),
 });
 const DISK_RESERVE_MIN = 15 * GIB;
 const DISK_RESERVE_MAX = 64 * GIB;
@@ -493,7 +496,7 @@ module.exports = {
 function help() {
     console.log([
         'usage: node capacity.js status [--json]',
-        '       node capacity.js clear-breaker --class <gate|worker|judge|frontier>',
+        '       node capacity.js clear-breaker --class <gate|worker|judge|frontier|archive>',
         '',
         'Machine capacity admission for gates, headless workers and judges. status lists',
         'the reservations and each class\'s deferral and crash breaker. clear-breaker is the',
