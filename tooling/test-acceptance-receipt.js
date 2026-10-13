@@ -238,6 +238,11 @@ try {
     r = accept(fl.taskId);
     record('forged_receipt', 'a receipt rewritten in the store is refused as tampered', r.code === 'receipt-tampered', said(r));
 
+    // Without --ledger the CLI reads the ledger under the config dir: a known task answers as with it.
+    const viaFlag = gateCheck(fl.taskId);
+    r = cli(SUBJECT, ['check', '--task-id', fl.taskId]);
+    record('missing_or_changed', 'the default ledger is the one under the config dir', r.code !== 'unknown-task' && r.code === viaFlag.code && r.status === viaFlag.status, `${said(r)} vs ${said(viaFlag)}`);
+
     // Last, because it breaks the chain for every later read: an index line appended out of chain.
     const cr = task('chain');
     const row = { seq: 999, at: new Date().toISOString(), taskId: cr.taskId, attemptId: recOf(cr.taskId).attemptId, tree: g(repo, 'rev-parse', 'claude/chain^{tree}'),
