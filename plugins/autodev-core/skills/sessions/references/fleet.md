@@ -56,8 +56,11 @@ notifying; `--test` sends one sample toast.
 
 It also fires once per open worker ask: an `ask.json` under `runs/` or beside a
 headless worker's report, read through `fleet-view.js`'s own `openAsks()`, so
-the toast and the fleet-view page list the same asks. A rewritten ask fires
-again. The 15-minute wait below does not apply to asks: nobody is in a headless
+the toast and the fleet-view page list the same asks. An ask is keyed by its
+decision and input version (`owner-asks.js`), never its mtime: a rewrite with a
+new question fires again, an unchanged rewrite or rerun does not. A toast that
+returned is `os-submitted`, and delivery reads UNKNOWN until the owner's receipt
+(`owner-asks.js ack`) or answer is recorded. The 15-minute wait below does not apply to asks: nobody is in a headless
 worker's conversation to answer one quickly.
 
 Each pass also runs `quota-tripwire.js --once`. Its PREP HANDOVER line toasts
