@@ -364,12 +364,9 @@
       "sha256": "774e4e0b164285fa9f97e88e3acffb2b1a62999b26d39f3a67eb2259aedfccf4"
     },
     "test-hook-budget.js": {
-      "isolation": "parallel",
-      "reason": "reviewed 2026-10-02: git init, add and commit in a temp project; HOME, USERPROFILE, CLAUDE_CONFIG_DIR and APPDATA point into a temp dir; budgets are CPU time since 2.1",
-      "accepted": [
-        "git-write: git init, add, commit (a fixture repo is initialised; every call must target it)"
-      ],
-      "sha256": "cfb14bc5dc99f65f2c6ff89606e6f10b183490dffadf21999e646d773f6c1791"
+      "isolation": "serial",
+      "reason": "reviewed 2026-10-13: writes only under its mkdtemp sandbox and a temp git project, as before. It now also judges wall time per hook and per event, and overlapping suites inflate wall time past what the interleaved floor and the capped scale absorb, so it runs alone",
+      "sha256": "0988d89be4cc73700d547da5baa3e602c9b8e9493f20611ec04266edb9cfd38e"
     },
     "test-hook-execution-evidence.js": {
       "isolation": "serial",
