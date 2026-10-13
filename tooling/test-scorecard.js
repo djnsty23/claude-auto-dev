@@ -82,6 +82,12 @@ try {
     const pass = sc.runProbe(c, { root: tmp, now: NOW });
     check('a passing probe records its population', pass.status === 'PASS' && pass.population === 7 && pass.watchHash === h1, JSON.stringify(pass).slice(0, 200));
     const nonzero = sc.runProbe(manifest.aspects[0].criteria[1], { root: tmp, now: NOW });
+    fs.writeFileSync(path.join(tmp, 'counted.js'), "for (const l of ['ok a', 'ok b', 'BAD c', 'ok d', 'all=PASS']) console.log(l);");
+    fs.writeFileSync(path.join(tmp, 'uncounted.js'), "console.log('all=PASS');");
+    const counted = sc.runProbe({ id: 'counted', kind: 'fixture', watch: [], probe: 'node counted.js', expect: '^all=PASS$', populationCount: '^ok ' }, { root: tmp, now: NOW });
+    check('populationCount counts the matching lines', counted.status === 'PASS' && counted.population === 3, JSON.stringify(counted).slice(0, 200));
+    const uncounted = sc.runProbe({ id: 'uncounted', kind: 'fixture', watch: [], probe: 'node uncounted.js', expect: '^all=PASS$', populationCount: '^ok ' }, { root: tmp, now: NOW });
+    check('a zero count is no population', uncounted.population === 0 && sc.criterionStatus({ id: 'uncounted', kind: 'fixture' }, [uncounted], { now: NOW }).status === 'UNKNOWN', String(uncounted.population));
     check('a matching line from a failed process is FAIL', nonzero.status === 'FAIL' && nonzero.why === 'exit 1', nonzero.why);
     sc.writeReceipt(receipts, pass);
     sc.writeReceipt(receipts, nonzero);

@@ -56,7 +56,8 @@ const problems = { oversubscriptions: [], unknown_probe: [], queue_preserved: []
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const mkTemp = (p) => { const d = fs.mkdtempSync(path.join(os.tmpdir(), p)); temps.push(d); return d; };
-const note = (field, cond, why) => { if (!cond) problems[field].push(why); return Boolean(cond); };
+let checked = 0;
+const note = (field, cond, why) => { checked++; if (!cond) problems[field].push(why); return Boolean(cond); };
 
 function fixture() {
     const dir = mkTemp('cap-');
@@ -392,7 +393,7 @@ async function main() {
 const WANT = 'oversubscriptions=0 unknown_probe=DEFER queue_preserved=PASS settlement_allowed=PASS crash_breaker=PASS';
 
 main().then((line) => {
-    process.stdout.write(line + '\n');
+    process.stdout.write(`${checked} checks\n${line}\n`);
     if (line !== WANT) {
         for (const [k, v] of Object.entries(problems)) {
             if (k === '_log' || !v.length) continue;

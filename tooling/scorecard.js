@@ -45,7 +45,7 @@ function defaultReceiptsDir(env = process.env) {
     return path.join(base, 'autodev', 'scorecard', 'receipts');
 }
 
-/** Reads and checks a manifest: { aspects: [{ id, name, criteria: [{ id, probe, expect, kind, watch, weight }] }] }. */
+/** Reads and checks a manifest: { aspects: [{ id, name, criteria: [{ id, probe, expect, populationCount, kind, watch, weight }] }] }. */
 function loadManifest(file) {
     const m = JSON.parse(fs.readFileSync(file, 'utf8'));
     const problems = validateManifest(m);
@@ -128,7 +128,11 @@ function runProbe(criterion, { root, now = Date.now(), spawn = spawnSync } = {})
     const r = spawn(criterion.probe, { cwd: root, shell: true, encoding: 'utf8', timeout: 20 * 60 * 1000, maxBuffer: 64 * 1024 * 1024 });
     const out = `${r.stdout || ''}${r.stderr || ''}`;
     const m = criterion.expect ? new RegExp(criterion.expect, 'm').exec(out) : null;
-    const population = m && m.groups && m.groups.population !== undefined ? Number(m.groups.population) : null;
+    // A suite that prints no count can still name its population: `populationCount` is a
+    // pattern, and the population is the number of output lines it matches.
+    const population = criterion.populationCount
+        ? (out.match(new RegExp(criterion.populationCount, 'gm')) || []).length
+        : (m && m.groups && m.groups.population !== undefined ? Number(m.groups.population) : null);
     const ok = r.status === 0 && !r.signal && Boolean(m);
     let head = null;
     try { head = spawnSync('git', ['rev-parse', 'HEAD'], { cwd: root, encoding: 'utf8' }).stdout.trim() || null; } catch { /* outside git */ }
