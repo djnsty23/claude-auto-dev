@@ -44,21 +44,36 @@
 // record is NOT MEASURED (exit 2 if nothing failed), never zero.
 //
 // What CPU does not see: time a hook spends waiting on a non-Node child (git,
-// a shell, ps). The harness timeout each hook declares is the wall-clock bound,
-// and the timeouts are asserted below.
+// a shell, ps), or sleeping. So there is a second, separate judge:
+//
+//   4. ELAPSED. The same valid runs, judged on wall time over the bare-node
+//      wall floor measured interleaved, min of RUNS, against a per-event wall
+//      budget (WALL_BUDGET_MS) that scales up with the floor to a hard cap
+//      (WALL_SCALE_MAX), and stays under every hook's harness timeout;
+//   5. CUMULATIVE. Every hook wired on one event, its wall overhead summed,
+//      against the event's ceiling (EVENT_WALL_CEILING_MS);
+//   6. TIMEOUT DESCENDANTS. A canary hook that spawns a detached child and never
+//      exits is killed at its timeout through the process-tree helper, and must
+//      leave zero live descendants.
 //
 // Every judge is shown to fire: a real wired hook wrapped in a CPU burn past its
-// budget must go over, the same hook wrapped in a SLEEP of the same length must
-// not (a wall clock would charge the sleep), every decision flipped must
-// disagree with what the hook actually did, and a wired list with one timeout
-// removed or one hook unclassified must be reported.
+// budget must go over, the same hook wrapped in a SLEEP must stay inside the CPU
+// budget (a wall clock would charge the sleep) and go OVER the wall budget,
+// every decision flipped must disagree with what the hook actually did, a wired
+// list with one timeout removed or one hook unclassified must be reported, and a
+// root-only kill of the timeout canary must leave its child alive and counted.
+//
+// --report prints the cost tables and one summary line, which must read
+//   sleep_control_cpu=PASS sleep_control_wall=FAIL timeout_descendants=0
+// --installed also measures the installed plugin cache as a separate profile.
+// It is never part of the default run (see installedProfile below).
 //
 // Nothing real is touched. HOME, USERPROFILE, CLAUDE_CONFIG_DIR, APPDATA,
 // LOCALAPPDATA and XDG_CONFIG_HOME point into a temp dir, the cwd is a temp git
 // repo, and ps, taskkill, tasklist, wmic and powershell are shadowed on PATH by
 // shims that do nothing, because agent-browser-cleanup.js kills processes.
 //
-// Run: node tooling/test-hook-budget.js [--report]
+// Run: node tooling/test-hook-budget.js [--report] [--installed]
 
 'use strict';
 const { execFileSync } = require('child_process');
@@ -70,6 +85,7 @@ const { spawnSyncCpu } = require('./cpu-telemetry.js');
 const ROOT = path.resolve(__dirname, '..');
 const PLUGINS = ['autodev-core', 'autodev-memory'];
 const REPORT = process.argv.includes('--report');
+const INSTALLED = process.argv.includes('--installed');
 const RUNS = 3;
 
 // CPU of an empty script under the preload. `[measured 2026-10-02]` single runs
@@ -93,6 +109,68 @@ const BUDGET_MS = {
     InstructionsLoaded: 250,
     SessionEnd: 250,
     SessionStart: 500,
+};
+
+// ELAPSED. The CPU budget above cannot see a hook waiting on git, a shell or
+// ps, or sleeping, and the user waits for all of it. So each hook is also judged
+// on wall time over the bare-node wall floor measured interleaved with it, min
+// of RUNS. Min-of-RUNS minus an interleaved floor is what keeps machine load out
+// of the verdict: load inflates both sides, and the minimum keeps the quietest
+// sample of each.
+//
+// WALL_FLOOR_REF_MS: the wall time of an empty script under the preload, the
+// spawn included. `[measured 2026-10-13]` three idle runs of this suite on a
+// 16-core Windows 11 box, Node 24.15.0, read a per-hook floor minimum between
+// 50 and 62 ms, so 55 ms is the reference above which wall budgets scale.
+const WALL_FLOOR_REF_MS = 55;
+// The wall budget scales with the floor measured beside it, upward only, and
+// never past this factor: a baseline that keeps slowing cannot keep widening
+// the budget. Past the cap a loaded machine reads red, which says the machine
+// was too busy to judge on, and the CPU verdict above still stands.
+const WALL_SCALE_MAX = 3;
+// Wall overhead one hook may add to one event, in idle-machine milliseconds.
+// `[measured 2026-10-13]` same three runs, min-of-3 wall over the floor: every
+// PreToolUse, PostToolUse and UserPromptSubmit hook read -4 to 13 ms, every
+// Stop, compact, InstructionsLoaded and SessionEnd hook -5 to 21 ms. On
+// SessionStart, session-start.js read 283 to 330 ms (git and the session store)
+// and agent-browser-cleanup.js 113 to 136 ms (three shell spawns), the rest
+// under 20 ms. Budgets sit about 5x over the per-tool readings and about 2x over
+// session-start.js, and each one at WALL_SCALE_MAX stays under the shortest
+// harness timeout on its event (asserted below).
+const WALL_BUDGET_MS = {
+    PreToolUse: 100,
+    PostToolUse: 100,
+    PostToolUseFailure: 100,
+    UserPromptSubmit: 100,
+    Stop: 150,
+    StopFailure: 150,
+    PreCompact: 150,
+    PostCompact: 150,
+    InstructionsLoaded: 150,
+    SessionEnd: 150,
+    SessionStart: 650,
+};
+// Wall overhead of every hook wired on one event, summed. Claude Code may start
+// matching hooks in parallel, so the sum is an upper bound on the wait, and it
+// counts every matcher as if one tool call matched them all. That is the
+// conservative reading: a ceiling the sum fits under, the real wait fits under.
+// `[measured 2026-10-13]` same three runs, summed per event: SessionStart 423
+// to 500 ms over 5 hooks, PreToolUse 18 to 40 over 7, PostToolUse 14 to 24 over
+// 4, Stop 32 to 38 over 6, SessionEnd 25 to 33 over 3, every other event under
+// 16 ms. The ceiling also caps growth by count: the next hook on a tool event
+// spends from the same few hundred milliseconds as the ones already there.
+const EVENT_WALL_CEILING_MS = {
+    PreToolUse: 250,
+    PostToolUse: 200,
+    PostToolUseFailure: 100,
+    UserPromptSubmit: 150,
+    Stop: 300,
+    StopFailure: 150,
+    PreCompact: 200,
+    PostCompact: 150,
+    InstructionsLoaded: 150,
+    SessionEnd: 250,
+    SessionStart: 1000,
 };
 
 // What each hook does when its stdin is garbage or empty.
@@ -188,6 +266,10 @@ const DECISIONS = {
 let pass = 0;
 let fail = 0;
 let notMeasured = 0;
+// The three facts the --report summary line states, each set only by the check
+// that measured it. null prints as NOT_MEASURED, which never matches.
+const summary = { sleepCpu: null, sleepWall: null, descendants: null };
+const EXPECTED_SUMMARY = 'sleep_control_cpu=PASS sleep_control_wall=FAIL timeout_descendants=0';
 const check = (label, ok, detail) => {
     if (ok) { pass++; console.log('PASS', label); } else { fail++; console.log('FAIL', label, detail === undefined ? '' : JSON.stringify(detail)); }
 };
@@ -196,10 +278,13 @@ const unmeasured = (label, why) => { notMeasured++; console.log('NOT MEASURED', 
 
 // ---------------------------------------------------------------- the wired list
 
-function readWired(root = ROOT) {
+// roots maps each plugin to the directory holding its hooks/hooks.json: the
+// repo copy by default, the installed cache under --installed.
+const repoRoots = () => Object.fromEntries(PLUGINS.map((p) => [p, path.join(ROOT, 'plugins', p)]));
+function readWired(roots = repoRoots()) {
     const wired = [];
     for (const plugin of PLUGINS) {
-        const pluginRoot = path.join(root, 'plugins', plugin);
+        const pluginRoot = roots[plugin];
         const manifest = JSON.parse(fs.readFileSync(path.join(pluginRoot, 'hooks', 'hooks.json'), 'utf8'));
         for (const [event, groups] of Object.entries(manifest.hooks || {})) {
             for (const group of groups) {
@@ -212,6 +297,31 @@ function readWired(root = ROOT) {
         }
     }
     return wired;
+}
+
+// The installed profile: the plugin cache Claude Code actually loads hooks from,
+// resolved the way check-plugin-drift.js resolves it, from installed_plugins.json
+// under the config dir. A user-scope entry wins over a project-scope one. Returns
+// { roots, versions } or { why } when any plugin has no installed hooks.json.
+function installedRoots() {
+    const claudePaths = require(path.join(ROOT, 'plugins', 'autodev-core', 'scripts', 'claude-paths.js'));
+    const manifest = path.join(claudePaths.configDir(), 'plugins', 'installed_plugins.json');
+    let m;
+    try { m = JSON.parse(fs.readFileSync(manifest, 'utf8')); } catch (e) { return { why: `cannot read ${manifest}: ${e.code || e.message}` }; }
+    const keys = Object.keys((m && m.plugins) || {});
+    const roots = {};
+    const versions = {};
+    for (const plugin of PLUGINS) {
+        const key = keys.find((k) => k === `${plugin}@autodev`) || keys.find((k) => k.startsWith(`${plugin}@`));
+        const entries = key && Array.isArray(m.plugins[key]) ? m.plugins[key] : [];
+        const e = entries.find((x) => x && x.scope === 'user') || entries[entries.length - 1];
+        if (!e || !e.installPath || !fs.existsSync(path.join(e.installPath, 'hooks', 'hooks.json'))) {
+            return { why: `${plugin} has no installed hooks.json in ${manifest}` };
+        }
+        roots[plugin] = e.installPath;
+        versions[plugin] = e.version;
+    }
+    return { roots, versions };
 }
 
 // Every wired hook classified, every decision wired: a hook added to hooks.json
@@ -229,6 +339,10 @@ function classification(wired, decisions) {
 const missingTimeouts = (wired) => wired.filter((w) => !(Number.isFinite(w.timeout) && w.timeout > 0)).map((w) => `${w.event} ${w.key}`);
 
 const unbudgeted = (wired) => [...new Set(wired.map((w) => w.event))].filter((e) => !(e in BUDGET_MS));
+const wallBudgetOverTimeout = (wired) => wired
+    .filter((w) => w.event in WALL_BUDGET_MS && Number.isFinite(w.timeout) && !(WALL_BUDGET_MS[w.event] * WALL_SCALE_MAX < w.timeout * 1000))
+    .map((w) => `${w.event} ${w.key} (${WALL_BUDGET_MS[w.event] * WALL_SCALE_MAX} ms vs ${w.timeout} s)`);
+const wallUnbudgeted = (wired) => [...new Set(wired.map((w) => w.event))].filter((e) => !(e in WALL_BUDGET_MS) || !(e in EVENT_WALL_CEILING_MS));
 
 // ---------------------------------------------------------------- the judges
 
@@ -238,6 +352,39 @@ function judgeCost(event, hookMinMs, floorMinMs) {
     const budget = BUDGET_MS[event] * scale;
     const overhead = hookMinMs - floorMinMs;
     return { over: overhead > budget, overhead, budget, scale };
+}
+
+// The wall scale: upward only, capped, so a slow floor widens the budget a
+// bounded amount and no further.
+const wallScale = (floorWallMs) => Math.min(WALL_SCALE_MAX, Math.max(1, floorWallMs / WALL_FLOOR_REF_MS));
+
+// Elapsed overhead over the event's wall budget. Separate from judgeCost on
+// purpose: a sleep or a wait on a non-Node child is invisible to one and not to
+// the other, and the sleep canary below holds each to its own answer.
+function judgeWall(event, hookWallMinMs, floorWallMinMs) {
+    const scale = wallScale(floorWallMinMs);
+    const budget = WALL_BUDGET_MS[event] * scale;
+    const overhead = hookWallMinMs - floorWallMinMs;
+    return { over: overhead > budget, overhead, budget, scale };
+}
+
+// Every hook wired on one event, summed. A negative overhead (a hook that read
+// faster than the floor beside it) counts as zero, never as credit.
+function judgeEvents(rows) {
+    const by = new Map();
+    for (const r of rows) {
+        const e = by.get(r.event) || { event: r.event, hooks: 0, sum: 0, floors: [] };
+        e.hooks++;
+        e.sum += Math.max(0, r.wallOverhead);
+        e.floors.push(r.floorWallMin);
+        by.set(r.event, e);
+    }
+    return [...by.values()].map((e) => {
+        const floor = e.floors.sort((a, b) => a - b)[Math.floor(e.floors.length / 2)];
+        const scale = wallScale(floor);
+        const ceiling = EVENT_WALL_CEILING_MS[e.event] * scale;
+        return { event: e.event, hooks: e.hooks, sum: e.sum, ceiling, scale, over: !(e.sum <= ceiling) };
+    });
 }
 
 // Does one run on bad input match the decision it was held to?
@@ -346,7 +493,7 @@ function payloadFor(w) {
 function run(file, input, env, timeoutMs) {
     const r = spawnSyncCpu(process.execPath, [file], { cwd: CWD, input, encoding: 'utf8', env, timeout: timeoutMs, windowsHide: true });
     const error = r.error ? r.error.code || String(r.error) : r.signal ? `killed by ${r.signal}` : null;
-    return { cpuMs: r.cpu.cpuMs, cpuWhy: r.cpu.why, status: r.status, stdout: r.stdout || '', stderr: r.stderr || '', error };
+    return { cpuMs: r.cpu.cpuMs, cpuWhy: r.cpu.why, wallMs: r.wallMs, status: r.status, stdout: r.stdout || '', stderr: r.stderr || '', error };
 }
 
 // An empty script, run through run() like a hook, so the floor pays exactly what
@@ -362,6 +509,8 @@ const floorRun = (env) => run(EMPTY, '', env, 30000);
 function measure(file, input, env, timeoutMs, sampleFloor = floorRun) {
     const hook = [];
     const floor = [];
+    const hookWall = [];
+    const floorWall = [];
     let last;
     let missing = null;
     for (let i = 0; i < RUNS; i++) {
@@ -371,28 +520,42 @@ function measure(file, input, env, timeoutMs, sampleFloor = floorRun) {
         if (last.cpuMs === null) missing = missing || `hook run: ${last.cpuWhy}`;
         floor.push(f.cpuMs);
         hook.push(last.cpuMs);
+        floorWall.push(f.wallMs);
+        hookWall.push(last.wallMs);
     }
-    if (missing) return { missing, last };
-    return { hookMin: Math.min(...hook), hookMed: hook.sort((a, b) => a - b)[Math.floor(RUNS / 2)], floorMin: Math.min(...floor), last };
+    // Wall time is read whether or not a CPU record exists: a hook killed at its
+    // timeout writes no CPU record and is exactly the case the wall judge is for.
+    const wall = { hookWallMin: Math.min(...hookWall), floorWallMin: Math.min(...floorWall) };
+    if (missing) return { missing, last, ...wall };
+    return { hookMin: Math.min(...hook), hookMed: hook.sort((a, b) => a - b)[Math.floor(RUNS / 2)], floorMin: Math.min(...floor), last, ...wall };
 }
 
 // Keep the canary construction in one place so a scripted floor change can
 // exercise the same subprocess and judge as the live control.
 function measureCanary(w, env, mode, sampleFloor = floorRun) {
-    const floors = Array.from({ length: RUNS }, () => sampleFloor(env).cpuMs);
+    const samples = Array.from({ length: RUNS }, () => sampleFloor(env));
+    const floors = samples.map((f) => f.cpuMs);
     if (floors.some((f) => f === null)) return { missing: 'the floor run left no CPU record' };
     const floorMin = Math.min(...floors);
+    // A scripted floor carries no wall figure; the reference stands in for it.
+    const walls = samples.map((f) => f.wallMs).filter(Number.isFinite);
+    const floorWallMin = walls.length ? Math.min(...walls) : WALL_FLOOR_REF_MS;
     // Bind the plant and its verdict to one calibration. A second floor can
     // raise the scaled budget after the burn was sized. Include the floor in
     // the burn too, since judgeCost subtracts it from the measured total CPU.
-    const extraMs = Math.ceil(floorMin + BUDGET_MS[w.event] * Math.max(1, floorMin / FLOOR_REF_MS) * 1.5) + 100;
+    const cpuExtraMs = Math.ceil(floorMin + BUDGET_MS[w.event] * Math.max(1, floorMin / FLOOR_REF_MS) * 1.5) + 100;
+    // The sleep must also clear the scaled WALL budget, or the wall judge could
+    // pass it for being short rather than miss it for being blind. It is never
+    // shorter than before, so the CPU judge sees the same sleep it always did.
+    const wallExtraMs = Math.ceil(WALL_BUDGET_MS[w.event] * wallScale(floorWallMin) * 1.5) + 100;
+    const extraMs = mode === 'sleep' ? Math.max(cpuExtraMs, wallExtraMs) : cpuExtraMs;
     const file = path.join(SB, mode + '-' + path.basename(w.rel));
     const real = JSON.stringify(path.join(w.pluginRoot, w.rel));
     const prefix = mode === 'burn'
         ? `{ const t = process.cpuUsage(); for (;;) { const d = process.cpuUsage(t); if ((d.user + d.system) / 1000 >= ${extraMs}) break; } }\n`
         : mode === 'sleep' ? `Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ${extraMs});\n` : '';
     fs.writeFileSync(file, prefix + `require(${real});\n`);
-    return { ...measure(file, JSON.stringify(payloadFor(w)), env, 60000, () => ({ cpuMs: floorMin })), extraMs };
+    return { ...measure(file, JSON.stringify(payloadFor(w)), env, 60000, () => ({ cpuMs: floorMin, wallMs: floorWallMin })), extraMs };
 }
 
 // ---------------------------------------------------------------- the wired list, checked
@@ -408,26 +571,56 @@ check(`the wired list is not empty (${wired.length} entries)`, wired.length > 0)
 }
 check('every wired hook declares a timeout', missingTimeouts(wired).length === 0, missingTimeouts(wired));
 check('every wired event has a budget', unbudgeted(wired).length === 0, unbudgeted(wired));
+check('every wired event has a wall budget and an event ceiling', wallUnbudgeted(wired).length === 0, wallUnbudgeted(wired));
+// The wall budget is the bound BELOW the harness timeout: at its widest scale
+// it must still end before the harness would kill the hook, or it bounds
+// nothing the timeout did not already.
+{
+    const loose = wallBudgetOverTimeout(wired);
+    check(`every wall budget at ${WALL_SCALE_MAX}x stays under its hook's timeout`, loose.length === 0, loose);
+}
 
 // ---------------------------------------------------------------- cost, per wired entry
 
-const rows = [];
-for (const w of wired) {
-    if (!(w.event in BUDGET_MS)) continue;
-    const file = path.join(w.pluginRoot, w.rel);
-    const env = sandboxEnv(w.pluginRoot, false);
-    const timeoutMs = (w.timeout || 60) * 1000;
-    const m = measure(file, JSON.stringify(payloadFor(w)), env, timeoutMs);
-    const label = `${w.event}${w.matcher ? ` [${w.matcher}]` : ''} ${w.key}`;
-    // A crash is fast. A timing only means something for a run that finished its
-    // work, so the valid run must have exited 0 before its time is believed.
-    check(`${label}: a valid payload exits 0`, m.last.status === 0 && !m.last.error, { status: m.last.status, error: m.last.error, stderr: m.last.stderr.slice(0, 200) });
-    if (m.missing) { unmeasured(`${label}: CPU cost`, m.missing); continue; }
-    const j = judgeCost(w.event, m.hookMin, m.floorMin);
-    check(`${label}: ${j.overhead.toFixed(0)} CPU ms over the node floor, budget ${j.budget.toFixed(0)} ms`, !j.over,
-        { hookMin: +m.hookMin.toFixed(1), floorMin: +m.floorMin.toFixed(1), scale: +j.scale.toFixed(2) });
-    rows.push({ label, event: w.event, hookMin: m.hookMin, hookMed: m.hookMed, floorMin: m.floorMin, overhead: j.overhead, budget: j.budget, timeout: w.timeout });
+// CPU and wall cost of every entry in one wired list, plus the event sums.
+// `prefix` names the profile in each check line, so an installed-profile run
+// reads apart from the repo run.
+function costRows(list, prefix = '') {
+    const rows = [];
+    for (const w of list) {
+        if (!(w.event in BUDGET_MS)) continue;
+        const file = path.join(w.pluginRoot, w.rel);
+        const env = sandboxEnv(w.pluginRoot, false);
+        const timeoutMs = (w.timeout || 60) * 1000;
+        const m = measure(file, JSON.stringify(payloadFor(w)), env, timeoutMs);
+        const label = `${prefix}${w.event}${w.matcher ? ` [${w.matcher}]` : ''} ${w.key}`;
+        // A crash is fast. A timing only means something for a run that finished its
+        // work, so the valid run must have exited 0 before its time is believed.
+        check(`${label}: a valid payload exits 0`, m.last.status === 0 && !m.last.error, { status: m.last.status, error: m.last.error, stderr: m.last.stderr.slice(0, 200) });
+        const jw = judgeWall(w.event, m.hookWallMin, m.floorWallMin);
+        check(`${label}: ${jw.overhead.toFixed(0)} wall ms over the node floor, wall budget ${jw.budget.toFixed(0)} ms`, !jw.over && !m.last.error,
+            { hookWallMin: +m.hookWallMin.toFixed(1), floorWallMin: +m.floorWallMin.toFixed(1), scale: +jw.scale.toFixed(2), error: m.last.error });
+        const wallRow = { wallOverhead: jw.overhead, wallBudget: jw.budget, hookWallMin: m.hookWallMin, floorWallMin: m.floorWallMin };
+        if (m.missing) { unmeasured(`${label}: CPU cost`, m.missing); rows.push({ label, event: w.event, timeout: w.timeout, ...wallRow }); continue; }
+        const j = judgeCost(w.event, m.hookMin, m.floorMin);
+        check(`${label}: ${j.overhead.toFixed(0)} CPU ms over the node floor, budget ${j.budget.toFixed(0)} ms`, !j.over,
+            { hookMin: +m.hookMin.toFixed(1), floorMin: +m.floorMin.toFixed(1), scale: +j.scale.toFixed(2) });
+        rows.push({ label, event: w.event, hookMin: m.hookMin, hookMed: m.hookMed, floorMin: m.floorMin, overhead: j.overhead, budget: j.budget, timeout: w.timeout, ...wallRow });
+    }
+
+    // Cumulative latency: what the user waits on one event, every wired hook summed.
+    const eventRows = judgeEvents(rows);
+    for (const e of eventRows) {
+        check(`${prefix}${e.event}: ${e.hooks} hooks add ${e.sum.toFixed(0)} wall ms together, event ceiling ${e.ceiling.toFixed(0)} ms`, !e.over, e);
+    }
+    {
+        const measuredEvents = new Set(rows.map((r) => r.event)).size;
+        const wiredEvents = new Set(list.filter((w) => w.event in BUDGET_MS).map((w) => w.event)).size;
+        check(`${prefix}every wired event was measured for cumulative latency (${eventRows.length} of ${wiredEvents})`, wiredEvents > 0 && eventRows.length === wiredEvents && measuredEvents === wiredEvents);
+    }
+    return { rows, eventRows };
 }
+const { rows, eventRows } = costRows(wired);
 
 // ---------------------------------------------------------------- failure direction, per hook file
 
@@ -500,7 +693,16 @@ if (process.platform === 'win32') {
         else {
             const j = judgeCost(w.event, idle.hookMin, idle.floorMin);
             check(`known negative: ${w.key} sleeping ${idle.extraMs} ms stays inside its ${j.budget.toFixed(0)} ms budget (overhead ${j.overhead.toFixed(0)} CPU ms)`, !j.over);
+            summary.sleepCpu = j.over ? 'FAIL' : 'PASS';
         }
+        // The same sleep, judged on elapsed time, must go OVER: the wall judge
+        // exists for exactly the cost the CPU judge is shown above to miss. Its
+        // wall figure is read even when the CPU record is missing.
+        if (Number.isFinite(idle.hookWallMin)) {
+            const jw = judgeWall(w.event, idle.hookWallMin, idle.floorWallMin);
+            check(`known positive: ${w.key} sleeping ${idle.extraMs} ms goes over its ${jw.budget.toFixed(0)} ms wall budget (overhead ${jw.overhead.toFixed(0)} wall ms)`, jw.over, jw);
+            summary.sleepWall = jw.over ? 'FAIL' : 'PASS';
+        } else unmeasured('wall known positive', 'the sleep canary left no wall figure');
     }
 
     // Model scheduling drift without competing with other suites for CPU.
@@ -552,17 +754,172 @@ if (process.platform === 'win32') {
     const c = classification(wired, partial);
     check('known positive: an unclassified hook and a stale decision are both reported',
         c.unclassified.length === 1 && c.unclassified[0] === one.key && c.stale.length === 1);
+    const saved = WALL_BUDGET_MS[one.event];
+    delete WALL_BUDGET_MS[one.event];
+    const missingWall = wallUnbudgeted(wired);
+    WALL_BUDGET_MS[one.event] = saved;
+    check(`known positive: ${one.event} with its wall budget removed is reported`, missingWall.length === 1 && missingWall[0] === one.event, missingWall);
+    const longTimeout = wallBudgetOverTimeout(wired.map((w) => (w === one ? { ...w, timeout: 0.1 } : w)));
+    check(`known positive: ${one.key} with a 0.1 s timeout under its wall budget is reported`, longTimeout.length === 1, longTimeout);
+}
+
+// The wall judges, on hand-written figures that cannot move with the subject.
+{
+    // Scale is capped: a floor ten times the reference widens the budget three
+    // times, not ten, so a hook 2,000 ms over still reads over.
+    const capped = judgeWall('PreToolUse', 550 + 2000, 550);
+    check(`known positive: a ${550} ms floor scales the wall budget to the ${WALL_SCALE_MAX}x cap, and 2000 ms over it is reported`,
+        capped.scale === WALL_SCALE_MAX && capped.over, capped);
+    // Scale never shrinks: a fast floor leaves the frozen budget whole.
+    const fast = judgeWall('PreToolUse', 10 + 50, 10);
+    check('known negative: a floor under the reference keeps the full wall budget', fast.scale === 1 && !fast.over, fast);
+    // Two hooks each under their own wall budget, summing over the event ceiling.
+    const pair = judgeEvents([
+        { event: 'PreToolUse', wallOverhead: 90, floorWallMin: 55 },
+        { event: 'PreToolUse', wallOverhead: 90, floorWallMin: 55 },
+        { event: 'PreToolUse', wallOverhead: 90, floorWallMin: 55 },
+    ]);
+    check('known positive: three PreToolUse hooks at 90 wall ms each, inside each own budget, go over the event ceiling together',
+        pair.length === 1 && pair[0].hooks === 3 && pair[0].sum === 270 && pair[0].over, pair);
+    const credit = judgeEvents([{ event: 'Stop', wallOverhead: -500, floorWallMin: 55 }, { event: 'Stop', wallOverhead: 320, floorWallMin: 55 }]);
+    check('known positive: a hook faster than its floor is no credit against another hook over the ceiling', credit[0].over, credit);
+}
+
+// ---------------------------------------------------------------- a hook killed at its timeout
+
+// A hook that spawns a child and is then killed at its timeout must not leave
+// that child running in the user's session. Killing only the hook's own pid does
+// leave it (Windows does not take children down with a parent, and POSIX
+// reparents them), so the harness path here kills the TREE, through
+// tooling/suite-process-tree.js, and the check counts what is still alive after.
+//
+// The count is taken apart from the helper that does the killing: identities
+// (pid plus creation time) of the hook's descendants are read from a snapshot
+// while the hook is alive, and looked up again after. A root-only kill of the
+// same canary is the known positive: it must leave the child alive, and the
+// count must see it, or a count of zero means nothing. The child the canary
+// reports by its own pid is the provenance: the count must have found THAT one.
+//
+// The child is spawned detached. On Windows libuv puts a Node process's
+// ordinary children in a job object that dies with it, so a plain child of a
+// Node hook dies with the hook anyway. A detached one breaks away, which is the
+// only way a Node hook leaves something behind there.
+const { snapshot, trackTree } = require('./suite-process-tree.js');
+const { spawn } = require('child_process');
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+const CANARY_TIMEOUT_MS = 2500;
+
+function descendantsOf(rows, rootPid) {
+    const root = rows.find((r) => r.pid === rootPid);
+    if (!root) return [];
+    const out = [];
+    const frontier = [root];
+    while (frontier.length) {
+        const p = frontier.pop();
+        for (const r of rows) {
+            if (r.parent === p.pid && r.pid !== p.pid && r.born >= p.born && !out.includes(r)) { out.push(r); frontier.push(r); }
+        }
+    }
+    return out;
+}
+
+async function killedAtTimeout(how) {
+    const ready = path.join(SB, `timeout-ready-${how}`);
+    const file = path.join(SB, `timeout-canary-${how}.js`);
+    // The child exits by itself after 30 s, so a failed cleanup cannot leave it
+    // running for long. The hook never exits: only its timeout ends it.
+    fs.writeFileSync(file, [
+        "const { spawn } = require('child_process');",
+        "const c = spawn(process.execPath, ['-e', 'setTimeout(() => {}, 30000)'], { stdio: 'ignore', windowsHide: true, detached: true });",
+        'c.unref();',
+        `require('fs').writeFileSync(${JSON.stringify(ready)}, String(c.pid));`,
+        'setInterval(() => {}, 1000);',
+    ].join('\n') + '\n');
+    const env = sandboxEnv(wired[0].pluginRoot, false);
+    const started = Date.now();
+    const child = spawn(process.execPath, [file], { cwd: CWD, env, stdio: ['pipe', 'ignore', 'ignore'], windowsHide: true });
+    const tree = trackTree(child.pid, started);
+    const exited = new Promise((resolve) => child.once('exit', () => { tree.exited(); resolve(); }));
+    child.stdin.end('{}');
+    while (!fs.existsSync(ready) && Date.now() - started < CANARY_TIMEOUT_MS) await sleep(25);
+    const before = await snapshot(20000);
+    const born = descendantsOf(before, child.pid);
+    await sleep(Math.max(0, started + CANARY_TIMEOUT_MS - Date.now()));
+    const killedAtMs = Date.now() - started;
+    if (how === 'tree') await tree.terminate();
+    else { tree.stop(); child.kill('SIGKILL'); }
+    await exited;
+    const after = await snapshot(20000);
+    const live = born.filter((d) => after.some((r) => r.pid === d.pid && r.born === d.born));
+    let reported = null;
+    try { reported = Number(fs.readFileSync(ready, 'utf8')); } catch { /* the canary never got as far as its child */ }
+    const reportedFound = born.some((d) => d.pid === reported);
+    return { descendants: born.length, live, killedAtMs, reported, reportedFound };
+}
+
+async function timeoutDescendants() {
+    let tree;
+    try { tree = await killedAtTimeout('tree'); } catch (e) { unmeasured('timeout descendants', `the process snapshot failed: ${e.message}`); return; }
+    check(`a canary hook killed at its ${CANARY_TIMEOUT_MS} ms timeout had its own child among ${tree.descendants} descendants before the kill`, tree.reportedFound, tree);
+    check(`a canary hook killed at its ${CANARY_TIMEOUT_MS} ms timeout leaves ${tree.live.length} live descendants`, tree.reportedFound && tree.live.length === 0,
+        tree.live.map((r) => r.pid));
+    if (tree.reportedFound) summary.descendants = tree.live.length;
+
+    let root;
+    try { root = await killedAtTimeout('root'); } catch (e) { unmeasured('timeout descendants known positive', `the process snapshot failed: ${e.message}`); return; }
+    check(`known positive: the same canary with only its own pid killed leaves its detached child alive, and the count sees it (${root.live.length} of ${root.descendants} descendants live)`,
+        root.reportedFound && root.live.some((r) => r.pid === root.reported), { reported: root.reported, descendants: root.descendants, live: root.live.map((r) => r.pid) });
+    // Clean up the survivors the control was built to leave.
+    for (const r of root.live) { try { process.kill(r.pid, 'SIGKILL'); } catch { /* already gone */ } }
+}
+
+// ---------------------------------------------------------------- the installed profile
+
+// --installed measures the hooks the plugin cache holds, the copy Claude Code
+// actually runs, with the same cost, wall and event judges, and reports it as a
+// separate profile. It is off in the default run, and so off in npm test and
+// the gate: its subject is whatever this machine last installed, so its verdict
+// says nothing about the tree under review, and a stale install would turn a
+// green tree red.
+function installedProfile() {
+    const got = installedRoots();
+    if (got.why) { unmeasured('installed profile', got.why); return null; }
+    const list = readWired(got.roots);
+    console.log(`installed population: ${list.length} wired entries, ${new Set(list.map((w) => w.key)).size} hook files, ${new Set(list.map((w) => w.event)).size} events, from ${PLUGINS.map((p) => `${p} ${got.versions[p]} at ${got.roots[p]}`).join('; ')}`);
+    const unb = [...unbudgeted(list), ...wallUnbudgeted(list)];
+    check('installed: every wired event has a CPU and wall budget', unb.length === 0, unb);
+    return { list, ...costRows(list, 'installed: ') };
 }
 
 // ---------------------------------------------------------------- report
 
-if (REPORT) {
-    console.log('\nevent               overhead  budget  hook min/med  floor  timeout  hook');
-    for (const r of rows.sort((a, b) => b.overhead - a.overhead)) {
-        console.log(`${r.event.padEnd(18)} ${r.overhead.toFixed(0).padStart(8)} ${r.budget.toFixed(0).padStart(7)}  ${r.hookMin.toFixed(0).padStart(5)}/${r.hookMed.toFixed(0).padEnd(5)} ${r.floorMin.toFixed(0).padStart(6)} ${String(r.timeout).padStart(7)}s  ${r.label.replace(/^\S+ /, '')}`);
+function printTable(title, rowsIn, eventRowsIn) {
+    const n = (v) => (Number.isFinite(v) ? v.toFixed(0) : '-');
+    console.log(`\n${title}`);
+    console.log('event               overhead  budget  hook min/med  floor   wall over  budget  floor  timeout  hook');
+    for (const r of [...rowsIn].sort((a, b) => b.wallOverhead - a.wallOverhead)) {
+        console.log(`${r.event.padEnd(18)} ${n(r.overhead).padStart(8)} ${n(r.budget).padStart(7)}  ${n(r.hookMin).padStart(5)}/${n(r.hookMed).padEnd(5)} ${n(r.floorMin).padStart(6)}  ${n(r.wallOverhead).padStart(9)} ${n(r.wallBudget).padStart(7)} ${n(r.floorWallMin).padStart(6)} ${String(r.timeout).padStart(7)}s  ${r.label.replace(/^(installed: )?\S+ /, '')}`);
+    }
+    console.log('\nevent               hooks  wall sum  ceiling');
+    for (const e of eventRowsIn) console.log(`${e.event.padEnd(18)} ${String(e.hooks).padStart(5)} ${n(e.sum).padStart(9)} ${n(e.ceiling).padStart(8)}`);
+}
+
+async function tail() {
+    await timeoutDescendants();
+    const installed = INSTALLED ? installedProfile() : null;
+    if (REPORT) {
+        printTable(`repo profile: ${rows.length} hooks measured on ${eventRows.length} events`, rows, eventRows);
+        if (installed) printTable(`installed profile: ${installed.rows.length} hooks measured on ${installed.eventRows.length} events`, installed.rows, installed.eventRows);
+        else console.log(`\ninstalled profile: ${INSTALLED ? 'not measured' : 'not run (pass --installed)'}`);
+        const line = `sleep_control_cpu=${summary.sleepCpu || 'NOT_MEASURED'} sleep_control_wall=${summary.sleepWall || 'NOT_MEASURED'} timeout_descendants=${summary.descendants === null ? 'NOT_MEASURED' : summary.descendants}`;
+        console.log(`\npopulation: ${rows.length} hooks on ${eventRows.length} events (repo)${installed ? `, ${installed.rows.length} hooks on ${installed.eventRows.length} events (installed)` : ''}`);
+        console.log(line);
+        if (line !== EXPECTED_SUMMARY) { fail++; console.log('FAIL the summary line differs from', EXPECTED_SUMMARY); }
     }
 }
 
-try { fs.rmSync(SB, { recursive: true, force: true }); } catch { /* a locked temp file is the OS's to clear */ }
-console.log(`\n${pass} passed, ${fail} failed${notMeasured ? `, ${notMeasured} not measured` : ''}`);
-process.exitCode = fail ? 1 : notMeasured ? 2 : 0;
+tail().catch((e) => { fail++; console.log('FAIL the suite tail threw', e && e.stack); }).finally(() => {
+    try { fs.rmSync(SB, { recursive: true, force: true }); } catch { /* a locked temp file is the OS's to clear */ }
+    console.log(`\n${pass} passed, ${fail} failed${notMeasured ? `, ${notMeasured} not measured` : ''}`);
+    process.exitCode = fail ? 1 : notMeasured ? 2 : 0;
+});
