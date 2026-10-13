@@ -261,7 +261,12 @@ async function main() {
     writeJson(path.join(baseAd, 'headless-workers.json'), { version: 1, records: [] });
     writeJson(path.join(baseAd, 'unattended-workers.json'), { version: 1, records: [] });
     writeJson(path.join(baseAd, 'bg-runner.json'), { workers: [{ code: 'BASE', id: 'base', state: 'running' }] });
-    const baseline = fv(['list'], { HOME: base, USERPROFILE: base, APPDATA: baseApp });
+    const baseline = fv(['list'], { HOME: base, USERPROFILE: base, APPDATA: baseApp, AUTODEV_FLEET_STATE: '' });
+    // U11 added the owner-asks lines on purpose: every expected ask source is
+    // listed with its state, so a notifier that never ran is a line, not an absence.
+    // The lines before and after them are unchanged.
+    const marker = path.join(base, '.claude', 'fleet', '.notify-last-run.json');
+    const neverRan = `${marker} does not exist: the notifier never ran here`;
     const expected = [
         `runs: 0 run(s) read under ${path.join(baseAd, 'runs')}, 0 shown`,
         `headless-worker: ${path.join(baseAd, 'headless-workers.json')}: 0 record(s), 0 shown`,
@@ -270,6 +275,15 @@ async function main() {
         'missions: COULD NOT READ (no --mission-store given, and the store has no default location)',
         `desktop-sessions: 0 session file(s) across 0 account folder(s) under ${path.join(baseApp, 'Claude', 'claude-code-sessions')}, 0 shown`,
         'desktop-routines: 0 routine(s) in 0 scheduled-tasks.json file(s), 0 enabled, 0 shown',
+        'owner-asks: 0 ask(s): queued 0, os-submitted 0, receipted 0, resolved 0; delivery UNKNOWN for 0 without a receipt; authority from silence 0; owner minutes 0',
+        `owner-asks source asks:runs: ok (runs: 0 run(s) read under ${path.join(baseAd, 'runs')}, 0 shown)`,
+        `owner-asks source asks:headless-worker: ok (headless-worker: ${path.join(baseAd, 'headless-workers.json')}: 0 record(s), 0 shown)`,
+        `owner-asks source notifier: INACCESSIBLE (${neverRan})`,
+        `owner-asks source desktop-panels: INACCESSIBLE (read only by the notifier, and ${neverRan})`,
+        `owner-asks source owner-asks-ledger: none-yet (${path.join(baseAd, 'owner-asks', 'ledger.jsonl')} does not exist: no ask was raised through it yet)`,
+        `owner-asks source windows-toast-history: INACCESSIBLE (${process.platform === 'win32'
+            ? 'no supported adapter reads Windows notification history: an OS-submitted toast stays UNKNOWN until the owner records a receipt'
+            : `not applicable on ${process.platform}: the toast notifier is Windows only, so delivery needs an owner receipt`})`,
         'window: live, asking, or touched in the last 48 h. 2 row(s).',
         'COULD-NOT-READ  -  -  missions  COULD-NOT-READ  -  -  | missions: COULD NOT READ (no --mission-store given, and the store has no default location)',
         'BASE  -  default  bg-runner  running  none  -', '',
