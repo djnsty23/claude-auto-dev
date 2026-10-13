@@ -512,6 +512,12 @@ function parseJudgeOutput(r) {
         const what = doc.subtype && doc.subtype !== 'success' ? doc.subtype : (doc.result || doc.subtype || 'is_error');
         return { ok: false, error: `judge-error: ${String(what).slice(0, 120)}`, costUsd: cost, turns };
     }
+    // A verdict counts only from a process that exited 0. A crash, a kill or a nonzero exit can still
+    // leave a valid-looking last line, and an absent status (no real spawn result) fails closed too.
+    if (r.signal || r.status !== 0) {
+        const how = r.signal ? `signal-${r.signal}` : `exit-${r.status === undefined ? 'unknown' : r.status}`;
+        return { ok: false, error: `judge-${how}`, costUsd: cost, turns, output: String(r.stdout || '').slice(-1000) };
+    }
     const v = doc.structured_output;
     if (!v || !uw.DECISIONS.includes(v.decision) || typeof v.reason !== 'string' || !v.reason.trim()) {
         return { ok: false, error: 'no-structured-verdict', costUsd: cost, turns };
@@ -646,7 +652,7 @@ function judgeAndLog(rec, mode, ctx, source) {
     const at = new Date().toISOString();
     const key = judgementKey(rec);
     const j = judgeRecord(rec, { judgeBin: ctx.opts['judge-bin'], model: ctx.opts.model || JUDGE_MODEL, cwd: p.state, reportsDir: p.reports, configDir: readSwitch(p.state).judgeConfigDir });
-    appendJsonl(path.join(p.state, 'runs.jsonl'), { at, key, taskId: rec.taskId, source, ok: j.ok, error: j.error || null, ...(j.login ? { login: j.login } : {}), costUsd: j.costUsd ?? null, turns: j.turns ?? null, durationMs: j.durationMs });
+    appendJsonl(path.join(p.state, 'runs.jsonl'), { at, key, taskId: rec.taskId, source, ok: j.ok, error: j.error || null, ...(j.login ? { login: j.login } : {}), ...(j.output ? { output: j.output } : {}), costUsd: j.costUsd ?? null, turns: j.turns ?? null, durationMs: j.durationMs });
     if (!j.ok) {
         out.events.push({ type: 'judge.error', key, detail: { taskId: rec.taskId, slug: rec.slug, error: j.error, ...(j.login ? { login: j.login } : {}), costUsd: j.costUsd ?? null } });
         if (!countsAgainstRecord({ ok: false, login: j.login, costUsd: j.costUsd ?? null })) return j;

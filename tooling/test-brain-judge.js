@@ -189,8 +189,22 @@ try {
         bj.countsAgainstRecord({ ok: false, costUsd: 0.01 }) && bj.countsAgainstRecord({ ok: false, error: 'timeout', costUsd: null })
         && !bj.countsAgainstRecord({ ok: false, login: 'auth-failed', costUsd: 0 }) && !bj.countsAgainstRecord({ ok: false, error: 'judge-error: success', costUsd: 0 })
         && !bj.countsAgainstRecord({ ok: true, costUsd: 0.02 }));
-    check('parseJudgeOutput refuses a decision outside the three', bj.parseJudgeOutput({ stdout: '{"structured_output":{"decision":"merge","reason":"r","evidence":[]}}' }).error === 'no-structured-verdict');
-    check('parseJudgeOutput reads a verdict', (() => { const o = bj.parseJudgeOutput({ stdout: '{"total_cost_usd":0.03,"num_turns":2,"structured_output":{"decision":"accept","reason":" ok ","evidence":["a",3]}}' }); return o.ok && o.decision === 'accept' && o.reason === 'ok' && o.evidence.join() === 'a' && o.turns === 2; })());
+    check('parseJudgeOutput refuses a decision outside the three', bj.parseJudgeOutput({ status: 0, signal: null, stdout: '{"structured_output":{"decision":"merge","reason":"r","evidence":[]}}' }).error === 'no-structured-verdict');
+    check('parseJudgeOutput reads a verdict', (() => { const o = bj.parseJudgeOutput({ status: 0, signal: null, stdout: '{"total_cost_usd":0.03,"num_turns":2,"structured_output":{"decision":"accept","reason":" ok ","evidence":["a",3]}}' }); return o.ok && o.decision === 'accept' && o.reason === 'ok' && o.evidence.join() === 'a' && o.turns === 2; })());
+    // U1: the same valid accept line must not count from a process that did not exit 0.
+    // The exit-0 row above is the positive control. Each failure keeps the output as evidence.
+    const acceptLine = '{"total_cost_usd":0.03,"num_turns":2,"structured_output":{"decision":"accept","reason":"ok","evidence":[]}}';
+    const processMatrix = [
+        ['exit 1', { status: 1, signal: null, stdout: acceptLine }, 'judge-exit-1'],
+        ['SIGTERM with a null status', { status: null, signal: 'SIGTERM', stdout: acceptLine }, 'judge-signal-SIGTERM'],
+        ['a null status and no signal', { status: null, signal: null, stdout: acceptLine }, 'judge-exit-null'],
+        ['no status at all', { stdout: acceptLine }, 'judge-exit-unknown'],
+    ];
+    for (const [what, r, want] of processMatrix) {
+        const o = bj.parseJudgeOutput(r);
+        check(`parseJudgeOutput refuses a valid accept from ${what}, and keeps its output`, o.ok === false && o.error === want && o.output === acceptLine && o.costUsd === 0.03, JSON.stringify(o));
+    }
+    check('a spawn error still wins over a valid accept line', bj.parseJudgeOutput({ error: { code: 'ENOENT' }, status: null, stdout: acceptLine }).error === 'spawn-ENOENT');
     const cands = bj.judgeCandidates([
         { taskId: 'a', startedAt: '1', state: 'closed', runStatus: 'succeeded', settledAt: '2026-09-28T10:00:00Z' },
         { taskId: 'b', startedAt: '1', state: 'deleted', runStatus: 'failed', settledAt: '2026-09-28T09:00:00Z' },
