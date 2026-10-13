@@ -4,7 +4,7 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const { spawnSync } = require('node:child_process');
-const { withLedgerLock, writeAtomic } = require('../plugins/autodev-core/scripts/ledger-lock.js');
+const { withLedgerLock, writeAtomic, acquireLock, releaseLock } = require('../plugins/autodev-core/scripts/ledger-lock.js');
 const root = fs.mkdtempSync(path.join(os.tmpdir(), 'ledger-lock-'));
 const file = path.join(root, 'ledger.json');
 const originalOpen = fs.openSync;
@@ -185,89 +185,74 @@ try {
             fs.rmSync(lock + '.reclaim', { force: true });
         }
     });
-    check('a fresh reclaim lock prevents judging or touching the main lock', () => {
+    const deadPid = () => {
+        const child = spawnSync(process.execPath, ['-e', '0']);
+        assert.equal(child.status, 0, child.error?.message);
+        assert.throws(() => process.kill(child.pid, 0), { code: 'ESRCH' });
+        return child.pid;
+    };
+    const ticketOf = (lock, n) => {
+        const st = fs.statSync(lock);
+        return `${lock}.reclaim-${st.ino}-${Math.round(st.mtimeMs)}.${n}`;
+    };
+    const reclaimFiles = () => fs.readdirSync(root).filter((n) => n.includes('.reclaim'));
+    check('a live reclaimer ticket, even one hour old, keeps every other reclaimer off the main lock', () => {
         const lock = file + '.write-lock';
-        const reclaim = lock + '.reclaim';
-        const originalStat = fs.statSync;
-        const old = new Date(Date.now() - 11 * 60 * 1000);
-        fs.writeFileSync(lock, 'dead ownerless');
-        fs.utimesSync(lock, old, old);
-        fs.writeFileSync(reclaim, 'other reclaimer');
-        const identity = fs.statSync(lock);
-        let mainStats = 0;
-        fs.statSync = function (target, ...rest) {
-            if (target === lock) mainStats++;
-            return originalStat.call(this, target, ...rest);
-        };
-        try {
-            assert.throws(() => withLedgerLock(file, () => assert.fail('must not mutate'), { waitMs: 20 }), { code: 'LEDGER_LOCKED' });
-            assert.equal(mainStats, 0, 'judgment must occur only under the reclaim mutex');
-            assert.equal(originalStat(lock).ino, identity.ino);
-            assert.equal(fs.readFileSync(lock, 'utf8'), 'dead ownerless');
-            assert.equal(fs.readFileSync(reclaim, 'utf8'), 'other reclaimer');
-        } finally {
-            fs.statSync = originalStat;
-            fs.rmSync(lock, { force: true });
-            fs.rmSync(reclaim, { force: true });
-        }
-    });
-    check('a reclaim lock older than 30 seconds is removed before dead-owner reclaim', () => {
-        const lock = file + '.write-lock';
-        const reclaim = lock + '.reclaim';
+        const lockPid = deadPid();
+        const content = JSON.stringify({ pid: lockPid });
+        fs.writeFileSync(lock, content);
+        const ticket = ticketOf(lock, 0);
+        const ticketBody = JSON.stringify({ pid: process.pid, token: 'other reclaimer' });
+        fs.writeFileSync(ticket, ticketBody);
+        const old = new Date(Date.now() - 60 * 60 * 1000);
+        fs.utimesSync(ticket, old, old);
         const originalKill = process.kill;
-        const originalUnlink = fs.unlinkSync;
-        const old = new Date(Date.now() - 31000);
-        fs.writeFileSync(lock, JSON.stringify({ pid: 2147483647 }));
-        fs.writeFileSync(reclaim, 'abandoned reclaimer');
-        fs.utimesSync(reclaim, old, old);
-        let removed = 0;
-        let probedUnderMutex = false;
-        process.kill = (pid, signal) => {
-            assert.equal(pid, 2147483647);
-            assert.equal(signal, 0);
-            probedUnderMutex = removed === 1 && fs.existsSync(reclaim);
-            throw Object.assign(new Error('dead owner plant'), { code: 'ESRCH' });
-        };
-        fs.unlinkSync = function (target, ...rest) {
-            if (target === reclaim) removed++;
-            return originalUnlink.call(this, target, ...rest);
-        };
+        const probed = [];
+        process.kill = function (pid, ...rest) { probed.push(pid); return originalKill.call(this, pid, ...rest); };
         try {
-            assert.equal(withLedgerLock(file, () => 'recovered', { waitMs: 100 }), 'recovered');
-            assert.equal(probedUnderMutex, true, 'remove abandoned mutex and reacquire before judging');
-            assert.equal(removed, 2, 'abandoned mutex removal plus owned mutex release');
-            assert.equal(fs.existsSync(reclaim), false);
-        } finally {
-            process.kill = originalKill;
-            fs.unlinkSync = originalUnlink;
-            fs.rmSync(lock, { force: true });
-            fs.rmSync(reclaim, { force: true });
-        }
-    });
-    check('reclaim release preserves a mutex replaced with a different identity', () => {
-        const lock = file + '.write-lock';
-        const reclaim = lock + '.reclaim';
-        const retired = reclaim + '.retired';
-        const originalKill = process.kill;
-        fs.writeFileSync(lock, JSON.stringify({ pid: 2147483647 }));
-        let replaced = false;
-        process.kill = () => {
-            fs.renameSync(reclaim, retired);
-            fs.writeFileSync(reclaim, 'replacement reclaimer');
-            assert.notEqual(fs.statSync(reclaim).ino, fs.statSync(retired).ino);
-            replaced = true;
-            throw Object.assign(new Error('dead owner plant'), { code: 'ESRCH' });
-        };
-        try {
-            assert.equal(withLedgerLock(file, () => 'recovered', { waitMs: 100 }), 'recovered');
-            assert.equal(replaced, true);
-            assert.equal(fs.readFileSync(reclaim, 'utf8'), 'replacement reclaimer');
+            assert.throws(() => withLedgerLock(file, () => assert.fail('must not mutate'), { waitMs: 30 }), { code: 'LEDGER_LOCKED' });
+            assert.ok(probed.includes(process.pid), 'the ticket owner was judged');
+            assert.ok(!probed.includes(lockPid), 'the main lock must not be judged without the ticket');
+            assert.equal(fs.readFileSync(lock, 'utf8'), content);
+            assert.equal(fs.readFileSync(ticket, 'utf8'), ticketBody);
+            assert.equal(fs.existsSync(ticket + '.done'), false);
         } finally {
             process.kill = originalKill;
             fs.rmSync(lock, { force: true });
-            fs.rmSync(reclaim, { force: true });
-            fs.rmSync(retired, { force: true });
+            for (const n of reclaimFiles()) fs.rmSync(path.join(root, n), { force: true });
         }
+    });
+    check('an abandoned reclaimer ticket is recovered by identity, not age, and leaves no tickets', () => {
+        const lock = file + '.write-lock';
+        fs.writeFileSync(lock, JSON.stringify({ pid: deadPid() }));
+        const ticket = ticketOf(lock, 0);
+        fs.writeFileSync(ticket, JSON.stringify({ pid: deadPid(), token: 'abandoned reclaimer' }));
+        try {
+            assert.equal(withLedgerLock(file, () => 'recovered', { waitMs: 100 }), 'recovered');
+            assert.equal(fs.existsSync(lock), false);
+            assert.deepEqual(reclaimFiles(), []);
+        } finally {
+            fs.rmSync(lock, { force: true });
+            for (const n of reclaimFiles()) fs.rmSync(path.join(root, n), { force: true });
+        }
+    });
+    check('a foreign or superseded release is a no-op that says why', () => {
+        const lock = file + '.write-lock';
+        const a = acquireLock(lock, { waitMs: 100 });
+        assert.equal(a.acquired, true);
+        const foreign = releaseLock(lock, { token: 'not-the-holder' });
+        assert.equal(foreign.released, false);
+        assert.match(foreign.why, /not to this token/);
+        assert.ok(fs.existsSync(lock));
+        fs.unlinkSync(lock); // A's file is gone, as if reclaimed.
+        const b = acquireLock(lock, { waitMs: 100 });
+        assert.equal(b.acquired, true);
+        const stale = a.release();
+        assert.equal(stale.released, false);
+        assert.match(stale.why, /replaced/);
+        assert.equal(JSON.parse(fs.readFileSync(lock, 'utf8')).token, b.token);
+        assert.deepEqual(b.release(), { released: true, why: null });
+        assert.equal(b.release().why, 'the lock is already gone');
     });
     check('lock metadata write failure releases the exclusively created file', () => {
         const originalWrite = fs.writeFileSync;
