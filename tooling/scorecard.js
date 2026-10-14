@@ -20,7 +20,10 @@
 //   PASS             fresh, populated, code unchanged, and of the required kind
 //   FAIL             the newest receipt failed
 //   UNKNOWN          no receipt, older than maxAgeDays (default 14), population
-//                    missing or zero, or a watched file changed since the receipt
+//                    missing or zero, a watched file changed since the receipt, or
+//                    the newest receipt is INDETERMINATE: the probe was killed from
+//                    outside twice (see probe-exit-mark.js), which says nothing about
+//                    the code. `record` exits 2 for it.
 //   NOT_OPERATIONAL  the criterion needs an operational receipt and only fixture
 //                    or installed receipts exist
 //
@@ -101,6 +104,7 @@ function criterionStatus(criterion, receipts, { now, currentHash, maxAgeDays = D
     const newest = mine[0];
     if (now - Date.parse(newest.ranUtc) > maxAgeDays * DAY_MS) return { ...base, status: 'UNKNOWN', why: `newest receipt is older than ${maxAgeDays} days` };
     if (newest.status === 'FAIL') return { ...base, status: 'FAIL', why: newest.why || 'probe failed' };
+    if (newest.status === 'INDETERMINATE') return { ...base, status: 'UNKNOWN', why: newest.why || 'the probe was killed from outside' };
     if (!(Number.isFinite(newest.population) && newest.population > 0)) return { ...base, status: 'UNKNOWN', why: 'receipt names no population' };
     if (currentHash !== undefined && newest.watchHash !== currentHash) return { ...base, status: 'UNKNOWN', why: 'a watched file changed since the receipt' };
     const need = KINDS.indexOf(criterion.kind);
@@ -123,10 +127,45 @@ function grade(manifest, receipts, opts) {
     return { aspects, sum, max: aspects.length * 10, mean: Math.round((sum / aspects.length) * 10) / 10 };
 }
 
-/** Runs a criterion's probe and builds its receipt. The probe passes only on exit 0 AND a match of `expect`. */
+// Forward slashes: NODE_OPTIONS reads a backslash inside quotes as an escape.
+const EXIT_MARK = path.join(__dirname, 'probe-exit-mark.js').split(path.sep).join('/');
+
+/**
+ * Runs the probe once with the exit-mark preload. `killed` is true when the probe's
+ * node process started and never reached its exit event: it was terminated from
+ * outside, so its status says nothing about the code it measures.
+ */
+function attempt(criterion, root, spawn) {
+    const mark = path.join(require('os').tmpdir(), `probe-mark-${process.pid}-${crypto.randomBytes(6).toString('hex')}`);
+    const env = { ...process.env, AUTODEV_PROBE_EXIT_MARK: mark, NODE_OPTIONS: `${process.env.NODE_OPTIONS || ''} --require "${EXIT_MARK}"`.trim() };
+    const r = spawn(criterion.probe, { cwd: root, shell: true, encoding: 'utf8', timeout: 20 * 60 * 1000, maxBuffer: 64 * 1024 * 1024, env });
+    let text = '';
+    try { text = fs.readFileSync(mark, 'utf8'); } catch { /* no node process ran: no claim either way */ }
+    try { fs.rmSync(mark, { force: true }); } catch { /* the OS temp sweep takes it */ }
+    const killed = !r.error && (r.status !== 0 || Boolean(r.signal)) && /^start /m.test(text) && !/^exit /m.test(text);
+    return { r, killed };
+}
+
+/**
+ * Runs a criterion's probe and builds its receipt. The probe passes only on exit 0 AND a match of `expect`.
+ * A probe killed from outside is run once more. Killed twice, the receipt is INDETERMINATE, never FAIL.
+ */
 function runProbe(criterion, { root, now = Date.now(), spawn = spawnSync } = {}) {
-    const r = spawn(criterion.probe, { cwd: root, shell: true, encoding: 'utf8', timeout: 20 * 60 * 1000, maxBuffer: 64 * 1024 * 1024 });
+    let { r, killed } = attempt(criterion, root, spawn);
+    let attempts = 1;
+    if (killed) { ({ r, killed } = attempt(criterion, root, spawn)); attempts = 2; }
     const out = `${r.stdout || ''}${r.stderr || ''}`;
+    if (killed) {
+        let head = null;
+        try { head = spawnSync('git', ['rev-parse', 'HEAD'], { cwd: root, encoding: 'utf8' }).stdout.trim() || null; } catch { /* outside git */ }
+        return {
+            criterion: criterion.id, kind: criterion.kind, ranUtc: new Date(now).toISOString(), head,
+            status: 'INDETERMINATE', population: null, populationLabel: criterion.populationLabel || null, attempts,
+            watchHash: watchHash(criterion.watch, root),
+            why: `terminated from outside twice (status ${r.signal || r.status}, no exit event)`,
+            tail: out.slice(-600),
+        };
+    }
     const m = criterion.expect ? new RegExp(criterion.expect, 'm').exec(out) : null;
     // A suite that prints no count can still name its population: `populationCount` is a
     // pattern, and the population is the number of output lines it matches.
@@ -138,7 +177,7 @@ function runProbe(criterion, { root, now = Date.now(), spawn = spawnSync } = {})
     try { head = spawnSync('git', ['rev-parse', 'HEAD'], { cwd: root, encoding: 'utf8' }).stdout.trim() || null; } catch { /* outside git */ }
     return {
         criterion: criterion.id, kind: criterion.kind, ranUtc: new Date(now).toISOString(), head,
-        status: ok ? 'PASS' : 'FAIL', population: ok ? population : null, populationLabel: criterion.populationLabel || null,
+        status: ok ? 'PASS' : 'FAIL', population: ok ? population : null, populationLabel: criterion.populationLabel || null, attempts,
         watchHash: watchHash(criterion.watch, root),
         why: ok ? null : (r.status !== 0 ? `exit ${r.signal ? r.signal : r.status}` : `output did not match ${criterion.expect}`),
         tail: out.slice(-600),
@@ -188,7 +227,7 @@ function main(argv = process.argv.slice(2), io = { log: console.log, err: consol
         const receipt = runProbe(c, { root });
         const file = writeReceipt(dir, receipt);
         io.log(`${receipt.status} ${c.id}${receipt.population !== null ? ` population ${receipt.population}` : ''}${receipt.why ? ` (${receipt.why})` : ''} -> ${file}`);
-        return receipt.status === 'PASS' ? 0 : 1;
+        return receipt.status === 'PASS' ? 0 : receipt.status === 'INDETERMINATE' ? 2 : 1;
     }
     const g = grade(manifest, readReceipts(dir), { now: Date.now(), hashFor: (c) => watchHash(c.watch, root) });
     io.log(args.json ? JSON.stringify(g, null, 2) : formatReport(g));

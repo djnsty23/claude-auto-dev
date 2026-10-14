@@ -1,5 +1,5 @@
 {
-  "description": "Evidence-bound criteria for the harness scorecard (A1 to A17). Read by tooling/scorecard.js. Fixture criteria carry weight 8 per aspect and the operational criterion weight 2, so an aspect proven only by fixtures scores at most 8, and 9 or 10 need operational evidence. A criterion whose suite does not exist yet stays UNKNOWN until its package lands. Policy frozen 2026-10-14, before evaluation.",
+  "description": "Evidence-bound criteria for the harness scorecard (A1 to A17). Read by tooling/scorecard.js. Fixture criteria carry weight 8 per aspect and the operational criterion weight 2, so an aspect proven only by fixtures scores at most 8, and 9 or 10 need operational evidence. A criterion whose suite does not exist yet stays UNKNOWN until its package lands. Policy frozen 2026-10-14, before evaluation. Amended 2026-10-14 after the overnight Brain stall: A9 adds mission-stall and splits its fixture weight 3, 3 and 2. An amendment may add evidence, never remove it.",
   "root": "..",
   "aspects": [
     {
@@ -39,7 +39,8 @@
           "probe": "node tooling/test-release-protection.js",
           "expect": "^direct_write=DENIED tag_replace=DENIED tag_delete=DENIED authorized_publish=PASS$",
           "watch": [
-            "tooling/test-release-protection.js"
+            "tooling/test-release-protection.js",
+            "tooling/release-protection.js"
           ],
           "weight": 8,
           "populationCount": "^(ok|PASS) "
@@ -260,7 +261,7 @@
             "tooling/test-brain-judge.js",
             "plugins/autodev-core/scripts/brain-judge.js"
           ],
-          "weight": 4,
+          "weight": 3,
           "populationLabel": "judge checks"
         },
         {
@@ -273,7 +274,20 @@
             "plugins/autodev-core/scripts/acceptance-receipt.js",
             "plugins/autodev-core/scripts/unattended-worker.js"
           ],
-          "weight": 4,
+          "weight": 3,
+          "populationCount": "^ok "
+        },
+        {
+          "id": "mission-stall",
+          "kind": "fixture",
+          "probe": "node tooling/test-mission-queue.js",
+          "expect": "^pending=BLOCK peer=IGNORED delegated=APPROVE no_progress=RELEASED corrupt=APPROVE auto_exit=CLEARED stalled=DETECTED$",
+          "watch": [
+            "tooling/test-mission-queue.js",
+            "plugins/autodev-core/scripts/mission-queue.js",
+            "plugins/autodev-core/hooks/stop-auto-check.js"
+          ],
+          "weight": 2,
           "populationCount": "^ok "
         },
         {

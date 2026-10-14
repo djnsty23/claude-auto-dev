@@ -87,7 +87,9 @@ const capacity = require(path.join(SCRIPTS, 'capacity.js'));
 
 const problems = { growth_reconciled: [], expired_eligible: [], protected: [], missed_retention: [], lifecycle_recovery: [] };
 let protectedLost = false;
-const note = (field, cond, why) => { if (!cond) problems[field].push(why); return Boolean(cond); };
+// Every passing check is counted, so the scorecard can read this suite's population.
+const passedChecks = [];
+const note = (field, cond, why) => { if (!cond) problems[field].push(why); else passedChecks.push(field); return Boolean(cond); };
 const exists = (p) => { try { fs.lstatSync(p); return true; } catch { return false; } };
 
 function cli(args, extraEnv = {}) {
@@ -396,7 +398,10 @@ function recovery(ctx) {
         const ex = path.join(TMP, 'extract');
         fs.mkdirSync(ex);
         const x = spawnSync('tar', ['-xf', path.relative(ex, ok.file).replace(/\\/g, '/')], { cwd: ex, encoding: 'utf8' });
-        note('lifecycle_recovery', x.status === 0 && fs.readFileSync(path.join(ex, 'proof', 'sub', 'b.bin')).equals(Buffer.from([0, 1, 2, 3, 255])), `the archive did not round-trip: ${x.stderr}`);
+        const back = path.join(ex, 'proof', 'sub', 'b.bin');
+        const bytes = exists(back) ? fs.readFileSync(back) : null;
+        note('lifecycle_recovery', x.status === 0 && bytes !== null && bytes.equals(Buffer.from([0, 1, 2, 3, 255])),
+            `the archive did not round-trip: status ${x.status} signal ${x.signal} error ${x.error ? x.error.code : 'none'} extracted ${bytes ? bytes.toString('hex') : 'nothing'} stderr ${String(x.stderr).trim()}`);
     }
     const ledger = capacity.status({ base: process.env.AUTODEV_GATE_LOCK_PATH, isAlive: () => true });
     note('lifecycle_recovery', ledger.ledger && ledger.ledger.reservations.length === 0, 'an archive reservation was never released');
@@ -444,6 +449,7 @@ function parseAndUsage() {
     };
     const line = Object.entries(fields).map(([k, v]) => `${k}=${v}`).join(' ');
     try { fs.rmSync(TMP, { recursive: true, force: true, maxRetries: 3 }); } catch { /* a held file: the OS temp sweep takes it */ }
+    process.stdout.write(passedChecks.map((f, i) => `ok ${f} ${i + 1}\n`).join(''));
     process.stdout.write(`${line}\n`);
     process.exitCode = line === 'growth_reconciled=PASS expired_eligible=REMOVED protected=KEPT missed_retention=DETECTED lifecycle_recovery=PASS' ? 0 : 1;
 })();
