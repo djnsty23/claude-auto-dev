@@ -85,7 +85,6 @@ function args(argv) {
   return out;
 }
 
-function iso(ms) { return new Date(ms).toISOString().replace(/\.\d{3}Z$/, "Z"); }
 function readJsonOr(p, fallback) { try { return JSON.parse(fs.readFileSync(p, "utf8")); } catch { return fallback; } }
 function writeJson(p, v) {
   fs.mkdirSync(path.dirname(p), { recursive: true });
