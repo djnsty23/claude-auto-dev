@@ -87,7 +87,9 @@ const capacity = require(path.join(SCRIPTS, 'capacity.js'));
 
 const problems = { growth_reconciled: [], expired_eligible: [], protected: [], missed_retention: [], lifecycle_recovery: [] };
 let protectedLost = false;
-const note = (field, cond, why) => { if (!cond) problems[field].push(why); return Boolean(cond); };
+// Every passing check is counted, so the scorecard can read this suite's population.
+const passedChecks = [];
+const note = (field, cond, why) => { if (!cond) problems[field].push(why); else passedChecks.push(field); return Boolean(cond); };
 const exists = (p) => { try { fs.lstatSync(p); return true; } catch { return false; } };
 
 function cli(args, extraEnv = {}) {
@@ -444,6 +446,7 @@ function parseAndUsage() {
     };
     const line = Object.entries(fields).map(([k, v]) => `${k}=${v}`).join(' ');
     try { fs.rmSync(TMP, { recursive: true, force: true, maxRetries: 3 }); } catch { /* a held file: the OS temp sweep takes it */ }
+    process.stdout.write(passedChecks.map((f, i) => `ok ${f} ${i + 1}\n`).join(''));
     process.stdout.write(`${line}\n`);
     process.exitCode = line === 'growth_reconciled=PASS expired_eligible=REMOVED protected=KEPT missed_retention=DETECTED lifecycle_recovery=PASS' ? 0 : 1;
 })();
