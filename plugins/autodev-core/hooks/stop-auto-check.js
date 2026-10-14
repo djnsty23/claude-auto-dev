@@ -5,6 +5,8 @@
 // reach `approve`. The escape hatches, in order: an explicit auto-exit signal,
 // a stale flag (>2h), an unparseable prd.json, a missing prd.json, and the
 // one-shot idle marker. tooling/test-stop-auto-check.js covers all of them.
+// A mission queue (scripts/mission-queue.js) holds a turn the same way for work
+// outside prd.json, and releases after three stops with no change to it.
 //
 // TWO WAYS A TURN CAN END THAT THIS FILE DOES NOT CONTROL, both enforced by the
 // harness rather than by any path below:
@@ -284,9 +286,19 @@ try {
         for (const f of [exitFlag, autoFlag, idleMarker]) {
             try { fs.unlinkSync(f); } catch { /* already gone */ }
         }
+        try { require(path.join(__dirname, '..', 'scripts', 'mission-queue.js')).clear(cwd); } catch { /* none */ }
         process.stderr.write('[Auto-Dev] auto-exit signal received. Cleaning up and allowing stop.\n');
         approve();
     }
+
+    // A mission queue: work this session committed to outside prd.json, such as
+    // a Brain mission. Pending items hold the turn open whether or not `auto`
+    // is active. scripts/mission-queue.js says why, and how the hold releases.
+    try {
+        const m = require(path.join(__dirname, '..', 'scripts', 'mission-queue.js')).stopDecision(cwd, sid);
+        if (m && m.block) block(m.block);
+        if (m && m.note) carry.push({ key: null, text: m.note });
+    } catch { /* a mission read must never strand a turn */ }
 
     // Not in auto mode. Approve, but if this repo's prd.json holds a story an
     // agent could act on, SAY SO on the way out, riding on the approve as a

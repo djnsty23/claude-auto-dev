@@ -95,6 +95,14 @@ means blocked or inconsistent, never complete. Diagnose dependency faults once,
 preserve the blocker and work elsewhere; retry only after a relevant condition
 changes. Do not reactivate deferred work to manufacture a fresh queue.
 
+A mission with no `prd.json` registers its queue so the Stop hook can hold it:
+`node "${CLAUDE_PLUGIN_ROOT}/scripts/mission-queue.js" start --mission "<goal>"`, then
+`add <id> <title>` per item. Move items as they change: `set <id> inflight` once a
+worker or wakeup will bring you back, `blocked --note "<who>"` for a person,
+`done` or `dropped` with the evidence. The Stop hook blocks while any item is
+`pending`. A failed command leaves its item pending: retry it, or record the
+blocker. `stalled --minutes 60` lists missions stopped with pending work.
+
 ## 3. Start bounded workers with one owner per unit
 
 Load `isolate` and `rule-agent-concurrency`. Before dispatch, record story,

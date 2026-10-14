@@ -18,6 +18,10 @@ and record reasons. Preserve existing authorization instead of asking again.
 When one item requires unavailable intent, credentials or permission, preserve
 its blocker and owner and continue independent work. Do not invent the answer.
 
+Register the mission queue before the first dispatch (Brain section 2,
+`scripts/mission-queue.js`). Nobody is there to restart a turn that ends early,
+so a failed command is retried or recorded as blocked, never a reason to stop.
+
 Start workers through an available autonomous channel and verify they started.
 A chip awaiting a click remains `awaiting-start`; a proposed restart remains
 `awaiting-restart`. Neither is execution. Persist work and recovery instructions
