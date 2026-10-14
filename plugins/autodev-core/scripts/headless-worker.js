@@ -44,7 +44,8 @@
  *   node headless-worker.js start --code <CODE> --prompt-file <md> --log <file>
  *        [--report <file>] [--config-dir <dir>] [--model <id>] [--effort <level>]
  *        [--permission-mode <mode>] [--cwd <dir>] [--claude-bin <path>] [--ledger <file>] [--dry-run] [--dev]
- *        [--plugin-dir <dir>] [--keep-tools <Artifact,Workflow|all>]
+ *        [--plugin-dir <dir>] [--keep-tools <Artifact,Workflow|all>] [--profile <builder>]
+ *        [--attempt-id <id>] [--budget-ledger <file>]
  *   node headless-worker.js supervise --code <CODE> --log <file> --prompt-file <md> ...   (internal)
  *   node headless-worker.js status [--code <CODE>] [--ledger <file>] [--json]
  *   node headless-worker.js settle --code <CODE> [--started-at <iso>] [--lost] [--unreported] [--ledger <file>] [--json]
@@ -60,13 +61,16 @@ const os = require('node:os');
 const path = require('node:path');
 const claudePaths = require('./claude-paths.js');
 const capacity = require('./capacity.js');
+const budget = require('./execution-budget.js');
+const profiles = require('./worker-profiles.js');
 const { spawn, spawnSync } = require('node:child_process');
 
 const USAGE = [
     'Usage: node headless-worker.js start --code <CODE> --prompt-file <md> --log <file>',
     '            [--report <file>] [--config-dir <dir>] [--model <id>] [--effort <level>]',
     '            [--permission-mode <mode>] [--cwd <dir>] [--claude-bin <path>] [--ledger <file>] [--dry-run] [--dev]',
-    '            [--plugin-dir <dir>] [--keep-tools <Artifact,Workflow|all>]',
+    '            [--plugin-dir <dir>] [--keep-tools <Artifact,Workflow|all>] [--profile <builder>]',
+    '            [--attempt-id <id>] [--budget-ledger <file>]',
     '       node headless-worker.js supervise ... (internal: the detached child that owns claude)',
     '       node headless-worker.js status [--code <CODE>] [--ledger <file>] [--json]',
     '       node headless-worker.js settle --code <CODE> [--started-at <iso>] [--lost] [--unreported] [--ledger <file>] [--json]',
@@ -77,7 +81,12 @@ const USAGE = [
     '       a directory that does not exist, before anything is spawned or recorded.',
     '       --effort is one of low|medium|high|xhigh|max, passed to claude as --effort <level>; omitted, argv has no --effort.',
     '       --plugin-dir is passed to claude as --plugin-dir <dir>: a plugin, or a directory whose children are plugins.',
-    '       The Artifact tools and Workflow are disallowed unless the prompt names them; --keep-tools keeps them.',
+    '       The worker gets exactly its --profile (worker-profiles.js, default builder) as one --tools list. The Artifact',
+    '       tools and Workflow join it only when the prompt names them or --keep-tools keeps them.',
+    '       --attempt-id names the attempt reserved in the shared execution budget (execution-budget.js), default',
+    '       <code>@<start time>. An id the budget has held before is refused as attempt-restart, and so is a',
+    '       reservation past a window cap. The supervisor stops a child past its turn, wall or output ceiling with',
+    '       its whole process tree, writes BUDGET_STOP=<field> to the kept log, and settles the attempt.',
     '       It must be a directory. A run that pins its plugins this way loads that tree, whatever the config dir installed.',
     '       start refuses a script outside a plugin cache, because a worker started from a checkout runs code no',
     '       release shipped. --dev runs the checkout on purpose. Every record names the version and script that ran.',
@@ -243,7 +252,7 @@ function parseArgs(argv) {
     const out = { _: [] };
     const flags = ['help', 'dry-run', 'json', 'lost', 'unreported', 'dev'];
     const known = ['_', ...flags, 'code', 'started-at', 'prompt-file', 'log', 'report', 'config-dir', 'model', 'effort',
-        'permission-mode', 'cwd', 'claude-bin', 'ledger', 'plugin-dir', 'keep-tools'];
+        'permission-mode', 'cwd', 'claude-bin', 'ledger', 'plugin-dir', 'keep-tools', 'profile', 'attempt-id', 'budget-ledger'];
     for (let i = 0; i < argv.length; i++) {
         const a = argv[i];
         if (a === '--help' || a === '-h' || a === 'help') { out.help = true; continue; }
@@ -443,17 +452,17 @@ function readPrompt(file, scratchDir, o = {}) {
 }
 
 /**
- * Tools a headless worker starts without unless its prompt names them.
+ * Tool families a headless worker starts without unless its prompt names them.
  * `[measured 2026-10-13]` on a 71.2k turn 1, one headless probe per arm: the
  * three Artifact tools cost 11.4k tokens and Workflow 2.0k, before the worker
  * reads a word of its brief. Desktop sessions keep them. A worker whose prompt
  * names a tool, or links a claude.ai artifact, keeps that family. `--keep-tools`
- * keeps one by name, or `all` keeps every one.
+ * keeps one by name, or `all` keeps every one. The families live in
+ * worker-profiles.js: the worker's whole tool set is its profile (--profile,
+ * default builder) plus the families it keeps, passed as one --tools list, so a
+ * tool a CLI release adds never reaches a worker unasked.
  */
-const HEAVY_TOOLS = Object.freeze({
-    Artifact: Object.freeze({ tools: ['Artifact', 'ArtifactComments', 'ArtifactData'], named: /\bArtifact(?:Data|Comments)?\b|claude\.ai\/(?:code\/)?artifact\//i }),
-    Workflow: Object.freeze({ tools: ['Workflow'], named: /\bWorkflow\b|\bultracode\b/ }),
-});
+const HEAVY_TOOLS = profiles.FAMILIES;
 
 function parseKeepTools(value) {
     if (!value) return [];
@@ -476,12 +485,16 @@ function droppedTools(prompt, keepTools = []) {
         .flatMap(([, spec]) => spec.tools);
 }
 
-function buildArgv({ claudeBin, prompt, model, effort, permissionMode, pluginDir = null, keepTools = [] }) {
-    const dropped = droppedTools(prompt, keepTools);
+/** The resolved tool profile for one worker: its kind's tools plus the families it keeps. */
+function toolProfile(prompt, keepTools = [], kind = 'builder') {
+    return profiles.resolve(kind, { prompt, keep: keepTools });
+}
+
+function buildArgv({ claudeBin, prompt, model, effort, permissionMode, pluginDir = null, keepTools = [], profile = 'builder' }) {
     return [claudeBin, '-p', prompt, ...(model ? ['--model', model] : []), ...(effort ? ['--effort', effort] : []),
         ...(pluginDir ? ['--plugin-dir', pluginDir] : []),
         '--permission-mode', permissionMode, '--output-format', 'stream-json', '--verbose',
-        ...(dropped.length ? ['--disallowedTools', dropped.join(',')] : [])];
+        ...profiles.toolsArgs(toolProfile(prompt, keepTools, profile))];
 }
 
 function requireEffort(value) {
@@ -590,6 +603,9 @@ function startOptions(opts) {
         effort: opts.effort ? requireEffort(opts.effort) : null,
         pluginDir: opts['plugin-dir'] ? path.resolve(opts['plugin-dir']) : null,
         keepTools: parseKeepTools(opts['keep-tools']),
+        profile: profiles.requireKind(opts.profile || 'builder'),
+        attemptId: opts['attempt-id'] ? requireAttemptId(opts['attempt-id']) : null,
+        budgetLedger: path.resolve(opts['budget-ledger'] || budget.ledgerPath()),
         permissionMode: opts['permission-mode'] || 'default',
         cwd: opts.cwd ? path.resolve(opts.cwd) : process.cwd(),
         claudeBin: resolveClaudeBin(opts['claude-bin'] || 'claude'),
@@ -613,8 +629,19 @@ function supervisorFlags(o) {
     if (o.configDir) flags.push('--config-dir', o.configDir);
     if (o.pluginDir) flags.push('--plugin-dir', o.pluginDir);
     if (o.keepTools.length) flags.push('--keep-tools', o.keepTools.join(','));
+    if (o.profile !== 'builder') flags.push('--profile', o.profile);
+    if (o.attemptId) flags.push('--attempt-id', o.attemptId);
+    flags.push('--budget-ledger', o.budgetLedger);
     return flags;
 }
+
+function requireAttemptId(v) {
+    if (!budget.ATTEMPT_RE.test(v)) fault('usage', `--attempt-id must match ${budget.ATTEMPT_RE}`);
+    return v;
+}
+
+/** The attempt a start reserves: --attempt-id when given, else one minted from the code and start time. */
+function attemptIdFor(o, startedAt) { return o.attemptId || `${o.code}@${startedAt.replace(/[-:.]/g, '')}`; }
 
 function start(opts) {
     const o = startOptions(opts);
@@ -634,13 +661,15 @@ function start(opts) {
     if (o.configDir) requireConfigDirExists(o.configDir);
     if (o.pluginDir && !isDir(o.pluginDir)) fault('plugin-dir-missing', `--plugin-dir resolved to ${o.pluginDir}, which is not a directory`);
     const prompt = readPrompt(o.promptFile, scratchDirFor(o), o);
-    const argv = buildArgv({ claudeBin: o.claudeBin, prompt, model: o.model, effort: o.effort, permissionMode: o.permissionMode, pluginDir: o.pluginDir, keepTools: o.keepTools });
+    const argv = buildArgv({ claudeBin: o.claudeBin, prompt, model: o.model, effort: o.effort, permissionMode: o.permissionMode, pluginDir: o.pluginDir, keepTools: o.keepTools, profile: o.profile });
     const plan = buildEnv(process.env, { code: o.code, configDir: o.configDir });
     if (opts['dry-run']) {
         return {
             dryRun: true, code: o.code, argv, command: spawnPlan(argv).command,
             envSet: plan.set, envDeleted: plan.deleted, envScrubList: plan.scrubList,
             configDir: o.configDir, effort: o.effort, pluginDir: o.pluginDir, droppedTools: droppedTools(prompt, o.keepTools),
+            profile: o.profile, tools: toolProfile(prompt, o.keepTools, o.profile).allowed,
+            budget: { ceilings: budget.ceilingsFor('worker'), billing: budget.billingOf(plan.env), ledger: o.budgetLedger, attemptId: o.attemptId },
             script: placement.script, version: placement.version, installed: placement.installed, dev: o.dev, integrity: integritySummary(integrity),
             log: o.log, report: o.report, scratchDir: scratchDirFor(o), ledger: o.ledger, cwd: o.cwd, spawned: false,
             wouldMoveAside: priorRunFiles(o),
@@ -656,14 +685,27 @@ function start(opts) {
         log: o.log, report: o.report, promptFile: o.promptFile,
         configDir: o.configDir ? path.basename(o.configDir) : null,
         version: placement.version, script: placement.script, dev: !placement.installed, integrity: integritySummary(integrity),
-        model: o.model, effort: o.effort, permissionMode: o.permissionMode, cwd: o.cwd, pluginDir: o.pluginDir, droppedTools: droppedTools(prompt, o.keepTools), state: 'starting',
+        model: o.model, effort: o.effort, permissionMode: o.permissionMode, cwd: o.cwd, pluginDir: o.pluginDir, droppedTools: droppedTools(prompt, o.keepTools),
+        profile: o.profile, tools: toolProfile(prompt, o.keepTools, o.profile).allowed, state: 'starting',
     };
+    // BUDGET. The attempt is reserved in the shared execution budget inside the
+    // ledger lock, after the code-active check and before anything moves or
+    // spawns. A refusal (an attempt id used before, a window cap, an unreadable
+    // config) leaves no record and no process. A start that fails after the
+    // reservation cancels it, so it charges nothing and its id stays used.
+    o.attemptId = attemptIdFor(o, record.startedAt);
+    Object.assign(record, { attemptId: o.attemptId, budgetLedger: o.budgetLedger });
+    const cancelBudget = (why) => budget.cancel(o.attemptId, why, { ledger: o.budgetLedger });
     const isReservation = (r) => r.code === o.code && r.state === 'starting' && r.startedAt === record.startedAt;
     withLedger(o.ledger, (ledger) => {
         if (ledger.records.some((r) => r.code === o.code && isUnsettled(r))) {
             fault('code-active', `${o.code} has an unsettled record in ${o.ledger}; settle it or pick another code`);
         }
-        const moved = moveAside(priorRunFiles(o), record.startedAt.replace(/[-:.]/g, ''));
+        const b = budget.reserve({ attemptId: o.attemptId, kind: 'worker', billing: budget.billingOf(plan.env),
+            account: o.configDir ? path.basename(o.configDir) : 'default', log: o.log, note: o.code }, { ledger: o.budgetLedger });
+        if (!b.ok) fault(b.code === 'attempt-restart' ? 'attempt-restart' : 'budget-refused', `execution budget refused ${o.attemptId}: ${b.why}`);
+        let moved;
+        try { moved = moveAside(priorRunFiles(o), record.startedAt.replace(/[-:.]/g, '')); } catch (e) { cancelBudget('the earlier run files could not be moved aside'); throw e; }
         const to = new Map(moved.map((m) => [m.from, m.to]));
         for (const r of ledger.records) {
             if (r.code !== o.code) continue;
@@ -678,6 +720,7 @@ function start(opts) {
             { detached: true, stdio: 'ignore', windowsHide: true, env: plan.env });
     } catch (e) {
         withLedger(o.ledger, (ledger) => { ledger.records = ledger.records.filter((r) => !isReservation(r)); });
+        cancelBudget('the supervisor could not be spawned');
         fault('spawn-failed', `could not spawn the supervisor: ${e.code || e.message}`);
     }
     child.on('error', () => { /* the supervisor could not be started; the record keeps whatever pid spawn assigned */ });
@@ -697,6 +740,17 @@ function start(opts) {
  * (missing binary, EACCES) gets a CLAUDE_SPAWN_ERROR line and an exit of -1,
  * so a poller is never left waiting on a process that does not exist.
  *
+ * BUDGET. The supervisor first marks its attempt running in the execution
+ * budget (execution-budget.js begin). An attempt that is not reserved, or one
+ * already running or settled, is a second launch of one attempt: it writes
+ * BUDGET_DENIED=<why> and CLAUDE_EXIT=-1, and claude never starts. While the
+ * child runs, a watchdog measures turns, wall time and output bytes against the
+ * attempt's ceilings. The first one passed writes BUDGET_STOP=<field> limit=<n>
+ * seen=<n> and stops the child with its whole process tree. The log is never
+ * truncated, so everything the child wrote stays as evidence. On every way out
+ * the attempt is settled: with the run's reported usage, or with its whole
+ * reservation when it reported none, or cancelled when claude never started.
+ *
  * CAPACITY. Immediately before the spawn, the supervisor reserves machine
  * capacity (capacity.js, class worker) in its own pid's name, since it lives as
  * long as the child. A deferral is written to the log as CAPACITY_WAIT=<why>
@@ -709,7 +763,7 @@ function start(opts) {
 function supervise(opts) {
     const o = startOptions(opts);
     const prompt = readPrompt(o.promptFile, scratchDirFor(o), o);
-    const argv = buildArgv({ claudeBin: o.claudeBin, prompt, model: o.model, effort: o.effort, permissionMode: o.permissionMode, pluginDir: o.pluginDir, keepTools: o.keepTools });
+    const argv = buildArgv({ claudeBin: o.claudeBin, prompt, model: o.model, effort: o.effort, permissionMode: o.permissionMode, pluginDir: o.pluginDir, keepTools: o.keepTools, profile: o.profile });
     const { env } = buildEnv(process.env, { code: o.code, configDir: o.configDir });
     const plan = spawnPlan(argv);
     fs.mkdirSync(path.dirname(o.log), { recursive: true });
@@ -723,10 +777,25 @@ function supervise(opts) {
         capacity.release(id);
     };
     process.on('exit', settleCapacity);
-    const finish = (lines, exitCode) => {
+    // The budget attempt: begun once begin() accepted it, launched once claude spawned.
+    const run = { begun: false, launched: false, launchedAt: null, stop: null, watchdog: null };
+    const settleBudget = (exit, reason) => {
+        if (!run.begun) return;
+        run.begun = false;
+        if (run.watchdog) run.watchdog.stop();
+        if (!run.launched) { budget.cancel(o.attemptId, reason, { ledger: o.budgetLedger }); return; }
+        const m = run.watchdog ? run.watchdog.measure() : { outputBytes: null };
+        budget.settle(o.attemptId, { usage: budget.usageFromLog(readText(o.log)), stop: run.stop, exit,
+            outputBytes: m.outputBytes, wallMs: Date.now() - run.launchedAt, ledger: o.budgetLedger });
+    };
+    const finish = (lines, exitCode, budgetExit = null) => {
         if (finished) return;
         finished = true;
         settleCapacity();
+        // The budget settles before the exit line lands, so a settle that reads the
+        // exit line finds this attempt already settled, with its stop recorded.
+        if (budgetExit === null) run.launched = false;
+        try { settleBudget(budgetExit, lines[0]); } catch { /* the attempt stays open and keeps its whole reservation */ }
         try { fs.writeSync(fd, '\n' + lines.join('\n') + '\n'); } catch { /* the log is gone; nothing left to say */ }
         try { fs.closeSync(fd); } catch { /* already closed */ }
         process.exitCode = exitCode;
@@ -734,16 +803,30 @@ function supervise(opts) {
     const launch = () => {
         let child;
         try {
-            child = spawn(plan.command, plan.args, { cwd: o.cwd, env, stdio: ['ignore', fd, fd], windowsHide: true });
+            // POSIX: the child leads its own process group, so a budget stop reaches every descendant.
+            child = spawn(plan.command, plan.args, { cwd: o.cwd, env, stdio: ['ignore', fd, fd], windowsHide: true, detached: process.platform !== 'win32' });
         } catch (e) {
             finish([`CLAUDE_SPAWN_ERROR=${e.code || e.message}`, 'CLAUDE_EXIT=-1'], 1);
             return { supervising: false, code: o.code };
         }
         child.on('error', (e) => finish([`CLAUDE_SPAWN_ERROR=${e.code || e.message}`, 'CLAUDE_EXIT=-1'], 1));
         child.on('exit', (code, signal) => {
-            if (code === null) finish([`CLAUDE_SIGNAL=${signal}`, 'CLAUDE_EXIT=-1'], 1);
-            else finish([`CLAUDE_EXIT=${code}`], code === 0 ? 0 : 1);
+            if (code === null) finish([`CLAUDE_SIGNAL=${signal}`, 'CLAUDE_EXIT=-1'], 1, -1);
+            else finish([`CLAUDE_EXIT=${code}`], code === 0 ? 0 : 1, code);
         });
+        if (child.pid) {
+            run.launched = true;
+            run.launchedAt = Date.now();
+            const held = budget.attemptOf(o.attemptId, { ledger: o.budgetLedger });
+            run.watchdog = budget.watch({
+                logFile: o.log, ceilings: (held && held.ceilings) || budget.ceilingsFor('worker'),
+                onStop: (hit) => {
+                    run.stop = { ...hit, at: new Date().toISOString() };
+                    try { fs.writeSync(fd, `\nBUDGET_STOP=${hit.field} limit=${hit.limit} seen=${hit.seen}\n`); } catch { /* the log is gone */ }
+                    run.stop.kill = budget.killTree(child.pid);
+                },
+            });
+        }
         return { supervising: true, code: o.code, childPid: child.pid };
     };
     const since = Date.now();
@@ -763,6 +846,13 @@ function supervise(opts) {
         setTimeout(admitThenLaunch, capacity.pollMs());
         return { supervising: true, code: o.code, capacity: c.why };
     };
+    const b = o.attemptId ? budget.begin(o.attemptId, { pid: process.pid, ledger: o.budgetLedger })
+        : { ok: false, code: 'unknown-attempt', why: 'no --attempt-id, so no reserved attempt to run under' };
+    if (!b.ok) {
+        finish([`BUDGET_DENIED=${b.code}: ${b.why}`, 'CLAUDE_EXIT=-1'], 1);
+        return { supervising: false, code: o.code, budget: b.code };
+    }
+    run.begun = true;
     return admitThenLaunch();
 }
 
@@ -1023,7 +1113,28 @@ function lostReason(rec, boot, liveness = pidLiveness, image = pidImage) {
     return null;
 }
 
+/**
+ * Settle a record, then reconcile its budget attempt. A supervisor settles its
+ * attempt itself on every way out, so this matters for one it never reached: a
+ * supervisor killed by a reboot or a kill. Such an attempt is settled from the
+ * log's reported usage, or charged its whole reservation when the log has none.
+ */
 function settle(opts) {
+    const seen = {};
+    const value = settleRecord(opts, seen);
+    const rec = seen.rec;
+    if (rec && rec.attemptId) {
+        try {
+            const r = budget.settle(rec.attemptId, { usage: budget.usageFromLog(readText(rec.log)), exit: Number.isInteger(rec.exit) ? rec.exit : null,
+                reason: `settled by headless-worker settle as ${rec.result}`, ledger: rec.budgetLedger || budget.ledgerPath() });
+            value.budget = r.ok ? { attemptId: rec.attemptId, state: r.attempt.state, already: Boolean(r.already), usageMissing: r.attempt.usageMissing === true }
+                : { attemptId: rec.attemptId, error: r.code };
+        } catch (e) { value.budget = { attemptId: rec.attemptId, error: e.code || e.message }; }
+    }
+    return value;
+}
+
+function settleRecord(opts, seen = {}) {
     const code = requireCode(opts);
     const file = path.resolve(opts.ledger || defaultLedger());
     return withLedger(file, (ledger) => {
@@ -1042,6 +1153,7 @@ function settle(opts) {
             rec = ledger.records.filter((r) => r.code === code && isUnsettled(r)).pop();
             if (!rec) fault('unknown-code', `no unsettled record for ${code} in ${file}`);
         }
+        seen.rec = rec;
         const logText = readText(rec.log);
         const exit = logText === null ? null : exitCodeOf(logText);
         if (opts.lost && opts.unreported) fault('usage', '--lost and --unreported name different endings: a worker with no exit line, and one that exited without a RESULT line. Pass one');
@@ -1241,7 +1353,7 @@ module.exports = {
     HEADLESS_NOTE, DENIED_NOTE, PROMPT_MAX, CODE_RE, placementNote, resultNote, scriptPlacement, otherResultCode, SCRUBBED_ENV, RETENTION_MS, SETTLED_RESULTS,
     AUTH_REFUSAL_PATTERNS, matchAuthRefusal, authRefusal, resolveConfigDir,
     askFiles, askNote, askState, scratchDirFor, priorRunFiles, moveAside, readLedger, settle, start,
-    HEAVY_TOOLS, droppedTools, namedTools, parseKeepTools,
+    HEAVY_TOOLS, droppedTools, namedTools, parseKeepTools, toolProfile, attemptIdFor, supervise,
     parseArgs, composePrompt, buildArgv, buildEnv, spawnPlan, resolveClaudeBin, exitCodeOf, parseResult,
     livenessFromError, pidLiveness, pidImage, isSupervisorImage, supervisorLiveness, bootAt, pruneSettled, laterRuns, recordStatus, lostReason, lostGateStep, run,
 };

@@ -142,7 +142,7 @@ try {
         const icfg = path.join(ROOT, 'install-cfg');
         const inst = path.join(icfg, 'plugins', 'cache', 'fixture-mkt', 'autodev-core', '1.0.0');
         write(path.join(inst, '.claude-plugin', 'plugin.json'), JSON.stringify({ name: 'autodev-core', version: '1.0.0' }));
-        for (const f of ['headless-worker.js', 'claude-paths.js', 'capacity.js', 'gate-records.js', 'plugin-integrity.js']) {
+        for (const f of ['headless-worker.js', 'claude-paths.js', 'capacity.js', 'gate-records.js', 'plugin-integrity.js', 'execution-budget.js', 'worker-profiles.js', 'ledger-lock.js', 'gate-identity.js']) {
             write(path.join(inst, 'scripts', f), fs.readFileSync(path.join(SCRIPTS, f)));
         }
         const launcher = path.join(inst, 'scripts', 'headless-worker.js');

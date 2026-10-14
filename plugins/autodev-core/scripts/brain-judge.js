@@ -83,6 +83,8 @@ const claudePaths = require('./claude-paths.js');
 const uw = require('./unattended-worker.js');
 const hw = require('./headless-worker.js');
 const capacity = require('./capacity.js');
+const budget = require('./execution-budget.js');
+const profiles = require('./worker-profiles.js');
 const acceptance = require('./acceptance-receipt.js');
 
 const USAGE = [
@@ -515,9 +517,14 @@ function buildJudgePrompt(rec, report, brief, nonce = crypto.randomBytes(6).toSt
     return lines.join('\n') + '\n';
 }
 
-function judgeArgv(bin, model) {
-    return [bin, '-p', '--output-format', 'json', '--tools', '', '--strict-mcp-config', '--setting-sources', '',
-        '--max-turns', String(JUDGE_MAX_TURNS), '--max-budget-usd', String(JUDGE_BUDGET_USD), '--no-session-persistence',
+/**
+ * The judge's argv. Its tools are the judge profile (worker-profiles.js: none),
+ * and its turn and dollar caps are the judge kind's ceilings in the shared
+ * execution budget (execution-budget.js), whose defaults are the constants above.
+ */
+function judgeArgv(bin, model, ceilings = { maxTurns: JUDGE_MAX_TURNS, maxUsd: JUDGE_BUDGET_USD }) {
+    return [bin, '-p', '--output-format', 'json', ...profiles.toolsArgs(profiles.resolve('judge')), '--strict-mcp-config', '--setting-sources', '',
+        '--max-turns', String(ceilings.maxTurns), '--max-budget-usd', String(ceilings.maxUsd), '--no-session-persistence',
         '--json-schema', JSON.stringify(VERDICT_SCHEMA), '--model', model];
 }
 
@@ -562,6 +569,12 @@ function reportPathOf(rec, reportsDir) {
 
 /**
  * Run the judge for one record. Tool-less, capped in turns and dollars, prompt on stdin.
+ * BUDGET. Every judge run, from a tick, a backfill or by hand, first reserves a
+ * judge attempt in the shared execution budget and settles it with the cost and
+ * turns the judge reported (its whole reservation when it reported none). A
+ * refusal spawns nothing and returns like a capacity deferral, so it never counts
+ * against the record. The judge kind's ceilings set its turns, dollars, wall
+ * time (the spawn timeout) and output bytes (the spawn buffer).
  * Machine capacity (capacity.js, class judge) is reserved right before the spawn and
  * settled in a finally. A deferral spawns nothing: { ok: false, capacity: true, costUsd: 0 },
  * which never counts against the record.
@@ -571,18 +584,30 @@ function judgeRecord(rec, { judgeBin, model = JUDGE_MODEL, cwd, reportsDir, conf
     const report = file ? tailText(file, REPORT_TAIL_BYTES) : { text: null, size: 0, cut: false };
     const brief = rec.briefFile ? headText(rec.briefFile, BRIEF_HEAD_BYTES) : null;
     const prompt = buildJudgePrompt(rec, report, brief);
-    const plan = hw.spawnPlan(judgeArgv(hw.resolveClaudeBin(judgeBin || 'claude'), model));
+    const ceilings = budget.ceilingsFor('judge');
+    const plan = hw.spawnPlan(judgeArgv(hw.resolveClaudeBin(judgeBin || 'claude'), model, ceilings));
     const { env } = hw.buildEnv(process.env, { code: 'brain-judge', configDir });
     fs.mkdirSync(cwd, { recursive: true });
     const sizes = { model, promptBytes: Buffer.byteLength(prompt), reportBytes: report.size };
     const c = capacity.admit({ cls: 'judge', path: cwd, note: String(rec.taskId || '') });
     if (!c.admitted) return { ok: false, capacity: true, error: `capacity-deferred: ${c.why}`, costUsd: 0, turns: 0, durationMs: 0, ...sizes };
+    const attemptId = `judge-${String(rec.taskId || 'task').replace(/[^A-Za-z0-9._-]/g, '-').slice(0, 80)}-${Date.now()}-${crypto.randomBytes(3).toString('hex')}`;
+    const b = budget.reserve({ attemptId, kind: 'judge', billing: budget.billingOf(env), account: configDir ? path.basename(configDir) : 'default', note: String(rec.taskId || '') });
+    if (!b.ok) {
+        capacity.release(c.id);
+        return { ok: false, capacity: true, budget: b.code, error: `budget-deferred: ${b.why}`, costUsd: 0, turns: 0, durationMs: 0, ...sizes };
+    }
+    budget.begin(attemptId, { pid: process.pid });
     const started = Date.now();
+    let out = null;
     try {
-        const r = spawnSync(plan.command, plan.args, { input: prompt, encoding: 'utf8', timeout: JUDGE_TIMEOUT_MS, windowsHide: true, env, cwd, maxBuffer: 16 * 1024 * 1024 });
-        return { ...parseJudgeOutput(r), durationMs: Date.now() - started, ...sizes };
+        const r = spawnSync(plan.command, plan.args, { input: prompt, encoding: 'utf8', timeout: Math.min(JUDGE_TIMEOUT_MS, ceilings.wallMs), windowsHide: true, env, cwd, maxBuffer: ceilings.outputBytes });
+        out = { ...parseJudgeOutput(r), durationMs: Date.now() - started, ...sizes, attemptId };
+        return out;
     } finally {
         capacity.release(c.id);
+        const usage = out && typeof out.costUsd === 'number' && typeof out.turns === 'number' ? { turns: out.turns, costUsd: out.costUsd } : null;
+        budget.settle(attemptId, { usage, wallMs: Date.now() - started, reason: out && !out.ok ? out.error : null });
     }
 }
 
@@ -951,7 +976,7 @@ function probe(opts) {
 }
 
 function probeArgv(bin) {
-    return [bin, '-p', '--output-format', 'json', '--tools', '', '--strict-mcp-config', '--setting-sources', '',
+    return [bin, '-p', '--output-format', 'json', ...profiles.toolsArgs(profiles.resolve('probe')), '--strict-mcp-config', '--setting-sources', '',
         '--max-turns', '1', '--no-session-persistence'];
 }
 
@@ -1008,7 +1033,7 @@ if (require.main === module) {
 }
 
 module.exports = {
-    parseArgs, readSwitch, effectiveMode, reportPathOf, breaker, takeLock, headlessRunOf, runStatusOfHeadless, buildJudgePrompt, judgeArgv,
+    parseArgs, readSwitch, effectiveMode, reportPathOf, breaker, takeLock, headlessRunOf, runStatusOfHeadless, buildJudgePrompt, judgeArgv, judgeRecord,
     parseJudgeOutput, judgeCandidates, revealedDecision, stem, readJsonl, run, pruneReported, tickRuns, writeVerdict, VERDICT_SCHEMA, RUBRIC, BRIEF_HEAD_BYTES,
     authHold, authRefusedKeys, probeArgv, countsAgainstRecord, cfgKey, readProbes, pathsFor,
     JUDGE_PER_TICK, JUDGE_PER_HOUR, JUDGE_FAILS_PER_RECORD, START_MAX_CONCURRENT, START_MAX_PER_HOUR,

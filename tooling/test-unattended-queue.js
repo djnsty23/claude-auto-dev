@@ -150,13 +150,14 @@ try {
     check('control: every flag brain-judge passes to launch is accepted', viaJudge.status === 0, viaJudge.stdout.slice(0, 200));
     // The worker reads its brief through POINTER.md, so headless-worker sees only the pointer:
     // launch has to name the tool families the brief uses, or the worker loses them.
-    const disallowed = (v) => { const a = v ? v.headless.argv : []; const i = a.indexOf('--disallowedTools'); return i < 0 ? '' : a[i + 1]; };
-    check('a brief naming no heavy tool starts its worker without the Artifact tools and Workflow', disallowed(dv) === 'Artifact,ArtifactComments,ArtifactData,Workflow', disallowed(dv));
+    const toolList = (v) => { const a = v ? v.headless.argv : []; const i = a.indexOf('--tools'); return i < 0 || a.includes('--disallowedTools') ? '' : a[i + 1]; };
+    const heavy = (v) => toolList(v).split(',').filter((t) => /^(Artifact|ArtifactComments|ArtifactData|Workflow)$/.test(t)).join(',');
+    check('a brief naming no heavy tool starts its worker without the Artifact tools and Workflow', toolList(dv).includes('Bash') && heavy(dv) === '', toolList(dv));
     const briefBefore = fs.readFileSync(briefCopy, 'utf8');
     fs.writeFileSync(briefCopy, briefBefore + 'Record the result on the board with ArtifactData.' + String.fromCharCode(10));
     const named = val(cli(['launch', '--task-id', 'worker-guide-a', '--dry-run', '--dev', '--claude-bin', fakeWorker, '--ledger', ledger]));
     fs.writeFileSync(briefCopy, briefBefore);
-    check('launch passes the tool families the brief names: a brief naming ArtifactData keeps the Artifact tools', disallowed(named) === 'Workflow', named ? named.headless.argv.join(' ').slice(-200) : 'no value');
+    check('launch passes the tool families the brief names: a brief naming ArtifactData keeps the Artifact tools', heavy(named) === 'Artifact,ArtifactComments,ArtifactData', named ? named.headless.argv.join(' ').slice(-200) : 'no value');
     check('a flag a command never reads is refused as usage, never ignored: status --model',
         code(cli(['status', '--model', 'm', '--ledger', ledger])) === 'usage');
     const stray = cli(['launch', '--task-id', 'worker-guide-a', '--repo', repo, '--dry-run', '--ledger', ledger]);
