@@ -184,6 +184,16 @@ function observeSuite(script) {
     check("weekly Monday", new Date(prevCronSlot("0 9 * * 1", at)).getDay() === 1);
     check("list 8,20", prevCronSlot("0 8,20 * * *", new Date(2026, 8, 23, 19, 0).getTime()) === new Date(2026, 8, 23, 8, 0).getTime());
   }
+  // 7b. A writer the clock cannot read refuses every capability with the reason, so no settle runs blind.
+  {
+    const { writerSupport } = require(script);
+    const absent = writerSupport(null);
+    check("no writer beside the clock: every capability is missing, with the reason",
+      Object.keys(absent.missing).length === 4 && Object.values(absent.missing).every((v) => /no headless-worker\.js beside the clock/.test(v)), JSON.stringify(absent));
+    const broken = writerSupport(path.join(root, "no-such-dir", "headless-worker.js"));
+    check("a writer whose --help fails: every capability is missing, naming the exit",
+      Object.values(broken.missing).length === 4 && Object.values(broken.missing).every((v) => /--help exit [1-9]/.test(v)), JSON.stringify(broken));
+  }
   // 8. No override and nothing at %APPDATA%/Claude: the Desktop stores are found in the MSIX package
   //    copy, which is all a Task Scheduler process can see.
   {

@@ -1183,4 +1183,4 @@ function main() {
 }
 
 if (require.main === module) process.exitCode = main();
-module.exports = { takeLock, dropLock, LOCK_PATH, LOCK_OWNERLESS_MS, STATE_DIR, STATE_SCHEMA, STATE_META, readStateMeta, releaseScript, reconcileRows, prevCronSlot, parseCron, diff, workerEvent, exitCodeOf, resultOf, pidLiveness, parseAct, lastLineResult, classifyUnattended };
+module.exports = { takeLock, dropLock, LOCK_PATH, LOCK_OWNERLESS_MS, STATE_DIR, STATE_SCHEMA, STATE_META, readStateMeta, releaseScript, reconcileRows, prevCronSlot, parseCron, diff, workerEvent, exitCodeOf, resultOf, pidLiveness, parseAct, lastLineResult, classifyUnattended, writerSupport };

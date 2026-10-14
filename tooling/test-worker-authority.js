@@ -292,6 +292,12 @@ function main() {
     expectAllow('builder Read of .env.example', B, tool('Read', { file_path: path.join(REPO, '.env.example') }));
     expectAllow('review git log and grep', R, bash('git log --oneline -5 | grep fix'));
     expectAllow('review Read', R, tool('Read', { file_path: path.join(REPO, 'AGENTS.md') }));
+    // An interpreter's code is read string by string: a harmless one runs, one that shells out to a push does not.
+    const builderAuth = wa.resolveAuthority('builder', { tools: ['Bash'], cwd: REPO, reportDir: REPORTS });
+    const harmless = wa.analyseCommand(`node -e "console.log('hello')"`, builderAuth, REPO);
+    check('authorized_control', 'a node -e that only prints is allowed after its strings are read', harmless === null, JSON.stringify(harmless), 'FAIL');
+    const shells = wa.analyseCommand(`node -e "require('child_process').execSync('git push')"`, builderAuth, REPO);
+    check('child_escape', 'a node -e whose string runs git push is denied in-process too', !!shells && shells.decision === 'deny', JSON.stringify(shells), 'ALLOW');
     // A declared secret is readable. No shipped kind declares one, so a fixture authority does, through the same guard script.
     const declared = wa.guardCommand(wa.resolveAuthority('builder', { tools: ['Bash'], cwd: REPO, reportDir: REPORTS }));
     const fixture = declared.replace(/guard \S+$/, `guard ${wa.encodeAuthority({ kind: 'builder', tools: ['Bash'], writeRoots: [REPO], secrets: ['AUTODEV_FIXTURE_TOKEN'], bash: 'guarded' })}`);
