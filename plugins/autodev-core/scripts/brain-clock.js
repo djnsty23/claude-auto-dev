@@ -266,6 +266,15 @@ function srcInbox() {
   }
   return { population: `${Object.keys(entries).length} files in ${projects} projects`, entries };
 }
+// The local ask queue (ask-queue.js beside this file). A missing queue is zero intents, not a failure.
+// Held, unacknowledged and conflicted intents become events, so work waiting on reconciliation shows.
+function srcAskQueue() {
+  const s = require(path.join(__dirname, "ask-queue.js")).status();
+  const entries = {};
+  for (const [id, state] of Object.entries(s.intents)) entries[id] = { state };
+  const c = s.counts;
+  return { population: `${s.total} intents, ${c.pending} pending, ${c.held + c.unacknowledged} held, ${c.conflict} in conflict, board adapter ${s.adapter}`, entries };
+}
 // A helper script from the same release as this clock: the copy beside this file, or null.
 // The plugin cache is never scanned, so a newer cache directory cannot replace a pinned release.
 function releaseScript(file) {
@@ -469,6 +478,10 @@ function diff(name, prevEntries, curEntries, ctx) {
     } else if (name === "inbox") {
       if (!p && c) add("inbox.received", key, c, p);
       else if (p && !c) add("inbox.cleared", key, null, p);
+    } else if (name === "ask-queue") {
+      const flag = (st) => (st === "held" || st === "unacknowledged" ? "intent.held" : st === "conflict" ? "intent.conflict" : null);
+      const t = c ? flag(c.state) : null;
+      if (t && (!p || flag(p.state) !== t)) add(t, key, c, p);
     } else if (name === "brain-role") {
       if (p && c && p.session !== c.session) add("brain.claimed", key, c, p);
       else if (!p && c && ctx.hadPrevious) add("brain.claimed", key, c, p);
@@ -1049,6 +1062,7 @@ function tick(opts, now) {
     read("bg-runner", srcBgRunner);
     read("runs", srcRuns);
     read("inbox", srcInbox);
+    read("ask-queue", srcAskQueue);
     read("brain-role", srcBrainRole);
     const homeRepos = results["brain-role"].ok ? results["brain-role"].homeRepos : ((prevSnap && prevSnap.homeRepos) || []);
     read("prs", () => srcPrs(homeRepos));

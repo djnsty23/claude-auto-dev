@@ -313,7 +313,8 @@
           "probe": "node tooling/test-queue-recovery.js",
           "expect": "^accepted=(?<population>\\d+) retained=\\k<population> duplicate_dispatches=0 conflicts_preserved=PASS uncertain_effects=HELD$",
           "watch": [
-            "tooling/test-queue-recovery.js"
+            "tooling/test-queue-recovery.js",
+            "plugins/autodev-core/scripts/ask-queue.js"
           ],
           "weight": 8,
           "populationLabel": "accepted tasks"

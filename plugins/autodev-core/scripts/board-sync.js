@@ -183,6 +183,22 @@ function planCounts(p) {
   return { apply: n("apply"), alreadyApplied: n("alreadyAppliedLines"), conflicts: n("conflicts"), notParsed, notBoardCodes: ig ? ig.length - notParsed : null };
 }
 
+// ---------- the local ask queue ----------
+// Every Inbox line the plan would apply is accepted into ask-queue.js, keyed by the line, so it has a
+// stable intent id and survives whatever account next reaches the board. Accepting is idempotent, so
+// a line seen on every run stays one intent. A queue failure never fails the export: it is reported.
+function queueInbox(p) {
+  try {
+    const queue = require(path.join(path.dirname(process.env.BOARD_SYNC_CLOCK || path.join(__dirname, "brain-clock.js")), "ask-queue.js"));
+    const lines = Array.isArray(p && p.apply) ? p.apply.map((a) => a && a.line).filter((l) => typeof l === "string" && l.trim()) : [];
+    let created = 0;
+    for (const line of lines) if (queue.accept({ source: "inbox", body: line, by: "board-sync" }).created) created++;
+    return { accepted: lines.length, created };
+  } catch (e) {
+    return { error: oneLine(e && e.message, 200) };
+  }
+}
+
 // ---------- run ----------
 function run(o) {
   const dump = path.resolve(o.dump);
@@ -202,6 +218,7 @@ function run(o) {
     fs.mkdirSync(AUTODEV, { recursive: true });
     child("open-loops-mirror.js", ["plan", "--dump", dump, "--file", list, "--out", PLAN], "the Inbox plan");
     const plan = planCounts(readJsonOr(PLAN, null));
+    const queued = queueInbox(readJsonOr(PLAN, null));
     child("open-loops-mirror.js", ["export", "--dump", dump, "--file", list, "--already-applied", PLAN], "the export");
     // Exit 0 is a claim. The block must carry this run's time and a sha that matches it.
     const after = readBlock(list);
@@ -209,13 +226,13 @@ function run(o) {
     if (!(gen >= Math.floor(started / 60000) * 60000) || after.recorded !== after.actual) {
       throw new Fail(1, `the export exited 0 but the block does not carry this run's export (block time ${after.generatedAt || "none"}, sha ${after.recorded === after.actual ? "matches" : "does not match"})`);
     }
-    exported = Object.assign({ exportedAt: new Date(gen).toISOString(), blockGeneratedAt: after.generatedAt, items }, plan, account(), { dump: tilde(dump), list: tilde(list), planFile: tilde(PLAN) });
+    exported = Object.assign({ exportedAt: new Date(gen).toISOString(), blockGeneratedAt: after.generatedAt, items }, plan, { queue: queued }, account(),{ dump: tilde(dump), list: tilde(list), planFile: tilde(PLAN) });
     child("board-index.js", ["index", dump, "--out", INDEX], "the code index");
     const ix = readJsonOr(INDEX, {}).counts || {};
     exported.index = { documents: ix.documents ?? null, mismatched: ix.mismatched ?? null, duplicateCodes: ix.duplicateCodes ?? null };
     exported.finishedAt = new Date().toISOString();
     writeJson(STAMP, Object.assign(readJsonOr(STAMP, {}) || {}, exported, { lastAttempt: { at: exported.finishedAt, exit: 0, reason: null } }));
-    lines.push(`board-sync: exported ${items} items at ${after.generatedAt} into ${tilde(list)}. Plan: ${plan.apply} Inbox lines to apply, ${plan.alreadyApplied ?? 0} already on the board, removed from the Inbox, ${plan.conflicts} conflicts, ${plan.notParsed} not parsed, ${plan.notBoardCodes ?? 0} ignored as no board code. Index: ${exported.index.mismatched} codes differ from their id. Run by ${exported.configDir}.`);
+    lines.push(`board-sync: exported ${items} items at ${after.generatedAt} into ${tilde(list)}. Plan: ${plan.apply} Inbox lines to apply, ${plan.alreadyApplied ?? 0} already on the board, removed from the Inbox, ${plan.conflicts} conflicts, ${plan.notParsed} not parsed, ${plan.notBoardCodes ?? 0} ignored as no board code. Index: ${exported.index.mismatched} codes differ from their id. Queue: ${queued.error ? `not written, ${queued.error}` : `${queued.accepted} Inbox asks held in the local ask queue, ${queued.created} new`}. Run by ${exported.configDir}.`);
     return { exit: 0, lines };
   } catch (e) {
     const fail = e instanceof Fail ? e : new Fail(1, `unexpected error: ${e && e.message}`);
