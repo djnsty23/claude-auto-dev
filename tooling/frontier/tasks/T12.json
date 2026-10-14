@@ -1,0 +1,15 @@
+{
+  "id": "T12",
+  "lane": "fix",
+  "size": "XS",
+  "source": "3e65a102 security-gate reads a compacted Supabase types file",
+  "parent": "7e921d2145d3de26537b218f8e3d763ac43236c6",
+  "fix": "3e65a10243d77aff65b3feacdc8ccd1e5f4b2a50",
+  "brief": "T12.md",
+  "heldOut": ["tooling/test-security-learned-rules.js"],
+  "checks": [["node", "tooling/test-security-learned-rules.js"]],
+  "passToPass": [],
+  "disclosed": [],
+  "contaminationWaiver": "the fix widens one regular expression and adds no identifier the parent lacks, so there is no token to search for",
+  "timeoutMin": 20
+}
