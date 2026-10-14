@@ -39,7 +39,8 @@
           "probe": "node tooling/test-release-protection.js",
           "expect": "^direct_write=DENIED tag_replace=DENIED tag_delete=DENIED authorized_publish=PASS$",
           "watch": [
-            "tooling/test-release-protection.js"
+            "tooling/test-release-protection.js",
+            "tooling/release-protection.js"
           ],
           "weight": 8,
           "populationCount": "^(ok|PASS) "
