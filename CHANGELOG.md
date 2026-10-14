@@ -1,5 +1,54 @@
 # Changelog
 
+## [8.191.0]
+
+### Acceptance
+
+- `brain-judge` counts a verdict only from a judge that exited 0. A nonzero exit,
+  a signal or a missing status fails closed and keeps the output as evidence.
+- A worker is accepted only on a receipt `acceptance-receipt.js verify` made
+  itself, outside the worker, against the brief's criteria and the result tree.
+  A judge accept without one escalates with a named reason.
+- Worker reconciliation (`worker-reconcile.js`) settles every reserved attempt
+  within two clock passes, holds auth refusals until an auth probe passes,
+  reads lost supervision as unknown and rejects stale success. Its `verify`
+  verb runs acceptance verification in its own capacity class and budget.
+- `plugin-integrity.js` compares the loaded plugin with the git tree it was
+  installed from, and a headless worker whose files do not match never starts.
+
+### Machine
+
+- Capacity admission: gates, workers, judges and archives start only with disk
+  and commit room, and a crash storm trips a breaker.
+- Capacity lifecycle (`lifecycle.js`): bounded disk snapshots, seven-day scratch
+  retention, per-attempt output caps and a daily receipt with overdue detection.
+  The pagefile, crash dumps, shader caches, transcripts and vendor caches are
+  never deleted.
+- The operating lock judges an owner by identity, never by age.
+
+### Evidence
+
+- `tooling/scorecard.js` grades each aspect only from fresh, populated receipts
+  of the required kind, against the frozen criteria in
+  `docs/scorecard-criteria.json`.
+- Every red gate step keeps complete failure evidence, and 27 critical mutants
+  are killed for their intended reason.
+- Delivery outcomes join worker runs to what still stood seven days after merge.
+- The hook budget judges wall time per hook and per event, and a hook killed at
+  its timeout leaves no descendants.
+
+### Owner
+
+- Owner asks are keyed by decision and input version, delivery is unknown until
+  receipted, stale sources stay visible, and silence never grants authority.
+- The instruction envelope is measured per source and an update that would push
+  it over budget is blocked.
+
+### Fleet
+
+- `coordinator-write-guard` lets the coordinator's dispatched subagents through,
+  and allows commit, merge and rebase in scratch repos. Push stays guarded.
+
 ## [8.190.0]
 
 ### Fleet
