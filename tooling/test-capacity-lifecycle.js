@@ -398,7 +398,10 @@ function recovery(ctx) {
         const ex = path.join(TMP, 'extract');
         fs.mkdirSync(ex);
         const x = spawnSync('tar', ['-xf', path.relative(ex, ok.file).replace(/\\/g, '/')], { cwd: ex, encoding: 'utf8' });
-        note('lifecycle_recovery', x.status === 0 && fs.readFileSync(path.join(ex, 'proof', 'sub', 'b.bin')).equals(Buffer.from([0, 1, 2, 3, 255])), `the archive did not round-trip: ${x.stderr}`);
+        const back = path.join(ex, 'proof', 'sub', 'b.bin');
+        const bytes = exists(back) ? fs.readFileSync(back) : null;
+        note('lifecycle_recovery', x.status === 0 && bytes !== null && bytes.equals(Buffer.from([0, 1, 2, 3, 255])),
+            `the archive did not round-trip: status ${x.status} signal ${x.signal} error ${x.error ? x.error.code : 'none'} extracted ${bytes ? bytes.toString('hex') : 'nothing'} stderr ${String(x.stderr).trim()}`);
     }
     const ledger = capacity.status({ base: process.env.AUTODEV_GATE_LOCK_PATH, isAlive: () => true });
     note('lifecycle_recovery', ledger.ledger && ledger.ledger.reservations.length === 0, 'an archive reservation was never released');
