@@ -7,7 +7,8 @@
  * Prints one `ok <check>` or `FAIL <check>` line per check, then the verdict:
  *   required_tools=PASS discovery=PASS actual_init_manifest=PASS hidden_expansion=0
  * A field that did not hold prints FAIL(<what>) or the count. Exit 0 green,
- * 1 red, 2 when a child produced no verdict.
+ * 1 red (a crash of the suite included), 2 only when a child could not be
+ * spawned or did not end in time.
  *
  * THE STUB CLI. Never the real claude. A `.js` file the launchers run through
  * node. It holds a literal built-in universe, applies --tools and
@@ -236,8 +237,10 @@ try {
     console.log(`required_tools=${f.required_tools} discovery=${f.discovery} actual_init_manifest=${f.actual_init_manifest} hidden_expansion=${f.hidden_expansion}`);
     process.exitCode = infra ? 2 : failed ? 1 : 0;
 } catch (e) {
+    // A throw here comes from the subject (a missing or broken export), so it is a red verdict, not infrastructure.
     console.error(`test-worker-profiles: ${e.stack || e.message}`);
-    process.exitCode = 2;
+    console.log('required_tools=ERROR discovery=ERROR actual_init_manifest=ERROR hidden_expansion=ERROR');
+    process.exitCode = 1;
 } finally {
     cleanup();
 }
