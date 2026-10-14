@@ -11,7 +11,7 @@ process.env.AUTODEV_CAPACITY = 'off';
  * held-out test and a distinctive token, and a second "fix" whose held-out test
  * is green on the unfixed tree. A fake claude (the `.js` --claude-bin
  * convention headless-worker uses) prints the stream-json a real run prints and
- * does what FAKE_MODE says: fix, noop, cheat, hang, answer, leak. Every run goes
+ * does what AUTODEV_FAKE_MODE says: fix, noop, cheat, hang, answer, leak. Every run goes
  * through run.js as a subprocess, then headless-worker start, its detached
  * supervisor and the fake, so exit codes and the env a worker sees are real.
  *
@@ -137,23 +137,23 @@ const fs = require('fs');
 const path = require('path');
 const argv = process.argv.slice(2);
 const val = (f) => { const i = argv.indexOf(f); return i >= 0 ? argv[i + 1] : null; };
-const mode = process.env.FAKE_MODE || 'noop';
+const mode = process.env.AUTODEV_FAKE_MODE || 'noop';
 const model = val('--model') || 'unset';
 const out = (o) => process.stdout.write(JSON.stringify(o) + '\\n');
 const pdir = val('--plugin-dir');
 let plugins = [];
 try { plugins = fs.readdirSync(pdir).map((n) => ({ name: n, version: JSON.parse(fs.readFileSync(path.join(pdir, n, '.claude-plugin', 'plugin.json'), 'utf8')).version })); } catch {}
-if (process.env.FAKE_OUT) {
-    fs.mkdirSync(process.env.FAKE_OUT, { recursive: true });
-    fs.writeFileSync(path.join(process.env.FAKE_OUT, 'seen-' + mode + '.json'), JSON.stringify({
+if (process.env.AUTODEV_FAKE_OUT) {
+    fs.mkdirSync(process.env.AUTODEV_FAKE_OUT, { recursive: true });
+    fs.writeFileSync(path.join(process.env.AUTODEV_FAKE_OUT, 'seen-' + mode + '.json'), JSON.stringify({
         names: Object.keys(process.env).sort(), tokenDigest: process.env.CLAUDE_CODE_OAUTH_TOKEN ? require('crypto').createHash('sha256').update(process.env.CLAUDE_CODE_OAUTH_TOKEN).digest('hex') : null,
         configDir: process.env.CLAUDE_CONFIG_DIR || null, cwd: process.cwd(), argv: argv.filter((a, i) => argv[i - 1] !== '-p'), pid: process.pid }));
 }
-out({ type: 'system', subtype: 'init', model, apiKeySource: process.env.FAKE_API || 'none', claude_code_version: '9.9.9', permissionMode: val('--permission-mode'), plugins, tools: ['Read', 'Edit'], mcp_servers: [], output_style: 'default' });
-out({ type: 'rate_limit_event', rate_limit_info: { unifiedWindows: { five_hour: { utilization: 0.05 }, seven_day: { utilization: Number(process.env.FAKE_7D || 0.1) } } } });
+out({ type: 'system', subtype: 'init', model, apiKeySource: process.env.AUTODEV_FAKE_API || 'none', claude_code_version: '9.9.9', permissionMode: val('--permission-mode'), plugins, tools: ['Read', 'Edit'], mcp_servers: [], output_style: 'default' });
+out({ type: 'rate_limit_event', rate_limit_info: { unifiedWindows: { five_hour: { utilization: 0.05 }, seven_day: { utilization: Number(process.env.AUTODEV_FAKE_7D || 0.1) } } } });
 if (mode === 'fix') fs.writeFileSync('lib/add.js', 'module.exports = (a, b) => a + b;\\n');
 if (mode === 'cheat') { fs.mkdirSync('tooling', { recursive: true }); fs.writeFileSync('tooling/test-add.js', 'process.exitCode = 0;\\n'); }
-if (mode === 'answer') fs.writeFileSync('frontier-answer.json', process.env.FAKE_ANSWER || '');
+if (mode === 'answer') fs.writeFileSync('frontier-answer.json', process.env.AUTODEV_FAKE_ANSWER || '');
 if (mode === 'leak') out({ type: 'assistant', message: { content: [{ type: 'tool_use', name: 'Read', input: { file_path: 'C:/Users/someone/.claude/memory/notes.md' } }] } });
 if (mode === 'hang') { setInterval(() => {}, 1000); return; }
 out({ type: 'result', subtype: 'success', duration_ms: 1234, duration_api_ms: 1000, num_turns: 3, total_cost_usd: 0.5,
@@ -165,7 +165,7 @@ out({ type: 'result', subtype: 'success', duration_ms: 1234, duration_api_ms: 10
 function envFor(extra = {}) {
     return Object.assign({}, process.env, {
         FRONTIER_SRC: SRC, FRONTIER_TASKS: TASKS, FRONTIER_DATA: DATA, FRONTIER_WORK: WORK, FRONTIER_CLAUDE_HOME: HOME, FRONTIER_CLAUDE_BIN: FAKE,
-        FRONTIER_POLL_MS: '300', FAKE_OUT: OUT, FRONTIER_PROCESS_LIST: QUIET_PS,
+        FRONTIER_POLL_MS: '300', AUTODEV_FAKE_OUT: OUT, FRONTIER_PROCESS_LIST: QUIET_PS,
         CLAUDE_CODE_OAUTH_TOKEN_TESTACCT: TOKEN, CLAUDE_CODE_OAUTH_TOKEN_OTHER: 'other-account-value', ANTHROPIC_API_KEY: 'must-not-reach-the-worker',
         ANTHROPIC_AUTH_TOKEN: 'nor-this', SOME_SECRET: 'nor-this-one', DOPPLER_PROJECT: 'accounts',
         // headless-worker reserves every run in the execution budget: keep it off the machine's real ledger and config.
@@ -180,7 +180,7 @@ function run(args, extra = {}, timeout = 120000) {
 }
 function startAndFinish(task, variant, mode, extra = {}, waitSec = 60) {
     const started = performance.now();
-    const s = run(['run', '--task', task, '--variant', variant, '--account', 'testacct'], Object.assign({ FAKE_MODE: mode }, extra));
+    const s = run(['run', '--task', task, '--variant', variant, '--account', 'testacct'], Object.assign({ AUTODEV_FAKE_MODE: mode }, extra));
     if (!s.json || !s.json.ok) return { start: s, row: null };
     const f = run(['finish', '--run', s.json.value.run, '--wait-sec', String(waitSec)], extra, (waitSec + 60) * 1000);
     if (f.json && f.json.ok) runMeasurements.push(performance.now() - started);
@@ -418,7 +418,7 @@ function cliCases(shas) {
     check('41. and no other credential reached it', seen && banned.every((n) => !seen.names.includes(n)), seen && seen.names.filter((n) => banned.includes(n)));
     check('42. it ran in its task repo on its own config dir with the pin, model and effort in argv',
         seen && row && path.resolve(seen.cwd) === path.resolve(path.join(WORK, 'wt', row.run)) && path.resolve(seen.configDir) === path.resolve(path.join(WORK, 'cfg', row.run))
-        && seen.argv.includes('--plugin-dir') && seen.argv.includes('claude-opus-5-5') && seen.argv[seen.argv.indexOf('--effort') + 1] === 'medium' && seen.argv.includes('bypassPermissions'), seen);
+        && seen.argv.includes('--plugin-dir') && seen.argv.includes('claude-opus-5-5') && seen.argv[seen.argv.indexOf('--effort') + 1] === 'medium' && seen.argv.includes('dontAsk'), seen);
     const again = run(['finish', '--run', row ? row.run : 'x']);
     check('43. finish is idempotent: the same row back and one row in the file', again.json && row && again.json.value.finishedAt === row.finishedAt && rows().filter((r) => r.run === row.run).length === 1);
 
@@ -426,7 +426,7 @@ function cliCases(shas) {
     check('44. a worker that does nothing fails on the held-out test', noop.row && noop.row.verdict === 'fail' && noop.row.grade.checks[0].exit === 1, noop.row || noop.start.json);
     const cheat = startAndFinish('TX', 'V1', 'cheat');
     check('45. a worker that rewrites the test instead of the code fails: the held-out file wins', cheat.row && cheat.row.verdict === 'fail', cheat.row || cheat.start.json);
-    const api = startAndFinish('TX', 'V1', 'fix', { FAKE_API: 'ANTHROPIC_API_KEY' });
+    const api = startAndFinish('TX', 'V1', 'fix', { AUTODEV_FAKE_API: 'ANTHROPIC_API_KEY' });
     check('46. an API-billed init is a billed-api row with no pass value, and it is not graded', api.row && api.row.verdict === 'billed-api' && api.row.pass === null && !api.row.grade, api.row || api.start.json);
     const leak = startAndFinish('TX', 'V1', 'leak');
     check('47. a tool call into the live config is flagged as a leak suspect', leak.row && leak.row.leak.suspect === true, leak.row && leak.row.leak);
@@ -438,20 +438,20 @@ function cliCases(shas) {
     for (let i = 0; i < 20 && alive; i++) { sleep(250); alive = pidAlive(hangSeen.pid); }
     check('49. and its process tree is killed', hangSeen && !alive, hangSeen && hangSeen.pid);
 
-    const locate = startAndFinish('TL', 'H0', 'answer', { FAKE_ANSWER: JSON.stringify({ items: [{ path: 'lib/add.js' }, { path: './tooling/test-other.js' }] }) });
+    const locate = startAndFinish('TL', 'H0', 'answer', { AUTODEV_FAKE_ANSWER: JSON.stringify({ items: [{ path: 'lib/add.js' }, { path: './tooling/test-other.js' }] }) });
     check('50. a locate answer is graded by F1 from the answer file', locate.row && locate.row.verdict === 'pass' && locate.row.grade.f1 === 1, locate.row || locate.start.json);
-    const badJson = startAndFinish('TL', 'H0', 'answer', { FAKE_ANSWER: '{not json' });
+    const badJson = startAndFinish('TL', 'H0', 'answer', { AUTODEV_FAKE_ANSWER: '{not json' });
     check('51. an unreadable answer file fails with the reason', badJson.row && badJson.row.verdict === 'fail' && /no readable/.test(badJson.row.grade.reason), badJson.row && badJson.row.grade);
     const lane = run(['run', '--task', 'TX', '--variant', 'H0', '--account', 'testacct']);
     check('52. a locate-only variant is refused on a fix task', lane.json && lane.json.error.code === 'lane-mismatch', lane.json);
-    const review = startAndFinish('TR', 'V1', 'answer', { FAKE_ANSWER: JSON.stringify({ findings: [
+    const review = startAndFinish('TR', 'V1', 'answer', { AUTODEV_FAKE_ANSWER: JSON.stringify({ findings: [
         { section: 'S2', severity: 'blocker', claim: 'Two sessions race on the file.' }, { section: 'S3', severity: 'major', claim: 'It fails open on a missing file.' }] }) });
     check('53. a review answer names both planted defects and passes', review.row && review.row.verdict === 'pass' && review.row.grade.named === 2, review.row || review.start.json);
     const planFile = review.row ? path.join(WORK, 'wt', review.row.run, 'PLAN.md') : null;
     check('54. the review task repo carries its support file', planFile && fs.existsSync(planFile));
 
-    const good = startAndFinish('TD', 'V1', 'answer', { FAKE_ANSWER: JSON.stringify({ answers: [{ id: 'q1', choice: 'B', why: 'policy' }, { id: 'q2', order: ['#11', '#12', '#13'] }] }) });
-    const bad = startAndFinish('TD', 'V1', 'answer', { FAKE_ANSWER: JSON.stringify({ answers: [{ id: 'q1', choice: 'A' }, { id: 'q2', order: ['#11', '#12', '#13'] }] }) });
+    const good = startAndFinish('TD', 'V1', 'answer', { AUTODEV_FAKE_ANSWER: JSON.stringify({ answers: [{ id: 'q1', choice: 'B', why: 'policy' }, { id: 'q2', order: ['#11', '#12', '#13'] }] }) });
+    const bad = startAndFinish('TD', 'V1', 'answer', { AUTODEV_FAKE_ANSWER: JSON.stringify({ answers: [{ id: 'q1', choice: 'A' }, { id: 'q2', order: ['#11', '#12', '#13'] }] }) });
     check('54b. a decide answer is graded from the answer file: right passes, one wrong choice fails',
         good.row && good.row.verdict === 'pass' && good.row.grade.right === 2 && bad.row && bad.row.verdict === 'fail' && bad.row.grade.right === 1, [good.row && good.row.grade, bad.row && bad.row.grade]);
     const briefPath = path.join(TASKS, 'TD.md');
@@ -462,7 +462,7 @@ function cliCases(shas) {
     check('54c. editing a task brief after its plant check makes the run refuse as plant-stale', stale.json && stale.json.error && stale.json.error.code === 'plant-stale', stale.json);
 
     // the budget guard: a reading at 0.95 stops a batch before it starts anything
-    const hot = startAndFinish('TX', 'V0', 'fix', { FAKE_7D: '0.95' });
+    const hot = startAndFinish('TX', 'V0', 'fix', { AUTODEV_FAKE_7D: '0.95' });
     check('55. a run reporting 95% of the week records it', hot.row && hot.row.budget.sevenDay === 0.95, hot.row && hot.row.budget);
     const b = run(['batch', '--tasks', 'TX', '--variants', 'V0,V1', '--account', 'testacct']);
     const bid = b.json && b.json.value && b.json.value.batch;
@@ -470,10 +470,10 @@ function cliCases(shas) {
     check('56. a batch over the budget stop starts nothing and says stopped-budget', bf && bf.state === 'stopped-budget' && bf.items.every((i) => i.state === 'queued'), bf || b.json || b.stderr);
 
     // a batch under budget runs both items, two at a time, and records both rows
-    const cool = startAndFinish('TX', 'V0', 'fix', { FAKE_7D: '0.2' });
+    const cool = startAndFinish('TX', 'V0', 'fix', { AUTODEV_FAKE_7D: '0.2' });
     check('57. a cooler reading replaces it', cool.row && cool.row.budget.sevenDay === 0.2);
     const before = rows().length;
-    const b2 = run(['batch', '--tasks', 'TX', '--variants', 'V0,V1', '--account', 'testacct'], { FAKE_MODE: 'fix' });
+    const b2 = run(['batch', '--tasks', 'TX', '--variants', 'V0,V1', '--account', 'testacct'], { AUTODEV_FAKE_MODE: 'fix' });
     const bid2 = b2.json && b2.json.value && b2.json.value.batch;
     const bf2 = batchDone(bid2);
     check('58. a detached batch runs to done and writes a row per item', bf2 && bf2.state === 'done' && bf2.items.every((i) => i.verdict === 'pass') && rows().length === before + 2, bf2 || b2.json || b2.stderr);
@@ -492,7 +492,7 @@ function cliCases(shas) {
 
     // --quiet-wait: a batch holds its item while a peer suite runs, then starts it anyway at the limit
     const rowOf = (f) => f && f.items[0] && rows().find((r) => r.run === f.items[0].run);
-    const bt = run(['batch', '--tasks', 'TX', '--variants', 'V1', '--account', 'testacct', '--quiet-wait', '0.02'], { FAKE_MODE: 'fix', FRONTIER_PROCESS_LIST: LOADED_PS });
+    const bt = run(['batch', '--tasks', 'TX', '--variants', 'V1', '--account', 'testacct', '--quiet-wait', '0.02'], { AUTODEV_FAKE_MODE: 'fix', FRONTIER_PROCESS_LIST: LOADED_PS });
     const bft = batchDone(bt.json && bt.json.value && bt.json.value.batch);
     const rt = rowOf(bft);
     check('62. under a peer suite, --quiet-wait 0.02 holds past its limit, starts anyway and records the row as loaded, timed out and naming the job',
@@ -502,7 +502,7 @@ function cliCases(shas) {
 
     const DYN_PS = path.join(ROOT, 'ps dynamic.tsv');
     fs.copyFileSync(LOADED_PS, DYN_PS);
-    const bq = run(['batch', '--tasks', 'TX', '--variants', 'V1', '--account', 'testacct', '--quiet-wait', '5'], { FAKE_MODE: 'fix', FRONTIER_PROCESS_LIST: DYN_PS });
+    const bq = run(['batch', '--tasks', 'TX', '--variants', 'V1', '--account', 'testacct', '--quiet-wait', '5'], { AUTODEV_FAKE_MODE: 'fix', FRONTIER_PROCESS_LIST: DYN_PS });
     const bqid = bq.json && bq.json.value && bq.json.value.batch;
     const held = waitForState(() => readJson(path.join(DATA, 'batches', `${bqid}.json`)),
         f => f && f.waitingOn, runMeasurements).value;
@@ -520,7 +520,7 @@ function cliCases(shas) {
         bfq && bfq.state === 'done' && !bfq.waitingOn && rq && rq.load.class === 'quiet' && rq.load.quietWait
         && rq.load.quietWait.timedOut === false && rq.load.quietWait.waitedSec >= 1, [bfq && bfq.state, rq && rq.load]);
 
-    const bare = run(['batch', '--tasks', 'TX', '--variants', 'V1', '--account', 'testacct', '--quiet-wait'], { FAKE_MODE: 'fix' });
+    const bare = run(['batch', '--tasks', 'TX', '--variants', 'V1', '--account', 'testacct', '--quiet-wait'], { AUTODEV_FAKE_MODE: 'fix' });
     const bfb = batchDone(bare.json && bare.json.value && bare.json.value.batch);
     const rb = rowOf(bfb);
     const junk = run(['batch', '--tasks', 'TX', '--variants', 'V1', '--account', 'testacct', '--quiet-wait', 'soon']);
@@ -540,7 +540,7 @@ function cliCases(shas) {
         fs.writeFileSync(file, text);
         return { id, file, text };
     });
-    const dup = run(['batch', '--tasks', 'TX', '--variants', 'V1', '--account', 'testacct'], { FAKE_MODE: 'fix' });
+    const dup = run(['batch', '--tasks', 'TX', '--variants', 'V1', '--account', 'testacct'], { AUTODEV_FAKE_MODE: 'fix' });
     const dupId = dup.json && dup.json.value && dup.json.value.batch;
     const bfd = batchDone(dupId);
     const intact = planted.every((p) => { try { return fs.readFileSync(p.file, 'utf8') === p.text; } catch { return false; } });

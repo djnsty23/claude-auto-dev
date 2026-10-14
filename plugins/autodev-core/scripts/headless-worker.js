@@ -45,7 +45,7 @@
  *        [--report <file>] [--config-dir <dir>] [--model <id>] [--effort <level>]
  *        [--permission-mode <mode>] [--cwd <dir>] [--claude-bin <path>] [--ledger <file>] [--dry-run] [--dev]
  *        [--plugin-dir <dir>] [--keep-tools <Artifact,Workflow|all>] [--profile <builder>]
- *        [--attempt-id <id>] [--budget-ledger <file>]
+ *        [--attempt-id <id>] [--budget-ledger <file>] [--secret <NAME,...>]
  *   node headless-worker.js supervise --code <CODE> --log <file> --prompt-file <md> ...   (internal)
  *   node headless-worker.js status [--code <CODE>] [--ledger <file>] [--json]
  *   node headless-worker.js settle --code <CODE> [--started-at <iso>] [--lost] [--unreported] [--ledger <file>] [--json]
@@ -63,6 +63,7 @@ const claudePaths = require('./claude-paths.js');
 const capacity = require('./capacity.js');
 const budget = require('./execution-budget.js');
 const profiles = require('./worker-profiles.js');
+const authority = require('./worker-authority.js');
 const { spawn, spawnSync } = require('node:child_process');
 
 const USAGE = [
@@ -70,7 +71,7 @@ const USAGE = [
     '            [--report <file>] [--config-dir <dir>] [--model <id>] [--effort <level>]',
     '            [--permission-mode <mode>] [--cwd <dir>] [--claude-bin <path>] [--ledger <file>] [--dry-run] [--dev]',
     '            [--plugin-dir <dir>] [--keep-tools <Artifact,Workflow|all>] [--profile <builder>]',
-    '            [--attempt-id <id>] [--budget-ledger <file>]',
+    '            [--attempt-id <id>] [--budget-ledger <file>] [--secret <NAME,...>]',
     '       node headless-worker.js supervise ... (internal: the detached child that owns claude)',
     '       node headless-worker.js status [--code <CODE>] [--ledger <file>] [--json]',
     '       node headless-worker.js settle --code <CODE> [--started-at <iso>] [--lost] [--unreported] [--ledger <file>] [--json]',
@@ -87,6 +88,9 @@ const USAGE = [
     '       <code>@<start time>. An id the budget has held before is refused as attempt-restart, and so is a',
     '       reservation past a window cap. The supervisor stops a child past its turn, wall or output ceiling with',
     '       its whole process tree, writes BUDGET_STOP=<field> to the kept log, and settles the attempt.',
+    '       AUTHORITY (worker-authority.js): the worker runs in dontAsk mode under a PreToolUse guard fixed at launch.',
+    '       --permission-mode bypassPermissions is refused. The child env is an allowlist plus the CLI login plus the',
+    '       --secret names its --profile declares in worker-authority.json. Every other variable is dropped.',
     '       It must be a directory. A run that pins its plugins this way loads that tree, whatever the config dir installed.',
     '       start refuses a script outside a plugin cache, because a worker started from a checkout runs code no',
     '       release shipped. --dev runs the checkout on purpose. Every record names the version and script that ran.',
@@ -149,7 +153,7 @@ const AUTH_REFUSAL_PATTERNS = [
 const AUTH_REASON_MAX = 300;
 // The settled results the harness writes, never a worker: each carries a reason.
 const NOT_FROM_REPORT = SETTLED_RESULTS.filter((r) => !RESULT_STATES.includes(r));
-const SCRUBBED_ENV = ['CLAUDECODE', 'CLAUDE_CODE_ENTRYPOINT', 'CLAUDE_CODE_SSE_PORT'];
+const SCRUBBED_ENV = authority.SCRUBBED_ENV;
 const LOCK_STALE_MS = 60 * 1000;
 const LOCK_WAIT_MS = 5000;
 const RETENTION_MS = 7 * 24 * 60 * 60 * 1000;
@@ -252,7 +256,7 @@ function parseArgs(argv) {
     const out = { _: [] };
     const flags = ['help', 'dry-run', 'json', 'lost', 'unreported', 'dev'];
     const known = ['_', ...flags, 'code', 'started-at', 'prompt-file', 'log', 'report', 'config-dir', 'model', 'effort',
-        'permission-mode', 'cwd', 'claude-bin', 'ledger', 'plugin-dir', 'keep-tools', 'profile', 'attempt-id', 'budget-ledger'];
+        'permission-mode', 'cwd', 'claude-bin', 'ledger', 'plugin-dir', 'keep-tools', 'profile', 'attempt-id', 'budget-ledger', 'secret'];
     for (let i = 0; i < argv.length; i++) {
         const a = argv[i];
         if (a === '--help' || a === '-h' || a === 'help') { out.help = true; continue; }
@@ -490,11 +494,23 @@ function toolProfile(prompt, keepTools = [], kind = 'builder') {
     return profiles.resolve(kind, { prompt, keep: keepTools });
 }
 
-function buildArgv({ claudeBin, prompt, model, effort, permissionMode, pluginDir = null, keepTools = [], profile = 'builder' }) {
+/** The authority one run carries: its kind's tools, write roots and declared secrets. */
+function runAuthority({ prompt = '', keepTools = [], profile = 'builder', cwd = null, report = null, secrets = [] }) {
+    return authority.resolveAuthority(profile, { tools: toolProfile(prompt, keepTools, profile).allowed, cwd, reportDir: report ? path.dirname(report) : null, secrets });
+}
+
+/**
+ * The claude argv. The permission mode passes through authority.launchMode, which
+ * refuses bypassPermissions, and the run's authority rides in --settings as a
+ * PreToolUse guard. Nothing in the prompt changes either.
+ */
+function buildArgv({ claudeBin, prompt, model, effort, permissionMode, pluginDir = null, keepTools = [], profile = 'builder', cwd = null, report = null, secrets = [] }) {
+    const auth = runAuthority({ prompt, keepTools, profile, cwd, report, secrets });
+    const [, mode, ...guard] = authority.launchArgs(auth, permissionMode);
     return [claudeBin, '-p', prompt, ...(model ? ['--model', model] : []), ...(effort ? ['--effort', effort] : []),
         ...(pluginDir ? ['--plugin-dir', pluginDir] : []),
-        '--permission-mode', permissionMode, '--output-format', 'stream-json', '--verbose',
-        ...profiles.toolsArgs(toolProfile(prompt, keepTools, profile))];
+        '--permission-mode', mode, '--output-format', 'stream-json', '--verbose',
+        ...profiles.toolsArgs(toolProfile(prompt, keepTools, profile)), ...guard];
 }
 
 function requireEffort(value) {
@@ -567,23 +583,23 @@ function spawnPlan(argv) {
 }
 
 /**
- * The child env: the parent's, minus the harness variables a session would
- * hand down, plus the two headless markers, plus CLAUDE_CONFIG_DIR when asked.
- * An INHERITED CLAUDE_CONFIG_DIR is scrubbed too: a caller running under a
- * second account must name the config dir it wants the worker on, or the
- * worker runs on the default one. Nothing about the account travels silently.
+ * The child env, built from an allowlist (worker-authority.js childEnv): the OS
+ * and network names, the harness's own non-secret settings, the CLI's login,
+ * and the secrets the kind declares. Every other variable the caller has is
+ * dropped, so a credential in the caller's environment never reaches a worker.
+ * The harness variables a session would hand down are removed. An INHERITED
+ * CLAUDE_CONFIG_DIR is removed too: a caller running under a second account
+ * must name the config dir it wants the worker on.
  */
-function buildEnv(base, { code, configDir }) {
-    const env = Object.assign({}, base);
-    const deleted = [];
+function buildEnv(base, { code, configDir, kind = 'builder', secrets = [] }) {
     const scrub = SCRUBBED_ENV.concat(configDir ? [] : ['CLAUDE_CONFIG_DIR']);
-    for (const k of scrub) if (k in env) { delete env[k]; deleted.push(k); }
-    env.AUTODEV_HEADLESS = '1';
-    env.AUTODEV_WORKER_CODE = code;
-    const set = ['AUTODEV_HEADLESS', 'AUTODEV_WORKER_CODE'];
-    if (configDir) { env.CLAUDE_CONFIG_DIR = configDir; set.push('CLAUDE_CONFIG_DIR'); }
-    return { env, set: set.sort(), deleted: deleted.sort(), scrubList: scrub.sort() };
+    const set = { AUTODEV_HEADLESS: '1', AUTODEV_WORKER_CODE: code };
+    const c = authority.childEnv(base, { kind, secrets, configDir, set });
+    const setNames = Object.keys(set).concat(configDir ? ['CLAUDE_CONFIG_DIR'] : []);
+    return { env: c.env, set: setNames.sort(), deleted: c.deleted, scrubList: scrub.sort(), names: c.names, dropped: c.dropped, declared: c.declared };
 }
+
+function parseSecrets(value) { return value ? String(value).split(',').map((s) => s.trim()).filter(Boolean) : []; }
 
 function startOptions(opts) {
     const code = requireCode(opts);
@@ -606,7 +622,8 @@ function startOptions(opts) {
         profile: profiles.requireKind(opts.profile || 'builder'),
         attemptId: opts['attempt-id'] ? requireAttemptId(opts['attempt-id']) : null,
         budgetLedger: path.resolve(opts['budget-ledger'] || budget.ledgerPath()),
-        permissionMode: opts['permission-mode'] || 'default',
+        permissionMode: authority.launchMode(opts['permission-mode']),
+        secrets: authority.requireSecrets(profiles.requireKind(opts.profile || 'builder'), parseSecrets(opts.secret)),
         cwd: opts.cwd ? path.resolve(opts.cwd) : process.cwd(),
         claudeBin: resolveClaudeBin(opts['claude-bin'] || 'claude'),
         ledger: path.resolve(opts.ledger || defaultLedger()),
@@ -631,6 +648,7 @@ function supervisorFlags(o) {
     if (o.keepTools.length) flags.push('--keep-tools', o.keepTools.join(','));
     if (o.profile !== 'builder') flags.push('--profile', o.profile);
     if (o.attemptId) flags.push('--attempt-id', o.attemptId);
+    if (o.secrets.length) flags.push('--secret', o.secrets.join(','));
     flags.push('--budget-ledger', o.budgetLedger);
     return flags;
 }
@@ -661,12 +679,13 @@ function start(opts) {
     if (o.configDir) requireConfigDirExists(o.configDir);
     if (o.pluginDir && !isDir(o.pluginDir)) fault('plugin-dir-missing', `--plugin-dir resolved to ${o.pluginDir}, which is not a directory`);
     const prompt = readPrompt(o.promptFile, scratchDirFor(o), o);
-    const argv = buildArgv({ claudeBin: o.claudeBin, prompt, model: o.model, effort: o.effort, permissionMode: o.permissionMode, pluginDir: o.pluginDir, keepTools: o.keepTools, profile: o.profile });
-    const plan = buildEnv(process.env, { code: o.code, configDir: o.configDir });
+    const argv = buildArgv({ claudeBin: o.claudeBin, prompt, model: o.model, effort: o.effort, permissionMode: o.permissionMode, pluginDir: o.pluginDir, keepTools: o.keepTools, profile: o.profile, cwd: o.cwd, report: o.report, secrets: o.secrets });
+    const plan = buildEnv(process.env, { code: o.code, configDir: o.configDir, kind: o.profile, secrets: o.secrets });
     if (opts['dry-run']) {
         return {
             dryRun: true, code: o.code, argv, command: spawnPlan(argv).command,
-            envSet: plan.set, envDeleted: plan.deleted, envScrubList: plan.scrubList,
+            envSet: plan.set, envDeleted: plan.deleted, envScrubList: plan.scrubList, envNames: plan.names, envDropped: plan.dropped, secrets: plan.declared,
+            authority: runAuthority({ prompt, keepTools: o.keepTools, profile: o.profile, cwd: o.cwd, report: o.report, secrets: o.secrets }),
             configDir: o.configDir, effort: o.effort, pluginDir: o.pluginDir, droppedTools: droppedTools(prompt, o.keepTools),
             profile: o.profile, tools: toolProfile(prompt, o.keepTools, o.profile).allowed,
             budget: { ceilings: budget.ceilingsFor('worker'), billing: budget.billingOf(plan.env), ledger: o.budgetLedger, attemptId: o.attemptId },
@@ -686,7 +705,7 @@ function start(opts) {
         configDir: o.configDir ? path.basename(o.configDir) : null,
         version: placement.version, script: placement.script, dev: !placement.installed, integrity: integritySummary(integrity),
         model: o.model, effort: o.effort, permissionMode: o.permissionMode, cwd: o.cwd, pluginDir: o.pluginDir, droppedTools: droppedTools(prompt, o.keepTools),
-        profile: o.profile, tools: toolProfile(prompt, o.keepTools, o.profile).allowed, state: 'starting',
+        profile: o.profile, tools: toolProfile(prompt, o.keepTools, o.profile).allowed, secrets: o.secrets, state: 'starting',
     };
     // BUDGET. The attempt is reserved in the shared execution budget inside the
     // ledger lock, after the code-active check and before anything moves or
@@ -763,8 +782,8 @@ function start(opts) {
 function supervise(opts) {
     const o = startOptions(opts);
     const prompt = readPrompt(o.promptFile, scratchDirFor(o), o);
-    const argv = buildArgv({ claudeBin: o.claudeBin, prompt, model: o.model, effort: o.effort, permissionMode: o.permissionMode, pluginDir: o.pluginDir, keepTools: o.keepTools, profile: o.profile });
-    const { env } = buildEnv(process.env, { code: o.code, configDir: o.configDir });
+    const argv = buildArgv({ claudeBin: o.claudeBin, prompt, model: o.model, effort: o.effort, permissionMode: o.permissionMode, pluginDir: o.pluginDir, keepTools: o.keepTools, profile: o.profile, cwd: o.cwd, report: o.report, secrets: o.secrets });
+    const { env } = buildEnv(process.env, { code: o.code, configDir: o.configDir, kind: o.profile, secrets: o.secrets });
     const plan = spawnPlan(argv);
     fs.mkdirSync(path.dirname(o.log), { recursive: true });
     const fd = fs.openSync(o.log, 'a');
@@ -1354,6 +1373,6 @@ module.exports = {
     AUTH_REFUSAL_PATTERNS, matchAuthRefusal, authRefusal, resolveConfigDir,
     askFiles, askNote, askState, scratchDirFor, priorRunFiles, moveAside, readLedger, settle, start,
     HEAVY_TOOLS, droppedTools, namedTools, parseKeepTools, toolProfile, attemptIdFor, supervise,
-    parseArgs, composePrompt, buildArgv, buildEnv, spawnPlan, resolveClaudeBin, exitCodeOf, parseResult,
+    parseArgs, composePrompt, buildArgv, buildEnv, runAuthority, parseSecrets, spawnPlan, resolveClaudeBin, exitCodeOf, parseResult,
     livenessFromError, pidLiveness, pidImage, isSupervisorImage, supervisorLiveness, bootAt, pruneSettled, laterRuns, recordStatus, lostReason, lostGateStep, run,
 };

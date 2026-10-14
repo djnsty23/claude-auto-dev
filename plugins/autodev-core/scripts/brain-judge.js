@@ -586,7 +586,7 @@ function judgeRecord(rec, { judgeBin, model = JUDGE_MODEL, cwd, reportsDir, conf
     const prompt = buildJudgePrompt(rec, report, brief);
     const ceilings = budget.ceilingsFor('judge');
     const plan = hw.spawnPlan(judgeArgv(hw.resolveClaudeBin(judgeBin || 'claude'), model, ceilings));
-    const { env } = hw.buildEnv(process.env, { code: 'brain-judge', configDir });
+    const { env } = hw.buildEnv(process.env, { code: 'brain-judge', configDir, kind: 'judge' });
     fs.mkdirSync(cwd, { recursive: true });
     const sizes = { model, promptBytes: Buffer.byteLength(prompt), reportBytes: report.size };
     const c = capacity.admit({ cls: 'judge', path: cwd, note: String(rec.taskId || '') });
@@ -959,7 +959,7 @@ function probe(opts) {
     const p = pathsFor(opts);
     const configDir = opts['config-dir'] ? hw.resolveConfigDir(opts['config-dir']) : null;
     const plan = hw.spawnPlan(probeArgv(hw.resolveClaudeBin(opts['worker-bin'] || 'claude')));
-    const { env } = hw.buildEnv(process.env, { code: 'brain-judge-probe', configDir });
+    const { env } = hw.buildEnv(process.env, { code: 'brain-judge-probe', configDir, kind: 'probe' });
     fs.mkdirSync(p.state, { recursive: true });
     const r = spawnSync(plan.command, plan.args, { input: PROBE_PROMPT, encoding: 'utf8', timeout: PROBE_TIMEOUT_MS, windowsHide: true, env, cwd: p.state });
     let doc = null;

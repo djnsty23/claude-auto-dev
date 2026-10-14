@@ -537,7 +537,7 @@ function prepare(c, taskId, variantId, repeat = 1, { account = null } = {}) {
 function start(c, meta, env) {
     const p = runPaths(c, meta.run);
     const argv = [c.hw, 'start', '--code', meta.run, '--prompt-file', p.prompt, '--log', p.log, '--report', p.report,
-        '--config-dir', p.cfg, '--model', meta.model, '--plugin-dir', meta.pin.dir, '--permission-mode', 'bypassPermissions',
+        '--config-dir', p.cfg, '--model', meta.model, '--plugin-dir', meta.pin.dir, '--permission-mode', 'dontAsk',
         '--cwd', p.repo, '--ledger', path.join(c.data, 'ledger.json'), '--dev'];
     if (meta.effort) argv.push('--effort', meta.effort);
     if (c.claudeBin) argv.push('--claude-bin', c.claudeBin);

@@ -103,8 +103,8 @@ const fakeJudge = path.join(scratch, 'fake-judge.js');
 fs.writeFileSync(fakeJudge, [
     "const fs = require('fs'); let input = '';",
     "process.stdin.on('data', (d) => { input += d; }).on('end', () => {",
-    "  if (process.env.FAKE_JUDGE_ARGV) fs.writeFileSync(process.env.FAKE_JUDGE_ARGV, JSON.stringify({ argv: process.argv.slice(2), input, cwd: process.cwd(), cfg: process.env.CLAUDE_CONFIG_DIR || null }));",
-    "  const mode = process.env.FAKE_JUDGE || '';",
+    "  if (process.env.AUTODEV_FAKE_JUDGE_ARGV) fs.writeFileSync(process.env.AUTODEV_FAKE_JUDGE_ARGV, JSON.stringify({ argv: process.argv.slice(2), input, cwd: process.cwd(), cfg: process.env.CLAUDE_CONFIG_DIR || null }));",
+    "  const mode = process.env.AUTODEV_FAKE_JUDGE || '';",
     "  if (mode === 'error') { process.stdout.write(JSON.stringify({ type: 'result', is_error: true, subtype: 'error_max_turns', total_cost_usd: 0.01 })); return; }",
     // The measured shape of a refused judge login, 2026-10-11, and a $0 API error beside it.
     "  if (mode === 'login') { process.stdout.write(JSON.stringify({ type: 'result', is_error: true, subtype: 'success', total_cost_usd: 0, num_turns: 1, result: 'Failed to authenticate: OAuth session expired and could not be refreshed' })); return; }",
@@ -282,7 +282,7 @@ try {
         const ver = run(RECEIPT, ['verify', '--task-id', 'worker-loop-a', '--ledger', ledger]);
         check('fixture: the coordinator verifies loop-a, so a judge accept has a receipt to stand on', ver.value && ver.value.complete === true, ver.stdout.slice(0, 300));
         const argvFile = path.join(scratch, 'judge-argv.json');
-        const t6 = judge(['tick', ...liveArgs], { FAKE_JUDGE_ARGV: argvFile });
+        const t6 = judge(['tick', ...liveArgs], { AUTODEV_FAKE_JUDGE_ARGV: argvFile });
         const ev = t6.value ? t6.value.events : [];
         check('the tick closes the settled run', types(t6).includes('judge.closed') && recOf('worker-loop-a').state === 'closed' && recOf('worker-loop-a').runStatus === 'succeeded', JSON.stringify(types(t6)));
         const verdict = ev.find((e) => e.type === 'judge.verdict');
@@ -304,19 +304,19 @@ try {
         spawnSync(process.execPath, [HEADLESS, 'settle', '--code', 'loop-b'], { encoding: 'utf8', env: baseEnv });
         const tj = judge(['tick', ...liveArgs, '--budget-sec', '100']);
         check('a tick with less budget left than the judge timeout defers the judge', tj.value && tj.value.lines.some((l) => /^judge: deferred to the next tick/.test(l)) && !types(tj).includes('judge.verdict') && !types(tj).includes('judge.error') && !recOf('worker-loop-b').verdict, tj.stdout.slice(0, 400));
-        const t8 = judge(['tick', ...liveArgs], { FAKE_JUDGE: 'error' });
+        const t8 = judge(['tick', ...liveArgs], { AUTODEV_FAKE_JUDGE: 'error' });
         check('a judge error is an event and a failed run, and writes no verdict', types(t8).includes('judge.error') && !recOf('worker-loop-b').verdict
             && fs.readFileSync(path.join(stateDir, 'runs.jsonl'), 'utf8').trim().split('\n').pop().includes('"ok":false'));
         // `[measured 2026-10-11]` two $0 login refusals escalated six records. Neither of these may count as the second failure.
         // They run as backfill and manual: three errored TICK runs in a row open the judge breaker, which is right for a login streak.
-        const tl = judge(['backfill', '--judge-bin', fakeJudge], { FAKE_JUDGE: 'login' });
+        const tl = judge(['backfill', '--judge-bin', fakeJudge], { AUTODEV_FAKE_JUDGE: 'login' });
         const lastRun = () => JSON.parse(fs.readFileSync(path.join(stateDir, 'runs.jsonl'), 'utf8').trim().split('\n').pop());
         check('a refused judge login is logged as one, stops the backfill with the probe command, and writes no verdict', tl.value && tl.value.judged === 1
             && !recOf('worker-loop-b').verdict && lastRun().login === 'auth-failed' && /^judge: stopped, the judge's login was refused \(auth-failed\).*probe --config-dir/.test(tl.value.stopped || ''), tl.stdout.slice(0, 400));
-        const ta = judge(['judge', '--task-id', 'worker-loop-b', '--judge-bin', fakeJudge], { FAKE_JUDGE: 'apierror' });
+        const ta = judge(['judge', '--task-id', 'worker-loop-b', '--judge-bin', fakeJudge], { AUTODEV_FAKE_JUDGE: 'apierror' });
         check('a $0 judge error is logged but is not a failure against the record', ta.value && ta.value.ok === false && !recOf('worker-loop-b').verdict
             && lastRun().error === 'judge-error: API Error: 529 Overloaded', ta.stdout.slice(0, 400));
-        const t8b = judge(['tick', ...liveArgs], { FAKE_JUDGE: 'error' });
+        const t8b = judge(['tick', ...liveArgs], { AUTODEV_FAKE_JUDGE: 'error' });
         const fb = (t8b.value ? t8b.value.events : []).find((e) => e.type === 'judge.verdict');
         check('a record the judge fails on twice is escalated for a person, so it stops spending and holding the queue', fb && fb.detail.decision === 'escalate' && fb.detail.from === 'judge-failed'
             && recOf('worker-loop-b').verdict && recOf('worker-loop-b').verdict.decision === 'escalate', t8b.stdout.slice(0, 400));
@@ -350,7 +350,7 @@ try {
     check('fixture: a dry tick judges the record and writes no verdict', types(td).includes('judge.verdict') && !recOf('worker-dry-one').verdict, td.stdout.slice(0, 300));
     judge(['switch', '--judge', 'live']);
     const runsBefore = fs.readFileSync(path.join(stateDir, 'runs.jsonl'), 'utf8').trim().split('\n').length;
-    const tl2 = judge(['tick', ...liveArgs], { FAKE_JUDGE: 'error' });
+    const tl2 = judge(['tick', ...liveArgs], { AUTODEV_FAKE_JUDGE: 'error' });
     const applied = (tl2.value ? tl2.value.events : []).find((e) => e.type === 'judge.verdict' && e.detail.taskId === 'worker-dry-one');
     check('going live writes the verdict logged while dry, without judging again', applied && applied.detail.applied === true && /^logged dry/.test(applied.detail.from)
         && recOf('worker-dry-one').verdict && recOf('worker-dry-one').verdict.decision === 'accept'
@@ -389,13 +389,13 @@ try {
     const sw1 = judge(['switch', '--config-dir', judgeCfg]);
     check('switch --config-dir records the judge\'s config dir and keeps both modes', sw1.value && sw1.value.switch.judgeConfigDir === path.resolve(judgeCfg)
         && sw1.value.switch.judge === sw1.value.previous.judge && sw1.value.switch.start === sw1.value.previous.start, sw1.stdout.slice(0, 300));
-    judge(['judge', '--task-id', 'worker-old-one', '--judge-bin', fakeJudge], { FAKE_JUDGE_ARGV: cfgArgv });
+    judge(['judge', '--task-id', 'worker-old-one', '--judge-bin', fakeJudge], { AUTODEV_FAKE_JUDGE_ARGV: cfgArgv });
     check('the judge runs with CLAUDE_CONFIG_DIR set to the switch\'s config dir', fs.existsSync(cfgArgv) && JSON.parse(fs.readFileSync(cfgArgv, 'utf8')).cfg === path.resolve(judgeCfg));
     check('switch refuses a config dir that does not exist', judge(['switch', '--config-dir', path.join(scratch, 'no-such-cfg')]).code === 'config-dir-missing'
         && bj.readSwitch(stateDir).judgeConfigDir === path.resolve(judgeCfg));
     const sw2 = judge(['switch', '--config-dir', 'default']);
     fs.rmSync(cfgArgv);
-    judge(['judge', '--task-id', 'worker-old-one', '--judge-bin', fakeJudge], { FAKE_JUDGE_ARGV: cfgArgv });
+    judge(['judge', '--task-id', 'worker-old-one', '--judge-bin', fakeJudge], { AUTODEV_FAKE_JUDGE_ARGV: cfgArgv });
     check('control: --config-dir default clears it, and the judge runs on the default login again',
         sw2.value && sw2.value.switch.judgeConfigDir === null && fs.existsSync(cfgArgv) && JSON.parse(fs.readFileSync(cfgArgv, 'utf8')).cfg === null, sw2.stdout.slice(0, 300));
     check('log refuses a zero limit', judge(['log', '--limit', '0']).code === 'usage');
@@ -471,14 +471,14 @@ try {
     const fakeProbe = path.join(scratch, 'fake-probe.js');
     fs.writeFileSync(fakeProbe, [
         "let input = ''; process.stdin.on('data', (d) => { input += d; }).on('end', () => {",
-        "  const refused = process.env.FAKE_PROBE === 'refused';",
+        "  const refused = process.env.AUTODEV_FAKE_PROBE === 'refused';",
         `  process.stdout.write(JSON.stringify({ type: 'result', is_error: refused, result: refused ? ${JSON.stringify(INCIDENT)} : 'OK', num_turns: 1 }) + '\\n');`,
         "  process.exitCode = refused ? 1 : 0;",
         "});",
     ].join('\n'));
     const pargv = bj.probeArgv('claude');
     check('the probe runs tool-less, with no MCP, no settings, one turn and no session', pargv[pargv.indexOf('--tools') + 1] === '' && pargv.includes('--strict-mcp-config') && pargv[pargv.indexOf('--max-turns') + 1] === '1' && pargv.includes('--no-session-persistence'));
-    const pr1 = judge(['probe', '--worker-bin', fakeProbe, ...aPaths], { FAKE_PROBE: 'refused' });
+    const pr1 = judge(['probe', '--worker-bin', fakeProbe, ...aPaths], { AUTODEV_FAKE_PROBE: 'refused' });
     check('a refused probe exits 1 with auth-refused and the text, and is logged', pr1.status === 1 && pr1.code === 'auth-refused' && pr1.json.error.message.includes(INCIDENT)
         && bj.readJsonl(path.join(aState, 'probes.jsonl')).rows.pop().passed === false, pr1.stdout.slice(0, 300));
     check('a refused probe does not lift the hold', heldRe.test(startLine(aTick())));
