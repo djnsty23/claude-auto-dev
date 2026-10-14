@@ -196,6 +196,10 @@ async function main() {
         check('happy: index and plan written, lock released', ix && ix.counts.documents === 3 && fs.existsSync(c.plan) && !fs.existsSync(c.lock), J(ix && ix.counts) + ' lock ' + fs.existsSync(c.lock));
         const r2 = sync(c, ['run', '--dump', c.dump]);
         check('happy: a second run accepts its own block', r2.code === 0, r2.all);
+        const qdir = path.join(c.autodev, 'ask-queue', 'intents');
+        const intents = fs.existsSync(qdir) ? fs.readdirSync(qdir).filter((f) => /^ask-[0-9a-f]{20}\.json$/.test(f)) : [];
+        const q1 = (readJson(c.stamp) || {}).queue || {};
+        check('happy: the Inbox line to apply is one intent in the ask queue, also after a second run', intents.length === 1 && q1.accepted === 1 && q1.created === 0 && /Queue: 1 Inbox asks held in the local ask queue, 1 new/.test(r.out), `${intents} ${J(q1)} ${r.out}`);
 
         const st = sync(c, ['status']);
         const s2 = readJson(c.stamp) || {};

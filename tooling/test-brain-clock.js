@@ -81,7 +81,7 @@ function observeSuite(script) {
     check("baseline event", ofType(ev, "clock.baseline").length === 1, JSON.stringify(ev.map((e) => e.type)));
     check("no started flood on baseline", ofType(ev, "worker.started").length === 0);
     check("baseline counts headless 2", ofType(ev, "clock.baseline")[0] && ofType(ev, "clock.baseline")[0].detail.counts.headless === 2);
-    const names = ["headless", "unattended", "bg-runner", "runs", "inbox", "brain-role", "prs", "desktop-sessions", "routines"];
+    const names = ["headless", "unattended", "bg-runner", "runs", "inbox", "ask-queue", "brain-role", "prs", "desktop-sessions", "routines"];
     check("population line per source", r.json && names.every((n) => r.json.sources.some((l) => l.startsWith(n + ": ") && !/COULD-NOT-READ/.test(l))), r.json && r.json.sources.join(" | "));
     const missed = ofType(ev, "routine.missed");
     check("enabled stale cron is missed", missed.length === 1 && /daily$/.test(missed[0].key), JSON.stringify(missed));
@@ -483,7 +483,7 @@ function actSuite(script) {
     const ev1 = W.events();
     const a1 = acts(ev1);
     check("act pass exit 0", r1.code === 0 && r1.json && r1.json.ok, r1.out);
-    check("--act runs the observe pass too", ev1.some((e) => e.type === "clock.baseline") && r1.json && r1.json.sources.length === 9, r1.out);
+    check("--act runs the observe pass too", ev1.some((e) => e.type === "clock.baseline") && r1.json && r1.json.sources.length === 10, r1.out);
     check("mark-dead dry run: would-mark-dead for D1 and R1", JSON.stringify(keysOf(a1, "act.would-mark-dead")) === JSON.stringify([`D1@${T("11:00")}`, `R1@${T("11:00")}`]), JSON.stringify(a1));
     check("mark-dead dry run writes only would-mark-dead events", a1.length === 2 && a1.every((e) => e.type === "act.would-mark-dead"), JSON.stringify(a1.map((e) => e.type)));
     const d1 = a1.find((e) => e.key.startsWith("D1@"));
