@@ -336,6 +336,7 @@ const live = argv.includes("--live");
 if (mode === "garbage") process.stdout.write("not json\\n");
 else if (mode === "crash") { process.stderr.write("boom\\n"); process.exitCode = 3; }
 else if (mode === "error") { process.stdout.write(JSON.stringify({ ok: false, error: { code: "ledger-locked", message: "held" } }) + "\\n"); process.exitCode = 1; }
+else if (mode === "badshape") process.stdout.write(JSON.stringify({ ok: true, value: { live, outcomes: 5, released: [], line: "bad shape" } }) + "\\n");
 else if (mode === "skipped") process.stdout.write(JSON.stringify({ ok: true, value: { skipped: "kill switch", outcomes: [], line: "reconcile: skipped, kill switch" } }) + "\\n");
 else {
   const outcomes = mode === "outcomes" ? [
@@ -769,6 +770,11 @@ function actSuite(script) {
     W3.setRecords([]);
     W3.wrSet("skipped");
     const r3 = W3.run(["tick", "--act", "judge", "--live", "--now", T("12:00")]);
+    const W4 = world();
+    W4.setRecords([]);
+    W4.wrSet("badshape");
+    const r4 = W4.run(["tick", "--act", "judge", "--live", "--now", T("12:00")]);
+    check("reconcile: a reply that breaks the relay is one ERROR line, the pass is ok and the judge runs", r4.code === 0 && r4.json && r4.json.status === "ok" && (r4.json.act || []).some((l) => /^reconcile: ERROR /.test(l)) && W4.bjCalls().length === 1, r4.out);
     check("reconcile: a skipped tick relays its line and no outcome", r3.json && (r3.json.act || []).includes("reconcile: reconcile: skipped, kill switch") && W3.events().filter((e) => e.source === "worker-reconcile").length === 0, r3.out);
   }
   fs.rmSync(root, { recursive: true, force: true });
@@ -824,7 +830,7 @@ const PLANTS = [
   { name: "a live pass runs reconcile dry", from: "    const argv = [script, \"tick\"];\n    if (a.live) argv.push(\"--live\");", to: "    const argv = [script, \"tick\"];" },
   { name: "a reconcile failure is reported every pass", from: "if (state.lastError !== error) out.events.push({ type: \"reconcile.tick-failed\"", to: "if (true) out.events.push({ type: \"reconcile.tick-failed\"" },
   { name: "a repeated reconcile outcome is relayed every pass", from: "          if (seen.has(k)) continue;\n", to: "" },
-  { name: "a reconcile throw fails the pass", from: "        try { rc = actReconcile(a); } catch (e) {", to: "        try { rc = actReconcile(a); if (!rc.save) throw new Error(\"x\"); } catch (e) { throw e;" },
+  { name: "a reconcile throw fails the pass", from: "        try { rc = actReconcile(a); } catch (e) {", to: "        try { rc = actReconcile(a); } catch (e) { throw e;" },
   { name: "reconcile PENDING outcomes flood the events", from: "if (o && o.outcome && o.outcome !== \"PENDING\") rows.push(o);", to: "if (o && o.outcome) rows.push(o);" },
   // The state schema.
   { name: "a newer state schema is written over", from: "  if (meta.error || meta.schema > STATE_SCHEMA) {", to: "  if (false) {" },
