@@ -1532,6 +1532,39 @@ try {
             && lines.slice(0, 2).every((l) => / ask=superseded\b/.test(l) && / result=superseded\b/.test(l) && l.includes(`supersededBy=${last.startedAt}`)),
             JSON.stringify(lines));
     }
+
+    // 32. A start whose earlier run files cannot be moved aside refuses, puts back what moved, and
+    // cancels the attempt it reserved in the execution budget, so the reservation is not charged.
+    // A preload makes every rename to a ".prev-" name fail with EPERM, as a locked file does on Windows.
+    {
+        const dir = path.join(ROOT, 'ASIDE');
+        fs.mkdirSync(dir, { recursive: true });
+        const log = path.join(dir, 'worker.log');
+        const ledger = path.join(dir, 'ledger.json');
+        const budgetLedger = path.join(dir, 'budget.json');
+        fs.writeFileSync(log, 'an earlier run\n', 'utf8');
+        const preload = path.join(dir, 'rename-fails.js');
+        fs.writeFileSync(preload, [
+            "const fs = require('fs');",
+            'const real = fs.renameSync;',
+            "fs.renameSync = (from, to) => { if (String(to).includes('.prev-')) { const e = new Error('EPERM: operation not permitted, rename'); e.code = 'EPERM'; throw e; } return real(from, to); };",
+        ].join('\n') + '\n', 'utf8');
+        const res = hw(['start', '--code', 'ASIDE', '--prompt-file', PROMPT, '--log', log, '--claude-bin', FAKE, '--ledger', ledger,
+            '--attempt-id', 'aside-1', '--budget-ledger', budgetLedger],
+        { NODE_OPTIONS: `--require "${preload.split(path.sep).join('/')}"` });
+        const err = res.json && res.json.ok === false ? res.json.error : null;
+        check('32. a move-aside that fails refuses the start with move-aside-failed, naming the rename error',
+            !!err && err.code === 'move-aside-failed' && /EPERM/.test(err.message), JSON.stringify(res.json).slice(0, 300));
+        check('32. the earlier run file is still where it was', fs.existsSync(log) && fs.readFileSync(log, 'utf8') === 'an earlier run\n');
+        let attempt = null;
+        try { attempt = JSON.parse(fs.readFileSync(budgetLedger, 'utf8')).attempts['aside-1'] || null; } catch { /* reported below */ }
+        check('32. the budget reservation is cancelled, charged nothing, and says why',
+            !!attempt && attempt.state === 'cancelled' && attempt.charged && attempt.charged.usd === 0 && /moved aside/.test(attempt.reason || ''),
+            JSON.stringify(attempt).slice(0, 300));
+        let rec = [];
+        try { rec = JSON.parse(fs.readFileSync(ledger, 'utf8')).records || []; } catch { /* no ledger written is also no record */ }
+        check('32. no worker record is left for the refused start', !rec.some((r) => r.code === 'ASIDE'), JSON.stringify(rec).slice(0, 200));
+    }
 } finally {
     // Kill by pid, never by pattern; a dead pid is the expected answer here.
     // The logs are scanned first so a supervisor that start never printed
@@ -1545,7 +1578,7 @@ try {
 }
 
 console.log(`\n${tally(pass, fail, infra)}`);
-console.log(`subject: ${path.relative(path.resolve(__dirname, '..'), SCRIPT)}, driven as a subprocess ${pass + fail} assertion(s) over 31 numbered cases; `
+console.log(`subject: ${path.relative(path.resolve(__dirname, '..'), SCRIPT)}, driven as a subprocess ${pass + fail} assertion(s) over 32 numbered cases; `
     + 'every worker ran through a fake binary under a temp root whose name carries a space.');
 if (fail) console.log(`failed: ${failures.join(' | ')}`);
 if (infra) console.log(`indeterminate: ${indeterminate.join(' | ')}`);
