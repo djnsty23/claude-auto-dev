@@ -493,7 +493,7 @@ function actSuite(script) {
     const ev1 = W.events();
     const a1 = acts(ev1);
     check("act pass exit 0", r1.code === 0 && r1.json && r1.json.ok, r1.out);
-    check("--act runs the observe pass too", ev1.some((e) => e.type === "clock.baseline") && r1.json && r1.json.sources.length === 10, r1.out);
+    check("--act runs the observe pass too", ev1.some((e) => e.type === "clock.baseline") && r1.json && r1.json.sources.length === 11 && r1.json.sources.includes("missions: 0 stalled, idle 60+ min"), r1.out);
     check("mark-dead dry run: would-mark-dead for D1 and R1", JSON.stringify(keysOf(a1, "act.would-mark-dead")) === JSON.stringify([`D1@${T("11:00")}`, `R1@${T("11:00")}`]), JSON.stringify(a1));
     check("mark-dead dry run writes only would-mark-dead events", a1.length === 2 && a1.every((e) => e.type === "act.would-mark-dead"), JSON.stringify(a1.map((e) => e.type)));
     const d1 = a1.find((e) => e.key.startsWith("D1@"));
@@ -806,12 +806,81 @@ function actSuite(script) {
   return { passed: counter.n, fails };
 }
 
+// ---------- stalled missions: observe only, relayed once ----------
+// A mission-queue.js file with pending work and no activity for the threshold is one
+// mission.stalled event, once while it repeats, and one mission.recovered when it clears.
+function stallSuite(script) {
+  const fails = [];
+  const counter = { n: 0 };
+  const check = checker(fails, counter);
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "brain-clock-stall-"));
+  const claude = path.join(root, "claude");
+  const missions = path.join(root, "missions");
+  const ghFixture = path.join(root, "gh.json");
+  w(ghFixture, { open: {}, view: {} });
+  const env = { ...process.env, BRAIN_CLOCK_CLAUDE_DIR: claude, BRAIN_CLOCK_DESKTOP_DIR: path.join(root, "desktop"), BRAIN_CLOCK_ROLE_CHECKER: "off", BRAIN_CLOCK_GH_FIXTURE: ghFixture, BRAIN_CLOCK_WORKER_RECONCILE: "off", BRAIN_CLOCK_BRAIN_JUDGE: "off", AUTODEV_MISSIONS_DIR: missions };
+  delete env.BRAIN_CLOCK_STALL_MIN;
+  const run = (at, extra) => {
+    const r = spawnSync(process.execPath, [script, "tick", "--observe", "--now", at], { env: { ...env, ...(extra || {}) }, encoding: "utf8" });
+    let json = null; try { json = JSON.parse(r.stdout); } catch { /* keep null */ }
+    return { code: r.status, json, out: r.stdout + r.stderr };
+  };
+  const events = () => readJsonl(path.join(claude, "autodev", "events.jsonl"));
+  const mission = (id, updatedAt, items) => w(path.join(missions, `${id}.json`), { version: 1, cwd: `/repo/${id}`, owner: "s1", mission: `mission ${id}`, items, updatedAt, lastStopAt: updatedAt, lastDecision: "approve" });
+  const delta = (fn) => { const before = events().length; const r = fn(); return { r, ev: events().slice(before).filter((e) => e.type.startsWith("mission.")) }; };
+  const show = (ev) => JSON.stringify(ev.map((e) => `${e.type} ${e.key}`));
+  try {
+    // 61 minutes idle with a pending item, one with only inflight and blocked items, one 59 minutes idle.
+    mission("aaa111", "2026-09-22T10:59:00Z", [{ id: "pr", state: "pending" }, { id: "w", state: "inflight" }]);
+    mission("bbb222", "2026-09-22T09:00:00Z", [{ id: "x", state: "inflight" }, { id: "y", state: "blocked" }, { id: "z", state: "done" }]);
+    mission("ccc333", "2026-09-22T11:01:00Z", [{ id: "q", state: "pending" }]);
+    let d = delta(() => run(NOW));
+    check("stall: pass 1 exit 0", d.r.code === 0 && d.r.json && d.r.json.ok, d.r.out);
+    const st = d.ev.filter((e) => e.type === "mission.stalled");
+    check("stall: one mission.stalled on pass 1", st.length === 1 && st[0].key === "aaa111" && st[0].source === "mission-queue", show(d.ev));
+    check("stall: the event names the pending items and idle minutes", st[0] && JSON.stringify(st[0].detail.pending) === "[\"pr\"]" && st[0].detail.idleMinutes === 61, st[0] && JSON.stringify(st[0].detail));
+    check("stall: only inflight and blocked items raise nothing", !d.ev.some((e) => e.key === "bbb222"), show(d.ev));
+    check("stall: 59 minutes idle is under the default threshold", !d.ev.some((e) => e.key === "ccc333"), show(d.ev));
+    check("stall: a population line for missions", d.r.json && d.r.json.sources.some((l) => /^missions: 1 stalled/.test(l)), d.r.json && d.r.json.sources.join(" | "));
+    d = delta(() => run(LATER));
+    check("stall: pass 2 relays nothing new", d.r.code === 0 && d.ev.filter((e) => e.key === "aaa111").length === 0, show(d.ev));
+    check("stall: ccc333 crosses the threshold on pass 2", d.ev.filter((e) => e.type === "mission.stalled" && e.key === "ccc333").length === 1, show(d.ev));
+    // An unreadable missions directory: one COULD-NOT-CHECK line, one event per distinct error, no recovery flood.
+    const aside = missions + ".aside";
+    fs.renameSync(missions, aside);
+    w(missions, "not a directory");
+    d = delta(() => run("2026-09-22T12:10:00Z"));
+    check("stall: unreadable missions still exits 0", d.r.code === 0 && d.r.json && d.r.json.ok, d.r.out);
+    check("stall: unreadable missions is one COULD-NOT-CHECK line", d.r.json && d.r.json.sources.filter((l) => /^missions: COULD-NOT-CHECK/.test(l)).length === 1, d.r.json && d.r.json.sources.join(" | "));
+    check("stall: unreadable missions is one check-failed event", d.ev.length === 1 && d.ev[0].type === "mission.check-failed", show(d.ev));
+    d = delta(() => run("2026-09-22T12:15:00Z"));
+    check("stall: the same error is not relayed twice", d.r.code === 0 && d.ev.length === 0, show(d.ev));
+    fs.rmSync(missions, { force: true });
+    fs.renameSync(aside, missions);
+    // The pending item is done: one mission.recovered, and ccc333 stays relayed once.
+    mission("aaa111", "2026-09-22T12:18:00Z", [{ id: "pr", state: "done" }, { id: "w", state: "inflight" }]);
+    d = delta(() => run("2026-09-22T12:20:00Z"));
+    const rec = d.ev.filter((e) => e.type === "mission.recovered");
+    check("stall: the item set to done yields one mission.recovered", rec.length === 1 && rec[0].key === "aaa111", show(d.ev));
+    check("stall: the check recovers once", d.ev.filter((e) => e.type === "mission.check-recovered").length === 1, show(d.ev));
+    check("stall: a still-stalled mission is not relayed again", !d.ev.some((e) => e.key === "ccc333"), show(d.ev));
+    d = delta(() => run("2026-09-22T12:25:00Z"));
+    check("stall: recovered is relayed once", d.ev.length === 0, show(d.ev));
+    // The threshold is a knob.
+    mission("ddd444", "2026-09-22T12:00:00Z", [{ id: "n", state: "pending" }]);
+    d = delta(() => run("2026-09-22T12:30:00Z", { BRAIN_CLOCK_STALL_MIN: "30" }));
+    check("stall: BRAIN_CLOCK_STALL_MIN sets the threshold", d.ev.filter((e) => e.type === "mission.stalled" && e.key === "ddd444").length === 1, show(d.ev));
+  } finally { fs.rmSync(root, { recursive: true, force: true }); }
+  return { passed: counter.n, fails };
+}
+
 // ---------- the suite and its plants ----------
 function suite(script) {
   const o = observeSuite(script);
   const a = actSuite(script);
   const l = lockSuite(script);
-  return { passed: o.passed + a.passed + l.passed, fails: [...o.fails, ...a.fails, ...l.fails], notes: l.notes };
+  const s = stallSuite(script);
+  return { passed: o.passed + a.passed + l.passed + s.passed, fails: [...o.fails, ...a.fails, ...l.fails, ...s.fails], notes: l.notes };
 }
 
 // The planted defects, each derived from the subject: the suite must go red on every one.
@@ -857,6 +926,10 @@ const PLANTS = [
   { name: "a repeated reconcile outcome is relayed every pass", from: "          if (seen.has(k)) continue;\n", to: "" },
   { name: "a reconcile throw fails the pass", from: "        try { rc = actReconcile(a); } catch (e) {", to: "        try { rc = actReconcile(a); } catch (e) { throw e;" },
   { name: "reconcile PENDING outcomes flood the events", from: "if (o && o.outcome && o.outcome !== \"PENDING\") rows.push(o);", to: "if (o && o.outcome) rows.push(o);" },
+  // Stalled missions.
+  { name: "the clock never calls stalled", from: "list = require(path.join(__dirname, \"mission-queue.js\")).stalled(minutes, now, { dir: missionsDir(), strict: true });", to: "list = [];" },
+  { name: "a stalled mission is relayed every pass", from: "      if (seen.has(key)) continue;\n      ev(\"mission.stalled\"", to: "      ev(\"mission.stalled\"" },
+  { name: "an unreadable missions directory reads as none stalled", from: "{ dir: missionsDir(), strict: true }", to: "{ dir: missionsDir(), strict: false }" },
   // The state schema.
   { name: "a newer state schema is written over", from: "  if (meta.error || meta.schema > STATE_SCHEMA) {", to: "  if (false) {" },
   { name: "the state schema is never recorded", from: "    if (!meta.recorded || meta.schema !== STATE_SCHEMA) writeJson(STATE_META,", to: "    if (false) writeJson(STATE_META," },

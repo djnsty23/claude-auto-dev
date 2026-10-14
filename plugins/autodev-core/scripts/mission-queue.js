@@ -141,14 +141,20 @@ function stopDecision(cwd, sid, at = Date.now()) {
 /**
  * Missions whose owner stopped with pending work and has not touched the queue
  * for `minutes`. For a clock or board to raise, never to act on.
+ * opts.dir reads another missions directory. opts.strict throws when the directory
+ * exists but cannot be listed, so a caller can tell "none stalled" from "could not look".
  */
-function stalled(minutes, at = Date.now()) {
+function stalled(minutes, at = Date.now(), opts = {}) {
     const out = [];
+    const dir = opts.dir || missionsDir();
     let names = [];
-    try { names = fs.readdirSync(missionsDir()).filter((n) => n.endsWith('.json')); } catch { return out; }
+    try { names = fs.readdirSync(dir).filter((n) => n.endsWith('.json')); } catch (e) {
+        if (opts.strict && !(e && e.code === 'ENOENT')) throw e;
+        return out;
+    }
     for (const name of names) {
         let q;
-        try { q = JSON.parse(fs.readFileSync(path.join(missionsDir(), name), 'utf8')); } catch { continue; }
+        try { q = JSON.parse(fs.readFileSync(path.join(dir, name), 'utf8')); } catch { continue; }
         if (!q || !Array.isArray(q.items)) continue;
         const pending = pendingOf(q);
         if (!pending.length) continue;
@@ -156,7 +162,7 @@ function stalled(minutes, at = Date.now()) {
         const idleMin = (at - last) / 60000;
         if (!(idleMin >= minutes)) continue;
         out.push({
-            cwd: q.cwd, owner: q.owner, mission: q.mission, pending: pending.map((i) => i.id),
+            id: name.slice(0, -'.json'.length), cwd: q.cwd, owner: q.owner, mission: q.mission, pending: pending.map((i) => i.id),
             idleMinutes: Math.round(idleMin),
             reason: q.lastDecision === 'approve' ? 'turn ended with pending work' : 'no queue activity',
         });

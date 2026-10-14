@@ -47,6 +47,14 @@
 // script cannot take the key. It acts on nothing when any source was unreadable in this pass,
 // and never twice on one record.
 //
+// Stalled missions. Every pass, observe or act, lists the mission-queue.js files beside it whose
+// owner stopped with pending work and has not touched the queue for BRAIN_CLOCK_STALL_MIN minutes
+// (default 60). It is a read like the sources, so it is always on and acts on no session: one
+// mission.stalled event per mission (source mission-queue, key the mission file id), relayed once
+// while it repeats, and one mission.recovered when it clears. A missions directory that cannot be
+// listed is one COULD-NOT-CHECK line and one mission.check-failed event per distinct error, keeps
+// what was stalled before, and never fails the pass.
+//
 // Which code runs. Every helper is the copy BESIDE this file, so a pass runs one release end to
 // end. The clock never scans the plugin cache for the newest version: that would undo a rollback
 // the moment a newer cache directory appeared. runtime-release.js pins the release a scheduler
@@ -66,6 +74,8 @@
 //   BRAIN_CLOCK_UNATTENDED_WORKER  unattended-worker.js (default: beside this file)
 //   BRAIN_CLOCK_BRAIN_JUDGE  brain-judge.js (default: beside this file), "off" skips it
 //   BRAIN_CLOCK_WORKER_RECONCILE  worker-reconcile.js (default: beside this file), "off" skips it
+//   AUTODEV_MISSIONS_DIR     <claude dir>/autodev/missions, as mission-queue.js reads it
+//   BRAIN_CLOCK_STALL_MIN    60, minutes a mission with pending work may sit idle
 //   BRAIN_CLOCK_PS           Git's MSYS ps (default: found beside git), "off" means absent.
 //                            A path ending in .js runs through node, for the suite.
 // The lock is ledger-lock.js beside this file, the operating lock every ledger writer shares.
@@ -117,6 +127,8 @@ const HEADLESS_CAPS = ["mark-dead", "settle-finished"];
 // A started unattended record whose session is this quiet with no RESULT line stopped to ask.
 const STRANDED_MS = 30 * 60 * 1000;
 const GRACE_MIN_DEFAULT = 15;
+// A mission with pending work idle this long is stalled.
+const STALL_MIN_DEFAULT = 60;
 const GRACE_MIN_FLOOR = 5;
 const PROBE_TIMEOUT_MS = 10 * 1000;
 const WRITER_TIMEOUT_MS = 30 * 1000;
@@ -840,6 +852,48 @@ function actUnattended(a, results, now, stamp, acted, out, budget) {
   if (deferred) out.lines.push(`settle-unattended deferred to the next pass: ${deferred}`);
 }
 
+// ---------- observe: stalled missions ----------
+function missionsDir() { return process.env.AUTODEV_MISSIONS_DIR || path.join(AUTODEV, "missions"); }
+function stallMinutes() {
+  const n = Number(process.env.BRAIN_CLOCK_STALL_MIN);
+  return Number.isFinite(n) && n > 0 ? n : STALL_MIN_DEFAULT;
+}
+// Missions stopped with pending work, as events relayed once while they repeat. Never throws.
+function observeStalls(now) {
+  const out = { events: [], line: "" };
+  const statePath = path.join(STATE_DIR, "stalls.json");
+  const state = readJsonOr(statePath, null) || {};
+  const seen = new Set(Array.isArray(state.seen) ? state.seen : []);
+  const ev = (type, key, detail) => out.events.push({ type, source: "mission-queue", key, detail });
+  const minutes = stallMinutes();
+  let list = null;
+  try {
+    list = require(path.join(__dirname, "mission-queue.js")).stalled(minutes, now, { dir: missionsDir(), strict: true });
+  } catch (e) {
+    const error = String(e && e.message || e).slice(0, 300);
+    out.line = `missions: COULD-NOT-CHECK ${error}`;
+    // What was stalled stays stalled: an unreadable directory is not a recovery.
+    if (state.lastError !== error) ev("mission.check-failed", "missions", { error });
+    state.lastError = error;
+  }
+  if (list) {
+    const cur = new Set();
+    for (const s of list) {
+      const key = String(s.id);
+      cur.add(key);
+      if (seen.has(key)) continue;
+      ev("mission.stalled", key, { cwd: s.cwd || null, owner: s.owner || null, mission: s.mission ? String(s.mission).slice(0, 120) : null, pending: s.pending, idleMinutes: s.idleMinutes, reason: s.reason });
+    }
+    for (const key of seen) if (!cur.has(key)) ev("mission.recovered", key, {});
+    if (state.lastError) ev("mission.check-recovered", "missions", { after: state.lastError });
+    delete state.lastError;
+    state.seen = [...cur].sort();
+    out.line = `missions: ${list.length} stalled, idle ${minutes}+ min`;
+  }
+  out.save = () => writeJson(statePath, state);
+  return out;
+}
+
 // ---------- act: the judge ----------
 function brainJudgeScript() {
   const env = process.env.BRAIN_CLOCK_BRAIN_JUDGE;
@@ -1096,6 +1150,11 @@ function tick(opts, now) {
     if (!hadPrevious && results.routines.ok) {
       for (const [key, e] of Object.entries(results.routines.entries)) if (e.missedSlot) events.push({ type: "routine.missed", source: "routines", key, detail: pick(e) });
     }
+    // Stalled missions are observed every pass, and a failure here is one line, not a failed pass.
+    let stalls;
+    try { stalls = observeStalls(now); } catch (e) { stalls = { events: [], line: `missions: COULD-NOT-CHECK ${String(e && e.message || e).slice(0, 300)}`, save: null }; }
+    events.push(...stalls.events);
+    lines.push(stalls.line);
     // Acting runs after the observe pass and cannot break it: an act failure is one line, not a failed pass.
     let act = null;
     if (a.caps) {
@@ -1121,6 +1180,7 @@ function tick(opts, now) {
     if (events.length) fs.appendFileSync(EVENTS, events.map((e) => JSON.stringify({ at: stamp, ...e })).join("\n") + "\n", "utf8");
     writeJson(snapPath, { at: stamp, homeRepos, sources: nextSources });
     if (!meta.recorded || meta.schema !== STATE_SCHEMA) writeJson(STATE_META, { schema: STATE_SCHEMA, writtenBy: process.env.AUTODEV_RUNTIME_RELEASE || "unpinned", at: stamp });
+    if (stalls.save) stalls.save();
     if (act && act.save) act.save();
     const rec = { at: stamp, status: unreadable ? "degraded" : "ok", durationMs: Date.now() - started, events: events.length, unreadable, sources: lines };
     if (act) rec.act = act.lines;
