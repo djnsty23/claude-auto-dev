@@ -707,7 +707,7 @@ try {
         const noneArgv = none.json && none.json.ok ? none.json.value.argv : [];
         check('22. --effort omitted leaves argv exactly as it was before the flag existed',
             JSON.stringify([noneArgv[0], noneArgv[1], ...noneArgv.slice(3)]) === JSON.stringify([FAKE, '-p', '--permission-mode', 'default', '--output-format', 'stream-json', '--verbose',
-                '--disallowedTools', 'Artifact,ArtifactComments,ArtifactData,Workflow'])
+                '--tools', 'Agent,Bash,Edit,Glob,Grep,Read,Skill,TodoWrite,ToolSearch,WebFetch,WebSearch,Write'])
             && none.json.value.effort === null, JSON.stringify([noneArgv[0], noneArgv[1], ...noneArgv.slice(3)]));
 
         for (const bad of ['extreme', 'HIGH']) {
@@ -735,39 +735,48 @@ try {
         check('22. the usage text lists --effort <level> and its five levels', usage.includes('[--effort <level>]') && usage.includes('low|medium|high|xhigh|max'));
     }
 
-    // ------------------------------------------------------------ 31. heavy tools are dropped unless the prompt names them
+    // ------------------------------------------------------------ 31. heavy tools join the profile only when the prompt names them
     // [measured 2026-10-13] the Artifact tools cost 11.4k and Workflow 2.0k of a
-    // headless turn 1. The names below are literals, so a script that stops
-    // dropping a tool, or drops one the prompt names, turns this red.
+    // headless turn 1. The worker gets one explicit --tools list (its profile),
+    // never a --disallowedTools exclusion. The names below are literals, so a
+    // script that adds a heavy tool unasked, or drops one the prompt names, turns
+    // this red.
     {
         const dir = path.join(ROOT, 'T31');
         const log = path.join(dir, 'dry.log');
         const ledger = path.join(dir, 'dry-ledger.json');
+        const BASE = 'Agent,Bash,Edit,Glob,Grep,Read,Skill,TodoWrite,ToolSearch,WebFetch,WebSearch,Write';
+        const withTools = (...extra) => [...BASE.split(','), ...extra].sort().join(',');
         const promptFile = (name, text) => { const p = path.join(ROOT, `t31-${name}.md`); write(p, text); return p; };
         const dry = (file, extra = []) => hw(['start', '--code', 'T31', '--prompt-file', file, '--log', log, '--claude-bin', FAKE, '--ledger', ledger, '--dry-run', ...extra]);
-        const dropped = (r) => {
+        const tools = (r) => {
             const argv = r.json && r.json.ok ? r.json.value.argv : [];
-            const i = argv.indexOf('--disallowedTools');
-            return { list: i < 0 ? '' : argv[i + 1], count: argv.filter((a) => a === '--disallowedTools').length, value: r.json && r.json.ok ? r.json.value.droppedTools : null };
+            const i = argv.indexOf('--tools');
+            return { list: i < 0 ? null : argv[i + 1], count: argv.filter((a) => a === '--tools').length,
+                excluded: argv.filter((a) => a === '--disallowedTools').length, value: r.json && r.json.ok ? r.json.value.tools : null };
         };
-        const plain = dropped(dry(PROMPT));
-        check('31. a prompt that names no heavy tool drops Artifact, ArtifactComments, ArtifactData and Workflow',
-            plain.list === 'Artifact,ArtifactComments,ArtifactData,Workflow' && plain.count === 1 && JSON.stringify(plain.value) === JSON.stringify(plain.list.split(',')), JSON.stringify(plain));
-        const named = dropped(dry(promptFile('named', 'Update the board with ArtifactData, then report.\n')));
-        check('31. a prompt naming ArtifactData keeps all three Artifact tools and still drops Workflow', named.list === 'Workflow', JSON.stringify(named));
-        const linked = dropped(dry(promptFile('linked', 'Read https://claude.ai/artifact/AbC123 and summarise it.\n')));
-        check('31. a prompt linking a claude.ai artifact keeps the Artifact tools', linked.list === 'Workflow', JSON.stringify(linked));
-        const flow = dropped(dry(promptFile('flow', 'Run the review as a Workflow with two agents.\n')));
-        check('31. a prompt naming Workflow keeps Workflow and drops the Artifact tools', flow.list === 'Artifact,ArtifactComments,ArtifactData', JSON.stringify(flow));
-        const lower = dropped(dry(promptFile('lower', 'Follow the usual workflow and ship it.\n')));
-        check('31. the common noun "workflow" does not keep the Workflow tool', lower.list.endsWith('Workflow'), JSON.stringify(lower));
-        const both = dropped(dry(PROMPT, ['--keep-tools', 'all']));
-        check('31. --keep-tools all puts no --disallowedTools in argv', both.count === 0 && Array.isArray(both.value) && both.value.length === 0, JSON.stringify(both));
-        const one = dropped(dry(PROMPT, ['--keep-tools', 'Workflow']));
-        check('31. --keep-tools Workflow keeps Workflow only', one.list === 'Artifact,ArtifactComments,ArtifactData', JSON.stringify(one));
+        const plain = tools(dry(PROMPT));
+        check('31. a prompt that names no heavy tool gets the builder profile only, as one --tools list',
+            plain.list === BASE && plain.count === 1 && plain.excluded === 0 && JSON.stringify(plain.value) === JSON.stringify(BASE.split(',')), JSON.stringify(plain));
+        const named = tools(dry(promptFile('named', 'Update the board with ArtifactData, then report.\n')));
+        check('31. a prompt naming ArtifactData adds all three Artifact tools and not Workflow',
+            named.list === withTools('Artifact', 'ArtifactComments', 'ArtifactData'), JSON.stringify(named));
+        const linked = tools(dry(promptFile('linked', 'Read https://claude.ai/artifact/AbC123 and summarise it.\n')));
+        check('31. a prompt linking a claude.ai artifact adds the Artifact tools', linked.list === withTools('Artifact', 'ArtifactComments', 'ArtifactData'), JSON.stringify(linked));
+        const flow = tools(dry(promptFile('flow', 'Run the review as a Workflow with two agents.\n')));
+        check('31. a prompt naming Workflow adds Workflow and not the Artifact tools', flow.list === withTools('Workflow'), JSON.stringify(flow));
+        const lower = tools(dry(promptFile('lower', 'Follow the usual workflow and ship it.\n')));
+        check('31. the common noun "workflow" does not add the Workflow tool', lower.list === BASE, JSON.stringify(lower));
+        const both = tools(dry(PROMPT, ['--keep-tools', 'all']));
+        check('31. --keep-tools all adds all four heavy tools and still no --disallowedTools',
+            both.list === withTools('Artifact', 'ArtifactComments', 'ArtifactData', 'Workflow') && both.excluded === 0, JSON.stringify(both));
+        const one = tools(dry(PROMPT, ['--keep-tools', 'Workflow']));
+        check('31. --keep-tools Workflow adds Workflow only', one.list === withTools('Workflow'), JSON.stringify(one));
         const bad = dry(PROMPT, ['--keep-tools', 'Bash']);
         check('31. --keep-tools with a name outside the heavy set is refused with code usage',
             bad.exit === 1 && bad.json && bad.json.error.code === 'usage' && bad.json.error.message.includes('Artifact, Workflow'), bad.stdout.slice(0, 200));
+        const prof = dry(PROMPT, ['--profile', 'nonsense']);
+        check('31. an unknown --profile is refused with code usage', prof.exit === 1 && prof.json && prof.json.error.code === 'usage', prof.stdout.slice(0, 200));
         check('31. the dry runs recorded and spawned nothing', !fs.existsSync(dir));
     }
 
@@ -1354,7 +1363,7 @@ try {
         const inst = path.join(ROOT, 'cfg', 'plugins', 'cache', 'autodev', 'autodev-core', '9.9.9');
         write(path.join(inst, '.claude-plugin', 'plugin.json'), JSON.stringify({ name: 'autodev-core', version: '9.9.9' }));
         fs.mkdirSync(path.join(inst, 'scripts'), { recursive: true });
-        for (const f of ['headless-worker.js', 'claude-paths.js', 'capacity.js', 'gate-records.js', 'plugin-integrity.js']) fs.copyFileSync(path.join(path.dirname(SCRIPT), f), path.join(inst, 'scripts', f));
+        for (const f of ['headless-worker.js', 'claude-paths.js', 'capacity.js', 'gate-records.js', 'plugin-integrity.js', 'execution-budget.js', 'worker-profiles.js', 'ledger-lock.js', 'gate-identity.js']) fs.copyFileSync(path.join(path.dirname(SCRIPT), f), path.join(inst, 'scripts', f));
         const instScript = path.join(inst, 'scripts', 'headless-worker.js');
         // A cache-shaped path alone is no longer enough: with no install record
         // and no marketplace commit to compare against, the copy is DENIED.
