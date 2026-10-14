@@ -12,7 +12,7 @@
  *
  * THE FAKE CLAUDE. A `.js` file that headless-worker runs through node. It
  * writes its pid to a pid file, spawns a grandchild that writes its own pid and
- * idles, then behaves as FAKE_MODE says: `wall` idles, `output` floods stdout,
+ * idles, then behaves as AUTODEV_FAKE_MODE says: `wall` idles, `output` floods stdout,
  * `turns` prints assistant events with new message ids, `ok` prints a result
  * event with 3 turns and $0.12, `nousage` exits with no result event. Both carry
  * a self-exit timer, so a defect never leaves a process behind for long.
@@ -58,7 +58,7 @@ const ROOT = fs.mkdtempSync(path.join(os.tmpdir(), 'budget test-'));
 const HOME = path.join(ROOT, 'home');
 const FAKE = path.join(ROOT, 'fake claude.js');
 const GRANDCHILD = path.join(ROOT, 'grandchild.js');
-const FAKE_JUDGE = path.join(ROOT, 'fake judge.js');
+const AUTODEV_FAKE_JUDGE = path.join(ROOT, 'fake judge.js');
 const PROMPT = path.join(ROOT, 'prompt.md');
 const END_MS = 20000;
 
@@ -80,21 +80,21 @@ write(FAKE, [
     'setTimeout(() => process.exit(97), 30000);',
     "const fs = require('fs');",
     "const { spawn } = require('child_process');",
-    'const pids = process.env.FAKE_PIDS;',
+    'const pids = process.env.AUTODEV_FAKE_PIDS;',
     "if (pids) fs.appendFileSync(pids, 'child ' + process.pid + '\\n');",
     `if (pids) spawn(process.execPath, [${JSON.stringify(GRANDCHILD)}, pids], { stdio: 'ignore', windowsHide: true, detached: ${process.platform === 'win32'} });`,
     "process.stdout.write('FAKE-BEGIN pid=' + process.pid + '\\n');",
-    "const mode = process.env.FAKE_MODE || 'ok';",
+    "const mode = process.env.AUTODEV_FAKE_MODE || 'ok';",
     "if (mode === 'ok') { process.stdout.write(JSON.stringify({ type: 'result', subtype: 'success', num_turns: 3, total_cost_usd: 0.12 }) + '\\n'); setTimeout(() => process.exit(0), 300); }",
     "else if (mode === 'nousage') setTimeout(() => process.exit(0), 300);",
     "else if (mode === 'output') setInterval(() => process.stdout.write('FLOOD ' + 'x'.repeat(4000) + '\\n'), 10);",
     "else if (mode === 'turns') { let n = 0; setInterval(() => process.stdout.write(JSON.stringify({ type: 'assistant', message: { id: 'msg_' + (++n), content: [] } }) + '\\n'), 40); }",
     "else setInterval(() => {}, 1000);",
 ].join('\n') + '\n');
-write(FAKE_JUDGE, [
+write(AUTODEV_FAKE_JUDGE, [
     "'use strict';",
     "const fs = require('fs');",
-    "if (process.env.FAKE_JUDGE_MARK) fs.writeFileSync(process.env.FAKE_JUDGE_MARK, String(process.pid));",
+    "if (process.env.AUTODEV_FAKE_JUDGE_MARK) fs.writeFileSync(process.env.AUTODEV_FAKE_JUDGE_MARK, String(process.pid));",
     "process.stdout.write(JSON.stringify({ type: 'result', subtype: 'success', is_error: false, num_turns: 2, total_cost_usd: 0.03 }) + '\\n');",
 ].join('\n') + '\n');
 
@@ -134,7 +134,7 @@ function startRun(code, { mode, configFile, attemptId = null, env = {}, ledger =
     fs.mkdirSync(dir, { recursive: true });
     const args = [HW, 'start', '--code', code, '--prompt-file', PROMPT, '--log', log, '--claude-bin', FAKE,
         '--ledger', path.join(dir, 'workers.json'), '--budget-ledger', ledger, '--dev', ...(attemptId ? ['--attempt-id', attemptId] : [])];
-    const r = node(args, baseEnv({ AUTODEV_BUDGET_CONFIG: configFile, FAKE_MODE: mode, FAKE_PIDS: pids, ...env }));
+    const r = node(args, baseEnv({ AUTODEV_BUDGET_CONFIG: configFile, AUTODEV_FAKE_MODE: mode, AUTODEV_FAKE_PIDS: pids, ...env }));
     const value = r.json && r.json.ok ? r.json.value : null;
     const sup = value ? value.supervisorPid : null;
     if (sup) started.push(sup);
@@ -256,16 +256,16 @@ function main() {
                 "'use strict';",
                 `const bj = require(${JSON.stringify(JUDGE)});`,
                 'const dir = process.argv[2];',
-                `const r = bj.judgeRecord({ taskId: 'J1' }, { judgeBin: ${JSON.stringify(FAKE_JUDGE)}, cwd: dir, reportsDir: dir });`,
+                `const r = bj.judgeRecord({ taskId: 'J1' }, { judgeBin: ${JSON.stringify(AUTODEV_FAKE_JUDGE)}, cwd: dir, reportsDir: dir });`,
                 'process.stdout.write(JSON.stringify(r) + "\\n");',
             ].join('\n') + '\n');
-            const judgeFull = node([driver, path.join(ROOT, 'judge-full')], { ...env, FAKE_JUDGE_MARK: mark });
+            const judgeFull = node([driver, path.join(ROOT, 'judge-full')], { ...env, AUTODEV_FAKE_JUDGE_MARK: mark });
             const jf = judgeFull.json;
             if (!check('shared: a judge on the worker-filled window is refused as window-exhausted and spawns nothing',
                 jf && jf.ok === false && jf.budget === 'window-exhausted' && !fs.existsSync(mark), judgeFull.stdout.slice(0, 300) + judgeFull.stderr.slice(0, 300))) sharedFails.push('judge-refused');
             // With room, the judge spends from the same pool, charged what it reported.
             const roomLedger = path.join(ROOT, 'judge-room.json');
-            const judgeRoom = node([driver, path.join(ROOT, 'judge-room')], { ...env, AUTODEV_BUDGET_LEDGER: roomLedger, FAKE_JUDGE_MARK: mark });
+            const judgeRoom = node([driver, path.join(ROOT, 'judge-room')], { ...env, AUTODEV_BUDGET_LEDGER: roomLedger, AUTODEV_FAKE_JUDGE_MARK: mark });
             const jr = judgeRoom.json;
             const ja = jr && jr.attemptId ? ledgerAttempt(roomLedger, jr.attemptId) : null;
             if (!check('shared: a judge with room reserves a judge attempt in the shared ledger and is charged its reported 2 turns',
@@ -330,7 +330,7 @@ function main() {
                 fs.mkdirSync(dir, { recursive: true });
                 const r = node([HW, 'supervise', '--code', 'RS-SUP', '--prompt-file', PROMPT, '--log', log, '--claude-bin', FAKE,
                     '--ledger', path.join(dir, 'workers.json'), '--budget-ledger', ledger, '--attempt-id', id],
-                baseEnv({ AUTODEV_BUDGET_CONFIG: cfgR, FAKE_MODE: 'ok', FAKE_PIDS: pids }));
+                baseEnv({ AUTODEV_BUDGET_CONFIG: cfgR, AUTODEV_FAKE_MODE: 'ok', AUTODEV_FAKE_PIDS: pids }));
                 const text = read(log) || '';
                 if (!check(`restart: a supervisor under ${label} attempt id writes BUDGET_DENIED=${code} and CLAUDE_EXIT=-1, and claude never runs`,
                     new RegExp(`^BUDGET_DENIED=${code}: `, 'm').test(text) && /^CLAUDE_EXIT=-1\s*$/m.test(text) && !/FAKE-BEGIN/.test(text) && !fs.existsSync(pids),

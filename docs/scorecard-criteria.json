@@ -64,7 +64,11 @@
           "probe": "node tooling/test-worker-authority.js",
           "expect": "^review_write=DENY local_push=DENY undeclared_secret=DENY child_escape=DENY injection_escalation=DENY authorized_control=PASS$",
           "watch": [
-            "tooling/test-worker-authority.js"
+            "tooling/test-worker-authority.js",
+            "plugins/autodev-core/scripts/worker-authority.js",
+            "plugins/autodev-core/scripts/worker-authority.json",
+            "plugins/autodev-core/scripts/headless-worker.js",
+            "plugins/autodev-core/scripts/unattended-worker.js"
           ],
           "weight": 6,
           "populationCount": "^(ok|PASS) "

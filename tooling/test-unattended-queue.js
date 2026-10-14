@@ -99,7 +99,9 @@ try {
     check('enqueue marks the record for the headless channel', r1 && r1.channel === 'headless');
     const readmeAtEnqueue = g(repo, 'rev-parse', 'origin/main:README.md');
     check('enqueue --pin stores the pinned blob at the base', r1 && r1.pins && r1.pins[0].blob === readmeAtEnqueue, JSON.stringify(r1 && r1.pins));
-    check('enqueue defaults the worker to bypassPermissions, the mode the fleet ran headless', r1 && r1.launch.permissionMode === 'bypassPermissions');
+    check('enqueue defaults the worker to dontAsk, never bypassPermissions', r1 && r1.launch.permissionMode === 'dontAsk');
+    const qBypass = cli(['enqueue', '--slug', 'guide-bypass', '--permission-mode', 'bypassPermissions', ...base]);
+    check('enqueue refuses --permission-mode bypassPermissions as authority-refused', qBypass.status === 1 && /authority-refused/.test(qBypass.stdout), qBypass.stdout.slice(0, 200));
     const briefCopy = r1 && r1.briefFile;
     check('enqueue copies the brief beside the report, so a later edit of the source cannot change a queued task',
         briefCopy && fs.readFileSync(briefCopy, 'utf8').includes('MISSION. Add a guide.') && path.dirname(briefCopy) === path.dirname(r1.report));
@@ -138,7 +140,7 @@ try {
     check('launch --dry-run succeeds through headless-worker start --dry-run', dry.status === 0 && dv && dv.dryRun === true && dv.headless.spawned === false, dry.stdout.slice(0, 300));
     const argvText = dv ? dv.headless.argv.join(' ') : '';
     check('the headless code is the slug, so the RESULT line both scripts read is one line', dv && dv.headless.code === 'guide-a');
-    check('the worker gets bypassPermissions from the queued record', /--permission-mode bypassPermissions/.test(argvText), argvText.slice(0, 200));
+    check('the worker gets dontAsk from the queued record', /--permission-mode dontAsk/.test(argvText) && !/bypassPermissions/.test(argvText), argvText.slice(0, 200));
     check('launch --dry-run leaves the ledger byte-identical', fs.readFileSync(ledger, 'utf8') === before);
     // `[measured 2026-10-08]` launch took --model and dropped it: the worker
     // started on the CLI default while the caller believed it had pinned one.

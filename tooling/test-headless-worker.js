@@ -17,7 +17,7 @@ process.env.AUTODEV_CAPACITY = 'off';
 // THE FAKE BINARY. `--claude-bin` names a `.js` file, which the script runs
 // through process.execPath (its header states the convention). The fake prints
 // one line to stdout and one to stderr, dumps its sorted env KEYS, its argv,
-// optionally writes a report file, and exits with the code in FAKE_EXIT. It
+// optionally writes a report file, and exits with the code in AUTODEV_FAKE_EXIT. It
 // carries a hard self-exit timer so a defect can never leave a worker alive.
 //
 // THE POLL HAS THREE ENDINGS, NOT TWO. A `start` returns before the worker
@@ -96,8 +96,8 @@ write(FAKE, [
     "process.stdout.write('ENVKEYS=' + JSON.stringify(Object.keys(process.env).sort()) + '\\n');",
     "process.stdout.write('ARGV=' + JSON.stringify(process.argv.slice(2)) + '\\n');",
     "process.stdout.write('PPID=' + process.ppid + '\\n');",
-    "if (process.env.FAKE_REPORT) fs.writeFileSync(process.env.FAKE_REPORT, process.env.FAKE_REPORT_TEXT || '', 'utf8');",
-    'process.exit(Number(process.env.FAKE_EXIT || 0));',
+    "if (process.env.AUTODEV_FAKE_REPORT) fs.writeFileSync(process.env.AUTODEV_FAKE_REPORT, process.env.AUTODEV_FAKE_REPORT_TEXT || '', 'utf8');",
+    'process.exit(Number(process.env.AUTODEV_FAKE_EXIT || 0));',
 ].join('\n') + '\n');
 
 let pass = 0;
@@ -146,7 +146,7 @@ function startFake(code, { exit = 0, report = null, reportText = '', extraArgs =
     const log = path.join(ROOT, code, 'worker.log');
     const ledger = path.join(ROOT, code, 'ledger.json');
     const res = hw(['start', '--code', code, '--prompt-file', PROMPT, '--log', log, '--claude-bin', FAKE, '--ledger', ledger, ...extraArgs], {
-        FAKE_EXIT: String(exit), ...(report ? { FAKE_REPORT: report, FAKE_REPORT_TEXT: reportText } : {}), ...env,
+        AUTODEV_FAKE_EXIT: String(exit), ...(report ? { AUTODEV_FAKE_REPORT: report, AUTODEV_FAKE_REPORT_TEXT: reportText } : {}), ...env,
     });
     const pid = res.json && res.json.ok ? res.json.value.supervisorPid : null;
     if (pid) supervisors.push(pid);
@@ -270,9 +270,9 @@ try {
         const argv = v ? v.argv : [];
         const promptArg = argv[argv.indexOf('-p') + 1] || '';
         check('2. dry-run exits 0 with ok:true', res.exit === 0 && !!v, res.stdout.slice(0, 200));
-        check('2. argv carries -p, the prompt text, --permission-mode, --output-format stream-json and --verbose',
+        check('2. argv carries -p, the prompt text, --permission-mode dontAsk, --output-format stream-json and --verbose',
             argv.includes('-p') && promptArg.includes('Read the brief in brief.md')
-            && argv[argv.indexOf('--permission-mode') + 1] === 'default'
+            && argv[argv.indexOf('--permission-mode') + 1] === 'dontAsk'
             && argv[argv.indexOf('--output-format') + 1] === 'stream-json' && argv.includes('--verbose'),
             JSON.stringify(argv).slice(0, 200));
         check('2. --model given puts --model <id> in argv', argv[argv.indexOf('--model') + 1] === 'a-model-id');
@@ -321,7 +321,7 @@ try {
             argv[0] === '-p' && argv[1].includes(HEADLESS_NOTE) && argv.includes('stream-json') && argv.includes('--verbose'), argvLine ? argvLine.slice(0, 80) : 'no ARGV line');
         check('4. the ledger record carries the supervisor pid and the fields of the contract',
             ['code', 'pid', 'startedAt', 'log', 'report', 'promptFile', 'configDir', 'model', 'permissionMode', 'state'].every((k) => k in t4.res.json.value.record)
-            && t4.res.json.value.record.pid === t4.pid && t4.res.json.value.record.permissionMode === 'default');
+            && t4.res.json.value.record.pid === t4.pid && t4.res.json.value.record.permissionMode === 'dontAsk');
 
         // 13. status --json after the run.
         const st = hw(['status', '--ledger', t4.ledger, '--json']);
@@ -705,9 +705,10 @@ try {
 
         const none = dry([]);
         const noneArgv = none.json && none.json.ok ? none.json.value.argv : [];
-        check('22. --effort omitted leaves argv exactly as it was before the flag existed',
-            JSON.stringify([noneArgv[0], noneArgv[1], ...noneArgv.slice(3)]) === JSON.stringify([FAKE, '-p', '--permission-mode', 'default', '--output-format', 'stream-json', '--verbose',
-                '--tools', 'Agent,Bash,Edit,Glob,Grep,Read,Skill,TodoWrite,ToolSearch,WebFetch,WebSearch,Write'])
+        check('22. --effort omitted leaves argv exactly as it was before the flag existed, plus the authority tail',
+            JSON.stringify([noneArgv[0], noneArgv[1], ...noneArgv.slice(3)]) === JSON.stringify([FAKE, '-p', '--permission-mode', 'dontAsk', '--output-format', 'stream-json', '--verbose',
+                '--tools', 'Agent,Bash,Edit,Glob,Grep,Read,Skill,TodoWrite,ToolSearch,WebFetch,WebSearch,Write',
+                '--permission-prompts', 'none', '--strict-mcp-config', '--settings', noneArgv[noneArgv.indexOf('--settings') + 1]])
             && none.json.value.effort === null, JSON.stringify([noneArgv[0], noneArgv[1], ...noneArgv.slice(3)]));
 
         for (const bad of ['extreme', 'HIGH']) {
@@ -1363,7 +1364,7 @@ try {
         const inst = path.join(ROOT, 'cfg', 'plugins', 'cache', 'autodev', 'autodev-core', '9.9.9');
         write(path.join(inst, '.claude-plugin', 'plugin.json'), JSON.stringify({ name: 'autodev-core', version: '9.9.9' }));
         fs.mkdirSync(path.join(inst, 'scripts'), { recursive: true });
-        for (const f of ['headless-worker.js', 'claude-paths.js', 'capacity.js', 'gate-records.js', 'plugin-integrity.js', 'execution-budget.js', 'worker-profiles.js', 'ledger-lock.js', 'gate-identity.js']) fs.copyFileSync(path.join(path.dirname(SCRIPT), f), path.join(inst, 'scripts', f));
+        for (const f of ['headless-worker.js', 'claude-paths.js', 'capacity.js', 'gate-records.js', 'plugin-integrity.js', 'execution-budget.js', 'worker-profiles.js', 'worker-authority.js', 'worker-authority.json', 'ledger-lock.js', 'gate-identity.js']) fs.copyFileSync(path.join(path.dirname(SCRIPT), f), path.join(inst, 'scripts', f));
         const instScript = path.join(inst, 'scripts', 'headless-worker.js');
         // A cache-shaped path alone is no longer enough: with no install record
         // and no marketplace commit to compare against, the copy is DENIED.

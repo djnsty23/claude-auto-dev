@@ -15,8 +15,8 @@
  * --tools "": none, --tools default: all, --tools <list>: exactly the known names
  * listed, --disallowedTools <list>: all but those), and prints a stream-json
  * system/init line. When ToolSearch is in the set, the deferrable tools in the
- * set are listed as deferred_tools, not loaded. STUB_SEARCH=<query> prints a
- * tool_search line with the deferred tools matching it. STUB_HIDE=<name> drops a
+ * set are listed as deferred_tools, not loaded. AUTODEV_STUB_SEARCH=<query> prints a
+ * tool_search line with the deferred tools matching it. AUTODEV_STUB_HIDE=<name> drops a
  * tool from the init line only: the control that proves the suite reads the
  * init line and not the profile config.
  *
@@ -78,10 +78,10 @@ write(STUB, [
     "const search = set.includes('ToolSearch');",
     'let loaded = set.filter((t) => !search || !DEFERRABLE.includes(t));',
     'const deferred = search ? set.filter((t) => DEFERRABLE.includes(t)) : [];',
-    'if (process.env.STUB_HIDE) loaded = loaded.filter((t) => t !== process.env.STUB_HIDE);',
+    'if (process.env.AUTODEV_STUB_HIDE) loaded = loaded.filter((t) => t !== process.env.AUTODEV_STUB_HIDE);',
     "process.stdout.write(JSON.stringify({ type: 'system', subtype: 'init', tools: loaded, deferred_tools: deferred }) + '\\n');",
-    'if (process.env.STUB_SEARCH) {',
-    '    const q = process.env.STUB_SEARCH.toLowerCase();',
+    'if (process.env.AUTODEV_STUB_SEARCH) {',
+    '    const q = process.env.AUTODEV_STUB_SEARCH.toLowerCase();',
     "    process.stdout.write(JSON.stringify({ type: 'tool_search', query: q, matches: search ? deferred.filter((t) => t.toLowerCase().includes(q)) : [] }) + '\\n');",
     '}',
     "process.stdout.write(JSON.stringify({ type: 'result', subtype: 'success', num_turns: 1, total_cost_usd: 0 }) + '\\n');",
@@ -153,7 +153,7 @@ function main() {
         let resolved;
         if (run.kind === 'builder') {
             const keepArgs = run.keep.length ? ['--keep-tools', run.keep.join(',')] : [];
-            const out = builderRun(`P-${run.label.replace(/[^A-Za-z]+/g, '-')}`, run.prompt, keepArgs, { STUB_SEARCH: 'web' });
+            const out = builderRun(`P-${run.label.replace(/[^A-Za-z]+/g, '-')}`, run.prompt, keepArgs, { AUTODEV_STUB_SEARCH: 'web' });
             text = out.text;
             resolved = profiles.resolve('builder', { prompt: run.prompt, keep: run.keep.includes('all') ? Object.keys(profiles.FAMILIES) : run.keep });
         } else {
@@ -180,7 +180,7 @@ function main() {
         }
         if (run.label === 'builder+Artifact') {
             // The Artifact family's own deferred member is found the same way.
-            const out = builderRun('P-artifact-search', run.prompt, [], { STUB_SEARCH: 'artifactdata' });
+            const out = builderRun('P-artifact-search', run.prompt, [], { AUTODEV_STUB_SEARCH: 'artifactdata' });
             const matches = searchOf(out.text) || [];
             if (!check('discovery builder+Artifact: ArtifactData is deferred and ToolSearch finds it', matches.includes('ArtifactData'), JSON.stringify(matches))) discFail.push('artifact');
         }
@@ -189,7 +189,7 @@ function main() {
     // Control: the suite grades the init line, not the config. A stub that hides Bash
     // from its init line must turn the builder's required check red.
     {
-        const out = builderRun('P-hide-bash', 'Read the brief in brief.md and do what it says.\n', [], { STUB_HIDE: 'Bash' });
+        const out = builderRun('P-hide-bash', 'Read the brief in brief.md and do what it says.\n', [], { AUTODEV_STUB_HIDE: 'Bash' });
         const m = profiles.initManifest(out.text);
         const g = profiles.grade(m, profiles.resolve('builder'));
         if (!check('control: a stub hiding Bash from its init line reads as Bash missing, so the grade reads the run and not the config',

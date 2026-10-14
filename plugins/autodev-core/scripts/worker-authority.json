@@ -1,0 +1,10 @@
+{
+  "version": 1,
+  "note": "The fixed authority of each headless worker kind. worker-authority.js reads it at launch. Tools come from worker-profiles.js. writeRoots names launch-time roots: cwd is the worker's working directory, reportDir the directory its report file lives in. secrets are the only secret environment names the kind may receive or read. bash is guarded, read-only or none.",
+  "kinds": {
+    "builder": { "writeRoots": ["cwd", "reportDir"], "secrets": [], "bash": "guarded" },
+    "review": { "writeRoots": [], "secrets": [], "bash": "read-only" },
+    "judge": { "writeRoots": [], "secrets": [], "bash": "none" },
+    "probe": { "writeRoots": [], "secrets": [], "bash": "none" }
+  }
+}
