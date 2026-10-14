@@ -1,0 +1,858 @@
+{
+  "_doc": "One proposed disposition per skill in plugins/*/skills. Every entry is PROPOSED: Andy decides the batch, and nothing here has been merged or deleted. A merge or retire names where the job goes (mergeInto or coveredBy), because frequency alone never decides. Drills are emergency or rare-by-design skills and stay retained whatever their frequency. Checked by tooling/test-skill-dispositions.js.",
+  "measured": {
+    "at": "2026-10-14",
+    "probe": "tooling/skill-census.js --days 30 --json",
+    "windowDays": 30,
+    "transcripts": 2930,
+    "totalHits": 603
+  },
+  "skills": [
+    {
+      "plugin": "autodev-core",
+      "name": "a11y",
+      "invocable": true,
+      "status": "proposed",
+      "evidence": {
+        "fires30d": {
+          "model": 2,
+          "typed": 0,
+          "preload": 0
+        },
+        "lastFired": "2026-09-23",
+        "listingBytes": 284
+      },
+      "disposition": "retain",
+      "drill": false,
+      "reason": "Fired 2 time(s) in the window, last on 2026-09-23. No overlap found that would justify a merge."
+    },
+    {
+      "plugin": "autodev-core",
+      "name": "adversarial-loop",
+      "invocable": true,
+      "status": "proposed",
+      "evidence": {
+        "fires30d": {
+          "model": 2,
+          "typed": 0,
+          "preload": 0
+        },
+        "lastFired": "2026-10-11",
+        "listingBytes": 506
+      },
+      "disposition": "retain",
+      "drill": true,
+      "reason": "Rare drill: reserved for high-stakes fixes where a wrong fix is expensive."
+    },
+    {
+      "plugin": "autodev-core",
+      "name": "audit",
+      "invocable": true,
+      "status": "proposed",
+      "evidence": {
+        "fires30d": {
+          "model": 0,
+          "typed": 0,
+          "preload": 0
+        },
+        "lastFired": null,
+        "listingBytes": 199
+      },
+      "disposition": "retain",
+      "drill": false,
+      "reason": "A named workflow mode (auto, audit, brainstorm) and half of the audit/brainstorm split. The Brain dispatches audits headless, where a typed name is not recorded as a fire."
+    },
+    {
+      "plugin": "autodev-core",
+      "name": "auto",
+      "invocable": true,
+      "status": "proposed",
+      "evidence": {
+        "fires30d": {
+          "model": 47,
+          "typed": 0,
+          "preload": 0
+        },
+        "lastFired": "2026-10-11",
+        "listingBytes": 297
+      },
+      "disposition": "retain",
+      "drill": false,
+      "reason": "Fired 47 time(s) in the window, last on 2026-10-11. No overlap found that would justify a merge."
+    },
+    {
+      "plugin": "autodev-core",
+      "name": "auto-brain",
+      "invocable": true,
+      "status": "proposed",
+      "evidence": {
+        "fires30d": {
+          "model": 5,
+          "typed": 3,
+          "preload": 0
+        },
+        "lastFired": "2026-10-13",
+        "listingBytes": 334
+      },
+      "disposition": "retain",
+      "drill": false,
+      "reason": "Fired 8 time(s) in the window, last on 2026-10-13. No overlap found that would justify a merge."
+    },
+    {
+      "plugin": "autodev-core",
+      "name": "brain",
+      "invocable": true,
+      "status": "proposed",
+      "evidence": {
+        "fires30d": {
+          "model": 29,
+          "typed": 6,
+          "preload": 0
+        },
+        "lastFired": "2026-10-10",
+        "listingBytes": 369
+      },
+      "disposition": "retain",
+      "drill": false,
+      "reason": "Fired 35 time(s) in the window, last on 2026-10-10. No overlap found that would justify a merge."
+    },
+    {
+      "plugin": "autodev-core",
+      "name": "brainstorm",
+      "invocable": true,
+      "status": "proposed",
+      "evidence": {
+        "fires30d": {
+          "model": 0,
+          "typed": 0,
+          "preload": 0
+        },
+        "lastFired": null,
+        "listingBytes": 242
+      },
+      "disposition": "retain",
+      "drill": false,
+      "reason": "A named workflow mode and the other half of the audit/brainstorm split."
+    },
+    {
+      "plugin": "autodev-core",
+      "name": "commit",
+      "invocable": true,
+      "status": "proposed",
+      "evidence": {
+        "fires30d": {
+          "model": 3,
+          "typed": 0,
+          "preload": 0
+        },
+        "lastFired": "2026-10-12",
+        "listingBytes": 487
+      },
+      "disposition": "retain",
+      "drill": false,
+      "reason": "Fired 3 time(s) in the window, last on 2026-10-12. No overlap found that would justify a merge."
+    },
+    {
+      "plugin": "autodev-core",
+      "name": "core",
+      "invocable": false,
+      "status": "proposed",
+      "evidence": {
+        "fires30d": {
+          "model": 0,
+          "typed": 0,
+          "preload": 0
+        },
+        "lastFired": null,
+        "listingBytes": 290
+      },
+      "disposition": "retain",
+      "drill": false,
+      "reason": "The prd.json schema every autodev workflow reads. It loads when a session touches prd.json, not by a Skill call."
+    },
+    {
+      "plugin": "autodev-core",
+      "name": "design",
+      "invocable": true,
+      "status": "proposed",
+      "evidence": {
+        "fires30d": {
+          "model": 29,
+          "typed": 0,
+          "preload": 0
+        },
+        "lastFired": "2026-09-23",
+        "listingBytes": 194
+      },
+      "disposition": "retain",
+      "drill": false,
+      "reason": "Fired 29 time(s) in the window, last on 2026-09-23. No overlap found that would justify a merge."
+    },
+    {
+      "plugin": "autodev-core",
+      "name": "framework-radar",
+      "invocable": true,
+      "status": "proposed",
+      "evidence": {
+        "fires30d": {
+          "model": 0,
+          "typed": 0,
+          "preload": 0
+        },
+        "lastFired": null,
+        "listingBytes": 531
+      },
+      "disposition": "retain",
+      "drill": false,
+      "reason": "Periodic research routine. It would host marketing-radar if that merge is accepted."
+    },
+    {
+      "plugin": "autodev-core",
+      "name": "heal",
+      "invocable": true,
+      "status": "proposed",
+      "evidence": {
+        "fires30d": {
+          "model": 5,
+          "typed": 0,
+          "preload": 0
+        },
+        "lastFired": "2026-10-14",
+        "listingBytes": 362
+      },
+      "disposition": "retain",
+      "drill": true,
+      "reason": "Emergency: the exposure sweep after a disclosure or a suspected breach."
+    },
+    {
+      "plugin": "autodev-core",
+      "name": "isolate",
+      "invocable": true,
+      "status": "proposed",
+      "evidence": {
+        "fires30d": {
+          "model": 3,
+          "typed": 0,
+          "preload": 0
+        },
+        "lastFired": "2026-10-11",
+        "listingBytes": 353
+      },
+      "disposition": "retain",
+      "drill": false,
+      "reason": "Fired 3 time(s) in the window, last on 2026-10-11. No overlap found that would justify a merge."
+    },
+    {
+      "plugin": "autodev-core",
+      "name": "learn-from-fixes",
+      "invocable": true,
+      "status": "proposed",
+      "evidence": {
+        "fires30d": {
+          "model": 1,
+          "typed": 0,
+          "preload": 0
+        },
+        "lastFired": "2026-10-05",
+        "listingBytes": 424
+      },
+      "disposition": "retain",
+      "drill": false,
+      "reason": "Fired 1 time(s) in the window, last on 2026-10-05. No overlap found that would justify a merge."
+    },
+    {
+      "plugin": "autodev-core",
+      "name": "marketing-radar",
+      "invocable": true,
+      "status": "proposed",
+      "evidence": {
+        "fires30d": {
+          "model": 0,
+          "typed": 0,
+          "preload": 0
+        },
+        "lastFired": null,
+        "listingBytes": 493
+      },
+      "disposition": "merge",
+      "mergeInto": "framework-radar",
+      "reason": "Same template (collect sources, extract claims, test hypotheses), different domain, and check-skill-collisions.js already triaged the pair as one template. One radar skill with a domain argument keeps both procedures and drops one listing entry."
+    },
+    {
+      "plugin": "autodev-core",
+      "name": "perf",
+      "invocable": true,
+      "status": "proposed",
+      "evidence": {
+        "fires30d": {
+          "model": 1,
+          "typed": 0,
+          "preload": 0
+        },
+        "lastFired": "2026-09-23",
+        "listingBytes": 262
+      },
+      "disposition": "retain",
+      "drill": false,
+      "reason": "Fired 1 time(s) in the window, last on 2026-09-23. No overlap found that would justify a merge."
+    },
+    {
+      "plugin": "autodev-core",
+      "name": "production-radar",
+      "invocable": true,
+      "status": "proposed",
+      "evidence": {
+        "fires30d": {
+          "model": 0,
+          "typed": 0,
+          "preload": 0
+        },
+        "lastFired": null,
+        "listingBytes": 510
+      },
+      "disposition": "retain",
+      "drill": true,
+      "reason": "Emergency: run when production is failing. Quiet months are the normal case, not evidence of no value."
+    },
+    {
+      "plugin": "autodev-core",
+      "name": "prove",
+      "invocable": true,
+      "status": "proposed",
+      "evidence": {
+        "fires30d": {
+          "model": 76,
+          "typed": 0,
+          "preload": 0
+        },
+        "lastFired": "2026-10-11",
+        "listingBytes": 632
+      },
+      "disposition": "retain",
+      "drill": false,
+      "reason": "Fired 76 time(s) in the window, last on 2026-10-11. No overlap found that would justify a merge."
+    },
+    {
+      "plugin": "autodev-core",
+      "name": "review",
+      "invocable": true,
+      "status": "proposed",
+      "evidence": {
+        "fires30d": {
+          "model": 6,
+          "typed": 0,
+          "preload": 0
+        },
+        "lastFired": "2026-10-11",
+        "listingBytes": 264
+      },
+      "disposition": "retain",
+      "drill": false,
+      "reason": "Fired 6 time(s) in the window, last on 2026-10-11. No overlap found that would justify a merge."
+    },
+    {
+      "plugin": "autodev-core",
+      "name": "rule-ab-testing",
+      "invocable": false,
+      "status": "proposed",
+      "evidence": {
+        "fires30d": {
+          "model": 4,
+          "typed": 0,
+          "preload": 0
+        },
+        "lastFired": "2026-10-02",
+        "listingBytes": 423
+      },
+      "disposition": "retain",
+      "drill": false,
+      "reason": "Fired 4 time(s) in the window, last on 2026-10-02. No overlap found that would justify a merge."
+    },
+    {
+      "plugin": "autodev-core",
+      "name": "rule-agent-concurrency",
+      "invocable": false,
+      "status": "proposed",
+      "evidence": {
+        "fires30d": {
+          "model": 0,
+          "typed": 0,
+          "preload": 0
+        },
+        "lastFired": null,
+        "listingBytes": 312
+      },
+      "disposition": "retain",
+      "drill": false,
+      "reason": "Exported to AGENTS.md for other agent hosts. Skill-tool fires do not measure that channel."
+    },
+    {
+      "plugin": "autodev-core",
+      "name": "rule-design-system",
+      "invocable": false,
+      "status": "proposed",
+      "evidence": {
+        "fires30d": {
+          "model": 7,
+          "typed": 0,
+          "preload": 0
+        },
+        "lastFired": "2026-09-23",
+        "listingBytes": 279
+      },
+      "disposition": "retain",
+      "drill": false,
+      "reason": "Fired 7 time(s) in the window, last on 2026-09-23. No overlap found that would justify a merge."
+    },
+    {
+      "plugin": "autodev-core",
+      "name": "rule-diagnosis",
+      "invocable": true,
+      "status": "proposed",
+      "evidence": {
+        "fires30d": {
+          "model": 12,
+          "typed": 0,
+          "preload": 0
+        },
+        "lastFired": "2026-10-11",
+        "listingBytes": 422
+      },
+      "disposition": "retain",
+      "drill": false,
+      "reason": "Fired 12 time(s) in the window, last on 2026-10-11. No overlap found that would justify a merge."
+    },
+    {
+      "plugin": "autodev-core",
+      "name": "rule-file-organization",
+      "invocable": false,
+      "status": "proposed",
+      "evidence": {
+        "fires30d": {
+          "model": 0,
+          "typed": 0,
+          "preload": 0
+        },
+        "lastFired": null,
+        "listingBytes": 333
+      },
+      "disposition": "retain",
+      "drill": false,
+      "reason": "Exported to AGENTS.md for other agent hosts. Skill-tool fires do not measure that channel."
+    },
+    {
+      "plugin": "autodev-core",
+      "name": "rule-gate-integrity",
+      "invocable": false,
+      "status": "proposed",
+      "evidence": {
+        "fires30d": {
+          "model": 24,
+          "typed": 0,
+          "preload": 0
+        },
+        "lastFired": "2026-10-11",
+        "listingBytes": 467
+      },
+      "disposition": "retain",
+      "drill": false,
+      "reason": "Fired 24 time(s) in the window, last on 2026-10-11. No overlap found that would justify a merge."
+    },
+    {
+      "plugin": "autodev-core",
+      "name": "rule-local-first",
+      "invocable": false,
+      "status": "proposed",
+      "evidence": {
+        "fires30d": {
+          "model": 1,
+          "typed": 0,
+          "preload": 0
+        },
+        "lastFired": "2026-09-21",
+        "listingBytes": 381
+      },
+      "disposition": "retain",
+      "drill": false,
+      "reason": "Fired 1 time(s) in the window, last on 2026-09-21. No overlap found that would justify a merge."
+    },
+    {
+      "plugin": "autodev-core",
+      "name": "rule-options-protocol",
+      "invocable": true,
+      "status": "proposed",
+      "evidence": {
+        "fires30d": {
+          "model": 0,
+          "typed": 0,
+          "preload": 0
+        },
+        "lastFired": null,
+        "listingBytes": 300
+      },
+      "disposition": "retain",
+      "drill": false,
+      "reason": "A shipped hook (panel-recommendation) points the model at it. Removing it orphans the hook text."
+    },
+    {
+      "plugin": "autodev-core",
+      "name": "rule-ramifications",
+      "invocable": false,
+      "status": "proposed",
+      "evidence": {
+        "fires30d": {
+          "model": 0,
+          "typed": 0,
+          "preload": 0
+        },
+        "lastFired": null,
+        "listingBytes": 350
+      },
+      "disposition": "merge",
+      "mergeInto": "rule-verification",
+      "reason": "Both trigger at the same moment, before calling a change done, and rule-verification already tells the reader to work rule-ramifications first. As a reference of rule-verification it loads at the one moment it is needed, with no second listing entry."
+    },
+    {
+      "plugin": "autodev-core",
+      "name": "rule-report-shell",
+      "invocable": false,
+      "status": "proposed",
+      "evidence": {
+        "fires30d": {
+          "model": 0,
+          "typed": 0,
+          "preload": 0
+        },
+        "lastFired": null,
+        "listingBytes": 430
+      },
+      "disposition": "retain",
+      "drill": false,
+      "reason": "Exported to AGENTS.md for other agent hosts. Skill-tool fires do not measure that channel."
+    },
+    {
+      "plugin": "autodev-core",
+      "name": "rule-security",
+      "invocable": false,
+      "status": "proposed",
+      "evidence": {
+        "fires30d": {
+          "model": 6,
+          "typed": 0,
+          "preload": 0
+        },
+        "lastFired": "2026-09-22",
+        "listingBytes": 280
+      },
+      "disposition": "retain",
+      "drill": false,
+      "reason": "Fired 6 time(s) in the window, last on 2026-09-22. No overlap found that would justify a merge."
+    },
+    {
+      "plugin": "autodev-core",
+      "name": "rule-thumb-first",
+      "invocable": false,
+      "status": "proposed",
+      "evidence": {
+        "fires30d": {
+          "model": 0,
+          "typed": 0,
+          "preload": 0
+        },
+        "lastFired": null,
+        "listingBytes": 414
+      },
+      "disposition": "retain",
+      "drill": false,
+      "reason": "Exported to AGENTS.md for other agent hosts. Skill-tool fires do not measure that channel."
+    },
+    {
+      "plugin": "autodev-core",
+      "name": "rule-verification",
+      "invocable": false,
+      "status": "proposed",
+      "evidence": {
+        "fires30d": {
+          "model": 0,
+          "typed": 0,
+          "preload": 0
+        },
+        "lastFired": null,
+        "listingBytes": 307
+      },
+      "disposition": "retain",
+      "drill": false,
+      "reason": "Exported to AGENTS.md, and the proposed host for rule-ramifications."
+    },
+    {
+      "plugin": "autodev-core",
+      "name": "rule-windows",
+      "invocable": false,
+      "status": "proposed",
+      "evidence": {
+        "fires30d": {
+          "model": 0,
+          "typed": 0,
+          "preload": 0
+        },
+        "lastFired": null,
+        "listingBytes": 287
+      },
+      "disposition": "retain",
+      "drill": false,
+      "reason": "Exported to AGENTS.md. It matters only on Windows hosts, so fleet-wide frequency understates it."
+    },
+    {
+      "plugin": "autodev-core",
+      "name": "rule-workflow-spine",
+      "invocable": true,
+      "status": "proposed",
+      "evidence": {
+        "fires30d": {
+          "model": 0,
+          "typed": 0,
+          "preload": 0
+        },
+        "lastFired": null,
+        "listingBytes": 426
+      },
+      "disposition": "retain",
+      "drill": false,
+      "reason": "isolate names itself step 1 of the spine. The spine is the one place the skill order is written down."
+    },
+    {
+      "plugin": "autodev-core",
+      "name": "security",
+      "invocable": true,
+      "status": "proposed",
+      "evidence": {
+        "fires30d": {
+          "model": 4,
+          "typed": 0,
+          "preload": 33
+        },
+        "lastFired": "2026-10-11",
+        "listingBytes": 567
+      },
+      "disposition": "retain",
+      "drill": true,
+      "reason": "Emergency gate: runs before any deploy that touches auth, payments or secrets."
+    },
+    {
+      "plugin": "autodev-core",
+      "name": "seo",
+      "invocable": true,
+      "status": "proposed",
+      "evidence": {
+        "fires30d": {
+          "model": 5,
+          "typed": 0,
+          "preload": 0
+        },
+        "lastFired": "2026-09-23",
+        "listingBytes": 579
+      },
+      "disposition": "retain",
+      "drill": false,
+      "reason": "Fired 5 time(s) in the window, last on 2026-09-23. No overlap found that would justify a merge."
+    },
+    {
+      "plugin": "autodev-core",
+      "name": "sessions",
+      "invocable": true,
+      "status": "proposed",
+      "evidence": {
+        "fires30d": {
+          "model": 4,
+          "typed": 0,
+          "preload": 0
+        },
+        "lastFired": "2026-10-03",
+        "listingBytes": 432
+      },
+      "disposition": "retain",
+      "drill": false,
+      "reason": "Fired 4 time(s) in the window, last on 2026-10-03. No overlap found that would justify a merge."
+    },
+    {
+      "plugin": "autodev-core",
+      "name": "setup-project",
+      "invocable": true,
+      "status": "proposed",
+      "evidence": {
+        "fires30d": {
+          "model": 0,
+          "typed": 0,
+          "preload": 0
+        },
+        "lastFired": null,
+        "listingBytes": 361
+      },
+      "disposition": "retain",
+      "drill": true,
+      "reason": "Rare drill: runs once per project, at onboarding."
+    },
+    {
+      "plugin": "autodev-core",
+      "name": "ship",
+      "invocable": true,
+      "status": "proposed",
+      "evidence": {
+        "fires30d": {
+          "model": 3,
+          "typed": 0,
+          "preload": 0
+        },
+        "lastFired": "2026-09-22",
+        "listingBytes": 150
+      },
+      "disposition": "retain",
+      "drill": false,
+      "reason": "Fired 3 time(s) in the window, last on 2026-09-22. No overlap found that would justify a merge."
+    },
+    {
+      "plugin": "autodev-core",
+      "name": "spec",
+      "invocable": true,
+      "status": "proposed",
+      "evidence": {
+        "fires30d": {
+          "model": 6,
+          "typed": 0,
+          "preload": 0
+        },
+        "lastFired": "2026-09-22",
+        "listingBytes": 479
+      },
+      "disposition": "retain",
+      "drill": false,
+      "reason": "Fired 6 time(s) in the window, last on 2026-09-22. No overlap found that would justify a merge."
+    },
+    {
+      "plugin": "autodev-core",
+      "name": "standards",
+      "invocable": false,
+      "status": "proposed",
+      "evidence": {
+        "fires30d": {
+          "model": 0,
+          "typed": 0,
+          "preload": 30
+        },
+        "lastFired": "2026-10-11",
+        "listingBytes": 305
+      },
+      "disposition": "retain",
+      "drill": false,
+      "reason": "Fired 30 time(s) in the window, last on 2026-10-11. No overlap found that would justify a merge."
+    },
+    {
+      "plugin": "autodev-core",
+      "name": "unslop",
+      "invocable": true,
+      "status": "proposed",
+      "evidence": {
+        "fires30d": {
+          "model": 1,
+          "typed": 0,
+          "preload": 0
+        },
+        "lastFired": "2026-10-10",
+        "listingBytes": 560
+      },
+      "disposition": "retain",
+      "drill": false,
+      "reason": "Fired 1 time(s) in the window, last on 2026-10-10. No overlap found that would justify a merge."
+    },
+    {
+      "plugin": "autodev-core",
+      "name": "writing-for-agents",
+      "invocable": true,
+      "status": "proposed",
+      "evidence": {
+        "fires30d": {
+          "model": 2,
+          "typed": 0,
+          "preload": 0
+        },
+        "lastFired": "2026-09-21",
+        "listingBytes": 417
+      },
+      "disposition": "retain",
+      "drill": false,
+      "reason": "Fired 2 time(s) in the window, last on 2026-09-21. No overlap found that would justify a merge."
+    },
+    {
+      "plugin": "autodev-memory",
+      "name": "mem-search",
+      "invocable": true,
+      "status": "proposed",
+      "evidence": {
+        "fires30d": {
+          "model": 1,
+          "typed": 0,
+          "preload": 0
+        },
+        "lastFired": "2026-10-08",
+        "listingBytes": 443
+      },
+      "disposition": "retain",
+      "drill": false,
+      "reason": "Fired 1 time(s) in the window, last on 2026-10-08. No overlap found that would justify a merge."
+    },
+    {
+      "plugin": "autodev-stack",
+      "name": "doppler",
+      "invocable": true,
+      "status": "proposed",
+      "evidence": {
+        "fires30d": {
+          "model": 0,
+          "typed": 0,
+          "preload": 0
+        },
+        "lastFired": null,
+        "listingBytes": 313
+      },
+      "disposition": "retain",
+      "drill": true,
+      "reason": "Rare drill: a credential migration happens once per project and must be right the first time."
+    },
+    {
+      "plugin": "autodev-stack",
+      "name": "stripe",
+      "invocable": true,
+      "status": "proposed",
+      "evidence": {
+        "fires30d": {
+          "model": 0,
+          "typed": 0,
+          "preload": 0
+        },
+        "lastFired": null,
+        "listingBytes": 221
+      },
+      "disposition": "retain",
+      "drill": true,
+      "reason": "Rare drill: payment work is infrequent and costly when wrong."
+    },
+    {
+      "plugin": "autodev-stack",
+      "name": "supabase",
+      "invocable": true,
+      "status": "proposed",
+      "evidence": {
+        "fires30d": {
+          "model": 6,
+          "typed": 0,
+          "preload": 0
+        },
+        "lastFired": "2026-09-22",
+        "listingBytes": 268
+      },
+      "disposition": "retain",
+      "drill": false,
+      "reason": "Fired 6 time(s) in the window, last on 2026-09-22. No overlap found that would justify a merge."
+    }
+  ]
+}

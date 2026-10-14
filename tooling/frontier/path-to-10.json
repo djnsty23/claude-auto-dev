@@ -1,0 +1,103 @@
+{
+  "_doc": "The preregistered path-to-10 calibration. Fixed before any run: 12 tasks in 12 families, three arms, three repeats, 108 bounded runs, and six families withheld from tuning. Tuning may change only the inputs listed under tuning.inputs, and may read only rows of tuning.tasks. Each run is graded by its task's endpoint oracle (held-out checks or the answer key), never by a reviewer's verdict. Read it with: node tooling/frontier/run.js compare --plan tooling/frontier/path-to-10.json [--fixtures]. The fixture rows are synthetic and exist to exercise the comparison, not to report a result.",
+  "preregisteredAt": "2026-10-14",
+  "repeats": 3,
+  "arms": [
+    {
+      "id": "CUR",
+      "label": "current release",
+      "pluginPin": "current",
+      "variant": "V0"
+    },
+    {
+      "id": "PRV",
+      "label": "previous release",
+      "pluginPin": "previous",
+      "variant": "V0"
+    },
+    {
+      "id": "BAS",
+      "label": "simpler baseline: no autodev plugins loaded",
+      "pluginPin": "none",
+      "variant": "V0"
+    }
+  ],
+  "tasks": [
+    {
+      "id": "T1",
+      "family": "instructions-loaded"
+    },
+    {
+      "id": "T2",
+      "family": "help-entrypoints"
+    },
+    {
+      "id": "T3",
+      "family": "git-failure-verdicts"
+    },
+    {
+      "id": "T4",
+      "family": "spawn-budget"
+    },
+    {
+      "id": "T5",
+      "family": "branch-landed"
+    },
+    {
+      "id": "T6",
+      "family": "worker-settle"
+    },
+    {
+      "id": "T7",
+      "family": "prd-state-readers"
+    },
+    {
+      "id": "T8",
+      "family": "hook-silence"
+    },
+    {
+      "id": "T9",
+      "family": "plan-review"
+    },
+    {
+      "id": "T10",
+      "family": "shell-parse"
+    },
+    {
+      "id": "T11",
+      "family": "worktree-lifecycle"
+    },
+    {
+      "id": "T12",
+      "family": "security-gate"
+    }
+  ],
+  "withheldFamilies": [
+    "git-failure-verdicts",
+    "branch-landed",
+    "worker-settle",
+    "hook-silence",
+    "worktree-lifecycle",
+    "security-gate"
+  ],
+  "tuning": {
+    "tasks": [
+      "T1",
+      "T2",
+      "T4",
+      "T7",
+      "T9",
+      "T10"
+    ],
+    "inputs": [
+      "plugins/autodev-core/skills",
+      "plugins/autodev-core/agents",
+      "plugins/autodev-core/hooks",
+      "plugins/autodev-memory/skills",
+      "plugins/autodev-stack/skills",
+      "CLAUDE.md",
+      "tooling/frontier/variants.json"
+    ]
+  },
+  "fixtures": "fixtures/path-to-10.runs.jsonl"
+}

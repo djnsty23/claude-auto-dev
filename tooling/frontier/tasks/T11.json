@@ -1,0 +1,14 @@
+{
+  "id": "T11",
+  "lane": "fix",
+  "size": "S",
+  "source": "95480cbe worktree-reap dates logs/HEAD by its entries",
+  "parent": "e7be7e96b8629c51d9ee805fcf376ee29f6d6048",
+  "fix": "95480cbe9c197546230228ae5973ae6a373c9178",
+  "brief": "T11.md",
+  "heldOut": ["tooling/test-worktree-reap.js"],
+  "checks": [["node", "tooling/test-worktree-reap.js"]],
+  "passToPass": [],
+  "disclosed": ["reflogMs"],
+  "timeoutMin": 30
+}
