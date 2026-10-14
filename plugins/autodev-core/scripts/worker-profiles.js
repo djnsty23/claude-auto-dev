@@ -33,6 +33,12 @@ const PROFILES = Object.freeze({
         deferred: Object.freeze(['WebFetch', 'WebSearch']),
         required: Object.freeze(['Bash', 'Read', 'Edit', 'Write', 'Glob', 'Grep', 'ToolSearch']),
     }),
+    // A reviewer: reads the repo and runs read-only commands. worker-authority.js holds its Bash to reads.
+    review: Object.freeze({
+        tools: Object.freeze(['Bash', 'Glob', 'Grep', 'Read', 'ToolSearch']),
+        deferred: Object.freeze([]),
+        required: Object.freeze(['Read', 'Glob', 'Grep']),
+    }),
     // brain-judge: the report and brief travel in the prompt, so the judge needs no tool.
     judge: Object.freeze({ tools: Object.freeze([]), deferred: Object.freeze([]), required: Object.freeze([]) }),
     // brain-judge probe: one tool-less reply that proves the login works.

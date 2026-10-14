@@ -67,7 +67,7 @@ function fv(args, env = {}) {
 // ---------------------------------------------------------------- fixtures
 write(FAKE, [
     "'use strict';",
-    'const ms = Number(process.env.FAKE_SLEEP_MS || 0);',
+    'const ms = Number(process.env.AUTODEV_FAKE_SLEEP_MS || 0);',
     "process.stdout.write(JSON.stringify({ type: 'system', subtype: 'init', cwd: process.cwd(), model: 'fake-model', session_id: 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee' }) + '\\n');",
     "process.stdout.write('PPID=' + process.ppid + '\\n');",
     "process.stdout.write('CONFIG_DIR=' + (process.env.CLAUDE_CONFIG_DIR || '') + '\\n');",
@@ -389,8 +389,8 @@ async function main() {
     const relaunched = JSON.parse(read(LEDGER)).records.find((r) => r.code === 'W-STOPPED-R2');
     if (relaunched && relaunched.pid) pids.push(relaunched.pid);
     const relPrompt = read(path.join(WDIR, 'W-STOPPED-R2.md')) || '';
-    check('4. relaunch starts a new code with the same model, mode and cwd', rel.status === 303 && !!relaunched && relaunched.model === 'm1'
-        && relaunched.permissionMode === 'default' && path.resolve(relaunched.cwd) === path.resolve(ROOT), decodeURIComponent(rel.headers.location || ''));
+    check('4. relaunch starts a new code with the same model, cwd and the legacy default mode as dontAsk', rel.status === 303 && !!relaunched && relaunched.model === 'm1'
+        && relaunched.permissionMode === 'dontAsk' && path.resolve(relaunched.cwd) === path.resolve(ROOT), decodeURIComponent(rel.headers.location || ''));
     check('4. a relaunch of a --dev record is started with --dev too', !!relaunched && relaunched.dev === true, relaunched ? String(relaunched.dev) : 'no record');
     check('4. the relaunch prompt is the same brief plus the answer', relPrompt.startsWith('# W-STOPPED brief') && relPrompt.includes('origin/main') && relPrompt.includes('rebase first'), relPrompt.slice(-300));
 
@@ -408,7 +408,7 @@ async function main() {
     // stop: a real headless worker whose fake claude sleeps, and a decoy whose identity does not match.
     const hwStart = runBudgeted(process.execPath, [HW_SCRIPT, 'start', '--code', 'W-LIVE', '--prompt-file', path.join(WDIR, 'W-SETTLE.md'),
         '--log', path.join(WDIR, 'W-LIVE.jsonl'), '--claude-bin', FAKE, '--ledger', LEDGER, '--cwd', ROOT, '--dev'],
-    { encoding: 'utf8', cwd: ROOT, env: { ...process.env, HOME, USERPROFILE: HOME, FAKE_SLEEP_MS: '60000' }, timeout: 30000, maxTimeout: 120000 });
+    { encoding: 'utf8', cwd: ROOT, env: { ...process.env, HOME, USERPROFILE: HOME, AUTODEV_FAKE_SLEEP_MS: '60000' }, timeout: 30000, maxTimeout: 120000 });
     let live = null;
     try { live = JSON.parse(String(hwStart.stdout).trim().split('\n').pop()).value; } catch { /* reported below */ }
     if (!live || !live.supervisorPid) { indeterminateCase('4. stop', `could not start a live worker: ${hwStart.stdout} ${hwStart.stderr}`); } else {

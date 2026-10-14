@@ -122,6 +122,7 @@ const path = require('node:path');
 const os = require('node:os');
 const claudePaths = require('./claude-paths.js');
 const acceptance = require('./acceptance-receipt.js');
+const authority = require('./worker-authority.js');
 const { scriptPlacement, readLedger: readHeadlessLedger, namedTools } = require('./headless-worker.js');
 const crypto = require('node:crypto');
 const { spawnSync } = require('node:child_process');
@@ -553,6 +554,7 @@ function brief(opts) {
  */
 function enqueue(opts) {
     for (const k of ['repo', 'slug', 'brief-file', 'return']) if (!opts[k]) fault('usage', `--${k} is required for enqueue`);
+    authority.launchMode(opts['permission-mode']);
     if (!SLUG.test(opts.slug) || opts.slug.length > HEADLESS_SLUG_MAX) {
         fault('bad-slug', `slug must match ${SLUG} and be at most ${HEADLESS_SLUG_MAX} characters, because it becomes the headless worker code`);
     }
@@ -568,7 +570,8 @@ function enqueue(opts) {
     const launchOpts = {
         model: opts.model || null,
         effort: opts.effort || null,
-        permissionMode: opts['permission-mode'] || 'bypassPermissions',
+        // A worker never launches with bypassPermissions: worker-authority.js refuses it, here at enqueue and again at start.
+        permissionMode: authority.launchMode(opts['permission-mode']),
         configDir: opts['config-dir'] || null,
     };
     const ledgerFile = opts.ledger || defaultLedger();
@@ -658,7 +661,7 @@ function headlessArgs(rec, files, opts) {
     const l = rec.launch || {};
     const args = [opts['headless-worker'] ? path.resolve(opts['headless-worker']) : defaultHeadlessWorker(), 'start',
         '--code', rec.slug, '--prompt-file', files.pointer, '--log', files.log, '--report', rec.report, '--cwd', rec.repo,
-        '--permission-mode', l.permissionMode || 'bypassPermissions'];
+        '--permission-mode', l.permissionMode || authority.LAUNCH_MODE];
     if (l.model) args.push('--model', l.model);
     if (l.effort) args.push('--effort', l.effort);
     if (l.configDir) args.push('--config-dir', l.configDir);
