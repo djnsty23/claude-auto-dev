@@ -419,6 +419,19 @@ async function main() {
         const names = ['tryLock', 'takeLock', 'dropLock', 'readBlock', 'sha', 'LOCK', 'GENERATED_RE'];
         check('interface: exports tryLock, takeLock, dropLock, readBlock, sha, LOCK and GENERATED_RE', names.every((n) => n in sub) && sub.GENERATED_RE instanceof RegExp && typeof sub.sha === 'function', Object.keys(sub).join(','));
         const h = spawnSync(process.execPath, [SUBJECT, '--help'], { encoding: 'utf8' });
+        const lockClaude = path.join(TMP, 'trylock-claude');
+        const probe = path.join(TMP, 'trylock-probe.js');
+        fs.writeFileSync(probe, [
+            'const fs = require("fs");',
+            'const s = require(process.argv[2]);',
+            'const a = s.tryLock(Date.now());',
+            'const held = fs.existsSync(s.LOCK);',
+            's.dropLock();',
+            'process.stdout.write(JSON.stringify({ acquired: a.acquired, held, after: fs.existsSync(s.LOCK) }));',
+        ].join('\n'));
+        const tl = spawnSync(process.execPath, [probe, SUBJECT], { encoding: 'utf8', env: { ...process.env, BRAIN_CLOCK_CLAUDE_DIR: lockClaude } });
+        let tj = null; try { tj = JSON.parse(tl.stdout); } catch { tj = null; }
+        check('interface: tryLock takes the clock lock without waiting, and dropLock gives it back', tl.status === 0 && tj && tj.acquired === true && tj.held === true && tj.after === false, tl.stdout + tl.stderr);
         check('interface: --help names the run and status verbs', h.status === 0 && /run --dump <dir>/.test(h.stdout) && /status \[--max-age-h 24\]/.test(h.stdout), h.stdout + h.stderr);
     }
 
