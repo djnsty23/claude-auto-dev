@@ -168,6 +168,8 @@ function envFor(extra = {}) {
         FRONTIER_POLL_MS: '300', FAKE_OUT: OUT, FRONTIER_PROCESS_LIST: QUIET_PS,
         CLAUDE_CODE_OAUTH_TOKEN_TESTACCT: TOKEN, CLAUDE_CODE_OAUTH_TOKEN_OTHER: 'other-account-value', ANTHROPIC_API_KEY: 'must-not-reach-the-worker',
         ANTHROPIC_AUTH_TOKEN: 'nor-this', SOME_SECRET: 'nor-this-one', DOPPLER_PROJECT: 'accounts',
+        // headless-worker reserves every run in the execution budget: keep it off the machine's real ledger and config.
+        AUTODEV_BUDGET_LEDGER: path.join(ROOT, 'execution-budget.json'), AUTODEV_BUDGET_CONFIG: path.join(ROOT, 'execution-budget-config.json'),
     }, extra);
 }
 function run(args, extra = {}, timeout = 120000) {
