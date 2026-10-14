@@ -89,6 +89,26 @@ try {
     const uncounted = sc.runProbe({ id: 'uncounted', kind: 'fixture', watch: [], probe: 'node uncounted.js', expect: '^all=PASS$', populationCount: '^ok ' }, { root: tmp, now: NOW });
     check('a zero count is no population', uncounted.population === 0 && sc.criterionStatus({ id: 'uncounted', kind: 'fixture' }, [uncounted], { now: NOW }).status === 'UNKNOWN', String(uncounted.population));
     check('a matching line from a failed process is FAIL', nonzero.status === 'FAIL' && nonzero.why === 'exit 1', nonzero.why);
+
+    // A probe killed from outside never reaches its exit event. SIGKILL to itself stands in for
+    // the outside kill: TerminateProcess on Windows, an uncatchable signal on POSIX.
+    const killSelf = "process.kill(process.pid, 'SIGKILL'); setTimeout(() => {}, 5000);";
+    fs.writeFileSync(path.join(tmp, 'killed.js'), `console.log('all=PASS'); ${killSelf}`);
+    const killed = sc.runProbe({ id: 'killed', kind: 'fixture', watch: [], probe: 'node killed.js', expect: '^all=PASS$' }, { root: tmp, now: NOW });
+    check('a probe killed twice is INDETERMINATE, not FAIL', killed.status === 'INDETERMINATE' && killed.attempts === 2 && /terminated from outside/.test(killed.why), JSON.stringify(killed).slice(0, 240));
+    const killedGrade = sc.criterionStatus({ id: 'killed', kind: 'fixture' }, [killed], { now: NOW });
+    check('an INDETERMINATE receipt grades UNKNOWN and says why', killedGrade.status === 'UNKNOWN' && /terminated from outside/.test(killedGrade.why), JSON.stringify(killedGrade));
+    fs.writeFileSync(path.join(tmp, 'once.js'), `const f = require('path').join(__dirname, 'once.flag'); if (!require('fs').existsSync(f)) { require('fs').writeFileSync(f, '1'); ${killSelf} } else { console.log('ok a'); console.log('all=PASS'); }`);
+    const once = sc.runProbe({ id: 'once', kind: 'fixture', watch: [], probe: 'node once.js', expect: '^all=PASS$', populationCount: '^ok ' }, { root: tmp, now: NOW });
+    check('a probe killed once is run again and its second run counts', once.status === 'PASS' && once.attempts === 2 && once.population === 1, JSON.stringify(once).slice(0, 240));
+    fs.writeFileSync(path.join(tmp, 'throws.js'), "throw new Error('a real defect');");
+    const threw = sc.runProbe({ id: 'throws', kind: 'fixture', watch: [], probe: 'node throws.js', expect: '^all=PASS$' }, { root: tmp, now: NOW });
+    check('a probe that throws reached its exit event, so it is FAIL on one run', threw.status === 'FAIL' && threw.attempts === 1, JSON.stringify(threw).slice(0, 240));
+    const shellOnly = sc.runProbe({ id: 'shell', kind: 'fixture', watch: [], probe: 'exit 3', expect: '^all=PASS$' }, { root: tmp, now: NOW });
+    check('a probe that runs no node process makes no kill claim', shellOnly.status === 'FAIL' && shellOnly.attempts === 1, JSON.stringify(shellOnly).slice(0, 240));
+    fs.writeFileSync(path.join(tmp, 'killed-manifest.json'), JSON.stringify({ aspects: [{ id: 'K', criteria: [{ id: 'killed', kind: 'fixture', watch: [], probe: 'node killed.js', expect: '^all=PASS$' }] }] }));
+    const mainRc = sc.main(['record', '--manifest', path.join(tmp, 'killed-manifest.json'), '--criterion', 'killed', '--receipts', path.join(tmp, 'killed-receipts')], { log: () => {}, err: () => {} });
+    check('record exits 2 for an INDETERMINATE probe', mainRc === 2, String(mainRc));
     sc.writeReceipt(receipts, pass);
     sc.writeReceipt(receipts, nonzero);
     check('receipts read back', sc.readReceipts(receipts).length === 2);
