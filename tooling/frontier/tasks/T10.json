@@ -1,0 +1,14 @@
+{
+  "id": "T10",
+  "lane": "fix",
+  "size": "XS",
+  "source": "9da41c24 hook-bypass multi-line heredoc",
+  "parent": "7562c3566f09d81c3fca1fa5364a63b21995dfb6",
+  "fix": "9da41c244ce93923a8ed4ee5f20ff01a82a6e25b",
+  "brief": "T10.md",
+  "heldOut": ["tooling/test-coordinator-write-guard.js"],
+  "checks": [["node", "tooling/test-coordinator-write-guard.js"]],
+  "passToPass": [],
+  "disclosed": [],
+  "timeoutMin": 20
+}

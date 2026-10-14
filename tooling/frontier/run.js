@@ -43,6 +43,9 @@ const USAGE = [
     '                                  machine, at most <min> minutes (10 when given alone), then starts it as a loaded row',
     '  batch-resume --batch <id>       restart the loop of a batch whose loop died',
     '  status [--json]                 batches and the latest rows',
+    '  compare --plan <file> [--fixtures]   read a preregistered plan against its rows: arms, independent oracles,',
+    '                                  leakage controls and missing runs. --fixtures reads the plan\'s recorded fixture',
+    '                                  rows, otherwise the rows in <data>/runs.jsonl. Launches nothing. Exit 1 on a red field',
     'Options: --src <repo> --tasks-dir <dir> --data <dir> --work <dir> --claude-bin <path> --hw <headless-worker.js>',
     '         --budget-stop 0.70 (seven-day utilisation that stops a batch) --api-sources none (allowed apiKeySource values)',
     'The account token is read from CLAUDE_CODE_OAUTH_TOKEN_<ACCOUNT> and handed to the worker as',
@@ -1131,6 +1134,15 @@ function main(argv) {
         }
         case 'batch-loop': value = batchLoop(c, opts.batch); break;
         case 'status': value = status(c); break;
+        case 'compare': {
+            // Text, not the JSON envelope: the scorecard reads its last line.
+            if (!opts.plan || opts.plan === true) fault('usage', 'compare needs --plan <file>');
+            const C = require('./compare.js');
+            const r = C.compare({ planFile: path.resolve(opts.plan), root: c.src, tasksDir: c.tasks, variants: readJson(path.join(HERE, 'variants.json')),
+                rows: opts.fixtures ? null : readRows(c) });
+            process.stdout.write(C.render(r));
+            return C.verdictOk(r) ? 0 : 1;
+        }
         default: fault('usage', `unknown command ${cmd}; run with --help`);
     }
     process.stdout.write(JSON.stringify({ ok: true, value }) + '\n');
