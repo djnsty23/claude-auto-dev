@@ -226,6 +226,35 @@ async function main() {
         check('selected_hash', 'verify reads the active release back as matching', v.code === 0 && v.json && v.json.ok && v.json.value.checked === fs.readdirSync(v1).length, v.out);
     }
 
+    // ------------------------------------------------------------ selected_hash: the shipped file itself
+    // The checks above run copies. These run the repo's runtime-release.js in its own claude dir.
+    {
+        const claude3 = path.join(ROOT, 'claude-shipped');
+        const env3 = baseEnv(claude3);
+        const pkg = path.join(ROOT, 'shipped', 'autodev-core');
+        const scripts = path.join(pkg, 'scripts');
+        fs.mkdirSync(scripts, { recursive: true });
+        fs.mkdirSync(path.join(pkg, '.claude-plugin'), { recursive: true });
+        for (const e of fs.readdirSync(SOURCE, { withFileTypes: true })) if (e.isFile()) fs.copyFileSync(path.join(SOURCE, e.name), path.join(scripts, e.name));
+        fs.writeFileSync(path.join(pkg, '.claude-plugin', 'plugin.json'), J({ name: 'autodev-core', version: '2.0.0' }));
+        const shipped = (argv) => node(SUBJECT, argv, env3);
+        const none = shipped(['run', 'brain-clock.js', '--help']);
+        const ev3 = readJsonl(path.join(claude3, 'autodev', 'events.jsonl'));
+        check('selected_hash', 'the shipped launcher refuses with nothing active, as one runtime.refused event', none.code !== 0 && none.json && none.json.error && none.json.error.code === 'no-active-release' && ev3.length === 1 && ev3[0].type === 'runtime.refused', none.out + J(ev3));
+        const rel3 = shipped(['release', '--from', scripts]);
+        const act3 = shipped(['activate', '--version', '2.0.0', '--wait-s', '5']);
+        check('selected_hash', 'release with no --version reads the version from the plugin manifest beside the scripts', rel3.code === 0 && rel3.json && rel3.json.value.version === '2.0.0' && act3.code === 0, rel3.out + act3.out);
+        const target = path.join(scripts, 'board-sync.js');
+        const good = fs.readFileSync(target);
+        fs.appendFileSync(target, '\n// tampered\n');
+        const ver3 = shipped(['verify']);
+        const run3 = shipped(['run', 'brain-clock.js', '--help']);
+        fs.writeFileSync(target, good);
+        check('selected_hash', 'the shipped verify and run both name the changed file', ver3.code !== 0 && ver3.json && /changed: board-sync\.js/.test(ver3.json.error.message) && run3.code !== 0 && run3.json && run3.json.error.code === 'release-mismatch', ver3.out + run3.out);
+        const ok3 = shipped(['run', 'brain-clock.js', '--help']);
+        check('selected_hash', 'the shipped launcher runs the restored release', ok3.code === 0, ok3.out);
+    }
+
     // ------------------------------------------------------------ newer_cache_ignored
     {
         makeVersion('99.0.0', (dir) => fs.writeFileSync(path.join(dir, 'brain-clock.js'), fakeNewerClock));

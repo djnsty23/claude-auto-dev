@@ -198,6 +198,21 @@ function observeSuite(script) {
     const line = json && json.sources.find((l) => l.startsWith("desktop-sessions: "));
     check("MSIX package copy is read when %APPDATA% has none", r.status === 0 && line && !/COULD-NOT-READ/.test(line) && /\b1\b/.test(line), line || r.stdout + r.stderr);
   }
+  // 10. events prints the newest events, and without gh the prs source is one COULD-NOT-READ.
+  {
+    const t = run(["events", "--tail", "2"]);
+    check("events prints the last N of all events", t.code === 0 && t.json && t.json.ok && t.json.events.length === 2 && t.json.total === events().length, t.out);
+    const bin = path.join(root, "no-gh");
+    fs.mkdirSync(bin, { recursive: true });
+    const env3 = { ...env };
+    for (const k of Object.keys(env3)) if (/^path$/i.test(k)) delete env3[k];
+    env3.PATH = bin;
+    delete env3.BRAIN_CLOCK_GH_FIXTURE;
+    const r = spawnSync(process.execPath, [script, "tick", "--observe", "--now", "2026-09-22T12:42:00Z"], { env: env3, encoding: "utf8" });
+    let json = null; try { json = JSON.parse(r.stdout); } catch { /* keep null */ }
+    const line = json && json.sources.find((l) => l.startsWith("prs: "));
+    check("without gh the prs source is COULD-NOT-READ and names gh pr list", line && /COULD-NOT-READ/.test(line) && /gh pr list/.test(line), line || r.stdout + r.stderr);
+  }
   // 9. State schema: a pass records it, and a clock older than the recorded schema refuses and writes nothing.
   {
     const metaP = path.join(autodev, "brain-clock", "state-meta.json");
