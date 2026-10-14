@@ -35,6 +35,9 @@ function check(name, cond, detail) {
 }
 
 // Async, so the in-process HTTP server can answer while the gate runs.
+// What a red check prints: a child killed at its timeout writes no stdout, so the exit, signal, time and stderr say why.
+const seen = (r) => `exit ${r.status} signal ${r.signal} after ${r.ms} ms | stdout ${r.stdout.slice(0, 300)} | stderr ${r.stderr.slice(-300)}`;
+
 function run(args, env) {
   return new Promise((resolve) => {
     const child = spawn(process.execPath, [GATE, ...args], { env: { ...process.env, ...env }, stdio: ['ignore', 'pipe', 'pipe'] });
@@ -42,8 +45,9 @@ function run(args, env) {
     let stderr = '';
     child.stdout.on('data', (d) => { stdout += d; });
     child.stderr.on('data', (d) => { stderr += d; });
+    const started = Date.now();
     const timer = setTimeout(() => child.kill(), 60000);
-    child.on('close', (status) => { clearTimeout(timer); resolve({ status, stdout, stderr }); });
+    child.on('close', (status, signal) => { clearTimeout(timer); resolve({ status, signal, ms: Date.now() - started, stdout, stderr }); });
   });
 }
 
@@ -258,7 +262,7 @@ async function main() {
     check('live requests are part of the population', /2 live requests/.test(r.stdout) && /\/api\/private \(no credentials\) -> 401/.test(r.stdout), r.stdout);
 
     const ro = await run(['--root', clean, '--url', `${base}/report-only`, '--json']);
-    check('a Report-Only policy counts as no policy', ro.status === 1 && rules(ro).has('live-csp-missing'), ro.stdout);
+    check('a Report-Only policy counts as no policy', ro.status === 1 && rules(ro).has('live-csp-missing'), seen(ro));
 
     const inl = rules(await run(['--root', clean, '--url', `${base}/inline`, '--json']));
     check("script-src 'unsafe-inline' with no nonce is an error, and X-Powered-By a warning", inl.has('live-csp-script') && inl.has('live-powered-by'), [...inl]);
