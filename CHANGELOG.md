@@ -1,5 +1,40 @@
 # Changelog
 
+## [8.192.0]
+
+### Brain
+
+- `mission-queue.js` keeps the items a session has committed to outside
+  `prd.json`, and the Stop hook holds the turn while one is pending. Items
+  handed to a worker or waiting on a person do not hold it. `stalled` lists
+  missions that stopped with pending work.
+- The Brain clock ships in autodev-core with its suite. It takes the identity
+  lock, loads helpers from beside itself and runs worker reconciliation before
+  the judge on every pass. `board-sync` moves into core with configurable paths.
+- `runtime-release.js` pins the clock's scripts by version and per-file sha256,
+  launches only an intact release, and backs up state before an activation.
+
+### Workers
+
+- Shared execution budgets: one machine-wide ledger reserves each headless
+  attempt before it spawns, and a watchdog stops a child past its turn, wall or
+  output ceiling with its whole process tree. Tool profiles are explicit.
+- Fixed worker authority per kind (builder, review, judge, probe): an env
+  allowlist plus a PreToolUse guard that denies writes outside the roots,
+  every form of git push, gh writes and undeclared secret reads.
+- `ask-queue.js` accepts an owner ask into a local canonical record keyed by
+  intent, so accepting never depends on board access and survives a crash.
+
+### Evidence
+
+- A scorecard probe killed from outside reads INDETERMINATE, not FAIL.
+- `release-protection.js` reads whether GitHub refuses a direct push to main or
+  stable and a moved or deleted release tag, for the acting account.
+- `frontier` compares arms against a preregistered plan with withheld families,
+  and a missing run is UNKNOWN, never a fail.
+- `docs/skill-dispositions.json` proposes retain, merge or retire for every
+  shipped skill. Nothing is merged or deleted until the owner decides.
+
 ## [8.191.0]
 
 ### Acceptance
