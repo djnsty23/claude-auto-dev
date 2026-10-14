@@ -529,7 +529,7 @@ function actSuite(script) {
     const n4 = W.events().length;
     const held = W.run(["tick", "--act", "mark-dead,settle-finished", "--live", "--now", T("12:15")]);
     check("a held lock skips an act pass and is left as it was", held.code === 0 && held.json && held.json.skipped === true && W.events().length === n4 && fs.readFileSync(lockP, "utf8") === lockBody, held.out);
-    fs.unlinkSync(lockP);
+    fs.rmSync(lockP, { force: true });
   }
   // C. A writer that cannot take the key: COULD-NOT-ACT, nothing spawned, and no event every pass.
   {
@@ -811,8 +811,8 @@ const PLANTS = [
   { name: "an old unattended writer is spawned anyway", from: "  if (support.missing) {\n", to: "  if (false) {\n" },
   // A9: the judge cap.
   { name: "the judge cap is refused", from: "\"settle-unattended\", \"judge\"];", to: "\"settle-unattended\"];" },
-  { name: "a live pass runs the judge dry", from: "if (a.live) argv.push(\"--live\");", to: "" },
-  { name: "a judge failure is reported every pass", from: "if (state.lastError !== error) out.events", to: "if (true) out.events" },
+  { name: "a live pass runs the judge dry", from: "String(Math.floor(budgetMs / 1000))];\n    if (a.live) argv.push(\"--live\");", to: "String(Math.floor(budgetMs / 1000))];" },
+  { name: "a judge failure is reported every pass", from: "if (state.lastError !== error) out.events.push({ type: \"judge.tick-failed\"", to: "if (true) out.events.push({ type: \"judge.tick-failed\"" },
   { name: "relayed judge events lose their source", from: "source: \"brain-judge\", key: String(e.key)", to: "source: String(e.source || \"unknown\"), key: String(e.key)" },
   { name: "a headless-channel record is settled by the clock", from: "  if (rec.channel === \"headless\") return { skip: \"headless channel, closed by brain-judge\" };\n", to: "" },
   // U2: the lock.
@@ -852,7 +852,9 @@ function main() {
       if (hits !== 1) { console.log(`PLANT-BROKEN ${p.name}: anchor matched ${hits} times`); plantFailures++; continue; }
       const mutant = path.join(dir, "brain-clock.js");
       fs.writeFileSync(mutant, src.replace(p.from, () => p.to));
-      const r = suite(mutant);
+      // A mutant that crashes the suite is caught too: the crash is its red check.
+      let r;
+      try { r = suite(mutant); } catch (e) { r = { fails: [`the suite crashed: ${String(e && e.message || e).slice(0, 200)}`] }; }
       if (r.fails.length === 0) { console.log(`PLANT-SURVIVED ${p.name}`); plantFailures++; } else console.log(`plant caught: ${p.name} (${r.fails.length} checks red, first: ${r.fails[0]})`);
     }
     fs.rmSync(dir, { recursive: true, force: true });
