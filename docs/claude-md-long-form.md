@@ -454,6 +454,9 @@ you started work; in a shared clone it moves under you.
   rulesets, `tooling/githooks/` holds only `commit-msg` and a `pre-push` that
   runs `validate.js` and says nothing about force, and `pre-tool-filter.js`
   records blocking `--force-with-lease` as a PAST mistake it will not repeat.
+  `[measured 2026-10-15]` That changed with U14: GitHub rulesets and the
+  pre-push push-guard now refuse a force-push to main, stable and `v*` tags
+  ([release-rulesets](release-rulesets/README.md)), and CLAUDE.md says so.
   Two sessions took worse paths on that sentence's authority in one morning —
   one kept an unwanted merge commit and carried an eleven-file diff into review,
   another merged where a rebase was correct. The real reason not to amend is two

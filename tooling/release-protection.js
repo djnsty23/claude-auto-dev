@@ -66,6 +66,12 @@ function ruleTypesFor(state, ref) {
     return types;
 }
 
+/** The rule types that refuse a force-push to `branch` for the acting account. */
+function forcePushBlockers(state, branch) {
+    const types = ruleTypesFor(state, 'refs/heads/' + branch);
+    return ['non_fast_forward', 'pull_request', 'update'].filter((t) => types.has(t));
+}
+
 function classicBlocksDirect(p) {
     if (!p) return false;
     const enforced = p.enforce_admins && p.enforce_admins.enabled;
@@ -128,7 +134,7 @@ function readLive(repo) {
 
 const line = (f) => `direct_write=${f.direct_write} tag_replace=${f.tag_replace} tag_delete=${f.tag_delete} authorized_publish=${f.authorized_publish}`;
 
-module.exports = { classify, readLive, repoFromRemote, line, globToRegex, UNKNOWN };
+module.exports = { classify, readLive, repoFromRemote, line, globToRegex, forcePushBlockers, UNKNOWN };
 
 if (require.main === module) {
     const args = process.argv.slice(2);

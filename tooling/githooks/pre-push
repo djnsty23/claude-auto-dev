@@ -25,6 +25,14 @@
 #
 # Bypass, when you mean it:  git push --no-verify
 
+# Release refs only move forward: no force-push or deletion of main or stable,
+# and an existing release tag (v*) is never moved or deleted. GitHub rulesets
+# refuse the same on the server; this fails it before it leaves the machine.
+# git hands the hook its ref lines on stdin. See tooling/push-guard.js.
+if ! node "$(git rev-parse --show-toplevel)/tooling/push-guard.js"; then
+    exit 1
+fi
+
 if ! node "$(git rev-parse --show-toplevel)/tooling/validate.js"; then
     echo ""
     echo "pre-push: validate failed — not pushing."

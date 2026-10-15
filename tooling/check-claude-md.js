@@ -17,6 +17,8 @@
  *      Two sessions took worse paths on that sentence's authority in one
  *      morning — one kept an unwanted merge commit and carried an eleven-file
  *      diff into review, another merged where a rebase was correct.
+ *      `[measured 2026-10-15]` the sentence is true again: release rulesets
+ *      (docs/release-rulesets/) and the pre-push push-guard refuse it.
  *   3. `[measured 2026-08-29]` the `passes` table listed FOUR states for as long
  *      as `needs-setup` had existed, and briefs written from it propagated the
  *      omission to other sessions.
@@ -64,6 +66,7 @@ const os = require('os');
 const path = require('path');
 const { spawnSync } = require('child_process');
 const { readGateChain } = require('./gate-lock.js');
+const releaseProtection = require('./release-protection.js');
 
 const argv = process.argv.slice(2);
 const has = (f) => argv.includes(f);
@@ -581,10 +584,13 @@ function checkForcePush(md, root, report, { network }) {
 
     const branch = defaultBranch(root);
     const protection = ghApi(`repos/${slug}/branches/${branch}/protection`);
-    const rulesets = ghApi(`repos/${slug}/rulesets`);
+    // The rulesets with their rules and this account's bypass, not just a
+    // count: a tag-only ruleset, or one the account can always bypass, does
+    // not stop a force-push to the default branch.
+    const live = releaseProtection.readLive(slug);
 
-    if (!protection.reachable || !rulesets.reachable) {
-        const why = !protection.reachable ? protection.reason : rulesets.reason;
+    if (!protection.reachable || !live.state) {
+        const why = !protection.reachable ? protection.reason : live.error;
         report.skip('force-push',
             `CLAUDE.md:${claim.line} claims force-push ${claimsBlocked ? 'IS' : 'is NOT'} blocked. `
             + `NOT VERIFIED — the GitHub API was unreachable: ${why}. `
@@ -599,12 +605,8 @@ function checkForcePush(md, root, report, { network }) {
         // `allow_force_pushes.enabled === false` is the API saying it blocks.
         if (!afp || afp.enabled === false) reasons.push(`branch protection on ${branch} disallows force pushes`);
     }
-    if (Array.isArray(rulesets.body) && rulesets.body.length > 0) {
-        // Deliberately conservative: a ruleset EXISTS, so blocking cannot be
-        // ruled out. Reporting "not blocked" here would be a false positive,
-        // and one false positive is what gets a gate switched off.
-        reasons.push(`${rulesets.body.length} repository ruleset(s) exist and may carry non_fast_forward`);
-    }
+    const ruleTypes = releaseProtection.forcePushBlockers(live.state, branch);
+    if (ruleTypes.length) reasons.push(`an active ruleset on ${branch} binds this account with ${ruleTypes.join(', ')}`);
     if (local.blocks) reasons.push(`local hooks reference force-push: ${local.blocking.join(', ')}`);
 
     const blocked = reasons.length > 0;
@@ -617,7 +619,7 @@ function checkForcePush(md, root, report, { network }) {
         actual: blocked
             ? `blocked — ${reasons.join('; ')}`
             : `NOT blocked — ${branch} carries no branch protection, `
-              + `${Array.isArray(rulesets.body) ? rulesets.body.length : 0} rulesets, and no local hook `
+              + `no binding ruleset (${live.state.rulesets.length} read), and no local hook `
               + `mentions force (${local.hooks.join(', ') || 'no githooks'})`,
         source: `GitHub API repos/${slug}/branches/${branch}/protection and /rulesets, plus tooling/githooks/`,
     });

@@ -74,7 +74,9 @@ console.log('  2. node tooling/validate.js');
 // reads one as red. 8.178.0 and 8.179.0 shipped lightweight from this line.
 console.log(`  3. git tag -a v${version} -m "v${version}"`);
 // Installs pin to the stable branch (README), so moving it is what ships the
-// version. A plain push, never forced: the branch only ever moves forward.
+// version. A ruleset refuses every direct push to stable; publish-release.js
+// moves it forward with the deploy key once the gate receipt proves the tag
+// commit's tree (docs/release-rulesets/README.md).
 // Not `release`: origin keeps the old release/<version> PR branches, and a
 // branch cannot share its name with a ref directory (refname conflict).
-console.log(`  4. once the tagged commit is on main: git push origin v${version} v${version}^{commit}:refs/heads/stable`);
+console.log(`  4. once the tagged commit is on main: node tooling/publish-release.js --version ${version} --gate-receipt <gate log> --head <PR head sha>`);
