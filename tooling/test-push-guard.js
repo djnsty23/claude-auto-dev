@@ -59,21 +59,27 @@ check('one bad ref among good ones is still refused',
     r(line(B, B, 'refs/heads/main', A) + line(C, C, 'refs/tags/v1.0.0', A) + line('refs/tags/v2', B, 'refs/tags/v2', ZERO)).length === 1);
 check('CRLF input is read', r(line(C, C, 'refs/heads/main', B).replace('\n', '\r\n')).length === 1);
 
-// Wiring: the real hook, in this checkout, with this repo's own history.
+// Wiring: the real hook text and the real guard, run in the throwaway repo so
+// the history is known. CI checks out one commit, so this repo's own HEAD~1
+// may not exist. validate.js is stubbed green: the hook's other half is not
+// under test here.
 const SH = (() => {
     if (process.platform !== 'win32') return 'sh';
     const gitRoot = path.resolve(execFileSync('git', ['--exec-path'], { encoding: 'utf8' }).trim(), '..', '..', '..');
     for (const rel of ['bin/sh.exe', 'usr/bin/sh.exe']) if (fs.existsSync(path.join(gitRoot, rel))) return path.join(gitRoot, rel);
     return null;
 })();
-const head = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: ROOT, encoding: 'utf8' }).trim();
-const parent = execFileSync('git', ['rev-parse', 'HEAD~1'], { cwd: ROOT, encoding: 'utf8' }).trim();
-const hook = (input) => spawnSync(SH, [PRE_PUSH, 'origin', 'https://example.invalid/repo.git'], { cwd: ROOT, input, encoding: 'utf8', windowsHide: true });
+fs.mkdirSync(path.join(TMP, 'tooling', 'githooks'), { recursive: true });
+fs.copyFileSync(PRE_PUSH, path.join(TMP, 'tooling', 'githooks', 'pre-push'));
+fs.copyFileSync(path.join(ROOT, 'tooling', 'push-guard.js'), path.join(TMP, 'tooling', 'push-guard.js'));
+fs.writeFileSync(path.join(TMP, 'tooling', 'validate.js'), 'process.exitCode = 0;\n');
+const hook = (input) => spawnSync(SH, [path.join(TMP, 'tooling', 'githooks', 'pre-push'), 'origin', 'https://example.invalid/repo.git'],
+    { cwd: TMP, input, encoding: 'utf8', windowsHide: true });
 if (!SH) check('a POSIX sh is available to run the hook', false, 'no sh beside git');
 else {
-    const back = hook(line(parent, parent, 'refs/heads/stable', head));
-    check('the pre-push hook refuses rewinding stable', back.status === 1 && /push-guard/.test(back.stderr), `exit ${back.status}`);
-    const fwd = hook(line(head, head, 'refs/heads/stable', parent));
+    const back = hook(line(A, A, 'refs/heads/stable', B));
+    check('the pre-push hook refuses rewinding stable', back.status === 1 && /push-guard/.test(back.stderr), `exit ${back.status} ${back.stderr.slice(-200)}`);
+    const fwd = hook(line(B, B, 'refs/heads/stable', A));
     check('the pre-push hook lets stable move forward', fwd.status === 0, `exit ${fwd.status} ${fwd.stderr.slice(-200)}`);
 }
 
