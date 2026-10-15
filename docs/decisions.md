@@ -3,6 +3,41 @@
 Non-obvious choices, and where the work that implements them actually landed.
 One entry per decision, newest first.
 
+## 2026-10-15: stable moves only through a deploy key bound to the gate receipt
+
+A version is a cache key, yet nothing on GitHub stopped main, stable or a
+`v*` tag from being rewritten. Three rulesets now do
+(`docs/release-rulesets/`): main and stable take a pull_request rule plus
+non_fast_forward and deletion, and `v*` tags take update, non_fast_forward
+and deletion. Tags carry no creation rule, so a new release tag can still be
+pushed. Neither branch carries an update rule, so both can still move.
+
+main has no bypass at all: merge-lock already lands every change with
+`gh pr merge --rebase`, and no script in `tooling/` or
+`plugins/*/scripts` pushed main directly. stable cannot work that way. It
+must equal the release tag's commit, and a pull request merge rewrites SHAs.
+So the stable ruleset's one bypass actor is a repository deploy key, and the
+operator account is not one. The key lives only in the operator's `~/.ssh`
+and `tooling/publish-release.js` is its only user. That script refuses
+unless the tag is annotated, VERSION matches, the commit is on origin/main,
+stable only moves forward, and the gate receipt passes merge-lock's
+`receiptProblem()` for a head whose tree equals the tag commit's tree. A
+rebase merge changes the SHA but not the tree, so the receipt from the PR's
+frozen candidate binds the release. Alternatives rejected: a GitHub App or
+fine-grained token as bypass actor is a new credential with more scope; making
+the operator a bypass actor makes every rule advisory for the account that
+runs every session; a required CI check moves the authoritative gate off this
+machine.
+
+The CLAUDE.md force-push sentence had to flip without a red gate on main in
+between. Any ruleset made the old checker read "blocked", so rules could not
+come first, and a "blocked" sentence could not merge before the rules existed.
+`tooling/githooks/pre-push` now runs `tooling/push-guard.js`, which refuses
+the same force-pushes and tag rewrites locally. That makes "force-push is
+blocked" true from the moment this lands, before and after the rulesets. The
+checker's negative direction now reads ruleset rules and bypass through
+`release-protection.js` instead of counting rulesets.
+
 ## 2026-10-07: a small candidate merges on a fast-lane receipt, judged twice
 
 The operator's policy lets a small candidate that touches no auth, payments or
