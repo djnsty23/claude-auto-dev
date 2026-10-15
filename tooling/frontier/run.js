@@ -727,7 +727,13 @@ function rowFor(c, meta, extra) {
 function killTree(pid) {
     if (!pid) return;
     if (process.platform === 'win32') spawnSync('taskkill', ['/F', '/T', '/PID', String(pid)], { windowsHide: true, encoding: 'utf8' });
-    else { try { process.kill(-pid, 'SIGKILL'); } catch { try { process.kill(pid, 'SIGKILL'); } catch { /* already gone */ } } }
+    else {
+        // SIGTERM first: the supervisor passes it on to the worker, which leads its own
+        // process group, so a SIGKILL to the supervisor's group alone leaves the worker running.
+        try { process.kill(pid, 'SIGTERM'); } catch { return; }
+        for (let i = 0; i < 40 && pidAlive(pid); i++) sleepMs(125);
+        try { process.kill(-pid, 'SIGKILL'); } catch { try { process.kill(pid, 'SIGKILL'); } catch { /* already gone */ } }
+    }
 }
 
 /**

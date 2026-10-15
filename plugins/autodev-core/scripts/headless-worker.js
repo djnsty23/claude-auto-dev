@@ -797,7 +797,7 @@ function supervise(opts) {
     };
     process.on('exit', settleCapacity);
     // The budget attempt: begun once begin() accepted it, launched once claude spawned.
-    const run = { begun: false, launched: false, launchedAt: null, stop: null, watchdog: null };
+    const run = { begun: false, launched: false, launchedAt: null, stop: null, watchdog: null, childPid: null, waiting: null };
     const settleBudget = (exit, reason) => {
         if (!run.begun) return;
         run.begun = false;
@@ -834,6 +834,7 @@ function supervise(opts) {
             else finish([`CLAUDE_EXIT=${code}`], code === 0 ? 0 : 1, code);
         });
         if (child.pid) {
+            run.childPid = child.pid;
             run.launched = true;
             run.launchedAt = Date.now();
             const held = budget.attemptOf(o.attemptId, { ledger: o.budgetLedger });
@@ -862,7 +863,7 @@ function supervise(opts) {
             finish([`CAPACITY_DEFERRED=${c.why}`, 'CLAUDE_EXIT=-1'], 1);
             return { supervising: false, code: o.code, capacity: c.why };
         }
-        setTimeout(admitThenLaunch, capacity.pollMs());
+        run.waiting = setTimeout(admitThenLaunch, capacity.pollMs());
         return { supervising: true, code: o.code, capacity: c.why };
     };
     const b = o.attemptId ? budget.begin(o.attemptId, { pid: process.pid, ledger: o.budgetLedger })
@@ -872,6 +873,15 @@ function supervise(opts) {
         return { supervising: false, code: o.code, budget: b.code };
     }
     run.begun = true;
+    // POSIX: the child leads its own process group, so a SIGTERM aimed at this
+    // supervisor (frontier's timeout, fleet-view's stop) reaches it only if passed on.
+    if (process.platform !== 'win32') {
+        process.once('SIGTERM', () => {
+            if (run.childPid) { budget.killTree(run.childPid); return; }
+            clearTimeout(run.waiting);
+            finish(['CLAUDE_SIGNAL=SIGTERM', 'CLAUDE_EXIT=-1'], 1);
+        });
+    }
     return admitThenLaunch();
 }
 
