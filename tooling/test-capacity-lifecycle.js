@@ -34,6 +34,13 @@
  * point at a fake home, every probe is injected (volume, pagefile, capacity,
  * processes, pull requests, transcript dirs), and the suite asserts that
  * nothing landed in the fake home's or the real profile's lifecycle state.
+ *
+ * The real capacity ledger is NOT watched by mtime: every gate in either lane
+ * of full-gate-queue.js rewrites it at admission and settlement, so an mtime
+ * watch went red whenever two gates overlapped. Instead the suite proves its
+ * capacity writes landed in its private ledger (the file exists on disk under
+ * TMP), and reads the real ledger only for a reservation pointing into TMP,
+ * which no concurrent gate can write.
  */
 'use strict';
 
@@ -43,10 +50,9 @@ const path = require('path');
 const { spawn, spawnSync } = require('child_process');
 
 const REAL_HOME = os.homedir();
-const REAL_WATCH = [
-    path.join(REAL_HOME, '.claude', 'autodev', 'lifecycle'),
-    path.join(REAL_HOME, '.claude', 'autodev', 'locks', 'full-gate.capacity.json'),
-];
+// Only paths no concurrent gate writes. The real capacity ledger is checked by content instead.
+const REAL_WATCH = [path.join(REAL_HOME, '.claude', 'autodev', 'lifecycle')];
+const REAL_LEDGER = path.join(REAL_HOME, '.claude', 'autodev', 'locks', 'full-gate.capacity.json');
 const statOf = (p) => { try { const s = fs.statSync(p); return `${s.mtimeMs}:${s.size}`; } catch { return 'absent'; } };
 const realBefore = REAL_WATCH.map(statOf);
 
@@ -84,6 +90,7 @@ Object.assign(process.env, {
 
 const lc = require(SCRIPT);
 const capacity = require(path.join(SCRIPTS, 'capacity.js'));
+const inTmp = (p) => typeof p === 'string' && (path.resolve(p) + path.sep).startsWith(TMP + path.sep);
 
 const problems = { growth_reconciled: [], expired_eligible: [], protected: [], missed_retention: [], lifecycle_recovery: [] };
 let protectedLost = false;
@@ -403,6 +410,10 @@ function recovery(ctx) {
         note('lifecycle_recovery', x.status === 0 && bytes !== null && bytes.equals(Buffer.from([0, 1, 2, 3, 255])),
             `the archive did not round-trip: status ${x.status} signal ${x.signal} error ${x.error ? x.error.code : 'none'} extracted ${bytes ? bytes.toString('hex') : 'nothing'} stderr ${String(x.stderr).trim()}`);
     }
+    // status() reads an absent ledger as empty, so the file itself must exist: proof the admission wrote here and not elsewhere.
+    const privateLedger = capacity.ledgerPath(process.env.AUTODEV_GATE_LOCK_PATH);
+    note('lifecycle_recovery', inTmp(privateLedger) && exists(privateLedger), `the admitted archive left no private ledger at ${privateLedger}`);
+    note('lifecycle_recovery', exists(capacity.ledgerPath(path.join(TMP, 'gate-short', 'full-gate.lock'))), 'the refused archive left no private ledger');
     const ledger = capacity.status({ base: process.env.AUTODEV_GATE_LOCK_PATH, isAlive: () => true });
     note('lifecycle_recovery', ledger.ledger && ledger.ledger.reservations.length === 0, 'an archive reservation was never released');
     note('lifecycle_recovery', capacity.CLASSES.includes('archive'), 'capacity has no archive class');
@@ -438,7 +449,11 @@ function parseAndUsage() {
         problems.lifecycle_recovery.push(`the suite threw: ${e.stack}`);
     }
     note('lifecycle_recovery', !exists(path.join(FAKE_HOME, '.claude')), 'something defaulted into the profile dir');
-    note('lifecycle_recovery', REAL_WATCH.map(statOf).join('|') === realBefore.join('|'), 'the real profile lifecycle or capacity state changed');
+    note('lifecycle_recovery', REAL_WATCH.map(statOf).join('|') === realBefore.join('|'), 'the real profile lifecycle state changed');
+    // Concurrent gates rewrite the real ledger freely, and only a reservation pointing into TMP can be this suite's.
+    let leaked = [];
+    try { leaked = (JSON.parse(fs.readFileSync(REAL_LEDGER, 'utf8')).reservations || []).filter((r) => r && (inTmp(r.path) || String(r.note || '').includes(TMP))); } catch { /* absent or mid-rewrite: nothing of ours to read */ }
+    note('lifecycle_recovery', leaked.length === 0, `the real capacity ledger holds this suite's reservation ${leaked.map((r) => r.id).join(', ')}`);
     for (const [k, v] of Object.entries(problems)) for (const w of v) process.stderr.write(`${k}: ${w}\n`);
     const fields = {
         growth_reconciled: problems.growth_reconciled.length ? 'FAIL' : 'PASS',
