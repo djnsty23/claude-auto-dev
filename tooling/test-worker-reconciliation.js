@@ -184,8 +184,16 @@ try {
         const marker = parse(integ());
         check('wrong_hash', 'control: the .in_use marker Claude Code writes is not code, and stays ALLOWED', marker.verdict === 'ALLOWED', JSON.stringify(marker));
 
+        // macOS: the record says /var/..., node runs the launcher from /private/var/...
         const idx = readJson(path.join(icfg, 'plugins', 'installed_plugins.json'));
         const key = Object.keys(idx.plugins)[0];
+        const aliasCfg = path.join(ROOT, 'install-cfg-alias');
+        fs.symlinkSync(icfg, aliasCfg, 'junction');
+        idx.plugins[key][0].installPath = path.join(aliasCfg, path.relative(icfg, inst));
+        write(path.join(icfg, 'plugins', 'installed_plugins.json'), JSON.stringify(idx));
+        const aliased = parse(integ());
+        check('wrong_hash', 'a record naming the root through a link (macOS /var for /private/var) is still that install, and ALLOWED', aliased.verdict === 'ALLOWED', JSON.stringify(aliased));
+        idx.plugins[key][0].installPath = inst;
         idx.plugins[key][0].gitCommitSha = 'f'.repeat(40);
         write(path.join(icfg, 'plugins', 'installed_plugins.json'), JSON.stringify(idx));
         const wrongCommit = parse(integ());

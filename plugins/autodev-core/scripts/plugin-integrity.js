@@ -44,8 +44,13 @@ function blobShas(buf) {
     return out;
 }
 
+/** One directory under two spellings is one path: macOS /var is /private/var, and node
+ * runs a main module from its real path. Compared by real path when it exists. */
 function samePath(a, b) {
-    const norm = (p) => path.resolve(p).replace(/[\\/]+$/, '');
+    const norm = (p) => {
+        const r = path.resolve(p);
+        try { return fs.realpathSync.native(r).replace(/[\\/]+$/, ''); } catch { return r.replace(/[\\/]+$/, ''); }
+    };
     return process.platform === 'win32' ? norm(a).toLowerCase() === norm(b).toLowerCase() : norm(a) === norm(b);
 }
 
