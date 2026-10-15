@@ -1452,9 +1452,9 @@ fs.lstatSync = function (file, ...args) {
     } else {
       // On failure this names the refusal: macOS CI showed only an empty archive.
       check('W1 POSIX control: the non-ASCII row carries no blocker', row(after, 'unicode').risk, null);
-      // The expected spelling is explicit and independent of the production
-      // comparator: libarchive lists imported UTF-8 names as NFD on Apple.
-      const name = process.platform === 'darwin' ? '.claude/nota\u0306 s\u0326.md' : '.claude/not\u0103 \u0219.md';
+      // members() folds bsdtar's NFD listing on Apple to NFC, so the expected
+      // spelling is NFC everywhere. The extraction control above checks the bytes.
+      const name = '.claude/not\u0103 \u0219.md';
       check('W1 POSIX control: non-ASCII names are preserved', JSON.stringify(members(row(after, 'unicode'))), JSON.stringify([name]));
     }
   }
@@ -1503,7 +1503,8 @@ function checkPosixLocaleControls() {
     const messages = [];
     require('vm').runInNewContext(source.slice(from, to), {
       spawnSync: () => ({ status: 0, stdout: charmap + '\n' }),
-      members: () => members, row: () => ({ risk: null }), after: [], process: { platform },
+      // The fixtures are tar's raw listing: fold them as the real members() does.
+      members: () => members.map((n) => n.normalize('NFC')), row: () => ({ risk: null }), after: [], process: { platform },
       check: (name, actual, expected) => assertions.push(actual === expected),
       console: { log: (message) => messages.push(message) },
     });
