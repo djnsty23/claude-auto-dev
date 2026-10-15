@@ -229,13 +229,15 @@ function releaseLock(lock, { token, identity = null } = {}) {
     let st;
     try { st = fs.statSync(lock); }
     catch (e) { return { released: false, why: e.code === 'ENOENT' ? 'the lock is already gone' : `the lock cannot be read (${e.code})` }; }
-    if (identity && (st.dev !== identity.dev || st.ino !== identity.ino)) {
-        return { released: false, why: 'the lock file was replaced by another acquisition' };
-    }
+    const replaced = { released: false, why: 'the lock file was replaced by another acquisition' };
+    if (identity && (st.dev !== identity.dev || st.ino !== identity.ino)) return replaced;
     let owner;
     try { owner = parseOwner(fs.readFileSync(lock, 'utf8')); }
     catch (e) { return { released: false, why: `the lock cannot be read (${e.code})` }; }
     if (!owner) return { released: false, why: 'the lock records no owner' };
+    // ext4 gives a freed inode to the next file at once, so a replacement can carry
+    // this acquisition's dev and ino. Its token is what tells the two apart.
+    if (identity && owner.token !== token) return replaced;
     if (owner.pid !== process.pid || owner.start !== OWN_START) {
         return { released: false, why: `the lock belongs to pid ${owner.pid}, not to this process` };
     }

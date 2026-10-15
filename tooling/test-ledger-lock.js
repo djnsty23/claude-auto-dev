@@ -254,6 +254,19 @@ try {
         assert.deepEqual(b.release(), { released: true, why: null });
         assert.equal(b.release().why, 'the lock is already gone');
     });
+    check('a replacement that reuses the freed inode is still named replaced, and survives', () => {
+        // ext4 hands the unlinked inode to the next create, so A's identity matches B's file.
+        const lock = file + '.write-lock';
+        const a = acquireLock(lock, { waitMs: 100 });
+        fs.unlinkSync(lock);
+        const b = acquireLock(lock, { waitMs: 100 });
+        try {
+            const stale = releaseLock(lock, { token: a.token, identity: b.identity });
+            assert.equal(stale.released, false);
+            assert.match(stale.why, /replaced/);
+            assert.equal(JSON.parse(fs.readFileSync(lock, 'utf8')).token, b.token);
+        } finally { b.release(); }
+    });
     check('lock metadata write failure releases the exclusively created file', () => {
         const originalWrite = fs.writeFileSync;
         fs.writeFileSync = function (target, ...args) {
