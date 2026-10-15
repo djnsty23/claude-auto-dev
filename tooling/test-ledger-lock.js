@@ -267,6 +267,30 @@ try {
             assert.equal(JSON.parse(fs.readFileSync(lock, 'utf8')).token, b.token);
         } finally { b.release(); }
     });
+    check('an acquisition whose file now carries another token is not acquired', () => {
+        // The file keeps A's dev and ino but B's body, which is what a reused inode produces.
+        const lock = file + '.write-lock';
+        const other = JSON.stringify({ pid: process.pid, start: new Date().toISOString(), token: 'successor-token' });
+        const originalWrite = fs.writeFileSync;
+        let planted = false;
+        fs.writeFileSync = function (target, ...args) {
+            const out = originalWrite.call(this, target, ...args);
+            if (typeof target === 'number' && !planted) { planted = true; originalWrite.call(this, lock, other); }
+            return out;
+        };
+        let a;
+        try { a = acquireLock(lock, { waitMs: 50 }); }
+        finally { fs.writeFileSync = originalWrite; }
+        try {
+            assert.ok(planted);
+            assert.equal(a.acquired, false);
+            assert.equal(a.holder.token, 'successor-token');
+            assert.equal(JSON.parse(fs.readFileSync(lock, 'utf8')).token, 'successor-token');
+        } finally {
+            if (a.acquired) a.release();
+            fs.rmSync(lock, { force: true });
+        }
+    });
     check('lock metadata write failure releases the exclusively created file', () => {
         const originalWrite = fs.writeFileSync;
         fs.writeFileSync = function (target, ...args) {

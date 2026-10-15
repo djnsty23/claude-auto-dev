@@ -284,14 +284,17 @@ function acquireLock(lock, { waitMs = 10000, meta = {} } = {}) {
         try {
             fs.writeFileSync(fd, ownerBody(token, meta));
             // Ours unless a reclaimer judged the file ownerless before the body landed.
+            // A reused inode can carry our dev and ino, so the token read back decides.
             const current = fs.statSync(lock);
-            mine = current.dev === identity.dev && current.ino === identity.ino;
+            mine = current.dev === identity.dev && current.ino === identity.ino
+                && parseOwner(fs.readFileSync(lock, 'utf8'))?.token === token;
         } catch (e) {
-            fs.closeSync(fd);
+            // The open descriptor keeps our inode from being reused, so compare before closing.
             try {
                 const current = fs.statSync(lock);
                 if (current.dev === identity.dev && current.ino === identity.ino) fs.unlinkSync(lock);
             } catch { /* do not remove another owner's lock */ }
+            fs.closeSync(fd);
             sweepTickets(lock);
             throw e;
         }
