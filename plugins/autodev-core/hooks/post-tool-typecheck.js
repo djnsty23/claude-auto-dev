@@ -49,6 +49,21 @@ try {
 
 if (process.env.CLAUDE_PLUGIN_OPTION_TYPECHECK === 'false') process.exit(0);
 
+// THE PROJECT IS THE PAYLOAD'S CWD, NOT OURS. A worker launched in a product's
+// main checkout edits a worktree of it; the hook process still starts in the
+// main checkout. Recording there made the Stop half typecheck a tree with no
+// node_modules. The root is the nearest ancestor of the payload cwd holding a
+// `.git` entry (a worktree's is a file), which is `git rev-parse
+// --show-toplevel` without a subprocess on every edit. stop-typecheck.js
+// resolves the same root, so both halves agree on where the list lives.
+function projectRoot(cwd) {
+    const start = path.resolve(typeof cwd === 'string' && cwd ? cwd : process.cwd());
+    for (let dir = start; ; dir = path.dirname(dir)) {
+        if (fs.existsSync(path.join(dir, '.git'))) return dir;
+        if (path.dirname(dir) === dir) return start;
+    }
+}
+
 try {
     const toolInput = (data && data.tool_input) || {};
     const paths = [];
@@ -63,12 +78,14 @@ try {
     // Restraint, kept from the old hook: a cwd with no package.json is not a
     // project this check can run in, and it must not grow a .claude/ directory
     // in every folder a JS file was ever edited from.
-    if (!fs.existsSync('package.json')) process.exit(0);
+    const base = typeof data.cwd === 'string' && data.cwd ? data.cwd : process.cwd();
+    const root = projectRoot(base);
+    if (!fs.existsSync(path.join(root, 'package.json'))) process.exit(0);
 
-    const dir = path.join(process.cwd(), '.claude');
+    const dir = path.join(root, '.claude');
     fs.mkdirSync(dir, { recursive: true });
     fs.appendFileSync(path.join(dir, '.typecheck-pending'),
-        edited.map((p) => path.resolve(p)).join('\n') + '\n');
+        edited.map((p) => path.resolve(base, p)).join('\n') + '\n');
 } catch {
     // An accumulator that cannot write has nothing to say.
 }

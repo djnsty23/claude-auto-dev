@@ -26,9 +26,11 @@ const cases = [];
 const check = (label, ok) => cases.push([label, ok]);
 
 let n = 0;
-function project({ scripts, pending, extraFiles = {} } = {}) {
+function project({ scripts, pending, extraFiles = {}, modules = true } = {}) {
     const dir = path.join(TMP, 'p' + ++n);
     fs.mkdirSync(path.join(dir, '.claude'), { recursive: true });
+    // An installed project: the hook stays silent in a tree with no node_modules.
+    if (modules) fs.mkdirSync(path.join(dir, 'node_modules'));
     if (scripts !== undefined) {
         fs.writeFileSync(path.join(dir, 'package.json'), JSON.stringify({ name: 'p', scripts }));
     }
@@ -85,6 +87,16 @@ const PASSING = 'node -e "process.exit(0)"';
     const dir = project({ pending: ['src/app.ts'] });
     const r = run(dir);
     check('pending but no package.json: silent', silent(r));
+    check('  and the list is consumed', consumed(dir));
+}
+
+// A tree with no node_modules fails every import, and that is noise about the
+// install, not about the edit. tooling/test-typecheck-worktree-root.js drives
+// the real case: a worktree launched from a main checkout without them.
+{
+    const dir = project({ scripts: { typecheck: FAILING }, pending: ['src/app.ts'], modules: false });
+    const r = run(dir);
+    check('no node_modules: silent even though typecheck would fail', silent(r));
     check('  and the list is consumed', consumed(dir));
 }
 
