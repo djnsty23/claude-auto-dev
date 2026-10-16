@@ -23,7 +23,7 @@
 // marker says what the bit cannot: that THIS hook blocked, for THIS session.
 //
 // Every quiet path is zero bytes on both streams: no pending list, no
-// package.json, no scripts, or a green run. Always exits 0.
+// package.json, no node_modules, no scripts, or a green run. Always exits 0.
 //
 // The `typecheck` switch (plugin userConfig, reaching hooks as
 // CLAUDE_PLUGIN_OPTION_TYPECHECK="false") skips this hook: it advises, it never
@@ -74,9 +74,10 @@ const RUN_TIMEOUT_MS = 25000;
  * `e.status` is null and `e.signal` is 'SIGTERM' on a timeout kill, so status
  * alone cannot separate the two cases. Check killed/signal first.
  */
-function runQuiet(cmd) {
+function runQuiet(cmd, cwd) {
     try {
         execSync(cmd, {
+            cwd,
             timeout: RUN_TIMEOUT_MS,
             stdio: ['ignore', 'pipe', 'pipe'],
             // execSync routes through cmd.exe on Windows and would flash a console
@@ -94,6 +95,19 @@ function runQuiet(cmd) {
     }
 }
 
+// THE PROJECT IS THE PAYLOAD'S CWD, NOT OURS: see projectRoot in
+// post-tool-typecheck.js, which records into the same root. A worker launched
+// in a product's main checkout and editing a worktree of it starts this hook in
+// the main checkout, and running the check there reported "Cannot find module"
+// on every turn, because only the worktree has node_modules.
+function projectRoot(cwd) {
+    const start = path.resolve(typeof cwd === 'string' && cwd ? cwd : process.cwd());
+    for (let dir = start; ; dir = path.dirname(dir)) {
+        if (fs.existsSync(path.join(dir, '.git'))) return dir;
+        if (path.dirname(dir) === dir) return start;
+    }
+}
+
 try {
     let data = {};
     try { data = JSON.parse(fs.readFileSync(0, 'utf8')) || {}; } catch { data = {}; }
@@ -102,7 +116,9 @@ try {
     // nothing ends the episode, so a later failure is a first failure again.
     const sid = typeof data.session_id === 'string' && data.session_id
         ? data.session_id.replace(/[^A-Za-z0-9_-]/g, '_').slice(0, 80) : 'no-session';
-    const marker = path.join(process.cwd(), '.claude', '.typecheck-retry-' + sid);
+    const root = projectRoot(data.cwd);
+    const at = (rel) => path.join(root, rel);
+    const marker = path.join(root, '.claude', '.typecheck-retry-' + sid);
     let isRetry = false;
     try { fs.unlinkSync(marker); isRetry = true; } catch { /* no block outstanding */ }
 
@@ -112,7 +128,7 @@ try {
     // After the rename a peer's append starts a fresh list for the next Stop.
     // What remains is an append that opened the file before the rename and
     // wrote after the read below: one appendFileSync call wide.
-    const pending = path.join(process.cwd(), '.claude', '.typecheck-pending');
+    const pending = path.join(root, '.claude', '.typecheck-pending');
     const claim = pending + '.' + process.pid + '.claim';
     try { fs.renameSync(pending, claim); } catch { process.exit(0); }
     let raw = '';
@@ -123,14 +139,17 @@ try {
 
     const files = [...new Set(raw.split('\n').map((s) => s.trim()).filter(Boolean))];
     if (files.length === 0) process.exit(0);
-    if (!fs.existsSync('package.json')) process.exit(0);
+    if (!fs.existsSync(at('package.json'))) process.exit(0);
+    // No node_modules: every module import fails, so the output would be noise
+    // about the install, not about the edit. Nothing a type check can say here.
+    if (!fs.existsSync(at('node_modules'))) process.exit(0);
 
     let pkg = {};
-    try { pkg = JSON.parse(fs.readFileSync('package.json', 'utf8')) || {}; } catch { pkg = {}; }
+    try { pkg = JSON.parse(fs.readFileSync(at('package.json'), 'utf8')) || {}; } catch { pkg = {}; }
     const scripts = pkg.scripts || {};
-    const pm = fs.existsSync('pnpm-lock.yaml') ? 'pnpm' :
-               fs.existsSync('yarn.lock') ? 'yarn' :
-               fs.existsSync('bun.lockb') ? 'bun' : 'npm';
+    const pm = fs.existsSync(at('pnpm-lock.yaml')) ? 'pnpm' :
+               fs.existsSync(at('yarn.lock')) ? 'yarn' :
+               fs.existsSync(at('bun.lockb')) ? 'bun' : 'npm';
 
     const findings = [];
     // A check that ran out of budget is INCONCLUSIVE, not passing and not
@@ -138,22 +157,22 @@ try {
     // is never silent either, because a check nobody ran must not read as green.
     const skipped = [];
     if (scripts.typecheck) {
-        const r = runQuiet(`${pm} run typecheck`);
+        const r = runQuiet(`${pm} run typecheck`, root);
         if (r && r.timedOut) skipped.push('typecheck');
         else if (r) findings.push('[TYPECHECK FAILED] Fix these errors before finishing:\n' + trimmed(r.out, TYPECHECK_LINES));
     }
 
     // Biome preferred, ESLint fallback, nothing when neither is configured:
     // zero config, zero noise.
-    const hasBiome = fs.existsSync('biome.json') || fs.existsSync('biome.jsonc');
+    const hasBiome = fs.existsSync(at('biome.json')) || fs.existsSync(at('biome.jsonc'));
     const hasEslint = ['.eslintrc.js', '.eslintrc.json', '.eslintrc.cjs', 'eslint.config.js', 'eslint.config.mjs']
-        .some((f) => fs.existsSync(f));
+        .some((f) => fs.existsSync(at(f)));
     let lintCmd = null;
     if (scripts.lint) lintCmd = `${pm} run lint`;
     else if (hasBiome) lintCmd = 'npx biome check .';
     else if (hasEslint) lintCmd = `${pm} run lint || npx eslint .`;
     if (lintCmd) {
-        const r = runQuiet(lintCmd);
+        const r = runQuiet(lintCmd, root);
         if (r && r.timedOut) skipped.push('lint');
         else if (r) findings.push('[LINT FAILED] Fix these before finishing:\n' + trimmed(r.out, LINT_LINES));
     }
