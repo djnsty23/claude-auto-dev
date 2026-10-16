@@ -116,6 +116,29 @@ try {
     fs.writeFileSync(path.join(tmp, 'watched.txt'), 'v2');
     check('editing a watched file invalidates the receipt', sc.criterionStatus(c, sc.readReceipts(receipts), { now: NOW + 1000, currentHash: sc.watchHash(['watched.txt'], tmp) }).status === 'UNKNOWN');
 
+    // Owner-held: a decision the owner keeps. No receipt, however good, may turn it PASS.
+    const held = { id: 'held', kind: sc.OWNER_HELD, weight: 2, needs: 'the owner reopens X1', watch: [] };
+    const heldReceipt = { criterion: 'held', kind: 'operational', ranUtc: new Date(NOW - DAY).toISOString(), status: 'PASS', population: 50, watchHash: sc.watchHash([], tmp) };
+    const heldGrade = sc.criterionStatus(held, [heldReceipt], { now: NOW, currentHash: sc.watchHash([], tmp) });
+    check('an owner-held criterion never reads PASS from a fresh operational receipt', heldGrade.status === 'OWNER_HELD', JSON.stringify(heldGrade));
+    check('an owner-held criterion names its blocker', heldGrade.why === 'owner-held: the owner reopens X1', heldGrade.why);
+    check('an owner-held criterion with no receipt is still OWNER_HELD', sc.criterionStatus(held, [], { now: NOW }).status === 'OWNER_HELD');
+    const heldAspect = sc.grade({ aspects: [{ id: 'H', criteria: [{ id: 'h-pass', kind: 'fixture', weight: 8, watch: [] }, held] }] },
+        [{ criterion: 'h-pass', kind: 'fixture', ranUtc: new Date(NOW - DAY).toISOString(), status: 'PASS', population: 3 }, heldReceipt], { now: NOW });
+    check('an owner-held weight counts zero against the aspect', heldAspect.aspects[0].score === 8, String(heldAspect.aspects[0].score));
+    check('an owner-held criterion must name its decision', sc.validateManifest({ aspects: [{ id: 'H', criteria: [{ id: 'h', kind: sc.OWNER_HELD }] }] }).length === 1);
+    check('an owner-held criterion must have no probe', sc.validateManifest({ aspects: [{ id: 'H', criteria: [{ ...held, probe: 'node x.js' }] }] }).length === 1);
+    check('owner-held stays out of the evidence kinds', !sc.KINDS.includes(sc.OWNER_HELD));
+    fs.writeFileSync(path.join(tmp, 'held-manifest.json'), JSON.stringify({ aspects: [{ id: 'H', criteria: [held] }] }));
+    let heldRc;
+    try { heldRc = sc.main(['record', '--manifest', path.join(tmp, 'held-manifest.json'), '--criterion', 'held', '--receipts', path.join(tmp, 'held-receipts')], { log: () => {}, err: () => {} }); }
+    catch (e) { heldRc = `threw ${e.code || e.message}`; }
+    check('record refuses an owner-held criterion and writes nothing', heldRc === 2 && sc.readReceipts(path.join(tmp, 'held-receipts')).length === 0, String(heldRc));
+    const real = sc.loadManifest(path.join(__dirname, '..', 'docs', 'scorecard-criteria.json'));
+    const cb = real.aspects.flatMap((a) => a.criteria).find((x) => x.id === 'credential-boundary');
+    const cbGrade = cb && sc.criterionStatus(cb, [{ ...heldReceipt, criterion: 'credential-boundary' }], { now: NOW });
+    check('the real credential-boundary is owner-held on the N5 decision', cbGrade && cbGrade.status === 'OWNER_HELD' && cbGrade.why === 'owner-held: Andy reopens N5 (declined 2026-09-23)', JSON.stringify(cbGrade));
+
     // CLI.
     const lines = [];
     const io = { log: (s) => lines.push(s), err: (s) => lines.push(s) };
