@@ -1,5 +1,34 @@
 # Changelog
 
+## [8.193.0]
+
+### Release
+
+- GitHub enforces release protection. Rulesets make main and stable PR-only and
+  refuse a moved or deleted `v*` tag. stable's one bypass actor is a deploy key,
+  so the operator account bypasses nothing (#405).
+- `tooling/publish-release.js` is that key's only user. It refuses unless the tag
+  is annotated, VERSION matches, the commit is on origin/main, stable moves
+  forward and the gate receipt proves a head with the tag commit's tree.
+- `tooling/push-guard.js` in the pre-push hook refuses force-pushes and
+  deletions of main or stable and any rewrite of an existing `v*` tag.
+
+### Brain
+
+- Every clock pass lists missions whose owner stopped with pending work and left
+  the queue untouched for `BRAIN_CLOCK_STALL_MIN` minutes (default 60).
+
+### Fixes
+
+- `ledger-lock`: an acquisition is ours only when the file carries our token,
+  and a lock replaced on a reused ext4 inode is named replaced (#407).
+- `frontier`: a timed-out worker on POSIX is stopped through its supervisor,
+  which passes the signal on to its child's process group.
+- `plugin-integrity`: an install record matches its root by real path, so a
+  macOS `/private/var` launcher is no longer denied.
+- `test-capacity-lifecycle` no longer watches the real capacity ledger by mtime,
+  which went red whenever two gates overlapped (#408).
+
 ## [8.192.0]
 
 ### Brain
