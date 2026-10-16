@@ -17,6 +17,7 @@
  *   P5  a record matches by pid alone              -> a reused pid keeps a dead owner's lock (S6)
  *   P5b a reused pid's own children count          -> its console host keeps the dead owner alive (S6)
  *   P6  the MSYS pid is never checked              -> a live Git Bash owner reads dead (S7)
+ *   P6b the same, while a native pid holds its number -> the owner is kept as unknown, not by its MSYS pid (S7b)
  *   P7  execution processes are ignored            -> a live chain under a dead owner is taken over (S8)
  *   P8  release ignores the fencing token          -> a late release frees a later admission (S9)
  *   P9  a malformed meta line reads as legacy      -> an unreadable record is taken over (S10)
@@ -328,17 +329,30 @@ function metaLock(fx, owner, { runId = `run-${Math.random().toString(36).slice(2
     return { runId, text: fs.readFileSync(fx.lock, 'utf8') };
 }
 
-/** Rows: a newcomer's take against `fx`'s lock, which is expected to be judged `alive` (kept) or dead (taken). */
-function takeRows(subject, fx, label, alive) {
+/**
+ * Rows: a newcomer's take against `fx`'s lock, which is expected to be judged
+ * `alive` (kept) or dead (taken). `why`, for a kept lock, is the reason the
+ * judgement must give: an unknown owner is kept too, so a kept lock alone
+ * cannot tell which check kept it.
+ */
+function takeRows(subject, fx, label, alive, why = null) {
     const before = fs.readFileSync(fx.lock, 'utf8');
     const w = sleeper();
     const r = run(subject, fx, ['take', '--pid', String(w), '--what', `newcomer ${w}`]);
     const after = readLockFile(fx.lock);
     if (alive) {
-        return [
+        const rows = [
             [`${label}: the newcomer is queued (exit 3)`, r.code === EXIT_QUEUED, r.out],
             [`${label}: the lock is untouched`, Boolean(after) && after.text === before, after ? after.text : '(no lock)'],
         ];
+        if (why) {
+            const s = run(subject, fx, ['status', '--json']);
+            let holder = null;
+            try { holder = JSON.parse(s.out).lanes[0].holder; } catch { /* the row below says so */ }
+            rows.push([`${label}: the holder is alive because ${why}`,
+                Boolean(holder) && holder.alive === true && why.test(holder.why || ''), holder ? JSON.stringify({ alive: holder.alive, why: holder.why }) : s.out]);
+        }
+        return rows;
     }
     return [
         [`${label}: the newcomer takes the lane (exit 0)`, r.code === 0, r.out],
@@ -537,7 +551,23 @@ async function s7Msys(subject, msys) {
     freshSnap();
     const fx = fixture(1);
     metaLock(fx, { pid: msys.pid, startUtc: null, bootId, msysPid: msys.pid, msysWinpid: msys.winpid });
-    return takeRows(subject, fx, 'S7 (live MSYS owner)', true);
+    return takeRows(subject, fx, 'S7 (live MSYS owner)', true, new RegExp(`^MSYS pid ${msys.pid} is running$`));
+}
+
+/**
+ * S7b: the same owner while a native process holds the number of its pid. An
+ * MSYS pid is free as a native pid when it is chosen, and Windows may hand
+ * that number to a new process before the scenario runs. The record's pid is
+ * then "running with no creation time", which reads unknown, so it is kept
+ * whether or not the MSYS pid was checked. A live native sleeper stands in
+ * for the process that took the number.
+ */
+async function s7MsysNativeCollision(subject, msys) {
+    if (!msys.pid) return [['S7b: an MSYS pid to test with', !WIN, msys.why]];
+    freshSnap();
+    const fx = fixture(1);
+    metaLock(fx, { pid: sleeper(), startUtc: null, bootId, msysPid: msys.pid, msysWinpid: msys.winpid });
+    return takeRows(subject, fx, 'S7b (live MSYS owner, its pid number held natively)', true, new RegExp(`^MSYS pid ${msys.pid} is running$`));
 }
 
 /** S8: a dead owner whose execution still runs (its chain root, or an orphaned grandchild) keeps the lane. */
@@ -926,7 +956,7 @@ async function main() {
     const real = {
         S1: () => s1HarnessRace(SUBJECT), S2: () => s2ConcurrentRelease(SUBJECT), S3: () => s3DerivedClass(SUBJECT),
         S4: () => s4ArrivalSurvives(SUBJECT), S5: () => s5PreBoot(SUBJECT), S6: () => s6ReusedPid(SUBJECT),
-        S7: () => s7Msys(SUBJECT, msys), S8: () => s8Descendants(SUBJECT, orphan), S9: () => s9Fence(SUBJECT),
+        S7: async () => [...await s7Msys(SUBJECT, msys), ...await s7MsysNativeCollision(SUBJECT, msys)], S8: () => s8Descendants(SUBJECT, orphan), S9: () => s9Fence(SUBJECT),
         S10: () => s10Malformed(SUBJECT), S10b: () => s10bSemantic(SUBJECT), S11: () => s11Readers(SUBJECT), S12: () => s12Library(SUBJECT),
         S13: () => s13Defaults(SUBJECT), S14: () => s14DeadParentOrphan(SUBJECT),
         S15: () => s15Lineage(SUBJECT),
@@ -952,6 +982,9 @@ async function main() {
         ['P6', 'the MSYS pid is never checked', 'gate-identity.js',
             [['else if (msys.byMsys.has(owner.msysPid) && (!owner.msysWinpid || msys.byMsys.get(owner.msysPid) === owner.msysWinpid)) {', 'else if (false) {']],
             (s) => s7Msys(s, msys), ['S7']],
+        ['P6b', 'the MSYS pid is never checked, while its number is a native pid', 'gate-identity.js',
+            [['else if (msys.byMsys.has(owner.msysPid) && (!owner.msysWinpid || msys.byMsys.get(owner.msysPid) === owner.msysWinpid)) {', 'else if (false) {']],
+            (s) => s7MsysNativeCollision(s, msys), ['S7']],
         ['P7', 'execution processes are ignored', 'gate-identity.js',
             [['for (const r of recorded.slice(1)) {', 'for (const r of []) {'], ['const live = liveDescendants(recorded, snap);', 'const live = [];']],
             (s) => s8Descendants(s, orphan), ['S8']],
@@ -1012,7 +1045,7 @@ async function main() {
     ];
     for (const [id, what, file, edits, scenario, covers] of plants) {
         if (!want(id) && !covers.some(want)) continue;
-        if (id === 'P6' && !msys.pid) { check(`${id}: an MSYS pid to plant against`, !WIN, msys.why); continue; }
+        if ((id === 'P6' || id === 'P6b') && !msys.pid) { check(`${id}: an MSYS pid to plant against`, !WIN, msys.why); continue; }
         const m = mutant(id, file, edits);
         if (!m) continue;
         expectRed(id, what, await scenario(m));
