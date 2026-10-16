@@ -950,6 +950,13 @@ async function main() {
     const has = (f) => argv.includes(f);
     const val = (f, d) => { const i = argv.indexOf(f); return i >= 0 && argv[i + 1] ? argv[i + 1] : d; };
 
+    // Usage only. Without this, --help ran the full report over every
+    // transcript on disk, which outgrew check-entrypoints' budget.
+    if (has('--help') || has('-h')) {
+        console.log('usage: node steer-log.js [--days N] [--json] [--evidence] [--root DIR] | --selftest');
+        console.log('Counts cross-session steers in the transcripts on disk and when each landed.');
+        return;
+    }
     if (has('--selftest')) {
         process.exitCode = await runSelftest();
         return;
