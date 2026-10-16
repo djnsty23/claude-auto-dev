@@ -38,9 +38,28 @@ function check(name, cond, detail) {
 // What a red check prints: a child killed at its timeout writes no stdout, so the exit, signal, time and stderr say why.
 const seen = (r) => `exit ${r.status} signal ${r.signal} after ${r.ms} ms | stdout ${r.stdout.slice(0, 300)} | stderr ${r.stderr.slice(-300)}`;
 
-function run(args, env) {
+// Node's own abort under coverage. `[measured 2026-10-17]` Node 24.15 on Windows
+// kills a process that does socket I/O while NODE_V8_COVERAGE is set in about 1
+// run in 300: exit 0xC0000409, nothing on stdout or stderr, before the request
+// returns. No JIT tier changes the rate; without coverage it is 0 in 4000, and
+// file I/O under coverage is 0 in 3000. test-all sets NODE_V8_COVERAGE, so a
+// live-check child here could die before printing its verdict and read as an
+// empty-stdout red. That exit is Node's, not the gate's: the child runs once
+// more, and the suite names every re-run. A second abort stays red.
+const COVERAGE_ABORT = 0xC0000409;
+const coverageAborts = [];
+const isCoverageAbort = (r, env) => Boolean(env.NODE_V8_COVERAGE) && r.status === COVERAGE_ABORT && !r.stdout && !r.stderr;
+
+async function run(args, env, once = runOnce) {
+  const first = await once(args, env);
+  if (!isCoverageAbort(first, { ...process.env, ...env })) return first;
+  coverageAborts.push(args.join(' '));
+  return once(args, env);
+}
+
+function runOnce(args, env, script = GATE) {
   return new Promise((resolve) => {
-    const child = spawn(process.execPath, [GATE, ...args], { env: { ...process.env, ...env }, stdio: ['ignore', 'pipe', 'pipe'] });
+    const child = spawn(process.execPath, [script, ...args], { env: { ...process.env, ...env }, stdio: ['ignore', 'pipe', 'pipe'] });
     let stdout = '';
     let stderr = '';
     child.stdout.on('data', (d) => { stdout += d; });
@@ -92,6 +111,35 @@ const CLEAN_APP = {
 };
 
 async function main() {
+  // ------------------------------------------- Node's abort under coverage
+  {
+    const abort = { status: COVERAGE_ABORT, signal: null, ms: 1, stdout: '', stderr: '' };
+    const green = { status: 0, signal: null, ms: 1, stdout: 'verdict: GREEN', stderr: '' };
+    const cov = { NODE_V8_COVERAGE: path.join(tmp, 'coverage-plant') };
+    const scripted = (...results) => {
+      const calls = [];
+      return { calls, once: async (args) => { calls.push(args); return results[Math.min(calls.length, results.length) - 1]; } };
+    };
+    let s = scripted(abort, green);
+    let r = await run(['--json'], cov, s.once);
+    check('a child Node aborted under coverage runs once more, and its second result is the verdict', r === green && s.calls.length === 2, { calls: s.calls.length, r });
+    s = scripted(abort, abort);
+    r = await run(['--json'], cov, s.once);
+    check('a second abort is returned, never hidden', r.status === COVERAGE_ABORT && s.calls.length === 2, { calls: s.calls.length, r });
+    s = scripted(abort, green);
+    r = await run(['--json'], { NODE_V8_COVERAGE: '' }, s.once);
+    check('without coverage the same exit is the child\'s verdict, not re-run', r === abort && s.calls.length === 1, { calls: s.calls.length });
+    s = scripted({ ...abort, stderr: 'security-gate: boom' }, green);
+    r = await run(['--json'], cov, s.once);
+    check('an abort that printed anything is the child\'s verdict, not re-run', r.status === COVERAGE_ABORT && s.calls.length === 1, { calls: s.calls.length });
+    coverageAborts.length = 0;
+    if (process.platform === 'win32') {
+      // The status a real process reports for that exit, so the constant matches what spawn sees.
+      const real = await runOnce(['process.exit(-1073740791)'], cov, '-e');
+      check('a real 0xC0000409 exit under coverage matches the abort signature', isCoverageAbort(real, cov), seen(real));
+    }
+  }
+
   // ---------------------------------------------------------- entry points
   {
     const r = await run(['--help']);
@@ -346,6 +394,7 @@ main()
   .catch((e) => failures.push(`suite crashed: ${e.stack}`))
   .finally(() => {
     fs.rmSync(tmp, { recursive: true, force: true });
+    for (const a of coverageAborts) console.log(`note: Node aborted the child under coverage (exit 0xC0000409, no output) and it ran once more: ${a}`);
     if (failures.length) {
       console.error(`\nFAIL  ${failures.length} of ${passed + failures.length}`);
       for (const f of failures) console.error(`    - ${f}`);
