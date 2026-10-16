@@ -70,13 +70,17 @@ if (gen.status !== 0) {
 console.log('\nNext:');
 console.log(`  1. Add a ## [${version}] section to CHANGELOG.md`);
 console.log('  2. node tooling/validate.js');
+// gate-lock.js names the gated head in its own output, so the plain log is
+// the receipt: no wrapper around npm run gate.
+console.log('  3. on the PR candidate, rebased and committed: npm run gate > gate.log 2>&1');
+console.log('     then merge it: node plugins/autodev-core/scripts/merge-lock.js merge --repo djnsty23/claude-auto-dev --pr <N> --head <PR head sha> --gate-receipt gate.log');
 // Annotated: a lightweight tag carries no date or tagger, and check-release-lag
 // reads one as red. 8.178.0 and 8.179.0 shipped lightweight from this line.
-console.log(`  3. git tag -a v${version} -m "v${version}"`);
+console.log(`  4. on the merged release commit on origin/main: git tag -a v${version} -m "v${version}"`);
 // Installs pin to the stable branch (README), so moving it is what ships the
 // version. A ruleset refuses every direct push to stable; publish-release.js
 // moves it forward with the deploy key once the gate receipt proves the tag
 // commit's tree (docs/release-rulesets/README.md).
 // Not `release`: origin keeps the old release/<version> PR branches, and a
 // branch cannot share its name with a ref directory (refname conflict).
-console.log(`  4. once the tagged commit is on main: node tooling/publish-release.js --version ${version} --gate-receipt <gate log> --head <PR head sha>`);
+console.log(`  5. node tooling/publish-release.js --version ${version} --gate-receipt gate.log --head <PR head sha>`);

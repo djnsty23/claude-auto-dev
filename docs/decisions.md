@@ -3,6 +3,22 @@
 Non-obvious choices, and where the work that implements them actually landed.
 One entry per decision, newest first.
 
+## 2026-10-16: gate-lock names its head, so the plain gate log is the receipt
+
+merge-lock refused a plain `npm run gate > log 2>&1` with "does not name head",
+because gate-lock printed only a 7-character head in its lock file. Every gate
+needed a hand wrapper, and the 8.193.0 release receipt was bound by hand from
+the gate-lock record and the reflog.
+
+gate-lock now prints `gate-lock: head <full sha>` as its first line and again
+just before its verdict, in the form merge-lock already reads. The second line
+keeps the receipt valid when the chain prints a nested verdict. A HEAD that
+moves during the chain turns a PASS into INDETERMINATE, since the run would
+otherwise name two heads. merge-lock's format is unchanged; the wrapper stays
+for product gates that do not run through gate-lock.
+`tooling/test-gate-receipt-head.js` gates throwaway repos and feeds the logs to
+merge-lock, including a planted log carrying the wrong sha.
+
 ## 2026-10-15: stable moves only through a deploy key bound to the gate receipt
 
 A version is a cache key, yet nothing on GitHub stopped main, stable or a
