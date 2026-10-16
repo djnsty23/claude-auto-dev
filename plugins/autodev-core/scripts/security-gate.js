@@ -456,6 +456,20 @@ async function readBody(res) {
   return text + decoder.decode();
 }
 
+/**
+ * Why a response is a bot challenge rather than the app, or null. A platform
+ * that challenges the probe answers with its own page and its own headers, so
+ * grading them reports the checkpoint's policy as the app's, and an API that
+ * answers the challenge reads as refusing. Either way the app was not read.
+ */
+function challengedBy(r) {
+  const h = r.headers;
+  if (h['x-vercel-mitigated']) return `x-vercel-mitigated: ${h['x-vercel-mitigated']}`;
+  if (h['cf-mitigated']) return `cf-mitigated: ${h['cf-mitigated']}`;
+  if (r.status === 429) return '429 Too Many Requests';
+  return null;
+}
+
 async function liveChecks({ urls, apis, inviteOnly }) {
   const findings = [];
   const problems = [];
@@ -464,6 +478,11 @@ async function liveChecks({ urls, apis, inviteOnly }) {
     try {
       const r = await fetchHeaders(url);
       lines.push(`${url} -> ${r.status}${r.finalUrl !== url ? ` at ${r.finalUrl}` : ''}`);
+      const challenge = challengedBy(r);
+      if (challenge) {
+        problems.push(`${url} answered a bot challenge (${challenge}), so its headers are the challenge page's, not the app's: not graded`);
+        continue;
+      }
       const isHtml = /text\/html/i.test(r.headers['content-type'] || '');
       if (!isHtml) problems.push(`${url} did not answer HTML (${r.headers['content-type'] || 'no content-type'}); its headers were graded anyway`);
       // The body carries a static site's <meta> policy. Without it the page is
@@ -494,6 +513,11 @@ async function liveChecks({ urls, apis, inviteOnly }) {
     try {
       const r = await fetchHeaders(target, { redirect: 'manual' });
       lines.push(`${target} (no credentials) -> ${r.status}`);
+      const challenge = challengedBy(r);
+      if (challenge) {
+        problems.push(`${target} answered a bot challenge (${challenge}), so the route itself was never reached: not graded`);
+        continue;
+      }
       findings.push(...C.checkLiveApi(target, r.status));
     } catch (e) {
       problems.push(`${target} could not be fetched: ${e.message}`);

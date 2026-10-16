@@ -248,6 +248,9 @@ async function main() {
     '/static-late': [200, staticHeaders, page(`<script src="/a.js"></script>${strictMeta}`)],
     '/api/private': [401, { 'content-type': 'application/json' }],
     '/api/open': [200, { 'content-type': 'application/json' }],
+    // What Vercel's attack challenge mode serves a script: none of the app's headers.
+    '/challenged': [429, { 'content-type': 'text/html', 'x-vercel-mitigated': 'challenge' }, '<html><body>Vercel Security Checkpoint</body></html>'],
+    '/api/challenged': [403, { 'content-type': 'text/html', 'x-vercel-mitigated': 'challenge' }],
   };
   const server = http.createServer((req, res) => {
     const [status, headers, body] = routes[req.url] || [404, {}];
@@ -283,6 +286,13 @@ async function main() {
     check('a static page whose hash-pinned meta policy precedes every script is GREEN through the real fetch', st.status === 0 && !rules(st).has('live-csp-script'), st.stdout);
     const stLate = await run(['--root', clean, '--url', `${base}/static-late`, '--json']);
     check('the same meta policy after a <script> is live-csp-script through the real fetch', stLate.status === 1 && rules(stLate).has('live-csp-script'), stLate.stdout);
+
+    // 2026-10-17: a site in challenge mode read RED on four header errors that were the checkpoint's.
+    const ch = await run(['--root', clean, '--url', `${base}/challenged`, '--json']);
+    const chj = JSON.parse(ch.stdout || '{}');
+    check('a page answered by a bot challenge is INDETERMINATE, and its headers are not graded', ch.status === 2 && (chj.findings || []).every((f) => !f.rule.startsWith('live-')) && (chj.problems || []).some((p) => p.includes('bot challenge (x-vercel-mitigated: challenge)')), ch.stdout);
+    const chApi = await run(['--root', clean, '--url', `${base}/good`, '--api', '/api/challenged']);
+    check('an --api path answered by a bot challenge is INDETERMINATE, never read as refusing', chApi.status === 2 && /never reached/.test(chApi.stdout), chApi.stdout);
 
     const down = await run(['--root', clean, '--url', 'http://127.0.0.1:9/nothing']);
     check('an unreachable URL is INDETERMINATE (exit 2), never GREEN', down.status === 2 && /INDETERMINATE .*could not be fetched/.test(down.stdout), down.stdout);
