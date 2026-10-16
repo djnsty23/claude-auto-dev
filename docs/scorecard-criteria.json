@@ -1,5 +1,5 @@
 {
-  "description": "Evidence-bound criteria for the harness scorecard (A1 to A17). Read by tooling/scorecard.js. Fixture criteria carry weight 8 per aspect and the operational criterion weight 2, so an aspect proven only by fixtures scores at most 8, and 9 or 10 need operational evidence. A criterion whose suite does not exist yet stays UNKNOWN until its package lands. Policy frozen 2026-10-14, before evaluation. Amended 2026-10-14 after the overnight Brain stall: A9 adds mission-stall and splits its fixture weight 3, 3 and 2. An amendment may add evidence, never remove it.",
+  "description": "Evidence-bound criteria for the harness scorecard (A1 to A17). Read by tooling/scorecard.js. Fixture criteria carry weight 8 per aspect and the operational criterion weight 2, so an aspect proven only by fixtures scores at most 8, and 9 or 10 need operational evidence. A criterion whose suite does not exist yet stays UNKNOWN until its package lands. Policy frozen 2026-10-14, before evaluation. Amended 2026-10-14 after the overnight Brain stall: A9 adds mission-stall and splits its fixture weight 3, 3 and 2. An amendment may add evidence, never remove it. Amended 2026-10-16: credential-boundary is owner-held, because its package N5 narrows the deploy credential the owner chose to keep on 2026-09-23. It keeps its weight 2 and counts zero, so no score rises and A3 is capped at 8 while that decision stands.",
   "root": "..",
   "aspects": [
     {
@@ -75,14 +75,10 @@
         },
         {
           "id": "credential-boundary",
-          "kind": "installed",
+          "kind": "owner-held",
           "weight": 2,
-          "probe": "node tooling/test-credential-boundary.js --installed",
-          "expect": "^authorized_scope=PASS foreign_scope=DENIED expiry=SET old_credential=REJECTED$",
-          "watch": [
-            "tooling/test-credential-boundary.js"
-          ],
-          "populationCount": "^(ok|PASS) "
+          "needs": "Andy reopens N5 (declined 2026-09-23)",
+          "watch": []
         },
         {
           "id": "authority-window",
