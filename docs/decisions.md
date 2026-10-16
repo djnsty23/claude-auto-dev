@@ -3,6 +3,21 @@
 Non-obvious choices, and where the work that implements them actually landed.
 One entry per decision, newest first.
 
+## 2026-10-16: a criterion that waits on a kept owner decision is owner-held
+
+A3's `credential-boundary` named a suite that was never written, so every
+receipt failed with MODULE_NOT_FOUND. Its package, N5, narrows the deploy
+credential, and the owner chose on 2026-09-23 to keep the broad, non-expiring
+one. A self-minted worker token could have turned the receipt PASS while that
+credential stayed in every worker's environment, so none was built.
+
+`tooling/scorecard.js` gains the `owner-held` kind. Such a criterion names its
+decision in `needs`, carries no probe, is refused by `record`, and grades
+`OWNER_HELD` whatever receipts exist. It keeps its weight and counts zero, so
+every aspect score is unchanged and A3 is capped at 8 while the decision
+stands. `tooling/test-scorecard.js` plants a fresh operational PASS receipt
+against it and checks the real manifest's line.
+
 ## 2026-10-16: gate-lock names its head, so the plain gate log is the receipt
 
 merge-lock refused a plain `npm run gate > log 2>&1` with "does not name head",

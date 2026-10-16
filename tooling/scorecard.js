@@ -26,9 +26,12 @@
 //                    the code. `record` exits 2 for it.
 //   NOT_OPERATIONAL  the criterion needs an operational receipt and only fixture
 //                    or installed receipts exist
+//   OWNER_HELD       the criterion's kind is owner-held: it waits on a decision
+//                    the owner has made and keeps, named in its `needs`. It has
+//                    no probe, `record` refuses it, and no receipt can make it PASS.
 //
 // An aspect scores 10 x (weight of PASS criteria) / (weight of all its criteria).
-// UNKNOWN and NOT_OPERATIONAL count as zero, so a score falls when evidence
+// UNKNOWN, NOT_OPERATIONAL and OWNER_HELD count as zero, so a score falls when evidence
 // expires. The overall score is the mean of the aspect scores, and the sum is
 // printed beside it so the arithmetic can be checked.
 
@@ -40,6 +43,8 @@ const { spawnSync } = require('child_process');
 const DAY_MS = 24 * 60 * 60 * 1000;
 const DEFAULT_MAX_AGE_DAYS = 14;
 const KINDS = ['fixture', 'installed', 'operational'];
+// Not a strength of evidence, so it stays out of KINDS and its ordering.
+const OWNER_HELD = 'owner-held';
 
 function defaultReceiptsDir(env = process.env) {
     let base;
@@ -66,7 +71,10 @@ function validateManifest(m) {
             if (!c.id) { problems.push(`a criterion in ${a.id} has no id`); continue; }
             if (seen.has(c.id)) problems.push(`criterion ${c.id} appears twice`);
             seen.add(c.id);
-            if (!KINDS.includes(c.kind)) problems.push(`criterion ${c.id} kind must be one of ${KINDS.join(', ')}`);
+            if (c.kind === OWNER_HELD) {
+                if (typeof c.needs !== 'string' || !c.needs.trim()) problems.push(`criterion ${c.id} is owner-held and must name the decision in needs`);
+                if (c.probe !== undefined) problems.push(`criterion ${c.id} is owner-held and must have no probe`);
+            } else if (!KINDS.includes(c.kind)) problems.push(`criterion ${c.id} kind must be one of ${KINDS.join(', ')}, or ${OWNER_HELD}`);
             if (c.weight !== undefined && !(Number.isFinite(c.weight) && c.weight > 0)) problems.push(`criterion ${c.id} weight must be positive`);
         }
     }
@@ -100,6 +108,7 @@ function criterionStatus(criterion, receipts, { now, currentHash, maxAgeDays = D
         .sort((a, b) => Date.parse(b.ranUtc) - Date.parse(a.ranUtc));
     const firstRed = mine.slice().reverse().find((r) => r.status === 'FAIL');
     const base = { id: criterion.id, firstRedUtc: firstRed ? firstRed.ranUtc : null, receipts: mine.length };
+    if (criterion.kind === OWNER_HELD) return { ...base, status: 'OWNER_HELD', why: `owner-held: ${criterion.needs}` };
     if (!mine.length) return { ...base, status: 'UNKNOWN', why: 'no receipt' };
     const newest = mine[0];
     if (now - Date.parse(newest.ranUtc) > maxAgeDays * DAY_MS) return { ...base, status: 'UNKNOWN', why: `newest receipt is older than ${maxAgeDays} days` };
@@ -224,6 +233,7 @@ function main(argv = process.argv.slice(2), io = { log: console.log, err: consol
     if (cmd === 'record') {
         const c = manifest.aspects.flatMap((a) => a.criteria).find((x) => x.id === args.criterion);
         if (!c) { io.err(`no criterion ${args.criterion} in ${args.manifest}`); return 2; }
+        if (c.kind === OWNER_HELD) { io.err(`${c.id} is owner-held (${c.needs}): there is nothing to record`); return 2; }
         const receipt = runProbe(c, { root });
         const file = writeReceipt(dir, receipt);
         io.log(`${receipt.status} ${c.id}${receipt.population !== null ? ` population ${receipt.population}` : ''}${receipt.why ? ` (${receipt.why})` : ''} -> ${file}`);
@@ -236,4 +246,4 @@ function main(argv = process.argv.slice(2), io = { log: console.log, err: consol
 
 if (require.main === module) process.exitCode = main();
 
-module.exports = { loadManifest, validateManifest, watchHash, readReceipts, criterionStatus, grade, runProbe, writeReceipt, formatReport, parseArgs, main, defaultReceiptsDir, KINDS };
+module.exports = { loadManifest, validateManifest, watchHash, readReceipts, criterionStatus, grade, runProbe, writeReceipt, formatReport, parseArgs, main, defaultReceiptsDir, KINDS, OWNER_HELD };
