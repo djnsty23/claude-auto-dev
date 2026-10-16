@@ -52,8 +52,9 @@
  * `gate-lock:` or `gate-receipt:` line, or a sha). Two closing lines count:
  *   - `gate-lock: verdict PASS (exit 0)`, which this repo's tooling/gate-lock.js
  *     prints. The full --head sha must appear between it and the closing line
- *     before it.
- *       { git rev-parse HEAD; npm run gate; } > receipt.log 2>&1
+ *     before it. gate-lock prints `gate-lock: head <sha>` first and again just
+ *     before its verdict, so the plain log is the receipt:
+ *       npm run gate > receipt.log 2>&1
  *   - `gate-receipt: exit 0`, the wrapper any repo's gate can produce. The
  *     first sha in its run (everything since the `gate-receipt:` line before
  *     it) must be --head, and every gate-lock verdict inside that run must be

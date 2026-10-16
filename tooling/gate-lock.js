@@ -55,6 +55,14 @@
  * --run-chain) that records npm's exit code in a temp sentinel only when it saw
  * npm exit. A runner killed mid-chain leaves no record, and that exits 2.
  *
+ * THE RECEIPT. The first line and the line just before the verdict are
+ * `gate-lock: head <full sha>`, the tree this run gated, so a plain
+ * `npm run gate > gate.log 2>&1` is the receipt merge-lock.js and
+ * publish-release.js accept, with no wrapper. The line before the verdict
+ * keeps that true when the chain's own output prints a nested verdict. A HEAD
+ * that moved during the chain turns a PASS into INDETERMINATE (exit 2): the
+ * run would otherwise name two heads.
+ *
  * WHY THE CHAIN MOVED to `scripts["gate:chain"]`. `npm run gate` has to take
  * the lock, so `scripts.gate` has to be this script. The lock cannot live
  * inside the chain: `&&` stops at a red step, so a release step at the end
@@ -233,6 +241,16 @@ function stillOurs(lockPaths, runId, token) {
 function git(root, args) {
     const r = spawnSync('git', args, { cwd: root, encoding: 'utf8', windowsHide: true, timeout: 15000 });
     return !r.error && r.status === 0 ? r.stdout.trim() : '';
+}
+
+/**
+ * The receipt line: the full sha of the gated tree, in the form merge-lock.js
+ * reads as naming the head. Printed at start and again just before the
+ * verdict, so `npm run gate > log 2>&1` is a receipt with no wrapper, even
+ * when the chain's own output carries a nested gate-lock verdict.
+ */
+function headLine(sha) {
+    return `${TAG} head ${sha || 'unknown (git rev-parse HEAD failed)'}`;
 }
 
 function describe(root) {
@@ -506,6 +524,8 @@ function main() {
     }
     const env = process.env;
     const log = (line) => console.log(line);
+    const startHead = git(root, ['rev-parse', 'HEAD']);
+    log(headLine(startHead));
     const base = path.resolve(env.AUTODEV_GATE_LOCK_PATH || queue.defaultLockPath());
     const pollMs = Math.max(50, Number(env.AUTODEV_GATE_LOCK_POLL_MS) || 5000);
     const reportMs = Math.max(0, Number(env.AUTODEV_GATE_LOCK_REPORT_MS) || 180000);
@@ -517,6 +537,7 @@ function main() {
     try { pkg = JSON.parse(fs.readFileSync(path.join(root, 'package.json'), 'utf8')); } catch { /* reported below */ }
     if (!pkg || !pkg.scripts || typeof pkg.scripts[CHAIN_SCRIPT] !== 'string') {
         console.error(`${TAG} ${path.join(root, 'package.json')} has no scripts["${CHAIN_SCRIPT}"] to run.`);
+        log(headLine(startHead));
         console.error(`${TAG} verdict INDETERMINATE (exit 2), the chain did NOT run; no lock was taken`);
         process.exitCode = 2;
         return;
@@ -614,6 +635,16 @@ function main() {
         if (done) return;
         done = true;
         releaseOnce();
+        // A PASS names one tree. A HEAD that moved under the chain leaves two
+        // candidates, so the run proves neither. The shas go on their own line:
+        // merge-lock reads a sha after the verdict as another run starting.
+        const endHead = git(root, ['rev-parse', 'HEAD']);
+        if (endHead !== startHead) {
+            log(`${TAG} HEAD moved during the gate, from ${startHead || 'unknown'} to ${endHead || 'unknown'}`);
+            const moved = 'HEAD moved during the gate (the line above)';
+            v = v.exit === 0 ? { ...v, exit: 2, why: `${v.why}; ${moved}, so this PASS proves no single head` } : { ...v, why: `${v.why}; ${moved}` };
+        }
+        log(headLine(startHead));
         const how = v.finished ? 'the chain finished' : 'the chain did NOT finish';
         log(`${TAG} verdict ${label(v.exit)} (exit ${v.exit}), ${how}: ${v.why}`);
         process.exitCode = v.exit;

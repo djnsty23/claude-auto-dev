@@ -26,14 +26,18 @@ commit's tree. The rationale is in [docs/decisions.md](../decisions.md).
 
 ## Publishing a release
 
-After `tooling/bump.js`, the changelog, and the release PR merged through
-merge-lock:
+After `tooling/bump.js` and the changelog, gate the release PR's candidate and
+merge it through merge-lock. The plain gate log is the receipt: gate-lock prints
+`gate-lock: head <full sha>` first and again just before its verdict, so no
+wrapper around `npm run gate` is needed.
 
 ```bash
+npm run gate > gate.log 2>&1
+node plugins/autodev-core/scripts/merge-lock.js merge --repo djnsty23/claude-auto-dev --pr <N> --head <PR head sha> --gate-receipt gate.log
 git fetch origin
 git tag -a v8.193.0 -m "v8.193.0" <the merged release commit on origin/main>
-node tooling/publish-release.js --version 8.193.0 --gate-receipt <gate log of the PR candidate> --head <PR head sha> --dry-run
-node tooling/publish-release.js --version 8.193.0 --gate-receipt <gate log of the PR candidate> --head <PR head sha>
+node tooling/publish-release.js --version 8.193.0 --gate-receipt gate.log --head <PR head sha> --dry-run
+node tooling/publish-release.js --version 8.193.0 --gate-receipt gate.log --head <PR head sha>
 ```
 
 `--head` is the commit the receipt names. The rebase merge gives the main
