@@ -157,11 +157,17 @@ function readText(file) {
 
 /**
  * null when the receipt proves `head`, else why not. `full` also requires the
- * run that proves `head` to carry gate-lock's PASS verdict, which only the full
- * gate prints: a wrapped `gate:fast` run merges an autodev PR but cannot
- * publish a release (publish-release.js passes full).
+ * run that proves `head` to hold gate-lock's closing pair, `gate-lock: head
+ * <head>` directly followed by its PASS verdict, which only the full gate
+ * prints: a wrapped `gate:fast` run merges an autodev PR but cannot publish a
+ * release (publish-release.js passes full).
  */
 function receiptProblem(file, head, { full = false } = {}) {
+    // Anchored, because a bare PASS could be lent by an earlier run in the log.
+    const fullProblem = (run) => (new RegExp(`(?:^|\\n)gate-lock: head ${head}\\r?\\n${PASS_LINE.replace(/[()]/g, '\\$&')}`, 'i').test(run)
+        ? null
+        : `--gate-receipt ${file}: the run that proves ${head} has no "gate-lock: head ${head}" line directly before "${PASS_LINE}", `
+            + 'so it is not the full gate. A gate:fast receipt merges a PR, and a release needs `npm run gate > gate.log 2>&1` on its candidate');
     if (!file) return `no --gate-receipt given. Capture the gate on this tree: ${WRAPPER_BASH}`;
     let text;
     try { text = readText(file); } catch (e) { return `cannot read --gate-receipt ${file} (${e.code || e.message})`; }
@@ -188,7 +194,7 @@ function receiptProblem(file, head, { full = false } = {}) {
         if (!lower.slice(from, last.index).includes(head)) {
             return `--gate-receipt ${file} names ${head} only outside the run that printed the last PASS, so that PASS proves another head`;
         }
-        return null;
+        return full ? fullProblem(text.slice(from, last.index + last.raw.length)) : null;
     }
     // The wrapper format: the run is everything since the exit line before it.
     // A harness gate inside it prints its own verdict first, so that run
@@ -206,11 +212,7 @@ function receiptProblem(file, head, { full = false } = {}) {
         return `--gate-receipt ${file}: the run that printed "${EXIT_PASS}" also printed "${red[0]}", `
             + 'so the exit is not the gate\'s. A pipe after the gate command reports the pipe\'s status';
     }
-    if (full && !run.includes(PASS_LINE)) {
-        return `--gate-receipt ${file}: the run that proves ${head} has no "${PASS_LINE}", so it is not the full gate. `
-            + 'A gate:fast receipt merges a PR; a release needs `npm run gate > gate.log 2>&1` on its candidate';
-    }
-    return null;
+    return full ? fullProblem(run) : null;
 }
 
 // ---------------------------------------------------------------------------

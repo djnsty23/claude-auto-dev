@@ -294,7 +294,8 @@ function main() {
         console.log('');
         console.log('Runs the cheap steps of the package.json gate chain INDEPENDENTLY and');
         console.log('reports which steps it did not run. This is NOT the gate: `npm run gate`');
-        console.log('runs every step and is what a merge needs.');
+        console.log('runs every step and is what a release needs. Under the gate-receipt');
+        console.log('wrapper, a clean run here is the merge receipt for an ordinary PR.');
         return;
     }
     if (has('--selftest')) { selftest(); return; }

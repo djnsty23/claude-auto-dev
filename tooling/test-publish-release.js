@@ -9,7 +9,10 @@
 //
 // Run: node tooling/test-publish-release.js
 
-const { judge, parseArgs } = require('./publish-release.js');
+const fs = require('fs');
+const os = require('os');
+const path = require('path');
+const { judge, parseArgs, releaseReceiptProblem } = require('./publish-release.js');
 
 let passed = 0;
 let failed = 0;
@@ -48,6 +51,19 @@ check('the same tag with stable behind still publishes', judge({ ...good, remote
 const a = parseArgs(['--version', '9.1.0', '--gate-receipt', 'r.log', '--head', C, '--dry-run']);
 check('arguments parse', a.version === '9.1.0' && a.gateReceipt === 'r.log' && a.head === C && a.dryRun === true);
 check('an unknown argument is caught', parseArgs(['--force']).unknown === '--force');
+
+// The wiring gather() uses: the release bar is the full gate, never a wrapped gate:fast run.
+{
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'pubrel-'));
+    const H = 'a'.repeat(40);
+    const write = (name, text) => { const p = path.join(dir, name); fs.writeFileSync(p, text); return p; };
+    const fast = write('fast.log', `${H}\ngate-fast: 9 of 13 steps ran, PARTIAL\ngate-receipt: exit 0\n`);
+    const full = write('full.log', `gate-lock: head ${H}\nnpm test\ngate-lock: head ${H}\ngate-lock: verdict PASS (exit 0), the chain finished: ok\n`);
+    check('a wrapped gate:fast receipt cannot publish', /is not the full gate/.test(releaseReceiptProblem(fast, H) || ''));
+    check('a full gate receipt publishes', releaseReceiptProblem(full, H) === null);
+    check('a non-sha head is refused before the receipt is read', /not a 40-hex sha/.test(releaseReceiptProblem(full, 'HEAD') || ''));
+    fs.rmSync(dir, { recursive: true, force: true });
+}
 
 console.log(`${passed} passed, ${failed} failed`);
 process.exitCode = failed ? 1 : 0;
