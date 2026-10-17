@@ -13,7 +13,8 @@
 //   2. that commit is on origin/main (it landed through a pull request)
 //   3. origin/stable is an ancestor of it (stable only moves forward)
 //   4. the gate receipt proves that commit's tree: it passes merge-lock's
-//      receiptProblem() for --head (default the tag commit), and --head has the
+//      receiptProblem() with full for --head (default the tag commit), so a
+//      wrapped gate:fast run is refused here, and --head has the
 //      same tree as the tag commit. A rebase merge rewrites the SHA, never the
 //      tree, so the receipt from the PR's frozen candidate binds the release.
 //   5. the tag is absent on the remote, or already this exact tag object
@@ -112,7 +113,7 @@ function gather({ version, gateReceipt, head }) {
     f.stableIsAncestor = Boolean(f.stable) && git('merge-base', '--is-ancestor', f.stable, f.commit).code === 0;
     f.head = String(head || f.commit).toLowerCase();
     const { receiptProblem } = require(path.join(ROOT, 'plugins', 'autodev-core', 'scripts', 'merge-lock.js'));
-    f.receiptProblem = SHA_RE.test(f.head) ? receiptProblem(gateReceipt, f.head) : `--head ${f.head} is not a 40-hex sha`;
+    f.receiptProblem = SHA_RE.test(f.head) ? receiptProblem(gateReceipt, f.head, { full: true }) :`--head ${f.head} is not a 40-hex sha`;
     const ht = git('rev-parse', '--verify', '--quiet', `${f.head}^{tree}`);
     f.headTree = ht.code === 0 ? ht.out : null;
     return { facts: f };

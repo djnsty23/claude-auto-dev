@@ -420,7 +420,7 @@ function isInside(root, child) {
 // ===========================================================================
 // THE THIRD GUARD IN THIS FILE: raw merges, opt-in. Added 2026-10-02.
 //
-// The merge bar is one full gate on the frozen candidate, merged by
+// The merge bar is one gate on the frozen candidate, merged by
 // scripts/merge-lock.js under a per-repo lock that refuses a moved base and
 // reads the merged tree back. A raw `gh pr merge` skips all of that. This rule
 // is INERT unless <home>/.claude/autodev/merge-lock.enforce exists, and the

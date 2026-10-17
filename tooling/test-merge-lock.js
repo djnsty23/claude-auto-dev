@@ -241,6 +241,21 @@ async function main() {
             `other head ${otherHead}, first sha ${firstShaOther}, earlier run ${headEarlierRun}, red ${redFinal}, crash ${crashFinal}, `
             + `empty ${emptyExit}, red after pass ${redAfterPass}, trailing run ${trailingRun}, trailing lock ${trailingLock}, `
             + `piped ${pipedExit}, quoted ${quoted}`);
+
+        // full: the release bar. A wrapped gate:fast run (no gate-lock verdict)
+        // merges a PR but is refused for a release; the full gate passes both ways.
+        const FULL = { full: true };
+        const fastText = `${HEAD}\ngate-fast: 9 of 13 steps ran, PARTIAL\n${ml.EXIT_PASS}\n`;
+        const fastMerges = ml.receiptProblem(f('x-fast.log', fastText), HEAD) === null;
+        const fastNoRelease = /is not the full gate/.test(ml.receiptProblem(f('x-fast2.log', fastText), HEAD, FULL) || '');
+        const plainFull = ml.receiptProblem(f('x-plain.log', `${HEAD}\ngate-lock: verdict PASS (exit 0)\n`), HEAD, FULL) === null;
+        const wrappedFull = ml.receiptProblem(f('x-wrapped.log',
+            `${HEAD}\ngate-lock: verdict PASS (exit 0), the chain finished\n${ml.EXIT_PASS}\n`), HEAD, FULL) === null;
+        const fullInEarlierRun = /is not the full gate/.test(ml.receiptProblem(f('x-earlier.log',
+            `${OLD}\ngate-lock: verdict PASS (exit 0)\n${ml.EXIT_PASS}\n${fastText}`), HEAD, FULL) || '');
+        check('A4e. full: a wrapped gate:fast run merges but cannot release; the full gate, plain or wrapped, releases; a full PASS in an earlier run does not count',
+            fastMerges && fastNoRelease && plainFull && wrappedFull && fullInEarlierRun,
+            `fast merges ${fastMerges}, fast refused for release ${fastNoRelease}, plain full ${plainFull}, wrapped full ${wrappedFull}, earlier-run full refused ${fullInEarlierRun}`);
     }
 
     {
