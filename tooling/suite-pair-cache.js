@@ -26,8 +26,10 @@
 // The key is a SHA-256 over a canonical serialisation of: the suite's path and
 // bytes, the subject's path and ORIGINAL bytes (never the stub's), the checker
 // and its helpers, the stub text, Node/V8/platform/arch, package.json and its
-// lockfile, the suite environment (with the source tree's path replaced by a
-// token), and the native commands the suite declares with the files they read.
+// lockfile without their release version, the suite environment (with the
+// source tree's path replaced by a token, and the volatile names stripped from
+// it before any suite runs), and the native commands the suite declares with
+// the files they read.
 // The candidate commit is recorded as provenance and is NOT in the key, so an
 // unrelated commit leaves the pair reusable.
 //
@@ -72,6 +74,21 @@ const CHECKER_FILES = [
     'suite-verdict-summary.js', 'spawn-budget.js', 'suite-tmp.js',
 ];
 const PACKAGE_FILES = ['package.json', 'package-lock.json'];
+// Names whose value is new on every gate run, Claude session or shell, or on
+// every release. `[measured 2026-10-17]` they kept every key unique: gate-lock
+// sets AUTODEV_GATE_RUN_ID and AUTODEV_GATE_RUN_TOKEN per run, so 52 sweeps
+// since 10-02 wrote about 100 fresh entries each and hit none, a same-head
+// rerun included. The sweep STRIPS them from the environment every suite runs
+// with (suiteEnv in check-suites-can-fail.js calls stripVolatileEnv), so no
+// suite can read them, and a key that digests that environment loses nothing
+// by not seeing them. CI runs every suite without any of them.
+const VOLATILE_ENV = [
+    'AUTODEV_GATE_RUN_ID', 'AUTODEV_GATE_RUN_TOKEN',
+    'CLAUDE_CODE_SESSION_ID', 'CLAUDE_CODE_HOST_SESSION_ID', 'CLAUDE_PID', 'CLAUDE_EFFORT',
+    'CLAUDE_CODE_MESSAGING_SOCKET', 'CLAUDE_CODE_MESSAGING_TOKEN', 'BAGGAGE', 'SENTRY-TRACE',
+    'CHROME_CRASHPAD_PIPE_NAME', 'CODEX_COMPANION_SESSION_ID', 'CODEX_COMPANION_TRANSCRIPT_PATH',
+    'OLDPWD', 'SHLVL', '_', 'npm_package_version',
+];
 const OUTCOMES = ['killed', 'green'];
 const KINDS = ['script', 'read', 'stat', 'list', 'resolve'];
 const WIN = process.platform === 'win32';
@@ -218,14 +235,47 @@ function resolveState(root, rel) {
     return r !== null ? 'path:' + r : 'outside:' + sha256(fold(path.resolve(out))).slice(0, 16);
 }
 
+// A copy of env without the VOLATILE_ENV names, matched without case: a
+// Windows environment copy can spell a name either way.
+function stripVolatileEnv(env) {
+    const drop = new Set(VOLATILE_ENV.map((n) => n.toUpperCase()));
+    const out = {};
+    for (const [k, v] of Object.entries(env || {})) if (!drop.has(k.toUpperCase())) out[k] = v;
+    return out;
+}
+
+// package.json or its lockfile with the release version taken out, so a bump
+// (bump.js writes only `version`) keeps every key. Everything else stays,
+// because Node's resolver reads `type`, `main`, `exports` and `imports` where
+// the tracer cannot see it. A suite that reads the file itself still records
+// it as a dependency with its full bytes, so a bump still misses that suite.
+function packageState(root, rel) {
+    let text;
+    try { text = fs.readFileSync(path.join(root, rel), 'utf8'); } catch { return fileState(root, 'read', rel); }
+    let doc;
+    try { doc = JSON.parse(text); } catch { return fileState(root, 'read', rel); }
+    if (!doc || typeof doc !== 'object' || Array.isArray(doc)) return fileState(root, 'read', rel);
+    delete doc.version;
+    if (doc.packages && doc.packages[''] && typeof doc.packages[''] === 'object') {
+        doc.packages = Object.assign({}, doc.packages, { '': Object.assign({}, doc.packages['']) });
+        delete doc.packages[''].version;
+    }
+    return 'json-sans-version:' + sha256(canonical(doc));
+}
+
 // The environment a suite runs with, minus what the sweep sets per run, and
 // with the source tree's path replaced by a token so two worktrees of one
 // repository agree. Returns the digest and a per-name digest for the report.
+// On Windows the path also arrives in the MSYS spelling (/c/Users/...), which
+// is how Git Bash hands PWD to the gate.
 function envIdentity(env, exclude, rootPaths) {
     const ex = new Set((exclude || []).map((n) => n.toUpperCase()));
     const spellings = [];
     for (const r of rootPaths || []) {
-        for (const s of [r, r.replace(/\\/g, '/'), r.replace(/\//g, '\\')]) if (s && !spellings.includes(s)) spellings.push(s);
+        const forms = [r, r.replace(/\\/g, '/'), r.replace(/\//g, '\\')];
+        const drive = /^([A-Za-z]):[\\/](.*)$/.exec(r);
+        if (drive) forms.push('/' + drive[1].toLowerCase() + '/' + drive[2].replace(/\\/g, '/'));
+        for (const s of forms) if (s && !spellings.includes(s)) spellings.push(s);
     }
     spellings.sort((a, b) => b.length - a.length);
     const names = {};
@@ -257,6 +307,67 @@ function parseDeclarations(text) {
         out.natives[cmd] = [...new Set((out.natives[cmd] || []).concat(reads))].sort();
     }
     return out;
+}
+
+// What a git child confined to its suite's own fixture can still read: git
+// itself and the config outside every repository (system, global, xdg, with
+// includes expanded). `sound` is false when that is not all of it: a
+// repository enclosing the temp root, which git would discover from a fixture
+// directory that is not yet a repository, or a configured hooks or template
+// directory whose contents this digest does not hold. Then no git child counts
+// as confined, and the pair needs a declaration as before.
+function gitIdentity(env) {
+    let dir;
+    try { dir = fs.mkdtempSync(path.join(os.tmpdir(), 'adgit')); } catch { return { sound: false, why: 'no temp directory', digest: 'none' }; }
+    try {
+        const git = (args) => spawnSync('git', args, { cwd: dir, env, encoding: 'utf8', windowsHide: true, timeout: 30000 });
+        const v = git(['--version']);
+        if (v.status !== 0) return { sound: false, why: 'git --version failed', digest: 'absent' };
+        const top = git(['rev-parse', '--git-dir']);
+        const cfg = git(['config', '--list', '--show-origin', '--show-scope']);
+        const text = cfg.stdout || '';
+        const why = top.status === 0 ? 'a repository encloses the temp root'
+            : cfg.status !== 0 ? 'git config unreadable'
+                : /^[^\t\n]*\t[^\t\n]*\t(core\.hookspath|init\.templatedir)=/im.test(text) ? 'a hooks or template directory is configured'
+                    : null;
+        return { sound: !why, why, digest: sha256(v.stdout.trim() + '\n' + text) };
+    } finally {
+        try { fs.rmSync(dir, { recursive: true, force: true }); } catch { /* temp */ }
+    }
+}
+
+// Why the git children in one run's records are not confined to that run's
+// private temp root, or [] when they all are. A record without its reach (an
+// older tracer) is not confined. homes are the sweep's own home directories,
+// whose git config gitIdentity digests.
+function gitConfinement(records, tmpRoot, homes) {
+    const out = [];
+    const tmpV = tmpRoot ? rootVariants(tmpRoot) : [];
+    const under = (p) => tmpV.length > 0 && relUnder(p, tmpV) !== null;
+    for (const rec of records) {
+        // A git control file the run wrote: git reads the paths it names.
+        if (rec[0] === 'gitfile') {
+            if (!under(String(rec[1]))) out.push('writes a git control file outside its temp root: ' + rec[1]);
+            for (const r of Array.isArray(rec[2]) ? rec[2] : ['!opaque']) {
+                const item = String(r);
+                if (item.startsWith('!')) out.push('a git control file ' + item.slice(1));
+                else if (!under(item)) out.push('a git control file names a path outside its temp root: ' + item);
+            }
+            continue;
+        }
+        if (rec[0] !== 'native' || rec[1] !== 'git') continue;
+        if (typeof rec[2] !== 'string' || !Array.isArray(rec[3])) { out.push('a git child with no recorded reach'); continue; }
+        if (!under(rec[2])) out.push('a git child runs outside its temp root: ' + rec[2]);
+        for (const r of rec[3]) {
+            const item = String(r);
+            if (item.startsWith('!')) out.push('a git child ' + item.slice(1));
+            else if (item.startsWith('home:')) {
+                const h = item.slice(5);
+                if (!under(h) && !homes.includes(fold(path.resolve(h)))) out.push('a git child has a home outside its temp root: ' + h);
+            } else if (!under(item)) out.push('a git child reaches outside its temp root: ' + item);
+        }
+    }
+    return [...new Set(out)];
 }
 
 function computeKey(parts) {
@@ -404,7 +515,9 @@ function collectEvidence(run, ctx) {
         }
         addDep('resolve', parentRel + '\n' + request, rec[2]);
     }
-    return { cacheable: reasons.length === 0, reasons: [...new Set(reasons)], deps, natives };
+    const gitUnconfined = ctx.git && ctx.git.sound ? gitConfinement(t.records, run.tmpRoot, ctx.homes || [])
+        : (natives.has('git') ? ['git identity: ' + ((ctx.git && ctx.git.why) || 'not measured')] : []);
+    return { cacheable: reasons.length === 0, reasons: [...new Set(reasons)], deps, natives, gitUnconfined };
 }
 
 // [kind, rel, state] for every dependency, sorted, measured now.
@@ -497,6 +610,9 @@ function open(opts) {
         traceRoot: c.traceRoot,
         preload: path.join(sweepRoot, 'tooling', 'suite-pair-trace.js'),
         textIndex: undefined,
+        git: gitIdentity(o.suiteEnv || {}),
+        homes: ['HOME', 'USERPROFILE', 'XDG_CONFIG_HOME'].map((n) => trace.envGet(o.suiteEnv || {}, n))
+            .filter(Boolean).map((h) => fold(path.resolve(h))),
     };
     const checker = CHECKER_FILES.map((f) => {
         try { return [f, sha256(fs.readFileSync(path.join(o.checkerDir, f)))]; } catch { return [f, 'absent']; }
@@ -507,8 +623,9 @@ function open(opts) {
     const fixed = {
         checker: { files: checker, stub: sha256(String(o.stub || '')) },
         runtime: { node: process.version, v8: process.versions.v8, platform: process.platform, arch: process.arch },
-        packages: PACKAGE_FILES.map((f) => [f, fileState(sweepRoot, 'read', f)]),
+        packages: PACKAGE_FILES.map((f) => [f, packageState(sweepRoot, f)]),
         env: envId.digest,
+        git: [ctx.git.digest, ctx.git.sound],
     };
     c.envNames = envId.names;
     c.head = o.head || null;
@@ -615,7 +732,13 @@ function open(opts) {
             if (!ev || !ev.cacheable) reasons.push(...((ev && ev.reasons) || ['not traced']));
             const declaredNatives = (p.decl && p.decl.natives) || {};
             for (const n of new Set([...((base && base.natives) || []), ...((ev && ev.natives) || [])])) {
-                if (!Object.prototype.hasOwnProperty.call(declaredNatives, n)) reasons.push(`native child ${n} undeclared`);
+                if (Object.prototype.hasOwnProperty.call(declaredNatives, n)) continue;
+                // An undeclared git child is allowed when both runs kept every
+                // git child inside their own temp root (gitConfinement).
+                const unconfined = n === 'git'
+                    ? [...((base && base.gitUnconfined) || ['not traced']), ...((ev && ev.gitUnconfined) || ['not traced'])] : null;
+                if (unconfined && unconfined.length === 0) continue;
+                reasons.push(`native child ${n} undeclared` + (unconfined ? ': ' + unconfined[0] : ''));
             }
             if (!p.key) reasons.push('no key');
             p.reasons = [...new Set(reasons)];
@@ -623,6 +746,9 @@ function open(opts) {
             if (p.cacheable && ev.states.length && base.states.length) {
                 const entry = {
                     schema: SCHEMA, key: p.key, suite: p.suite, subject: p.subject, outcome,
+                    // Each key part's digest, so two entries of one pair show
+                    // which part moved between them.
+                    parts: p.parts,
                     deps: { baseline: base.states, stub: ev.states },
                     provenance: { head: c.head, utc: new Date().toISOString(), mode: c.mode, node: process.version },
                 };
@@ -731,9 +857,9 @@ function writeReport(c, rows) {
 }
 
 module.exports = {
-    SCHEMA, MODE_ENV, DIR_ENV, REPORT_ENV, CHECKER_FILES, canonical, resolveMode, reportPath, cacheBase,
-    normalizeOrigin, repoIdentity, rootVariants, relUnder, fileState, envIdentity, parseDeclarations,
-    computeKey, partDigests, buildTextIndex, attribute, readCoverage, collectEvidence, stateList,
+    SCHEMA, MODE_ENV, DIR_ENV, REPORT_ENV, CHECKER_FILES, VOLATILE_ENV, canonical, resolveMode, reportPath, cacheBase,
+    normalizeOrigin, repoIdentity, rootVariants, relUnder, fileState, packageState, stripVolatileEnv, envIdentity, parseDeclarations,
+    computeKey, partDigests, gitIdentity, gitConfinement, buildTextIndex, attribute, readCoverage, collectEvidence, stateList,
     entryDefect, staleness, writeAtomic, open, populations, summaryLines,
 };
 

@@ -28,7 +28,10 @@
 // and the trace directory is set.
 //
 // WHAT IT CANNOT SEE: a native child's reads (it records that a native child
-// ran, which makes the pair uncacheable unless the suite declares it), reads
+// ran, which makes the pair uncacheable unless the suite declares it; a git
+// child's record carries its cwd and every path its arguments and environment
+// name, and each write to a git control file carries the paths its text names,
+// so suite-pair-cache.js can allow git confined to a suite's temp root), reads
 // through internal bindings (module resolution is recorded per request
 // instead), reads on a descriptor (recorded at open by its flags), and
 // anything a process does after it is killed.
@@ -101,8 +104,94 @@ function carriesTrace(env, preload, traceDir, coverageDir) {
         && envGet(env, COVERAGE_ENV) === coverageDir;
 }
 
+// The git variables that name a repository, a tree or a config file.
+const GIT_PATH_VARS = ['GIT_DIR', 'GIT_WORK_TREE', 'GIT_COMMON_DIR', 'GIT_INDEX_FILE', 'GIT_OBJECT_DIRECTORY',
+    'GIT_ALTERNATE_OBJECT_DIRECTORIES', 'GIT_CONFIG', 'GIT_CONFIG_GLOBAL', 'GIT_CONFIG_SYSTEM', 'GIT_TEMPLATE_DIR',
+    'GIT_EXEC_PATH'];
+// The home variables git finds its global config through.
+const HOME_VARS = ['HOME', 'USERPROFILE', 'XDG_CONFIG_HOME'];
+
+// Where one git child can reach beyond its working directory: { cwd, reach },
+// reach being absolute paths and '!'-flags. The pair cache treats a git child
+// as reading only its suite's own fixture when cwd and every reach path sit in
+// that run's private temp root and there is no flag. It is a conservative
+// reading of the command line, so anything it cannot place is a flag:
+//   · a path argument, a -C, --git-dir or --work-tree value, or a GIT_*
+//     variable naming a path, made absolute against the child's cwd;
+//   · '!dotdot' for a relative argument that climbs (`..`), '!url' for a
+//     remote URL, '!shell' for a command line a shell parses, '!tilde' for a
+//     path under a home, '!configenv' for config given in the environment;
+//   · the value of every --opt=value or -c key=value argument, as a path;
+//   · 'home:<path>' for each home variable, because git reads its global
+//     config there. The cache allows the sweep's own home, whose config it
+//     keys on, and a home inside the temp root.
+function gitReach(args, opts, shell) {
+    const o = opts || {};
+    const cwd = path.resolve(typeof o.cwd === 'string' ? o.cwd : process.cwd());
+    const reach = [];
+    if (shell) return { cwd, reach: ['!shell'] };
+    const add = (v) => {
+        const s = String(v);
+        if (!s) return;
+        if (/^[a-z][a-z0-9+.-]*:\/\//i.test(s) || /^[\w.-]+@[\w.-]+:/.test(s)) { reach.push('!url'); return; }
+        if (/(^|[\\/])\.\.([\\/]|$)/.test(s)) { reach.push('!dotdot'); return; }
+        if (s.startsWith('~')) { reach.push('!tilde'); return; }
+        if (path.isAbsolute(s)) reach.push(path.resolve(s));
+    };
+    for (const a of Array.isArray(args) ? args : []) {
+        const s = String(a);
+        add(s);
+        // --opt=value and -c key=value: the value is a path git may read.
+        const eq = s.indexOf('=');
+        if (eq >= 0) add(s.slice(eq + 1));
+    }
+    const env = o.env || process.env;
+    // Config given through the environment can name any file to include.
+    for (const name of ['GIT_CONFIG_PARAMETERS', 'GIT_CONFIG_COUNT']) {
+        const v = envGet(env, name);
+        if (v !== undefined && v !== '') reach.push('!configenv');
+    }
+    for (const name of GIT_PATH_VARS) {
+        const v = envGet(env, name);
+        if (v === undefined || v === '') continue;
+        for (const part of String(v).split(path.delimiter)) {
+            if (!part) continue;
+            if (/(^|[\\/])\.\.([\\/]|$)/.test(part)) { reach.push('!dotdot'); continue; }
+            reach.push(path.resolve(cwd, part));
+        }
+    }
+    for (const name of HOME_VARS) {
+        const v = envGet(env, name);
+        if (v !== undefined && v !== '') reach.push('home:' + path.resolve(cwd, String(v)));
+    }
+    return { cwd, reach: [...new Set(reach)].sort() };
+}
+
+// A file git reads to find other files: anything under a .git directory, a
+// .git file, or .gitmodules. A suite can point git outside its fixture by
+// writing one of these, with no git argument showing it.
+function isGitControl(p) {
+    return /(^|[\\/])\.git([\\/]|$)/.test(p) || /(^|[\\/])\.gitmodules$/.test(p);
+}
+
+// The paths a git control file's text names, as gitReach reports them: an
+// absolute path as itself, a URL as '!url', a '..' segment as '!dotdot', and
+// content that is not text as '!opaque'. A relative path without '..' stays
+// under the directory the file or its git child is in, so it is not listed.
+function gitControlReach(data) {
+    if (typeof data !== 'string' && !Buffer.isBuffer(data)) return ['!opaque'];
+    const text = String(data);
+    const reach = [];
+    if (/[a-z][a-z0-9+.-]*:\/\//i.test(text)) reach.push('!url');
+    if (/(^|[\s=:"'\\/])\.\.([\\/]|$)/m.test(text)) reach.push('!dotdot');
+    for (const m of text.matchAll(/(?:^|[^A-Za-z0-9])([A-Za-z]:[\\/][^\s"'<>|]*)/g)) reach.push(path.resolve(m[1]));
+    for (const m of text.matchAll(/(?:^|[\s="':])(\/[^\s"'<>|]*)/gm)) reach.push(path.resolve(m[1]));
+    return [...new Set(reach)].sort();
+}
+
 // Classify one child-process call into a record, or null when the child is a
-// traced Node process. `kind` is the child_process function's name.
+// traced Node process. `kind` is the child_process function's name. A git
+// child's record also carries its cwd and reach (gitReach above).
 function classifyChild(kind, args, ctx) {
     let cmd;
     let options;
@@ -133,6 +222,10 @@ function classifyChild(kind, args, ctx) {
     if (!isNodeCommand(program)) {
         const base = path.basename(String(program || '').replace(/^"(.*)"$/, '$1')).toLowerCase()
             .replace(/\.(exe|cmd|bat|com)$/, '');
+        if (base === 'git') {
+            const g = gitReach(shell ? [] : (Array.isArray(args[1]) ? args[1] : []), opts, shell);
+            return ['native', 'git', g.cwd, g.reach];
+        }
         return ['native', base || 'unknown'];
     }
     const env = opts.env || process.env;
@@ -226,6 +319,21 @@ function install() {
     };
     const openRead = (args) => { const p = asPath(args[0]); if (p && flagsOf(args[1]).reads) add(['read', p]); };
     const openWrite = (args) => { const p = asPath(args[0]); if (p && flagsOf(args[1]).writes) add(['write', p, '-']); };
+    // Every write to a git control file, through any entry point and before
+    // the call, so a failed or asynchronous write is over-recorded, never
+    // missed. gitConfinement in suite-pair-cache.js reads these.
+    const gitData = (args) => { const p = asPath(args[0]); if (p && isGitControl(p)) add(['gitfile', p, gitControlReach(args[1])]); };
+    const gitDest = (args) => { const p = asPath(args[1]); if (p && isGitControl(p)) add(['gitfile', p, ['!opaque']]); };
+    const gitOpen = (args) => {
+        const p = asPath(args[0]);
+        if (p && isGitControl(p) && flagsOf(typeof args[1] === 'function' ? undefined : args[1]).writes) add(['gitfile', p, ['!opaque']]);
+    };
+    const gitStream = (args) => { const p = asPath(args[0]); if (p && isGitControl(p)) add(['gitfile', p, ['!opaque']]); };
+    const gitLink = (args) => {
+        const p = asPath(args[1]);
+        const target = asPath(args[0]);
+        if (p && isGitControl(p)) add(['gitfile', p, target ? [path.isAbsolute(target) ? path.resolve(target) : (/(^|[\\/])\.\.([\\/]|$)/.test(target) ? '!dotdot' : path.resolve(path.dirname(p), target))] : ['!opaque']]);
+    };
 
     for (const target of [fs, fs.promises]) {
         for (const n of ['readFileSync', 'readFile', 'createReadStream']) wrap(target, n, one('read'));
@@ -237,6 +345,11 @@ function install() {
         for (const n of ['copyFileSync', 'cpSync', 'renameSync', 'linkSync']) wrap(target, n, copyDest, 'after');
         for (const n of ['openSync', 'open']) wrap(target, n, openRead);
         wrap(target, 'openSync', openWrite, 'after');
+        for (const n of ['writeFileSync', 'appendFileSync', 'writeFile', 'appendFile']) wrap(target, n, gitData);
+        for (const n of ['copyFileSync', 'cpSync', 'renameSync', 'linkSync', 'copyFile', 'cp', 'rename', 'link']) wrap(target, n, gitDest);
+        for (const n of ['symlinkSync', 'symlink']) wrap(target, n, gitLink);
+        for (const n of ['openSync', 'open']) wrap(target, n, gitOpen);
+        wrap(target, 'createWriteStream', gitStream);
     }
     for (const fn of [fs.realpathSync, fs.realpath]) wrap(fn, 'native', one('stat'));
 
@@ -307,7 +420,8 @@ function readTraceDir(dir) {
 
 module.exports = {
     TRACE_DIR_ENV, COVERAGE_ENV, textDigest, asPath, isNodeCommand, shellHead, envGet,
-    carriesTrace, classifyChild, install, readTraceDir,
+    carriesTrace, classifyChild, gitReach, GIT_PATH_VARS, HOME_VARS, isGitControl, gitControlReach,
+    install, readTraceDir,
 };
 
 if (require.main === undefined) {
