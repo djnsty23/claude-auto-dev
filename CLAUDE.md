@@ -11,7 +11,7 @@ A **Claude Code plugin marketplace**. `plugins/` ships into other people's sessi
 
 ```bash
 npm run gate                 # THE GATE: thirteen steps chained with &&. Run this.
-npm run gate:fast            # the cheap steps only, in seconds. NOT the gate.
+npm run gate:fast            # cheap steps: the merge bar, not the release bar.
 npm test                     # every tooling/test-*.js suite, then validate. Step 1 of 13.
                              # It publishes the coverage receipt that check:coverage grades.
 node tooling/bump.js 8.9.0   # the ONLY correct way to change the version
@@ -37,10 +37,9 @@ The chain's exit status is a verdict on one step, not on thirteen.
 
 - **`npm run gate` waits its turn** via `tooling/gate-lock.js` in the machine-wide `full-gate-queue.js`, behind product gates, then runs `scripts["gate:chain"]`. Remove a stopped waiter with `full-gate-queue.js leave --pid <pid>`.
 - **Exit 2 is INDETERMINATE**, never pass or fail. Read the conflict or `tooling/gate-recovery.js` machine evidence (unfinished chain, ENOSPC below the disk floor, occupied port, crash with event 2004). In `npm test`, evidence belongs in each failed suite's own log.
-- **One full gate per merge, on the frozen candidate.** Iterate with `npm test`, rebase onto `origin/main`, commit, then gate the clean tree. `check:suites` grades HEAD in a private worktree and refuses dirt. Use `plugins/autodev-core/scripts/merge-lock.js` for the per-repo lock, base check and merged-tree readback.
-- **Product fast lanes require operator policy.** `plugins/autodev-core/scripts/fast-lane.js run` classifies size and sensitive paths, runs lint/typecheck/test/build, and records a receipt. `merge-lock.js --fast-lane-receipt` reclassifies GitHub's diff. This repo always uses its full gate.
+- **`[stated 2026-10-17]` A PR merges on `gate:fast`, a release on the full gate.** Rebase onto `origin/main`, commit, then `{ git rev-parse HEAD; npm run gate:fast; echo "gate-receipt: exit $?"; } > r.log 2>&1` is the merge receipt. `publish-release.js` takes only a full `npm run gate` receipt of the release candidate. `check:suites` grades HEAD in a private worktree and refuses dirt. `plugins/autodev-core/scripts/merge-lock.js` does the per-repo lock, base check and merged-tree readback.
+- **Product fast lanes require operator policy.** `plugins/autodev-core/scripts/fast-lane.js run` classifies size and sensitive paths, runs lint/typecheck/test/build, and records a receipt. `merge-lock.js --fast-lane-receipt` reclassifies GitHub's diff.
 - **Do not touch the tree during a gate.** `test-all.js` fails `tree-inert` for changed `git status` under stable HEAD. Moved HEAD exits 2, or 1 if a suite also fails. Draft in a scratchpad. `check:coverage` refuses missing/stale/partial/red receipts with exit 2. `find-untested-functions.js --fresh` measures anew.
-- **`gate:fast` does not satisfy the merge bar.** The bar is the full gate on the rebased candidate.
 - **The gate differs from CI.** `check:hook-parse` runs CI's `node --check` on `plugins/*/hooks/*.js`. Seven of CI's steps are `if: matrix.os == 'ubuntu-latest'`.
 - **Conflict markers in strings parse.** `check:conflict-markers` scans all tracked files. Doc examples need closed fences.
 

@@ -3,7 +3,8 @@
  * merge-lock.js - merge one GitHub PR under a per-repo lock, only when the
  * merged tree is the tree the gate proved.
  *
- * WHY. The merge bar is one full gate per merge, run on the frozen candidate:
+ * WHY. The merge bar is one gate per merge, run on the frozen candidate (in
+ * this repo gate:fast under the wrapper, with the full gate on each release):
  * the PR branch rebased onto the base branch's current head. That proof holds
  * only while the base does not move, and two sessions merging into one repo
  * move it under each other. So a merge here is serialised per repo, refuses a
@@ -154,8 +155,13 @@ function readText(file) {
     return buf.toString('utf8');
 }
 
-/** null when the receipt proves `head`, else why not. */
-function receiptProblem(file, head) {
+/**
+ * null when the receipt proves `head`, else why not. `full` also requires the
+ * run that proves `head` to carry gate-lock's PASS verdict, which only the full
+ * gate prints: a wrapped `gate:fast` run merges an autodev PR but cannot
+ * publish a release (publish-release.js passes full).
+ */
+function receiptProblem(file, head, { full = false } = {}) {
     if (!file) return `no --gate-receipt given. Capture the gate on this tree: ${WRAPPER_BASH}`;
     let text;
     try { text = readText(file); } catch (e) { return `cannot read --gate-receipt ${file} (${e.code || e.message})`; }
@@ -199,6 +205,10 @@ function receiptProblem(file, head) {
     if (red) {
         return `--gate-receipt ${file}: the run that printed "${EXIT_PASS}" also printed "${red[0]}", `
             + 'so the exit is not the gate\'s. A pipe after the gate command reports the pipe\'s status';
+    }
+    if (full && !run.includes(PASS_LINE)) {
+        return `--gate-receipt ${file}: the run that proves ${head} has no "${PASS_LINE}", so it is not the full gate. `
+            + 'A gate:fast receipt merges a PR; a release needs `npm run gate > gate.log 2>&1` on its candidate';
     }
     return null;
 }

@@ -3,6 +3,23 @@
 Non-obvious choices, and where the work that implements them actually landed.
 One entry per decision, newest first.
 
+## 2026-10-17: an autodev PR merges on gate:fast, and the full gate binds the release
+
+The operator chose this on 2026-10-17. It replaces the 2026-10-02 bar for this
+repo only, and product repos keep one full gate per merge. A merge to main ships
+nothing here: installs pin to `stable`, and only `tooling/publish-release.js`
+moves it. So the full gate guards the release instead of every merge.
+`[measured 2026-10-17]` Over the last 49 merges (2026-09-27 to 2026-10-17), the
+time from head commit to merge had a median of 218 min and a p90 of 1,015 min.
+
+An ordinary PR now merges through `merge-lock.js` on a wrapped `gate:fast` run,
+with the same lock, base check and tree readback. `receiptProblem()` gained a
+`full` option, and `publish-release.js` passes it. Its receipt must then carry
+gate-lock's `verdict PASS (exit 0)` inside the run that proves the head, which
+only `npm run gate` prints. A wrapped `gate:fast` log is refused there. So a
+red suite merged on the fast bar stops the release, not the merge, and it is
+fixed on main before the version bump.
+
 ## 2026-10-16: a criterion that waits on a kept owner decision is owner-held
 
 A3's `credential-boundary` named a suite that was never written, so every

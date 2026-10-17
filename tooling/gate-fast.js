@@ -10,8 +10,9 @@
  * before check:coverage joined the chain. The figures move; re-time before
  * quoting one. CLAUDE.md carries the per-step table.
  *
- * The merge bar requires the FULL gate after every rebase. This makes the
- * iterations before that cheap; it does not replace the last one.
+ * In this repo a wrapped gate:fast run is the merge bar for an ordinary PR,
+ * and the FULL gate runs once on each release candidate (publish-release.js
+ * refuses any other receipt). Product repos keep the full gate per merge.
  *
  * `check:entrypoints` is most of this tier: it probes every tooling script with
  * `--help` under a 10 s budget each, so its worst case is minutes and its cost
@@ -180,7 +181,8 @@ function render(ran, deferred, total) {
     } else {
         lines.push(`  The ${ran.length} fast steps are clean. THIS IS NOT THE GATE.`);
     }
-    lines.push(`  Before merging: npm run gate   (all ${total} steps)`);
+    lines.push('  Merging a PR: this run under the gate-receipt wrapper is the receipt (CLAUDE.md).');
+    lines.push(`  Before a release: npm run gate   (all ${total} steps)`);
     return lines.join('\n');
 }
 
