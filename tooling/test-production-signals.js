@@ -364,21 +364,62 @@ console.log('real network path: GET only, Content-Range pagination, host refusal
     res.end(JSON.stringify(page));
   });
   const done = new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
-  done.then(() => {
+  // Node's own abort. `[measured 2026-10-17]` Node 24.15 on Windows kills a
+  // socket-using child with exit 0xC0000409 and nothing on stdout or stderr. With
+  // NODE_V8_COVERAGE set (test-all sets it) a minimal fetch child died 10 of 2000;
+  // with coverage off and three suites looping beside product gates,
+  // test-parity-capture's children died in 19 of 95 runs. The collector never exits with
+  // that code, so a child with that exact signature runs once more and the re-run
+  // is printed. A second abort, or that exit after any output, is the child's result.
+  const NODE_ABORT = 0xC0000409;
+  const isNodeAbort = (r) => r.status === NODE_ABORT && !r.stdout && !r.stderr;
+  const { spawn } = require('child_process');
+  const spawnOnce = (args, opts) => new Promise((resolve) => {
+    const child = spawn(process.execPath, args, opts);
+    let out = '', err = '';
+    child.stdout.on('data', (d) => { out += d; });
+    child.stderr.on('data', (d) => { err += d; });
+    child.on('close', (status) => resolve({ status, stdout: out, stderr: err }));
+  });
+  const runNet = async (args, opts, once = spawnOnce) => {
+    const first = await once(args, opts);
+    if (!isNodeAbort(first)) return first;
+    console.log(`  note: Node aborted the child (exit 0xC0000409, no output) and it ran once more: ${args.slice(1).join(' ')}`);
+    return once(args, opts);
+  };
+  done.then(async () => {
+    // The re-run fires on that signature alone.
+    const abort = { status: NODE_ABORT, stdout: '', stderr: '' };
+    const green = { status: 0, stdout: 'radar: ok', stderr: '' };
+    const plantEnv = { env: process.env };
+    const scripted = (...results) => {
+      const calls = [];
+      return { calls, once: async () => { calls.push(1); return results[Math.min(calls.length, results.length) - 1]; } };
+    };
+    let s = scripted(abort, green);
+    let r = await runNet([SCRIPT, 'plant'], plantEnv, s.once);
+    check('a child Node aborted with no output runs once more, and its second result is the verdict', r === green && s.calls.length === 2, `calls ${s.calls.length}`);
+    s = scripted(abort, abort);
+    r = await runNet([SCRIPT, 'plant'], plantEnv, s.once);
+    check('a second abort is returned, never hidden', r.status === NODE_ABORT && s.calls.length === 2, `calls ${s.calls.length}`);
+    s = scripted({ ...abort, stderr: 'production-signals: boom' }, green);
+    r = await runNet([SCRIPT, 'plant'], plantEnv, s.once);
+    check('an abort that printed anything is the child\'s result, not re-run', r.status === NODE_ABORT && s.calls.length === 1, `calls ${s.calls.length}`);
+    if (process.platform === 'win32') {
+      // The status a real process reports for that exit, so the constant matches what spawn sees.
+      const real = await spawnOnce(['-e', 'process.exit(-1073740791)'], plantEnv);
+      check('a real 0xC0000409 exit matches the abort signature', isNodeAbort(real), `exit ${real.status} | ${real.stdout}${real.stderr}`);
+    }
+  }).then(() => {
     const port = server.address().port;
     const dir = mkRepo('net', { remote: LIVE_REMOTE, prd: PRD, config: { sources: [
       { id: 'server-errors', kind: 'postgrest-errors', url_env: 'SUPABASE_URL', key_env: 'SUPABASE_SERVICE_ROLE_KEY', table: 'server_errors', group_by: ['function_name', 'error_code'] },
       { id: 'sentry', kind: 'sentry-issues', org: 'o', project: 'p', region: `http://127.0.0.1:${port}`, token_env: 'SUPABASE_SERVICE_ROLE_KEY' },
     ] } });
     // spawn, not spawnSync: the server lives in THIS process and must answer while the child runs
-    const { spawn } = require('child_process');
     // A bearer header cannot carry newlines, so this case uses a single-line key of its own.
     const NET_KEY = 'sk-net-CANARY-' + 'K'.repeat(40);
-    const child = spawn(process.execPath, [SCRIPT, '--now', NOW, '--summary'], { cwd: dir, env: Object.assign({}, process.env, { SUPABASE_URL: `http://127.0.0.1:${port}`, SUPABASE_SERVICE_ROLE_KEY: NET_KEY }) });
-    let out = '', err = '';
-    child.stdout.on('data', (d) => { out += d; });
-    child.stderr.on('data', (d) => { err += d; });
-    return new Promise((resolve) => child.on('close', (status) => resolve({ status, stdout: out, stderr: err })));
+    return runNet([SCRIPT, '--now', NOW, '--summary'], { cwd: dir, env: Object.assign({}, process.env, { SUPABASE_URL: `http://127.0.0.1:${port}`, SUPABASE_SERVICE_ROLE_KEY: NET_KEY }) });
   }).then((r) => {
     server.close();
     check('every request the collector made was a GET', seen.length > 0 && seen.every((s) => s.method === 'GET'), JSON.stringify(seen.map((s) => s.method)));
