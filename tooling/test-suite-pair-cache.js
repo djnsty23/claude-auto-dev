@@ -119,6 +119,50 @@ function commitAll(dir, msg) {
     const c = pc.envIdentity({ INIT_CWD: root, X: '2' }, ['TEMP'], [root]);
     check('env: the source tree path is a token and excluded names do not count', a.digest === b.digest);
     check('env: a changed value changes the identity', a.digest !== c.digest);
+
+    // Volatile names: stripped, without case, and nothing else is.
+    const raw = { AUTODEV_GATE_RUN_ID: 'r', autodev_gate_run_token: '7', Npm_Package_Version: '1.2.3',
+        CLAUDE_CODE_SESSION_ID: 's', OLDPWD: 'o', PATH: 'p', HOME: 'h', AUTODEV_GATE_LANES: '2' };
+    const kept = pc.stripVolatileEnv(raw);
+    check('env: the volatile names are stripped whatever their case, and only they are',
+        JSON.stringify(Object.keys(kept).sort()) === JSON.stringify(['AUTODEV_GATE_LANES', 'HOME', 'PATH']), JSON.stringify(kept));
+    const every = pc.stripVolatileEnv(Object.fromEntries(pc.VOLATILE_ENV.map((n) => [n, 'v'])));
+    check('env: every VOLATILE_ENV name is stripped', Object.keys(every).length === 0, JSON.stringify(every));
+    check('env: two gate runs of two sessions share an identity once the volatile names are stripped',
+        pc.envIdentity(pc.stripVolatileEnv({ AUTODEV_GATE_RUN_ID: 'run-1', CLAUDE_CODE_SESSION_ID: 'a', X: '1' }), [], [root]).digest
+        === pc.envIdentity(pc.stripVolatileEnv({ AUTODEV_GATE_RUN_ID: 'run-2', CLAUDE_CODE_SESSION_ID: 'b', X: '1' }), [], [root]).digest);
+    // Git Bash hands the gate PWD in the MSYS spelling of the worktree.
+    const wa = 'C:\\Users\\someone\\wt-a', wb = 'C:\\Users\\someone\\wt-b';
+    const pa = pc.envIdentity({ PWD: '/c/Users/someone/wt-a', X: '1' }, [], [wa]);
+    const pb = pc.envIdentity({ PWD: '/c/Users/someone/wt-b', X: '1' }, [], [wb]);
+    const pz = pc.envIdentity({ PWD: '/c/Users/someone/elsewhere', X: '1' }, [], [wb]);
+    check('env: the MSYS spelling of the source tree path is a token too', pa.digest === pb.digest && pb.digest !== pz.digest);
+}
+
+// --- package.json and its lockfile, keyed without the release version ----------
+{
+    const d = tmp('pkg');
+    const put = (rel, doc) => fs.writeFileSync(path.join(d, rel), typeof doc === 'string' ? doc : JSON.stringify(doc, null, 2) + '\n');
+    const st = (rel) => pc.packageState(d, rel);
+    const pkg = (version, extra) => Object.assign({ name: 'n', version, type: 'commonjs', scripts: { t: 'node t.js' } }, extra);
+    put('package.json', pkg('1.0.0'));
+    const p0 = st('package.json');
+    put('package.json', pkg('1.0.1'));
+    check('package: a version-only bump keeps the state', st('package.json') === p0, p0);
+    put('package.json', pkg('1.0.1', { type: 'module' }));
+    check('package: a changed type (the resolver reads it) changes the state', st('package.json') !== p0);
+    put('package.json', pkg('1.0.1', { scripts: { t: 'node other.js' } }));
+    check('package: a changed script changes the state', st('package.json') !== p0);
+    const lock = (version, deps) => ({ name: 'n', version, lockfileVersion: 3, packages: { '': { name: 'n', version, dependencies: deps } } });
+    put('package-lock.json', lock('1.0.0', { a: '1' }));
+    const l0 = st('package-lock.json');
+    put('package-lock.json', lock('1.0.1', { a: '1' }));
+    check('package: a lockfile whose root versions alone moved keeps the state', st('package-lock.json') === l0, l0);
+    put('package-lock.json', lock('1.0.1', { a: '2' }));
+    check('package: a lockfile with a changed dependency changes the state', st('package-lock.json') !== l0);
+    put('package.json', '{ not json');
+    check('package: an unparseable file falls back to its bytes', /^sha256:/.test(st('package.json')), st('package.json'));
+    check('package: an absent file is absent', st('nope.json') === 'absent');
 }
 
 // --- attribution of scripts loaded from outside the repository ----------------
@@ -176,7 +220,16 @@ let unitRepo;
     fs.appendFileSync(path.join(unitRepo, 'tooling/test-u.js'), '// suite-pair-cache: native git reads plugins/demo/other.txt\n');
     const k3 = keyNow();
     fs.appendFileSync(path.join(unitRepo, 'plugins/demo/other.txt'), 'declared now\n');
-    check('key: a file a declared native child reads changes the key', keyNow() !== k3);
+    const k4 = keyNow();
+    check('key: a file a declared native child reads changes the key', k4 !== k3);
+    fs.writeFileSync(path.join(unitRepo, 'package.json'), JSON.stringify({ name: 'u', version: '1.0.0', type: 'commonjs' }));
+    const k5 = keyNow();
+    check('key: adding package.json changes the key', k5 !== k4);
+    fs.writeFileSync(path.join(unitRepo, 'package.json'), JSON.stringify({ name: 'u', version: '1.0.1', type: 'commonjs' }));
+    check('key: a version-only bump of package.json keeps the key', keyNow() === k5);
+    fs.writeFileSync(path.join(unitRepo, 'package.json'), JSON.stringify({ name: 'u', version: '1.0.1', type: 'module' }));
+    check('key: any other package.json change changes the key', keyNow() !== k5);
+    fs.rmSync(path.join(unitRepo, 'package.json'));
 
     // settle(): what gets queued
     const c = open();
@@ -369,7 +422,133 @@ let unitRepo;
         JSON.stringify(k.processes));
     // Required rather than preloaded, it installs nothing.
     check('tracer: a shell command line is classified by its program, and a compound one as a shell', tr.classifyChild('exec', ['git status | cat'], {}).join(' ') === 'native shell'
-        && tr.classifyChild('execSync', ['git status'], {}).join(' ') === 'native git');
+        && tr.classifyChild('execSync', ['git status'], {}).slice(0, 2).join(' ') === 'native git'
+        && tr.classifyChild('execSync', ['git status'], {})[3].includes('!shell'));
+}
+
+// A git child is allowed undeclared only when it is confined to its run's own
+// temp root. Each case below names one way out of that root, written by hand
+// rather than derived from the tracer's own lists.
+{
+    const root = tmp('confine');
+    const inRoot = path.join(root, 'fixture');
+    const outside = tmp('confine-out');
+    const home = tmp('confine-home');
+    const conf = (recs, homes) => pc.gitConfinement(recs, root, homes || []);
+    const git = (cwd, args, env) => ['native', 'git', ...Object.values(tr.gitReach(args, { cwd, env: env || {} }, false))];
+    check('confine: a git child in its temp root with plain arguments is confined',
+        conf([git(inRoot, ['init', '-q']), git(inRoot, ['commit', '-m', 'x y'])]).length === 0,
+        JSON.stringify(conf([git(inRoot, ['init', '-q'])])));
+    check('confine: a git child whose cwd is outside its temp root is not',
+        /runs outside its temp root/.test(conf([git(outside, ['status'])]).join(';')));
+    check('confine: an absolute argument outside the temp root is not',
+        /reaches outside its temp root/.test(conf([git(inRoot, ['clone', outside, 'copy'])]).join(';')));
+    check('confine: the path after --opt= is read as an argument',
+        /reaches outside its temp root/.test(conf([git(inRoot, ['--git-dir=' + outside, 'log'])]).join(';')));
+    check('confine: an absolute argument inside the temp root is confined',
+        conf([git(inRoot, ['clone', path.join(root, 'origin'), 'copy'])]).length === 0);
+    check('confine: a -c key=value naming a path outside the temp root is not',
+        /reaches outside its temp root/.test(conf([git(inRoot, ['-c', 'include.path=' + outside, 'log'])]).join(';')));
+    check('confine: a ~ path is not', /a git child tilde/.test(conf([git(inRoot, ['-c', 'include.path=~/x.gitconfig', 'log'])]).join(';')));
+    check('confine: config given through the environment is not',
+        /a git child configenv/.test(conf([git(inRoot, ['log'], { GIT_CONFIG_COUNT: '1', GIT_CONFIG_KEY_0: 'include.path', GIT_CONFIG_VALUE_0: 'x' })]).join(';'))
+        && /a git child configenv/.test(conf([git(inRoot, ['log'], { GIT_CONFIG_PARAMETERS: "'core.hookspath'='x'" })]).join(';')));
+    check('confine: a URL argument is not', /a git child url/.test(conf([git(inRoot, ['fetch', 'https://example.invalid/r.git'])]).join(';')));
+    check('confine: a .. segment is not', /a git child dotdot/.test(conf([git(inRoot, ['clone', '../../elsewhere', 'c'])]).join(';')));
+    check('confine: a shell command line is not', /a git child shell/.test(conf([['native', 'git', ...Object.values(tr.gitReach([], { cwd: inRoot }, true))]]).join(';')));
+    check('confine: GIT_DIR outside the temp root is not',
+        /reaches outside its temp root/.test(conf([git(inRoot, ['log'], { GIT_DIR: outside })]).join(';')));
+    check('confine: a home outside the temp root and the sweep homes is not',
+        /home outside its temp root/.test(conf([git(inRoot, ['log'], { HOME: home })]).join(';')));
+    check('confine: the sweep\'s own home is allowed',
+        conf([git(inRoot, ['log'], { HOME: home })], [process.platform === 'win32' ? path.resolve(home).toLowerCase() : path.resolve(home)]).length === 0,
+        JSON.stringify(conf([git(inRoot, ['log'], { HOME: home })], [home])));
+    check('confine: a record without its reach (an older tracer) is not',
+        /no recorded reach/.test(conf([['native', 'git']]).join(';')));
+    check('confine: no temp root confines nothing',
+        pc.gitConfinement([git(inRoot, ['log'])], undefined, []).length > 0);
+    // Git control files written by the run.
+    const gf = (p, data) => ['gitfile', p, tr.gitControlReach(data)];
+    check('confine: a git control file in the root naming nothing outside it is confined',
+        conf([gf(path.join(inRoot, '.git', 'description'), 'fixture\n'), gf(path.join(inRoot, '.git'), 'gitdir: sub\n')]).length === 0);
+    check('confine: a git control file naming a path outside the root is not',
+        /names a path outside its temp root/.test(conf([gf(path.join(inRoot, '.git', 'config'), '[remote "o"]\n\turl = ' + outside + '\n')]).join(';')));
+    check('confine: a gitdir file with a .. segment is not',
+        /control file dotdot/.test(conf([gf(path.join(inRoot, '.git'), 'gitdir: ../../repo/.git/worktrees/w\n')]).join(';')));
+    check('confine: a git control file written from a non-text value is not',
+        /control file opaque/.test(conf([gf(path.join(inRoot, '.git', 'config'), new Uint8Array(4))]).join(';')));
+    check('confine: a git control file written outside the root is not',
+        /writes a git control file outside its temp root/.test(conf([gf(path.join(outside, '.git', 'config'), 'x\n')]).join(';')));
+    check('trace: git control paths are a .git file, anything under .git, and .gitmodules',
+        ['a/.git', 'a/.git/config', 'a\\.git\\info\\alternates', 'a/.gitmodules'].every(tr.isGitControl)
+        && !['a/.gitignore', 'a/.github/x', 'a/git/config', 'a/x.git'].some(tr.isGitControl));
+
+    // gitIdentity: git and its config outside any repository.
+    const id1 = pc.gitIdentity(process.env);
+    check('git identity: sound in a temp root no repository encloses', id1.sound === true && /^[0-9a-f]{64}$/.test(id1.digest), JSON.stringify(id1));
+    const cfgA = path.join(tmp('gitcfg'), 'a.gitconfig');
+    fs.writeFileSync(cfgA, '[user]\n\tname = fixture one\n');
+    const cfgB = path.join(path.dirname(cfgA), 'b.gitconfig');
+    fs.writeFileSync(cfgB, '[user]\n\tname = fixture two\n');
+    const cfgH = path.join(path.dirname(cfgA), 'h.gitconfig');
+    fs.writeFileSync(cfgH, '[core]\n\thooksPath = ' + outside.replace(/\\/g, '/') + '\n');
+    const withCfg = (f) => Object.assign({}, process.env, { GIT_CONFIG_GLOBAL: f, GIT_CONFIG_NOSYSTEM: '1' });
+    const ida = pc.gitIdentity(withCfg(cfgA));
+    const idb = pc.gitIdentity(withCfg(cfgB));
+    check('git identity: a different global config changes its digest', ida.sound && idb.sound && ida.digest !== idb.digest);
+    check('git identity: the same config gives the same digest', pc.gitIdentity(withCfg(cfgA)).digest === ida.digest);
+    const idh = pc.gitIdentity(withCfg(cfgH));
+    check('git identity: a configured hooks directory is unsound', idh.sound === false && /hooks or template/.test(idh.why), JSON.stringify(idh));
+    // A repository enclosing the temp root: git would discover it from a fixture
+    // directory that is not yet a repository.
+    const enclosing = tmp('enclosing');
+    gitIn(enclosing)('init', '-q');
+    const inner = path.join(enclosing, 'tmp');
+    fs.mkdirSync(inner);
+    const saved = { TEMP: process.env.TEMP, TMP: process.env.TMP, TMPDIR: process.env.TMPDIR };
+    let ide;
+    try {
+        process.env.TEMP = process.env.TMP = process.env.TMPDIR = inner;
+        ide = pc.gitIdentity(process.env);
+    } finally {
+        for (const [k, v] of Object.entries(saved)) { if (v === undefined) delete process.env[k]; else process.env[k] = v; }
+    }
+    check('git identity: a repository enclosing the temp root is unsound',
+        ide.sound === false && /encloses the temp root/.test(ide.why), JSON.stringify(ide));
+}
+
+// The tracer records a write to a git control file through each entry point.
+{
+    const d = tmp('gitfile');
+    const traceDir = path.join(d, 't');
+    const covDir = path.join(d, 'c');
+    fs.mkdirSync(traceDir);
+    fs.mkdirSync(covDir);
+    const probeOut = tmp('gitfile-out');
+    const script = path.join(d, 'probe.js');
+    fs.writeFileSync(script, [
+        "const fs = require('fs'); const path = require('path');",
+        "const g = path.join(__dirname, 'fx', '.git'); fs.mkdirSync(g, { recursive: true });",
+        "fs.writeFileSync(path.join(g, 'config'), '[remote \"o\"]\\n\\turl = ' + process.env.PROBE_OUT + '\\n');",
+        "fs.appendFileSync(path.join(g, 'description'), 'fixture\\n');",
+        "fs.copyFileSync(__filename, path.join(g, 'copied'));",
+        "fs.writeFileSync(path.join(__dirname, 'fx', 'plain.txt'), 'x');",
+        "fs.promises.writeFile(path.join(g, 'async'), 'gitdir: ../x\\n').then(() => process.stdout.write('probe-done'));",
+    ].join('\n'));
+    const env = Object.assign({}, process.env, {
+        NODE_OPTIONS: '--require "' + TRACE.replace(/\\/g, '/') + '"',
+        [tr.TRACE_DIR_ENV]: traceDir, [tr.COVERAGE_ENV]: covDir, PROBE_OUT: probeOut,
+    });
+    const r = spawnSync(process.execPath, [script], { env, encoding: 'utf8', windowsHide: true, timeout: 60000 });
+    const recs = tr.readTraceDir(traceDir).records.filter((x) => x[0] === 'gitfile');
+    const at = (tail) => recs.find((x) => String(x[1]).replace(/\\/g, '/').endsWith(tail));
+    check('trace gitfile: the probe ran', r.status === 0 && r.stdout === 'probe-done', r.stderr.slice(0, 300));
+    check('trace gitfile: a written config carries the absolute path its text names',
+        at('.git/config') && at('.git/config')[2].some((p) => p.toLowerCase() === path.resolve(probeOut).toLowerCase()), JSON.stringify(recs));
+    check('trace gitfile: an appended file is recorded', at('.git/description') && at('.git/description')[2].length === 0, JSON.stringify(recs));
+    check('trace gitfile: a copy into .git is opaque', at('.git/copied') && at('.git/copied')[2].includes('!opaque'), JSON.stringify(recs));
+    check('trace gitfile: an asynchronous write is recorded', at('.git/async') && at('.git/async')[2].includes('!dotdot'), JSON.stringify(recs));
+    check('trace gitfile: a file outside .git is not a git control file', !at('plain.txt'), JSON.stringify(recs));
 }
 
 // ============================================================ end to end ==
@@ -422,6 +601,18 @@ const FILES = {
     'plugins/demo/conf.txt': 'conf one\n',
     'tooling/test-g.js': '// suite-pair-cache: native git reads plugins/demo/conf.txt\n'
         + suite('g', "cp.spawnSync('git', ['--version']);"),
+    // q: an undeclared git child confined to its own temp root.
+    'plugins/demo/q.js': sub('q'),
+    'tooling/test-q.js': suite('q', String.raw`const d = fs.mkdtempSync(path.join(require('os').tmpdir(), 'q'));
+cp.spawnSync('git', ['init', '-q'], { cwd: d });
+fs.writeFileSync(path.join(d, '.git', 'description'), 'fixture\n');
+cp.spawnSync('git', ['status', '--short'], { cwd: d });`),
+    // w: the same, but the git config it writes names a path outside that root.
+    'plugins/demo/w.js': sub('w'),
+    'tooling/test-w.js': suite('w', String.raw`const d = fs.mkdtempSync(path.join(require('os').tmpdir(), 'w'));
+cp.spawnSync('git', ['init', '-q'], { cwd: d });
+fs.appendFileSync(path.join(d, '.git', 'config'), '[remote "o"]\n\turl = ' + path.dirname(process.env.PAIR_FIXTURE_EXTERNAL).replace(/\\/g, '/') + '\n');
+cp.spawnSync('git', ['remote', '-v'], { cwd: d });`),
     // k: a traced child it kills, so the run's evidence is incomplete.
     'plugins/demo/k.js': sub('k'),
     'tooling/test-k.js': suite('k', "cp.spawnSync(process.execPath, ['-e', 'setTimeout(() => {}, 20000)'], { timeout: 1500 });"),
@@ -436,8 +627,8 @@ const FILES = {
     'plugins/demo/x.js': sub('x'),
     'tooling/test-x.js': suite('x', 'fs.readFileSync(process.env.PAIR_FIXTURE_EXTERNAL);'),
 };
-const SUITES = ['a', 'b', 'd', 'e', 'f', 'g', 'k', 'n', 'r', 'x'];
-const CACHEABLE = ['a', 'b', 'd', 'e', 'f', 'g', 'r'];
+const SUITES = ['a', 'b', 'd', 'e', 'f', 'g', 'k', 'n', 'q', 'r', 'w', 'x'];
+const CACHEABLE = ['a', 'b', 'd', 'e', 'f', 'g', 'q', 'r'];
 
 // The fixture sweeps start as a top-level check:suites does: with no tracer.
 // Under the real check:suites this suite is itself a traced pair, so its own
@@ -496,12 +687,16 @@ const tail = (s) => (s ? s.all.slice(-1500) : '');
         const why = (s) => (r1.p[s] ? r1.p[s].lookupReason + ' ' + r1.p[s].reasons.join(';') : 'absent');
         check('R1 shadow: an undeclared native child makes its pair uncacheable', r1.p.n && !r1.p.n.stored
             && /native child git undeclared/.test(why('n')), why('n'));
+        check('R1 shadow: an undeclared git child outside its temp root says so',
+            /native child git undeclared: a git child runs outside its temp root/.test(why('n')), why('n'));
+        check('R1 shadow: a git config naming a path outside the temp root makes its pair uncacheable', r1.p.w && !r1.p.w.stored
+            && /native child git undeclared: a git control file names a path outside its temp root/.test(why('w')), why('w'));
         check('R1 shadow: a killed traced child makes its pair uncacheable', r1.p.k && !r1.p.k.stored
             && /did not finish/.test(why('k')), why('k'));
         check('R1 shadow: a read outside the repository makes its pair uncacheable', r1.p.x && !r1.p.x.stored
             && /reads outside the repository/.test(why('x')), why('x'));
         check('R1 shadow: the summary prints the hit, miss and uncacheable populations',
-            /\[pair-cache\] mode shadow \(default\) · 10 pair\(s\): 0 hit · 7 miss · 3 uncacheable/.test(r1.all), tail(r1));
+            /\[pair-cache\] mode shadow \(default\) · 12 pair\(s\): 0 hit · 8 miss · 4 uncacheable/.test(r1.all), tail(r1));
     }
 
     // R2: shadow again on the same tree. Every stored pair is a hit and agrees.
@@ -519,9 +714,9 @@ const tail = (s) => (s ? s.all.slice(-1500) : '');
     if (r3) {
         const notSkipped = CACHEABLE.filter((s) => !(r3.p[s] && r3.p[s].lookup === 'hit' && r3.p[s].fresh === null));
         check('R3 --cache: every valid pair is skipped', notSkipped.length === 0, notSkipped.join(','));
-        check('R3 --cache: the uncacheable pairs still ran', ['k', 'n', 'x'].every((s) => r3.p[s] && r3.p[s].fresh === 'killed'));
+        check('R3 --cache: the uncacheable pairs still ran', ['k', 'n', 'w', 'x'].every((s) => r3.p[s] && r3.p[s].fresh === 'killed'));
         check('R3 --cache: the verdict rows and exit code are the uncached run\'s', r3.rows === r1.rows && r3.code === 0, tail(r3));
-        check('R3 --cache: the summary counts the skipped pairs', /7 hit · 0 miss · 3 uncacheable · 7 skipped/.test(r3.all), tail(r3));
+        check('R3 --cache: the summary counts the skipped pairs', /8 hit · 0 miss · 4 uncacheable · 8 skipped/.test(r3.all), tail(r3));
     }
 
     // Commit 2: one edit per scenario, plus an unrelated one, plus two entries
@@ -595,6 +790,73 @@ const tail = (s) => (s ? s.all.slice(-1500) : '');
         check('R6 --no-cache: off, no pairs looked up, verdicts unchanged',
             /\[pair-cache\] off \(--no-cache\)/.test(r6.all) && r6.doc && r6.doc.pairs.length === 0 && r6.rows === r1.rows && r6.code === 0,
             tail(r6));
+    }
+}
+
+// A release bump between two gate runs of two sessions. `[measured 2026-10-17]`
+// every gate since 10-08 hit nothing: gate-lock gives each run a new
+// AUTODEV_GATE_RUN_ID and token, the suite environment carried them into the
+// key, and package.json's version moved on every release. So: the run id, the
+// token, the session and the version all differ between B1 and B2, and only
+// what a suite can actually observe may cost a rerun.
+{
+    const pkgJson = (v) => JSON.stringify({ name: 'fixture', version: v, type: 'commonjs' }, null, 2) + '\n';
+    const repo = makeRepo('bump', {
+        'VERSION': '1.0.0\n',
+        'package.json': pkgJson('1.0.0'),
+        'tooling/validate.js': FILES['tooling/validate.js'],
+        'plugins/demo/b.js': sub('b'),
+        'tooling/test-b.js': suite('b'),
+        'plugins/demo/c.js': sub('c'),
+        'tooling/test-c.js': suite('c'),
+        'plugins/demo/e.js': sub('e'),
+        'tooling/test-e.js': suite('e'),
+        // v reads package.json itself, so a bump must rerun it.
+        'plugins/demo/v.js': sub('v'),
+        'tooling/test-v.js': suite('v', `JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'package.json'), 'utf8'));`),
+    });
+    const cacheDir = path.join(tmp('bump-cache'), 'c');
+    const gateEnv = (n, v) => ({ AUTODEV_GATE_RUN_ID: 'run-' + n, AUTODEV_GATE_RUN_TOKEN: String(n),
+        CLAUDE_CODE_SESSION_ID: 'session-' + n, npm_package_version: v });
+    const bump = (v, extra) => {
+        writeFiles(repo, Object.assign({ 'VERSION': v + '\n', 'package.json': pkgJson(v) }, extra || {}));
+        return commitAll(repo, 'release ' + v);
+    };
+    const desc = (r, s) => JSON.stringify(r.p[s] && [r.p[s].lookup, r.p[s].lookupReason, r.p[s].fresh, r.p[s].agree]);
+    const b1 = runSweep(repo, cacheDir, 'b1', [], gateEnv(1, '1.0.0'));
+    if (b1) {
+        check('B1: every pair of the bump fixture is stored', ['b', 'c', 'e', 'v'].every((s) => b1.p[s] && b1.p[s].stored),
+            ['b', 'c', 'e', 'v'].map((s) => desc(b1, s)).join(' '));
+    }
+    const b2 = b1 && bump('1.0.1') ? runSweep(repo, cacheDir, 'b2', [], gateEnv(2, '1.0.1')) : null;
+    if (b2) {
+        check('B2: across a version-only bump, a new run id and a new session, untouched pairs are hits that agree',
+            ['b', 'c', 'e'].every((s) => b2.p[s] && b2.p[s].lookup === 'hit' && b2.p[s].agree === true),
+            ['b', 'c', 'e'].map((s) => desc(b2, s)).join(' '));
+        check('B2: a suite that reads package.json itself reruns after the bump', b2.p.v && b2.p.v.lookup === 'miss'
+            && /package\.json/.test(b2.p.v.lookupReason), desc(b2, 'v'));
+        check('B2: the verdict rows are B1\'s', b2.code === 0 && b2.rows === b1.rows, tail(b2));
+    }
+    // B3: another bump, carrying two planted defects. test-b.js is made vacuous
+    // (it exits 0 before it tests anything), which is the verdict the sweep
+    // exists to catch, and c.js is edited. Both pairs must miss, and the fresh
+    // run must report the vacuous suite, not a cached "killed".
+    const vacuous = 'process.exit(0);\n' + suite('b');
+    const b3 = b2 && bump('1.0.2', { 'tooling/test-b.js': vacuous, 'plugins/demo/c.js': sub('c') + '// edited\n' })
+        ? runSweep(repo, cacheDir, 'b3', [], gateEnv(3, '1.0.2')) : null;
+    if (b3) {
+        check('B3: a suite made vacuous misses, and its fresh run is the vacuous verdict', b3.p.b && b3.p.b.lookup === 'miss'
+            && b3.p.b.fresh === 'green' && b3.code === 1 && /VACUOUS/.test(b3.all), desc(b3, 'b') + ' ' + tail(b3));
+        check('B3: an edited subject misses across a bump', b3.p.c && b3.p.c.lookup === 'miss', desc(b3, 'c'));
+        check('B3: the untouched pair is still a hit that agrees', b3.p.e && b3.p.e.lookup === 'hit' && b3.p.e.agree === true, desc(b3, 'e'));
+    }
+    // B4: the same tree with a changed environment name that is not volatile.
+    // A suite could read it, so every key is new.
+    const b4 = b3 ? runSweep(repo, cacheDir, 'b4', [], Object.assign(gateEnv(4, '1.0.2'), { PAIR_FIXTURE_FLAG: 'changed' })) : null;
+    if (b4) {
+        check('B4: a changed environment name that is not volatile changes every key',
+            ['b', 'c', 'e', 'v'].every((s) => b4.p[s] && b4.p[s].lookup === 'miss' && b4.p[s].lookupReason === 'no entry'),
+            ['b', 'c', 'e', 'v'].map((s) => desc(b4, s)).join(' '));
     }
 }
 

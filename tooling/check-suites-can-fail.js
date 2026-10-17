@@ -625,8 +625,11 @@ const REPORT_MARGIN_MS = 30000;
 // The operator's profile never reaches a suite: a suite that fakes HOME still
 // resolves CLAUDE_CONFIG_DIR first, so an inherited one points it at the real
 // config dir. test-all.js carries the measurement and strips the same name.
+// Nor does a per-run, per-session or per-release name (VOLATILE_ENV in
+// suite-pair-cache.js): the pair key digests this environment, and one of
+// those would make every key new on every gate run.
 const suiteEnv = (extra) => {
-    const env = Object.assign({}, process.env, extra);
+    const env = pairCacheLib.stripVolatileEnv(Object.assign({}, process.env, extra));
     delete env.CLAUDE_CONFIG_DIR;
     return env;
 };
