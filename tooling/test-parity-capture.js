@@ -130,26 +130,26 @@ function serve() {
     }));
 }
 
-// A socket-using node child on Windows can die with 0xC0000409 (a native
-// fast-fail, 3221226505) under load, with no output. Measured 2026-09-25 on
-// Node 24.15: 6 of 100 concurrent suite runs, with fetch and with node:http
-// alike, and 0 of 800 for a child with no sockets. That code is never a verdict
-// (the script exits 0, 1 or 2), so the invocation is retried ONCE and the retry
-// is printed. A crash that repeats still fails the assertion.
-const NATIVE_CRASH = 3221226505;
+// Node's own abort. `[measured 2026-10-17]` Node 24.15 on Windows kills a
+// socket-using child with exit 0xC0000409 and nothing on stdout or stderr. With
+// NODE_V8_COVERAGE set (test-all sets it) a minimal fetch child died 10 of 2000;
+// with coverage off and three suites looping beside product gates,
+// test-parity-capture's children died in 19 of 95 runs. The script never exits with
+// that code, so a child with that exact signature runs once more and the re-run
+// is printed. A second abort, or that exit after any output, is the child's result.
+const NODE_ABORT = 0xC0000409;
+const isNodeAbort = (r) => r.code === NODE_ABORT && !r.stdout && !r.stderr;
 
-async function runScript(...a) {
-    let r = await runScriptOnce(...a);
-    if (r.code === NATIVE_CRASH) {
-        console.log(`note: a child died with 0xC0000409 (native crash, no verdict); retrying it once: ${a[1].join(' ')}`);
-        r = await runScriptOnce(...a);
-    }
-    return r;
+async function runScript(script, args, env = process.env, once = runScriptOnce) {
+    const first = await once(script, args, env);
+    if (!isNodeAbort(first)) return first;
+    console.log(`note: Node aborted the child (exit 0xC0000409, no output) and it ran once more: ${args.join(' ')}`);
+    return once(script, args, env);
 }
 
-function runScriptOnce(script, args, timeoutMs = 60000) {
+function runScriptOnce(script, args, env = process.env, timeoutMs = 60000) {
     return new Promise((resolve) => {
-        const child = spawn(process.execPath, [script, ...args], { stdio: ['ignore', 'pipe', 'pipe'] });
+        const child = spawn(process.execPath, [script, ...args], { env, stdio: ['ignore', 'pipe', 'pipe'] });
         let stdout = ''; let stderr = '';
         child.stdout.on('data', (d) => { stdout += d; });
         child.stderr.on('data', (d) => { stderr += d; });
@@ -170,6 +170,31 @@ function findings(out, cls, kind) {
 }
 
 async function main() {
+    // Node's abort: the re-run fires on that signature alone.
+    {
+        const abort = { code: NODE_ABORT, signal: null, stdout: '', stderr: '' };
+        const green = { code: 0, signal: null, stdout: 'parity: ok', stderr: '' };
+        const plantEnv = process.env;
+        const scripted = (...results) => {
+            const calls = [];
+            return { calls, once: async () => { calls.push(1); return results[Math.min(calls.length, results.length) - 1]; } };
+        };
+        let s = scripted(abort, green);
+        let r = await runScript(SCRIPT, ['plant'], plantEnv, s.once);
+        check('a child Node aborted with no output runs once more, and its second result is the verdict', r === green && s.calls.length === 2, `calls ${s.calls.length}`);
+        s = scripted(abort, abort);
+        r = await runScript(SCRIPT, ['plant'], plantEnv, s.once);
+        check('a second abort is returned, never hidden', r.code === NODE_ABORT && s.calls.length === 2, `calls ${s.calls.length}`);
+        s = scripted({ ...abort, stderr: 'parity-capture: boom' }, green);
+        r = await runScript(SCRIPT, ['plant'], plantEnv, s.once);
+        check('an abort that printed anything is the child\'s result, not re-run', r.code === NODE_ABORT && s.calls.length === 1, `calls ${s.calls.length}`);
+        if (process.platform === 'win32') {
+            // The code a real process reports for that exit, so the constant matches what spawn sees.
+            const real = await runScriptOnce('-e', ['process.exit(-1073740791)'], plantEnv);
+            check('a real 0xC0000409 exit matches the abort signature', isNodeAbort(real), `exit ${real.code} | ${real.stdout}${real.stderr}`);
+        }
+    }
+
     const B = await serve();
     const C = await serve();
     let caseNo = 0;
