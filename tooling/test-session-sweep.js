@@ -240,6 +240,9 @@ function buildCases() {
 
   // 8. The app's own opt-out must win over every other signal.
   cases.push({ id: 'exempt', wt: null, expectRisk: null, expectSafe: false, exempt: true });
+  // 8b. A session that turned its own PR auto-archive switch off (the Brain) is
+  // opted out the same way.
+  cases.push({ id: 'pr-archive-off', wt: null, expectRisk: null, expectSafe: false, prArchiveOff: true });
 
   // 9. ARGUMENT injection — a checked-out branch whose name begins with '-'.
   //
@@ -300,6 +303,7 @@ function writeSession(c, i) {
   };
   if (c.wt) rec.worktreePath = c.wt;
   if (c.exempt) rec.autoArchiveExempt = true;
+  if (c.prArchiveOff) rec.autoArchiveOnPrClose = false;
   if (c.scheduledTaskId) rec.scheduledTaskId = c.scheduledTaskId;
   // The repo slug is deliberately unresolvable, so refreshPrStates() fails for
   // it and the cached state below is what gets used. That exercises the
