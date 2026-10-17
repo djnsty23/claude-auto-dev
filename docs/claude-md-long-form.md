@@ -253,10 +253,11 @@ before quoting a share.
 `--help` under a 10 s budget each, so its worst case is minutes and its cost
 grows with the script count — 7.8 s on 2026-09-08, 12.7 s here at a lower load.
 
-**`gate:fast` does not satisfy the merge bar.** The bar is the full gate AFTER
-any rebase, and the tier makes the iterations before that cheap; it does not
-replace the last one. Its exit 0 means "the steps it ran are clean", so never
-chain it into a push or a merge as though it were the gate.
+**`[stated 2026-10-17]` `gate:fast` is the merge bar, never the release bar.** An
+ordinary PR merges on a wrapped `gate:fast` run after its rebase. The full gate
+runs once on the release candidate, and `publish-release.js` refuses any other
+receipt (docs/decisions.md, 2026-10-17). Its exit 0 means "the steps it ran are
+clean", never "the gate passed".
 
 **`gate:fast` IS NOT THE GATE, and it says so on every run — including a clean
 one.** It prints what it ran, what it DEFERRED, and a summary line counting the

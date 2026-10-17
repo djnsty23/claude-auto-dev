@@ -16,7 +16,8 @@
 //      receiptProblem() with full for --head (default the tag commit), so a
 //      wrapped gate:fast run is refused here, and --head has the
 //      same tree as the tag commit. A rebase merge rewrites the SHA, never the
-//      tree, so the receipt from the PR's frozen candidate binds the release.
+//      tree, so the full gate on the release PR's frozen candidate (bump.js
+//      step 3) binds the release.
 //   5. the tag is absent on the remote, or already this exact tag object
 //
 // Then one atomic push over SSH with the deploy key creates the tag and moves
@@ -112,8 +113,7 @@ function gather({ version, gateReceipt, head }) {
     }
     f.stableIsAncestor = Boolean(f.stable) && git('merge-base', '--is-ancestor', f.stable, f.commit).code === 0;
     f.head = String(head || f.commit).toLowerCase();
-    const { receiptProblem } = require(path.join(ROOT, 'plugins', 'autodev-core', 'scripts', 'merge-lock.js'));
-    f.receiptProblem = SHA_RE.test(f.head) ? receiptProblem(gateReceipt, f.head, { full: true }) :`--head ${f.head} is not a 40-hex sha`;
+    f.receiptProblem = releaseReceiptProblem(gateReceipt, f.head);
     const ht = git('rev-parse', '--verify', '--quiet', `${f.head}^{tree}`);
     f.headTree = ht.code === 0 ? ht.out : null;
     return { facts: f };
@@ -191,6 +191,13 @@ function main() {
     return 0;
 }
 
-module.exports = { judge, parseArgs };
+/** The release bar: a full gate receipt for a 40-hex head, never a wrapped gate:fast run. */
+function releaseReceiptProblem(gateReceipt, head) {
+    if (!SHA_RE.test(head)) return `--head ${head} is not a 40-hex sha`;
+    const { receiptProblem } = require(path.join(ROOT, 'plugins', 'autodev-core', 'scripts', 'merge-lock.js'));
+    return receiptProblem(gateReceipt, head, { full: true });
+}
+
+module.exports = { judge, parseArgs, releaseReceiptProblem };
 
 if (require.main === module) process.exitCode = main();

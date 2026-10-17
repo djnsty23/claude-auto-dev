@@ -244,18 +244,26 @@ async function main() {
 
         // full: the release bar. A wrapped gate:fast run (no gate-lock verdict)
         // merges a PR but is refused for a release; the full gate passes both ways.
+        // gate-lock's real closing pair: its head line directly before the verdict.
         const FULL = { full: true };
+        const pair = (h, eol = '\n') => `gate-lock: head ${h}${eol}gate-lock: verdict PASS (exit 0), the chain finished: ok${eol}`;
         const fastText = `${HEAD}\ngate-fast: 9 of 13 steps ran, PARTIAL\n${ml.EXIT_PASS}\n`;
         const fastMerges = ml.receiptProblem(f('x-fast.log', fastText), HEAD) === null;
         const fastNoRelease = /is not the full gate/.test(ml.receiptProblem(f('x-fast2.log', fastText), HEAD, FULL) || '');
-        const plainFull = ml.receiptProblem(f('x-plain.log', `${HEAD}\ngate-lock: verdict PASS (exit 0)\n`), HEAD, FULL) === null;
-        const wrappedFull = ml.receiptProblem(f('x-wrapped.log',
-            `${HEAD}\ngate-lock: verdict PASS (exit 0), the chain finished\n${ml.EXIT_PASS}\n`), HEAD, FULL) === null;
+        const plainFull = ml.receiptProblem(f('x-plain.log', `gate-lock: head ${HEAD}\nnpm test\n${pair(HEAD)}`), HEAD, FULL) === null;
+        const crlfFull = ml.receiptProblem(f('x-crlf.log', `gate-lock: head ${HEAD}\r\n${pair(HEAD, '\r\n')}`), HEAD, FULL) === null;
+        const wrappedFull = ml.receiptProblem(f('x-wrapped.log', `${HEAD}\n${pair(HEAD)}${ml.EXIT_PASS}\n`), HEAD, FULL) === null;
         const fullInEarlierRun = /is not the full gate/.test(ml.receiptProblem(f('x-earlier.log',
-            `${OLD}\ngate-lock: verdict PASS (exit 0)\n${ml.EXIT_PASS}\n${fastText}`), HEAD, FULL) || '');
-        check('A4e. full: a wrapped gate:fast run merges but cannot release; the full gate, plain or wrapped, releases; a full PASS in an earlier run does not count',
-            fastMerges && fastNoRelease && plainFull && wrappedFull && fullInEarlierRun,
-            `fast merges ${fastMerges}, fast refused for release ${fastNoRelease}, plain full ${plainFull}, wrapped full ${wrappedFull}, earlier-run full refused ${fullInEarlierRun}`);
+            `${OLD}\n${pair(OLD)}${ml.EXIT_PASS}\n${fastText}`), HEAD, FULL) || '');
+        // The review's case: an earlier plain run whose head line printed no sha,
+        // then a wrapped gate:fast run with no closing line between them.
+        const lentPass = /is not the full gate/.test(ml.receiptProblem(f('x-lent.log',
+            `gate-lock: head unknown (git rev-parse HEAD failed)\ngate-lock: verdict PASS (exit 0)\n${fastText}`), HEAD, FULL) || '');
+        const bareVerdict = /is not the full gate/.test(ml.receiptProblem(f('x-bare.log', `${HEAD}\ngate-lock: verdict PASS (exit 0)\n`), HEAD, FULL) || '');
+        check('A4e. full: a wrapped gate:fast run merges but cannot release; the full gate (plain, CRLF or wrapped) releases; a PASS from an earlier run, a lent PASS or a PASS without its head line does not',
+            fastMerges && fastNoRelease && plainFull && crlfFull && wrappedFull && fullInEarlierRun && lentPass && bareVerdict,
+            `fast merges ${fastMerges}, fast refused ${fastNoRelease}, plain ${plainFull}, crlf ${crlfFull}, wrapped ${wrappedFull}, `
+            + `earlier run refused ${fullInEarlierRun}, lent refused ${lentPass}, bare verdict refused ${bareVerdict}`);
     }
 
     {
