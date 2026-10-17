@@ -1162,8 +1162,10 @@ function main() {
       const thirdParty = finished ? isThirdParty(s) : false;
       const inspected = finished ? worktreeRisk(s, all) : { reason: null, localOnly: [] };
       let risk = inspected.reason;
-      // The app has its own opt-out. Honour it rather than inventing a second one.
-      const exempt = s.autoArchiveExempt === true;
+      // The app has its own opt-outs. Honour them rather than inventing another.
+      // autoArchiveOnPrClose false is the session's own switch (ccd_pr set_monitor),
+      // which the brain skill turns off so a coordinator is never swept.
+      const exempt = s.autoArchiveExempt === true || s.autoArchiveOnPrClose === false;
       const standing = workspaceStanding(s.__workspace, currentWorkspace, orphanedWorkspaces);
       const reachable = standing === 'live' || standing === 'undetermined';
       let archive = null;

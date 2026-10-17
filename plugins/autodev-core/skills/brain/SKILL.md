@@ -2,7 +2,7 @@
 name: brain
 description: Drive an authorized product mission from idea through implementation, independent review and live verification. Use when asked to run the fleet, replace manual coordination, or resume Brain.
 when_to_use: "Invoked when the user says \"brain\", \"restart the brain\", \"you are the brain\", \"take over the fleet\", or delegates a product mission from idea to delivery."
-allowed-tools: Bash, Read, Write, Edit, Grep, Glob, Task, Agent, Workflow, AskUserQuestion, SendMessage, Monitor, mcp__ccd_session_mgmt__send_message, mcp__ccd_session_mgmt__list_sessions, mcp__ccd_session_mgmt__get_session, mcp__ccd_session_mgmt__archive_session, mcp__ccd_session__spawn_task, mcp__ccd_session__dismiss_task, mcp__scheduled-tasks__create_scheduled_task, mcp__scheduled-tasks__run_scheduled_task, mcp__scheduled-tasks__list_task_runs, mcp__scheduled-tasks__delete_scheduled_task
+allowed-tools: Bash, Read, Write, Edit, Grep, Glob, Task, Agent, Workflow, AskUserQuestion, SendMessage, Monitor, mcp__ccd_session_mgmt__send_message, mcp__ccd_session_mgmt__list_sessions, mcp__ccd_session_mgmt__get_session, mcp__ccd_session_mgmt__archive_session, mcp__ccd_pr__set_monitor, mcp__ccd_pr__get_status, mcp__ccd_session__spawn_task, mcp__ccd_session__dismiss_task, mcp__scheduled-tasks__create_scheduled_task, mcp__scheduled-tasks__run_scheduled_task, mcp__scheduled-tasks__list_task_runs, mcp__scheduled-tasks__delete_scheduled_task
 model: opus
 user-invocable: true
 argument-hint: "[mission or resume]"
@@ -64,6 +64,14 @@ When the record is `degraded`, use its positively verified reachable address
 for existing work and re-stamp the stale field before broadcasting the record.
 A decayed peer name does not mean the coordinator disappeared. A `fault` or
 unchecked address requires diagnosis; a missing check is not proof of death.
+
+Before the first PR is bound to this session, call `mcp__ccd_pr__set_monitor`
+with `auto_archive_on_close: false`, then read `ccd_pr get_status self` and
+require that switch to read false. The app archives an idle session once a bound
+PR merges or closes, and binding an open PR clears the exemption an unarchive
+gives. Only the session itself can set this override. `[measured 2026-10-17]`
+Brain 40 held release PR #409, merged a day earlier, and the app archived it the
+moment its last turn ended.
 
 ## 2. Turn the mission into executable outcomes
 
