@@ -393,7 +393,7 @@
           "id": "frontier-compare",
           "kind": "fixture",
           "probe": "node tooling/frontier/run.js compare --plan tooling/frontier/path-to-10.json --fixtures",
-          "expect": "^arms=3 independent_oracles=PASS leakage_controls=PASS missing_runs=UNKNOWN$",
+          "expect": "^arms=3 independent_oracles=PASS leakage_controls=PASS missing_runs=UNKNOWN run_identity=PASS$",
           "watch": [
             "tooling/frontier/run.js",
             "tooling/frontier/frontier.js"
