@@ -20,6 +20,12 @@
  *                        UNKNOWN with no pass rate, never a pass and never a
  *                        zero. NONE when every arm is complete, FAIL when an
  *                        incomplete arm reports a number.
+ *   run_identity         every counted row fills its own planned cell once. A
+ *                        second counted row for one arm, task and repeat, or a
+ *                        repeat beyond the plan, is an unplanned attempt: a
+ *                        re-run that replaced a fail would otherwise read as
+ *                        the arm's result. FAIL names each, and that arm
+ *                        reports CONFLICT with no rate.
  *
  * Counted rows are pass, fail and timeout, as frontier.js counts them. A
  * contaminated, billed-api or no-stream row measured the harness, not the arm,
@@ -162,17 +168,22 @@ function armRuns(plan, rows) {
     const out = {};
     for (const a of plan.arms || []) {
         const cells = new Map();
+        const unplanned = [];
         for (const r of rows) {
             if (r.arm !== a.id || !ids.has(r.task) || !COUNTED.has(r.verdict)) continue;
             const rep = Number(r.repeat);
-            if (!(rep >= 1 && rep <= repeats)) continue;
-            cells.set(`${r.task}#${rep}`, r);
+            const key = `${r.task}#${r.repeat}`;
+            if (!(Number.isInteger(rep) && rep >= 1 && rep <= repeats)) { unplanned.push(`${key} beyond ${repeats} repeat(s)`); continue; }
+            if (cells.has(key)) { unplanned.push(`${key} recorded twice`); continue; }
+            cells.set(key, r);
         }
         const expected = tasks.length * repeats;
         const counted = [...cells.values()];
-        const complete = expected > 0 && counted.length === expected;
+        const conflict = unplanned.length > 0;
+        const complete = !conflict && expected > 0 && counted.length === expected;
         const rate = (rs) => (rs.length ? Math.round((rs.filter((r) => r.pass === true).length / rs.length) * 1000) / 1000 : null);
-        out[a.id] = { expected, counted: counted.length, missing: expected - counted.length, status: complete ? 'COMPLETE' : 'UNKNOWN',
+        out[a.id] = { expected, counted: counted.length, missing: expected - counted.length, unplanned,
+            status: conflict ? 'CONFLICT' : complete ? 'COMPLETE' : 'UNKNOWN',
             passRate: complete ? rate(counted) : null, heldOutPassRate: complete ? rate(counted.filter((r) => withheldIds.has(r.task))) : null };
     }
     return out;
@@ -182,8 +193,15 @@ function missingRuns(arms) {
     const rows = Object.values(arms);
     if (!rows.length) return 'UNKNOWN';
     const incomplete = rows.filter((a) => a.missing > 0);
-    if (incomplete.some((a) => a.status !== 'UNKNOWN' || a.passRate !== null || a.heldOutPassRate !== null)) return 'FAIL';
+    if (incomplete.some((a) => a.status === 'COMPLETE' || a.passRate !== null || a.heldOutPassRate !== null)) return 'FAIL';
     return incomplete.length ? 'UNKNOWN' : 'NONE';
+}
+
+/** PASS when no arm holds an unplanned attempt. An arm without the list fails closed. */
+function runIdentity(arms) {
+    const rows = Object.values(arms);
+    if (!rows.length) return 'UNKNOWN';
+    return rows.some((a) => !Array.isArray(a.unplanned) || a.unplanned.length > 0 || a.status === 'CONFLICT') ? 'FAIL' : 'PASS';
 }
 
 /**
@@ -198,9 +216,10 @@ function compare(opts) {
     const leakage = leakageControls(plan, rows, opts.root, opts.tasksDir);
     const runs = armRuns(plan, rows);
     const missing = missingRuns(runs);
+    const identity = runIdentity(runs);
     const planned = (plan.tasks || []).length * (plan.arms || []).length * (Number(plan.repeats) || 0);
-    return { plan, rows: rows.length, planned, arms, oracles, leakage, runs, missing,
-        line: `arms=${arms.problems.length ? `INVALID(${arms.problems.length})` : arms.count} independent_oracles=${oracles.verdict} leakage_controls=${leakage.verdict} missing_runs=${missing}` };
+    return { plan, rows: rows.length, planned, arms, oracles, leakage, runs, missing, identity,
+        line: `arms=${arms.problems.length ? `INVALID(${arms.problems.length})` : arms.count} independent_oracles=${oracles.verdict} leakage_controls=${leakage.verdict} missing_runs=${missing} run_identity=${identity}` };
 }
 
 /** The population lines and the verdict line, as printed by run.js compare. */
@@ -211,7 +230,7 @@ function render(r) {
     line(r.oracles.verdict === 'PASS', `oracles: ${r.oracles.tasks} task(s), ${r.oracles.graded} counted row(s) each matched to its endpoint record${r.oracles.problems.length ? ` (${r.oracles.problems.slice(0, 3).join('; ')})` : ''}`);
     line(r.leakage.verdict === 'PASS', `leakage: ${r.leakage.withheld} withheld task(s), ${r.leakage.fingerprints} fingerprint(s) over ${r.leakage.inputs} tuning input file(s)${r.leakage.problems.length ? ` (${r.leakage.problems.slice(0, 3).join('; ')})` : ''}`);
     for (const [id, a] of Object.entries(r.runs)) {
-        line(a.status === 'COMPLETE' ? a.passRate !== null : a.passRate === null, `arm ${id}: ${a.counted} of ${a.expected} run(s), ${a.status === 'COMPLETE' ? `pass rate ${a.passRate}, held-out ${a.heldOutPassRate}` : `${a.missing} missing, rate UNKNOWN`}`);
+        line(!a.unplanned.length && (a.status === 'COMPLETE' ? a.passRate !== null : a.passRate === null), `arm ${id}: ${a.counted} of ${a.expected} run(s), ${a.status === 'COMPLETE' ? `pass rate ${a.passRate}, held-out ${a.heldOutPassRate}` : `${a.missing} missing, rate UNKNOWN`}${a.unplanned.length ? `, ${a.status}: ${a.unplanned.slice(0, 3).join('; ')}` : ''}`);
     }
     out.push(`plan: ${r.planned} bounded run(s) preregistered, ${r.rows} row(s) read`);
     out.push(r.line);
@@ -219,7 +238,7 @@ function render(r) {
 }
 
 function verdictOk(r) {
-    return r.arms.problems.length === 0 && r.oracles.verdict === 'PASS' && r.leakage.verdict === 'PASS' && r.missing !== 'FAIL';
+    return r.arms.problems.length === 0 && r.oracles.verdict === 'PASS' && r.leakage.verdict === 'PASS' && r.missing !== 'FAIL' && r.identity !== 'FAIL';
 }
 
-module.exports = { compare, render, verdictOk, validArms, taskOracle, oraclePass, independentOracles, fingerprints, leakageControls, armRuns, missingRuns, planTasks, readRowsFile };
+module.exports = { compare, render, verdictOk, validArms, taskOracle, oraclePass, independentOracles, fingerprints, leakageControls, armRuns, missingRuns, runIdentity, planTasks, readRowsFile };

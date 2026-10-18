@@ -16,6 +16,9 @@
 //   missing_runs         an incomplete arm reads UNKNOWN with no rate, a
 //                        complete set reads NONE, and a reader that scores a
 //                        missing run as a zero reads FAIL
+//   run_identity         a second counted row for one cell, and a repeat
+//                        beyond the plan, each read FAIL with the arm in
+//                        CONFLICT and no rate, even when the arm looks full
 //
 // No run is launched: --fixtures reads recorded rows only.
 const fs = require('fs');
@@ -57,7 +60,7 @@ try {
     check('plan: every task file in tasks/ is in the plan', fs.readdirSync(TASKS).filter((f) => /^T\d+\.json$/.test(f)).every((f) => plan.tasks.some((t) => `${t.id}.json` === f)));
 
     const base = run(plan, rows);
-    check(`baseline: ${base.line}`, base.line === 'arms=3 independent_oracles=PASS leakage_controls=PASS missing_runs=UNKNOWN');
+    check(`baseline: ${base.line}`, base.line === 'arms=3 independent_oracles=PASS leakage_controls=PASS missing_runs=UNKNOWN run_identity=PASS');
 
     // arms
     const dup = clone(plan); dup.arms.push(clone(dup.arms[0]));
@@ -114,17 +117,34 @@ try {
     const passed = clone(arms); passed.BAS.status = 'COMPLETE';
     check('plant missing: an incomplete arm marked complete reads FAIL', C.missingRuns(passed) === 'FAIL');
     check('missing: no arm at all is UNKNOWN, not NONE', C.missingRuns({}) === 'UNKNOWN');
+    // run identity: every counted row fills its own planned cell once.
+    const curFail = rows.find((r) => r.arm === 'CUR' && r.verdict === 'fail');
+    const rerun = clone(rows).concat([Object.assign(clone(curFail), { verdict: 'pass', pass: true, grade: { checks: [{ exit: 0 }], passToPass: [], pass: true } })]);
+    const rr = run(plan, rerun);
+    check(`plant identity: a re-run that turns a CUR fail into a pass reads ${rr.identity}`, rr.identity === 'FAIL' && rr.runs.CUR.status === 'CONFLICT' && rr.runs.CUR.passRate === null && !C.verdictOk(rr), JSON.stringify(rr.runs.CUR));
+    check('plant identity: the CONFLICT names the cell recorded twice', rr.runs.CUR.unplanned.includes(`${curFail.task}#${curFail.repeat} recorded twice`), JSON.stringify(rr.runs.CUR.unplanned));
+    check('plant identity: render marks the conflicted arm FAIL', /^FAIL arm CUR: .*CONFLICT: .*recorded twice/m.test(C.render(rr)));
+    const beyond = clone(rows).concat([Object.assign(clone(curFail), { repeat: plan.repeats + 1 })]);
+    const rb = run(plan, beyond);
+    check('plant identity: a repeat beyond the plan reads FAIL', rb.identity === 'FAIL' && rb.runs.CUR.unplanned.some((u) => /beyond 3 repeat/.test(u)));
+    const shuffled = clone(rows).reverse();
+    check('control: row order changes nothing', run(plan, shuffled).line === base.line && run(plan, shuffled).runs.CUR.passRate === 0.75);
+    const contaminatedTwice = clone(rows).concat([Object.assign(clone(curFail), { verdict: 'contaminated' })]);
+    check('control: an uncounted row beside a counted one is no conflict', run(plan, contaminatedTwice).identity === 'PASS');
+    const dropped = clone(arms); delete dropped.CUR.unplanned;
+    check('plant identity: an arm without its unplanned list fails closed', C.runIdentity(dropped) === 'FAIL');
+    check('identity: no arm at all is UNKNOWN, not PASS', C.runIdentity({}) === 'UNKNOWN');
     check('render: one line per arm and the verdict line last', C.render(base).trim().split('\n').pop() === base.line && C.verdictOk(base));
 
     // The real command, as the scorecard runs it.
     const r = spawnSync(process.execPath, [RUN, 'compare', '--plan', 'tooling/frontier/path-to-10.json', '--fixtures'], { cwd: ROOT, encoding: 'utf8', windowsHide: true });
     const last = r.stdout.trim().split('\n').pop();
-    check(`command: run.js compare --fixtures exits 0 and prints ${last}`, r.status === 0 && last === 'arms=3 independent_oracles=PASS leakage_controls=PASS missing_runs=UNKNOWN', r.stderr);
+    check(`command: run.js compare --fixtures exits 0 and prints ${last}`, r.status === 0 && last === 'arms=3 independent_oracles=PASS leakage_controls=PASS missing_runs=UNKNOWN run_identity=PASS', r.stderr);
     const u = spawnSync(process.execPath, [RUN, 'compare'], { cwd: ROOT, encoding: 'utf8', windowsHide: true });
     check('command: compare without --plan is a usage error', u.status === 1 && /compare needs --plan/.test(u.stdout));
     const empty = path.join(scratch, 'data');
     const d = spawnSync(process.execPath, [RUN, 'compare', '--plan', PLAN, '--data', empty], { cwd: ROOT, encoding: 'utf8', windowsHide: true });
-    check('command: with no recorded rows every arm is UNKNOWN, never a zero', d.status === 0 && /missing_runs=UNKNOWN$/.test(d.stdout.trim()) && /arm CUR: 0 of 36 run\(s\), 36 missing, rate UNKNOWN/.test(d.stdout));
+    check('command: with no recorded rows every arm is UNKNOWN, never a zero', d.status === 0 && /missing_runs=UNKNOWN run_identity=PASS$/.test(d.stdout.trim()) && /arm CUR: 0 of 36 run\(s\), 36 missing, rate UNKNOWN/.test(d.stdout));
 } catch (e) {
     failures.push(`threw: ${e.stack || e.message}`);
 } finally {
