@@ -6,7 +6,12 @@
 // recorded rows. This suite plants each defect the four fields guard and
 // watches its field go red, then runs the real command on the real plan:
 //
-//   arms                 a duplicate arm or an unknown variant is INVALID
+//   arms                 a duplicate arm or an unknown variant is INVALID, and so
+//                        is a counted row that ran another arm's variant or pin
+//   live rows            a row built by run.js's own rowFor under --arm is
+//                        counted in that arm through the real compare command.
+//                        Fixture rows carry arm by hand, so they alone could not
+//                        show a recorder that drops it (every arm read 0 of 36)
 //   independent_oracles  a row passed by a reviewer's verdict, a row whose pass
 //                        contradicts its checks, and a task graded by anything
 //                        but its endpoint each read FAIL
@@ -26,6 +31,7 @@ const os = require('os');
 const path = require('path');
 const { spawnSync } = require('child_process');
 const C = require('./frontier/compare.js');
+const R = require('./frontier/run.js');
 
 const ROOT = path.resolve(__dirname, '..');
 const RUN = path.join(__dirname, 'frontier', 'run.js');
@@ -110,8 +116,11 @@ try {
     check(`missing: BAS reads UNKNOWN with ${arms.BAS.missing} run(s) missing and no rate`, arms.BAS.status === 'UNKNOWN' && arms.BAS.passRate === null && arms.BAS.missing > 0);
     check('missing: a contaminated row is missing, not a fail', rows.some((r) => r.arm === 'BAS' && r.verdict === 'contaminated') && arms.BAS.counted === 16);
     check(`missing: CUR complete at ${arms.CUR.passRate}`, arms.CUR.status === 'COMPLETE' && arms.CUR.passRate === 0.75);
-    const full = clone(rows).filter((r) => r.arm !== 'BAS').concat(clone(rows).filter((r) => r.arm === 'CUR').map((r) => Object.assign(r, { arm: 'BAS' })));
+    const full = clone(rows).filter((r) => r.arm !== 'BAS').concat(clone(rows).filter((r) => r.arm === 'CUR').map((r) => Object.assign(r, { arm: 'BAS', pluginPin: 'none' })));
     check('control: every arm complete reads NONE', run(plan, full).missing === 'NONE');
+    const relabelled = clone(rows).filter((r) => r.arm !== 'BAS').concat(clone(rows).filter((r) => r.arm === 'CUR').map((r) => Object.assign(r, { arm: 'BAS' })));
+    const rl = run(plan, relabelled);
+    check('plant arms: CUR rows relabelled BAS, still pinned current, are INVALID and not counted in BAS', /^arms=INVALID/.test(rl.line) && rl.runs.BAS.counted === 0, rl.line);
     const zeroed = clone(arms); zeroed.BAS.passRate = 0;
     check('plant missing: an incomplete arm scored as zero reads FAIL', C.missingRuns(zeroed) === 'FAIL');
     const passed = clone(arms); passed.BAS.status = 'COMPLETE';
@@ -145,6 +154,66 @@ try {
     const empty = path.join(scratch, 'data');
     const d = spawnSync(process.execPath, [RUN, 'compare', '--plan', PLAN, '--data', empty], { cwd: ROOT, encoding: 'utf8', windowsHide: true });
     check('command: with no recorded rows every arm is UNKNOWN, never a zero', d.status === 0 && /missing_runs=UNKNOWN run_identity=PASS$/.test(d.stdout.trim()) && /arm CUR: 0 of 36 run\(s\), 36 missing, rate UNKNOWN/.test(d.stdout));
+
+    // Live rows: what run.js itself records, through its own rowFor, not a fixture.
+    // Fixture rows carry arm by hand, so they alone could never show a recorder that drops it.
+    const c = { data: path.join(scratch, 'live') };
+    const cur = R.loadArm(PLAN, 'CUR');
+    const graded = { verdict: 'pass', pass: true, grade: { checks: [{ exit: 0 }], passToPass: [], pass: true } };
+    const liveMeta = (arm, over = {}) => Object.assign({ run: 'F-18120000-T1-V0-1', task: 'T1', taskHash: 'h', lane: 'fix', variant: arm ? arm.variant : 'V0',
+        arm: arm ? arm.id : null, pluginPin: arm ? arm.pluginPin : null, model: 'm', effort: null, account: 'a', repeat: 1,
+        pin: { tag: 'v0.0.0', hash: 'p', plugins: ['autodev-core'], dir: null }, snapshot: 's', harnessCommit: 'c', contamination: { tokens: 0, hits: [] } }, over);
+    const live = R.rowFor(c, liveMeta(cur), graded);
+    check(`live: rowFor records the arm it ran (${live.arm}/${live.variant}/${live.pluginPin})`, live.arm === 'CUR' && live.variant === 'V0' && live.pluginPin === 'current');
+    const lr = C.armRuns(plan, [live]);
+    check('live: a rowFor row is counted in its arm, and only there', lr.CUR.counted === 1 && lr.PRV.counted === 0 && lr.BAS.counted === 0, JSON.stringify(lr.CUR));
+    check('live: its oracle record matches its pass', C.independentOracles(plan, [live], TASKS).verdict === 'PASS');
+    const unarmed = R.rowFor(c, liveMeta(null), graded);
+    const ur = C.armRuns(plan, [unarmed]);
+    check('plant live: a run without --arm records arm null and no arm counts it', unarmed.arm === null && ur.CUR.counted + ur.PRV.counted + ur.BAS.counted === 0);
+    const wrongPin = R.rowFor(c, liveMeta(cur, { pluginPin: 'previous' }), graded);
+    const wp = run(plan, rows.filter((r) => !(r.arm === 'CUR' && r.task === 'T1' && r.repeat === 1)).concat([wrongPin]));
+    check('plant live: a row naming CUR that ran the previous pin is INVALID and not counted', /^arms=INVALID/.test(wp.line) && wp.runs.CUR.counted === 35, wp.line);
+    const liveData = path.join(scratch, 'live-data');
+    fs.mkdirSync(liveData, { recursive: true });
+    fs.writeFileSync(path.join(liveData, 'runs.jsonl'), JSON.stringify(live) + '\n');
+    const lc = spawnSync(process.execPath, [RUN, 'compare', '--plan', PLAN, '--data', liveData], { cwd: ROOT, encoding: 'utf8', windowsHide: true });
+    check('command: run.js compare on live data counts the rowFor row in CUR', lc.status === 0 && /arm CUR: 1 of 36 run\(s\), 35 missing/.test(lc.stdout) && /arm PRV: 0 of 36/.test(lc.stdout), lc.stdout.trim().split('\n').slice(3, 6).join(' | '));
+
+    // The arm is taken from the plan, and the runner refuses one it would mislabel.
+    const refused = (fn, code) => { try { fn(); return false; } catch (e) { return e.publicCode === code; } };
+    check('arm: an id the plan does not define is refused', refused(() => R.loadArm(PLAN, 'ZZZ'), 'no-arm'));
+    check('arm: --variant that is not the arm\'s variant is refused', refused(() => R.loadArm(PLAN, 'CUR', 'V1'), 'arm-variant'));
+    check('arm: --arm without --plan is a usage error', refused(() => R.armOpt({ arm: 'CUR' }), 'usage'));
+    check('arm: no --arm is no arm', R.armOpt({ variant: 'V0' }) === null);
+    const badPin = path.join(scratch, 'bad-pin.json');
+    fs.writeFileSync(badPin, JSON.stringify({ arms: [{ id: 'X', variant: 'V0', pluginPin: 'latest' }] }));
+    check('arm: a pluginPin the runner cannot load is refused', refused(() => R.loadArm(badPin, 'X'), 'bad-arm'));
+    check('arm: prepare refuses an arm whose variant it was not given, before building anything',
+        refused(() => R.prepare({ data: path.join(scratch, 'never'), tasks: TASKS }, 'T1', 'V1', 1, { arm: cur }), 'arm-variant') && !fs.existsSync(path.join(scratch, 'never')));
+
+    // The pin each arm loads: a two-release repo, so current and previous differ.
+    const g = path.join(scratch, 'pins-src');
+    fs.mkdirSync(g);
+    const gx = (...a) => spawnSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@t', ...a], { cwd: g, encoding: 'utf8', windowsHide: true });
+    gx('init', '-q');
+    for (const v of ['v1.0.0', 'v1.1.0']) { fs.writeFileSync(path.join(g, 'f'), v); gx('add', 'f'); gx('commit', '-qm', v); gx('tag', v); }
+    fs.writeFileSync(path.join(g, 'f'), 'after'); gx('commit', '-qam', 'after');
+    const tagOf = (rev) => gx('describe', '--tags', '--abbrev=0', '--match', 'v*', rev).stdout.trim();
+    const gc = { src: g };
+    check('pin: current is the source HEAD\'s release', tagOf(R.pinRev(gc, {}, R.loadArm(PLAN, 'CUR'))) === 'v1.1.0');
+    check('pin: previous is the release before it', tagOf(R.pinRev(gc, {}, R.loadArm(PLAN, 'PRV'))) === 'v1.0.0');
+    check('pin: none loads no plugins', R.pinRev(gc, {}, R.loadArm(PLAN, 'BAS')) === null);
+    check('pin: without an arm, the task\'s parent as before', R.pinRev(gc, { parentSha: 'abc' }, null) === 'abc');
+
+    // A batch over arms carries each item's arm to the run.
+    const bc = { data: path.join(scratch, 'batch-data'), budgetStop: 0.7 };
+    const arms3 = Object.fromEntries(['CUR', 'PRV', 'BAS'].map((id) => [id, R.loadArm(PLAN, id)]));
+    const b = R.createBatch(bc, { tasks: ['T1', 'T2'], arms: arms3, account: 'a', k: 1, max: 2 });
+    check(`batch: --arms queues ${b.items.length} item(s), each with its arm and that arm's variant`,
+        b.items.length === 6 && b.items.every((it) => arms3[it.arm] && it.variant === arms3[it.arm].variant) && b.arms.BAS.pluginPin === 'none');
+    const bv = R.createBatch(bc, { tasks: ['T1'], variants: ['V0', 'V1'], account: 'a', k: 1, max: 2 });
+    check('batch: --variants queues items with no arm, as before', bv.items.length === 2 && bv.items.every((it) => it.arm === undefined) && bv.arms === undefined);
 } catch (e) {
     failures.push(`threw: ${e.stack || e.message}`);
 } finally {

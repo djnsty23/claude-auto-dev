@@ -8,7 +8,12 @@
  * plan and the rows recorded so far and answers four questions, without
  * launching anything:
  *
- *   arms                 how many arms the plan defines validly
+ *   arms                 how many arms the plan defines validly, and every
+ *                        counted row ran the variant and plugin pin of the arm
+ *                        it names. run.js records the arm at run time: the
+ *                        path-to-10 arms share one variant, so it cannot be
+ *                        derived, and a row whose arm was redefined after it
+ *                        ran measured something else.
  *   independent_oracles  every task has an endpoint oracle (held-out checks for
  *                        a fix, an answer key otherwise), and every row's pass
  *                        is exactly what that oracle recorded. A row passed by
@@ -51,8 +56,8 @@ function planTasks(plan) {
     return { tasks, withheldIds: new Set(tasks.filter((t) => withheld.has(t.family)).map((t) => t.id)) };
 }
 
-/** Arms with a unique id, a plugin pin and a variant the runner knows. */
-function validArms(plan, variants) {
+/** Arms with a unique id, a plugin pin and a variant the runner knows, and rows that ran the arm they name. */
+function validArms(plan, variants, rows = []) {
     const seen = new Set();
     const problems = [];
     for (const a of plan.arms || []) {
@@ -60,9 +65,14 @@ function validArms(plan, variants) {
         seen.add(a.id);
         if (!['current', 'previous', 'none'].includes(a.pluginPin)) problems.push(`arm ${a.id}: pluginPin ${a.pluginPin} is not current, previous or none`);
         if (!variants[a.variant]) problems.push(`arm ${a.id}: variant ${a.variant} is not in variants.json`);
+        const off = rows.filter((r) => r.arm === a.id && COUNTED.has(r.verdict) && !ranArm(r, a));
+        if (off.length) problems.push(`arm ${a.id}: ${off.length} counted row(s) ran another arm, first ${off[0].task}#${off[0].repeat} as ${off[0].variant}/${off[0].pluginPin}, the plan says ${a.variant}/${a.pluginPin}`);
     }
     return { count: seen.size, problems };
 }
+
+/** The row ran the arm's variant under the arm's plugin pin. */
+function ranArm(r, a) { return r.variant === a.variant && r.pluginPin === a.pluginPin; }
 
 /** The oracle a task file names: held-out checks for a fix, an answer key otherwise. */
 function taskOracle(tasksDir, id) {
@@ -170,7 +180,7 @@ function armRuns(plan, rows) {
         const cells = new Map();
         const unplanned = [];
         for (const r of rows) {
-            if (r.arm !== a.id || !ids.has(r.task) || !COUNTED.has(r.verdict)) continue;
+            if (r.arm !== a.id || !ids.has(r.task) || !COUNTED.has(r.verdict) || !ranArm(r, a)) continue;
             const rep = Number(r.repeat);
             const key = `${r.task}#${r.repeat}`;
             if (!(Number.isInteger(rep) && rep >= 1 && rep <= repeats)) { unplanned.push(`${key} beyond ${repeats} repeat(s)`); continue; }
@@ -211,7 +221,7 @@ function runIdentity(arms) {
 function compare(opts) {
     const plan = readJsonFile(opts.planFile);
     const rows = opts.rows || readRowsFile(path.resolve(path.dirname(opts.planFile), plan.fixtures));
-    const arms = validArms(plan, opts.variants);
+    const arms = validArms(plan, opts.variants, rows);
     const oracles = independentOracles(plan, rows, opts.tasksDir);
     const leakage = leakageControls(plan, rows, opts.root, opts.tasksDir);
     const runs = armRuns(plan, rows);
@@ -241,4 +251,4 @@ function verdictOk(r) {
     return r.arms.problems.length === 0 && r.oracles.verdict === 'PASS' && r.leakage.verdict === 'PASS' && r.missing !== 'FAIL' && r.identity !== 'FAIL';
 }
 
-module.exports = { compare, render, verdictOk, validArms, taskOracle, oraclePass, independentOracles, fingerprints, leakageControls, armRuns, missingRuns, runIdentity, planTasks, readRowsFile };
+module.exports = { compare, render, verdictOk, validArms, ranArm, taskOracle, oraclePass, independentOracles, fingerprints, leakageControls, armRuns, missingRuns, runIdentity, planTasks, readRowsFile };
