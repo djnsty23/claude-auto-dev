@@ -37,8 +37,11 @@ const USAGE = [
     '  plant [--task T1,T3]            unfixed red, fixed green, neighbours green, contamination fires; no model tokens',
     '  prepare --task T --variant V    build the repo, config dir and pin, run the contamination check, start nothing',
     '  run --task T --variant V --account <name> [--repeat n]   prepare and start one worker, return at once',
+    '  prepare|run ... --plan <file> --arm <id>   run one arm of a preregistered plan: its variant (--variant may be left',
+    '                                  out) and its plugin pin (current, previous or none), recorded on the row as arm',
     '  finish --run <id> [--wait-sec n]   grade an exited run and append its row; idempotent',
     '  batch --tasks T1,T2|all --variants V0,V1 --account <name> [--k 1] [--max 2] [--quiet-wait <min>]   start a detached batch loop',
+    '  batch ... --plan <file> --arms CUR,PRV,BAS   the same over plan arms instead of --variants',
     '                                  --quiet-wait holds each item until no gate, coverage run or full suite runs on the',
     '                                  machine, at most <min> minutes (10 when given alone), then starts it as a loaded row',
     '  batch-resume --batch <id>       restart the loop of a batch whose loop died',
@@ -65,6 +68,9 @@ const SNAPSHOT_DIRS = ['rules', 'agents', 'output-styles'];
 // A variable whose name says it carries a credential never reaches a worker or a check.
 const SCRUB_RE = /^(ANTHROPIC_|CLAUDE_CODE_OAUTH_TOKEN|DOPPLER_)|TOKEN|SECRET|PASSWORD|PASSWD|API_?KEY|PRIVATE_KEY|_PAT$/i;
 const PIN_SKIP = new Set(['autodev-memory']);
+const PIN_MODES = new Set(['current', 'previous', 'none']);
+// An arm pinned to none loads no plugin dir: the config dir is fresh, so nothing else loads.
+const NO_PIN = Object.freeze({ tag: 'none', hash: null, plugins: [], pluginDir: null });
 
 function fault(code, message) { const e = new Error(message || code); e.publicCode = code; throw e; }
 
@@ -393,6 +399,34 @@ function loadVariant(id) {
     return Object.assign({ id }, v);
 }
 
+// ---------------------------------------------------------------- plan arms
+/**
+ * One arm of a preregistered plan. compare counts a row only in the arm the
+ * row names, and all three path-to-10 arms share variant V0, so the arm cannot
+ * be derived from the variant: the runner records it, and loads exactly the
+ * pin the arm names, so the label is what ran.
+ */
+function loadArm(planFile, armId, variantId = null) {
+    const plan = readJson(planFile);
+    const arm = (plan.arms || []).find((a) => a.id === armId);
+    if (!arm) fault('no-arm', `${armId} is not an arm of ${path.basename(planFile)} (${(plan.arms || []).map((a) => a.id).join(', ')})`);
+    if (!PIN_MODES.has(arm.pluginPin)) fault('bad-arm', `arm ${armId}: pluginPin ${arm.pluginPin} is not current, previous or none`);
+    if (variantId && variantId !== arm.variant) fault('arm-variant', `arm ${armId} runs variant ${arm.variant}, not ${variantId}`);
+    return { id: arm.id, variant: arm.variant, pluginPin: arm.pluginPin };
+}
+/**
+ * The revision whose last release tag is the pin. Without an arm, the task's
+ * parent: the plugins of the last release before the fix. current is the
+ * source HEAD's release, previous the release before it, none no plugins.
+ */
+function pinRev(c, task, arm) {
+    if (!arm) return task.parentSha;
+    if (arm.pluginPin === 'none') return null;
+    if (arm.pluginPin === 'current') return revParse(c.src, 'HEAD');
+    if (arm.pluginPin === 'previous') return `${git(['describe', '--tags', '--abbrev=0', '--match', 'v*', 'HEAD'], { cwd: c.src }).trim()}^`;
+    fault('bad-arm', `arm ${arm.id}: pluginPin ${arm.pluginPin} is not current, previous or none`);
+}
+
 // ---------------------------------------------------------------- contamination
 const CODEY = (w) => /[A-Z].*[A-Z_0-9]|[a-z][A-Z]|_|\d|-/.test(w.slice(1)) || /^[A-Z_0-9]{6,}$/.test(w);
 /**
@@ -509,7 +543,8 @@ function plantOk(c, task) {
 }
 
 // ---------------------------------------------------------------- prepare and start
-function prepare(c, taskId, variantId, repeat = 1, { account = null } = {}) {
+function prepare(c, taskId, variantId, repeat = 1, { account = null, arm = null } = {}) {
+    if (arm && arm.variant !== variantId) fault('arm-variant', `arm ${arm.id} runs variant ${arm.variant}, not ${variantId}`);
     const task = loadTask(c, taskId);
     const variant = loadVariant(variantId);
     if (variant.lanes && !variant.lanes.includes(task.lane)) fault('lane-mismatch', `variant ${variant.id} runs only ${variant.lanes.join(',')} and ${task.id} is ${task.lane}`);
@@ -519,13 +554,15 @@ function prepare(c, taskId, variantId, repeat = 1, { account = null } = {}) {
     fs.mkdirSync(p.dir, { recursive: true });
     buildTaskRepo(c, task, p.repo, task.parentSha);
     const snap = buildConfigDir(c, p.cfg);
-    const pin = pinFor(c, task.parentSha);
+    const rev = pinRev(c, task, arm);
+    const pin = rev === null ? NO_PIN : pinFor(c, rev);
     const tokens = task.lane === 'fix' ? fixTokens(c, task) : [];
-    const hits = scanForTokens(tokens, [p.cfg, p.repo, pin.pluginDir]);
+    const hits = scanForTokens(tokens, [p.cfg, p.repo, pin.pluginDir].filter(Boolean));
     const brief = fs.readFileSync(path.join(c.tasks, task.brief), 'utf8');
     fs.writeFileSync(p.prompt, composePrompt(task, brief, p.repo));
     const meta = {
-        run, task: task.id, taskHash: task.hash, lane: task.lane, variant: variant.id, model: variant.model, effort: variant.effort || null,
+        run, task: task.id, taskHash: task.hash, lane: task.lane, variant: variant.id, arm: arm ? arm.id : null, pluginPin: arm ? arm.pluginPin : null,
+        model: variant.model, effort: variant.effort || null,
         account, repeat, createdAt: new Date().toISOString(), timeoutMin: Number(task.timeoutMin || 30),
         repo: p.repo, cfg: p.cfg, log: p.log, report: p.report, prompt: p.prompt,
         pin: { tag: pin.tag, hash: pin.hash, plugins: pin.plugins, dir: pin.pluginDir },
@@ -540,7 +577,7 @@ function prepare(c, taskId, variantId, repeat = 1, { account = null } = {}) {
 function start(c, meta, env) {
     const p = runPaths(c, meta.run);
     const argv = [c.hw, 'start', '--code', meta.run, '--prompt-file', p.prompt, '--log', p.log, '--report', p.report,
-        '--config-dir', p.cfg, '--model', meta.model, '--plugin-dir', meta.pin.dir, '--permission-mode', 'dontAsk',
+        '--config-dir', p.cfg, '--model', meta.model, ...(meta.pin.dir ? ['--plugin-dir', meta.pin.dir] : []), '--permission-mode', 'dontAsk',
         '--cwd', p.repo, '--ledger', path.join(c.data, 'ledger.json'), '--dev'];
     if (meta.effort) argv.push('--effort', meta.effort);
     if (c.claudeBin) argv.push('--claude-bin', c.claudeBin);
@@ -554,9 +591,9 @@ function start(c, meta, env) {
     return meta;
 }
 
-function runOne(c, taskId, variantId, account, repeat, env, extra = {}) {
+function runOne(c, taskId, variantId, account, repeat, env, extra = {}, arm = null) {
     const wenv = workerEnv(env, account);
-    const meta = Object.assign(prepare(c, taskId, variantId, repeat, { account }), extra);
+    const meta = Object.assign(prepare(c, taskId, variantId, repeat, { account, arm }), extra);
     if (meta.state === 'contaminated') {
         appendRow(c, rowFor(c, meta, { verdict: 'contaminated', pass: null }));
         fault('contaminated', `${meta.run}: ${meta.contamination.hits.map((h) => `${h.token} in ${h.file}`).join('; ')}`);
@@ -716,7 +753,8 @@ function appendRow(c, row) {
 }
 function rowFor(c, meta, extra) {
     return Object.assign({
-        v: 1, run: meta.run, task: meta.task, lane: meta.lane, variant: meta.variant, account: meta.account, repeat: meta.repeat,
+        v: 1, run: meta.run, task: meta.task, lane: meta.lane, variant: meta.variant, arm: meta.arm || null, pluginPin: meta.pluginPin || null,
+        account: meta.account, repeat: meta.repeat,
         taskHash: meta.taskHash, startedAt: meta.startedAt || null,
         fingerprint: { requestedModel: meta.model, effort: meta.effort, pin: meta.pin.tag, pinHash: meta.pin.hash, plugins: meta.pin.plugins,
             snapshot: meta.snapshot, harnessCommit: meta.harnessCommit, workerVersion: meta.workerVersion || null },
@@ -951,14 +989,15 @@ function latestSevenDay(c, account, running) {
  * with a hard link, which fails on a name that exists, and a taken id moves to
  * the next suffix: B-<stamp>, B-<stamp>-2, B-<stamp>-3.
  */
-function createBatch(c, { tasks, variants, account, k, max, quietWaitMin = 0 }) {
+function createBatch(c, { tasks, variants = [], arms = null, account, k, max, quietWaitMin = 0 }) {
     const items = [];
-    for (let rep = 1; rep <= k; rep++) for (const t of tasks) for (const v of variants) items.push({ task: t, variant: v, rep, state: 'queued', run: null, verdict: null });
+    const cols = arms ? Object.values(arms).map((a) => ({ variant: a.variant, arm: a.id })) : variants.map((v) => ({ variant: v }));
+    for (let rep = 1; rep <= k; rep++) for (const t of tasks) for (const col of cols) items.push(Object.assign({ task: t }, col, { rep, state: 'queued', run: null, verdict: null }));
     const now = new Date();
     fs.mkdirSync(path.join(c.data, 'batches'), { recursive: true });
     for (let n = 1; n <= 100; n++) {
         const id = n === 1 ? `B-${stamp(now)}` : `B-${stamp(now)}-${n}`;
-        const batch = { id, createdAt: now.toISOString(), account, max, budgetStop: c.budgetStop, quietWaitMin, items, state: 'running', loopPid: null };
+        const batch = Object.assign({ id, createdAt: now.toISOString(), account, max, budgetStop: c.budgetStop, quietWaitMin }, arms ? { arms } : {}, { items, state: 'running', loopPid: null });
         const file = batchFile(c, id);
         const tmp = `${file}.${process.pid}.tmp`;
         fs.writeFileSync(tmp, JSON.stringify(batch, null, 2) + '\n');
@@ -1052,7 +1091,7 @@ function batchLoop(c, id) {
                 const wait = next.length ? quietGate(c, batch) : null;
                 for (const it of wait && wait.hold ? [] : next) {
                     try {
-                        const meta = runOne(c, it.task, it.variant, batch.account, it.rep, process.env, wait ? { quietWait: wait.record } : {});
+                        const meta = runOne(c, it.task, it.variant, batch.account, it.rep, process.env, wait ? { quietWait: wait.record } : {}, it.arm ? batch.arms[it.arm] : null);
                         it.run = meta.run; it.state = 'running';
                     } catch (e) {
                         it.state = 'skipped'; it.verdict = e.publicCode || 'error'; it.error = e.message.slice(0, 300);
@@ -1086,6 +1125,13 @@ function status(c) {
 }
 
 // ---------------------------------------------------------------- cli
+/** --plan <file> --arm <id> as an arm, or null without --arm. --variant, when given too, must be the arm's. */
+function armOpt(opts) {
+    if (opts.arm === undefined) return null;
+    if (opts.arm === true || !opts.plan || opts.plan === true) fault('usage', '--arm needs an id and --plan <file>');
+    return loadArm(path.resolve(opts.plan), opts.arm, opts.variant && opts.variant !== true ? opts.variant : null);
+}
+
 function main(argv) {
     const opts = parseArgs(argv);
     const cmd = opts._[0];
@@ -1097,13 +1143,15 @@ function main(argv) {
         case 'snapshot': value = snapshot(c); break;
         case 'plant': value = plant(c, opts.task ? list(opts.task) : allTaskIds(c)); break;
         case 'prepare': {
-            if (!opts.task || !opts.variant) fault('usage', 'prepare needs --task and --variant');
-            value = prepare(c, opts.task, opts.variant, Number(opts.repeat || 1));
+            const arm = armOpt(opts);
+            if (!opts.task || !(opts.variant || arm)) fault('usage', 'prepare needs --task and --variant (or --plan and --arm)');
+            value = prepare(c, opts.task, arm ? arm.variant : opts.variant, Number(opts.repeat || 1), { arm });
             break;
         }
         case 'run': {
-            if (!opts.task || !opts.variant || !opts.account) fault('usage', 'run needs --task, --variant and --account');
-            value = runOne(c, opts.task, opts.variant, opts.account, Number(opts.repeat || 1), process.env);
+            const arm = armOpt(opts);
+            if (!opts.task || !(opts.variant || arm) || !opts.account) fault('usage', 'run needs --task, --variant (or --plan and --arm) and --account');
+            value = runOne(c, opts.task, arm ? arm.variant : opts.variant, opts.account, Number(opts.repeat || 1), process.env, {}, arm);
             break;
         }
         case 'finish': {
@@ -1118,15 +1166,18 @@ function main(argv) {
             break;
         }
         case 'batch': {
-            if (!opts.tasks || !opts.variants || !opts.account) fault('usage', 'batch needs --tasks, --variants and --account');
+            if (!opts.tasks || !(opts.variants || opts.arms) || !opts.account) fault('usage', 'batch needs --tasks, --variants (or --plan and --arms) and --account');
+            if (opts.variants && opts.arms) fault('usage', 'batch takes --variants or --arms, not both: an arm names its own variant');
+            if (opts.arms && (opts.arms === true || !opts.plan || opts.plan === true)) fault('usage', '--arms needs ids and --plan <file>');
             workerEnv(process.env, opts.account);
             const tasks = opts.tasks === 'all' ? allTaskIds(c) : list(opts.tasks);
-            const variants = list(opts.variants);
+            const arms = opts.arms ? Object.fromEntries(list(opts.arms).map((id) => [id, loadArm(path.resolve(opts.plan), id)])) : null;
+            const variants = arms ? [...new Set(Object.values(arms).map((a) => a.variant))] : list(opts.variants);
             for (const t of tasks) plantOk(c, loadTask(c, t));
             for (const v of variants) loadVariant(v);
             const qw = opts['quiet-wait'] === true ? 10 : Number(opts['quiet-wait'] || 0);
             if (!(qw >= 0)) fault('usage', '--quiet-wait takes minutes, 10 when given alone');
-            const b = createBatch(c, { tasks, variants, account: opts.account, k: Number(opts.k || 1), max: Math.min(2, Number(opts.max || 2)), quietWaitMin: qw });
+            const b = createBatch(c, { tasks, variants, arms, account: opts.account, k: Number(opts.k || 1), max: Math.min(2, Number(opts.max || 2)), quietWaitMin: qw });
             const pid = spawnLoop(c, b.id, opts);
             value = { batch: b.id, items: b.items.length, loopPid: pid, file: batchFile(c, b.id) };
             break;
@@ -1165,5 +1216,5 @@ if (require.main === module) {
 }
 
 module.exports = { parseArgs, fixTokens, scanForTokens, workerEnv, checksEnv, composePrompt, parseStream, tokensOf, leakHits,
-    gradeLocate, gradeReview, gradeDecide, decideAnswer, plantedFindings, readRows, RUN_RE, SCRUB_RE, SETTINGS_KEEP, CODEY,
+    gradeLocate, gradeReview, gradeDecide, decideAnswer, plantedFindings, readRows, rowFor, loadArm, pinRev, armOpt, prepare, createBatch, RUN_RE, SCRUB_RE, SETTINGS_KEEP, CODEY,
     processList, heavyJobs, noteLoad, loadRecord, quietGate, HEAVY_RE };
