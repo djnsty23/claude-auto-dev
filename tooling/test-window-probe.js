@@ -117,8 +117,10 @@ const FIX = {
             attemptId: `a-${d}`, kind: 'worker', state: 'settled', reservedAt: `${d}T08:00:00.000Z`, startedAt: `${d}T08:00:00.000Z`,
             wallMs: 3600000, settledAt: d === o.bad ? `${d}T09:30:00.000Z` : `${d}T09:02:00.000Z`, ceilings: { wallMs: 21600000 } }])) }));
     },
-    'instruction-window': (h, o) => write(h, 'logs/instructions-loaded.jsonl', jsonl(DAYS.filter((d) => d !== o.gap).map((d) => ({
-        at: `${d}T09:00:00Z`, file: 'CLAUDE.md', reason: 'session_start', bytes: d === o.bad ? 0 : 4096 })))),
+    // The gap day holds only a resumed start, which must not count as a fresh session.
+    'instruction-window': (h, o) => write(h, 'logs/instruction-envelope.jsonl', jsonl(DAYS.map((d) => ({
+        at: `${d}T09:00:00Z`, sessionId: `s-${d}`, source: d === o.gap ? 'resume' : 'startup', inside: d !== o.bad,
+        rulesTotal: d === o.bad ? 33000 : 30000, budget: 32000, envelopeTotal: 38000, missing: 0, conflicts: 0 })))),
     'skill-window': (h, o) => write(h, 'autodev/frontier/runs.jsonl', jsonl(DAYS.filter((d) => d !== o.gap).map((d) => ({
         run: `r-${d}`, startedAt: `${d}T09:00:00Z`, finishedAt: `${d}T09:10:00Z`, routedTo: 'audit', pass: d !== o.bad })))),
     'cost-window': (h, o) => write(h, 'autodev/delivery/outcomes.jsonl', jsonl(DAYS.filter((d) => d !== o.gap).map((d) => ({
@@ -165,8 +167,8 @@ const FIX = {
 
 // The specs that can pass on records the harness writes today, and those that must fail
 // by name until a writer exists. Written by hand, so narrowing a spec moves a case red.
-const PASSABLE = ['gate-window', 'release-window', 'worker-window', 'visibility-window', 'delivery-window'];
-const NO_WRITER = ['authority-window', 'hook-window', 'instruction-window', 'skill-window', 'cost-window', 'acceptance-window',
+const PASSABLE = ['gate-window', 'release-window', 'worker-window', 'instruction-window', 'visibility-window', 'delivery-window'];
+const NO_WRITER = ['authority-window', 'hook-window', 'skill-window', 'cost-window', 'acceptance-window',
     'queue-window', 'locking-window', 'learning-window', 'capacity-window', 'owner-window', 'recovery-window'];
 // The records a planted bad day must produce, by the line that names it.
 const BAD_LINE = {
@@ -175,7 +177,7 @@ const BAD_LINE = {
     'authority-window': /^violation 2026-11-09T09:00:00Z w-2026-11-09: ran bypassPermissions/m,
     'hook-window': /^violation 2026-11-09T09:00:00Z PreToolUse p95 400 ms, budget 100 ms$/m,
     'worker-window': /^violation 2026-11-09T08:00:00.000Z a-2026-11-09: settled 30 min after it exited/m,
-    'instruction-window': /^violation 2026-11-09T09:00:00Z .*CLAUDE\.md loaded with bytes 0/m,
+    'instruction-window': /^violation 2026-11-09T09:00:00Z .*session s-2026-1 started outside the envelope \(rules 33000 of 32000, 0 missing, 0 conflicts\)$/m,
     'skill-window': /^violation 2026-11-09T09:10:00Z r-2026-11-09: routed audit, pass false$/m,
     'cost-window': /^violation 2026-11-09T09:00:00Z t-2026-11-09: no cost$/m,
     'acceptance-window': /^violation 2026-11-09T09:00:00Z t-2026-11-09: an accept that did not apply/m,
