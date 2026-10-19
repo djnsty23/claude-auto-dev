@@ -55,6 +55,14 @@
 // listed is one COULD-NOT-CHECK line and one mission.check-failed event per distinct error, keeps
 // what was stalled before, and never fails the pass.
 //
+// Scheduled observers. Every pass reads <claude dir>/autodev/brain-clock/observers.json
+// (BRAIN_CLOCK_OBSERVERS overrides it): {"observers": [{"id", "script", "args", "cwd", "everyMin"}]}.
+// Each is a read-only script that writes its own ledger; the clock only spawns it, at most once
+// per everyMin (60 or more) and one per pass, under a 90 s timeout. No file means none run. Each
+// run is one observer.ran or observer.failed event; a bad config is one observer.config-invalid
+// event per distinct error, runs nothing, and never fails the pass. The scorecard's release-window
+// is fed this way: `tooling/release-protection.js --observe` once a day.
+//
 // Which code runs. Every helper is the copy BESIDE this file, so a pass runs one release end to
 // end. The clock never scans the plugin cache for the newest version: that would undo a rollback
 // the moment a newer cache directory appeared. runtime-release.js pins the release a scheduler
@@ -894,6 +902,57 @@ function observeStalls(now) {
   return out;
 }
 
+// ---------- scheduled observers ----------
+// An observer is a read-only script the operator lists in observers.json; it writes its own
+// ledger, the clock only spawns it. Absent config means none, and nothing runs.
+const OBSERVER_TIMEOUT_MS = 90 * 1000;
+const OBSERVER_MIN_EVERY = 60;
+function observersConfig() { return process.env.BRAIN_CLOCK_OBSERVERS || path.join(STATE_DIR, "observers.json"); }
+function observerFault(o) {
+  if (!o || typeof o !== "object") return "an entry is not an object";
+  if (!/^[a-z0-9][a-z0-9-]{0,40}$/.test(String(o.id || ""))) return `id ${JSON.stringify(o.id)} is not a short slug`;
+  if (typeof o.script !== "string" || !path.isAbsolute(o.script) || !/\.js$/.test(o.script)) return `${o.id}: script must be an absolute .js path`;
+  if (!fs.existsSync(o.script)) return `${o.id}: ${o.script} does not exist`;
+  if (o.args !== undefined && !(Array.isArray(o.args) && o.args.every((x) => typeof x === "string"))) return `${o.id}: args must be strings`;
+  if (!(Number.isFinite(o.everyMin) && o.everyMin >= OBSERVER_MIN_EVERY)) return `${o.id}: everyMin must be at least ${OBSERVER_MIN_EVERY}`;
+  if (o.cwd !== undefined && !(typeof o.cwd === "string" && fs.existsSync(o.cwd))) return `${o.id}: cwd does not exist`;
+  return null;
+}
+function observeScheduled(now) {
+  const out = { events: [], line: "" };
+  const cfgPath = observersConfig();
+  if (!fs.existsSync(cfgPath)) { out.line = "observers: none configured"; return out; }
+  const statePath = path.join(STATE_DIR, "observers-state.json");
+  const state = readJsonOr(statePath, null) || {};
+  state.lastRun = state.lastRun || {};
+  out.save = () => writeJson(statePath, state);
+  let list;
+  try { const cfg = readJson(cfgPath); list = Array.isArray(cfg.observers) ? cfg.observers : null; } catch { list = null; }
+  const fault = !list ? `${path.basename(cfgPath)} has no observers array` : list.map(observerFault).find(Boolean);
+  if (fault) {
+    out.line = `observers: CONFIG-INVALID ${fault}`;
+    if (state.lastError !== fault) out.events.push({ type: "observer.config-invalid", source: "observers", key: "config", detail: { error: fault } });
+    state.lastError = fault;
+    return out;
+  }
+  delete state.lastError;
+  // One observer per pass at most, the one most overdue, so a pass stays bounded.
+  const due = list.filter((o) => !state.lastRun[o.id] || now - Date.parse(state.lastRun[o.id]) >= o.everyMin * 60000)
+    .sort((x, y) => (Date.parse(state.lastRun[x.id] || 0) || 0) - (Date.parse(state.lastRun[y.id] || 0) || 0));
+  if (!due.length) { out.line = `observers: ${list.length} configured, none due`; return out; }
+  const o = due[0];
+  const t0 = Date.now();
+  const r = spawnSync(process.execPath, [o.script, ...(o.args || [])], { cwd: o.cwd || path.dirname(o.script), encoding: "utf8", timeout: OBSERVER_TIMEOUT_MS, windowsHide: true });
+  const ms = Date.now() - t0;
+  const exit = r.error ? null : r.status;
+  const error = r.error ? (r.error.code === "ETIMEDOUT" ? "timeout" : `spawn-${r.error.code || r.error.message}`) : null;
+  state.lastRun[o.id] = iso(now);
+  const tail = String((r.stdout || "") + (r.stderr || "")).trim().split(/\r?\n/).slice(-1)[0] || "";
+  out.events.push({ type: exit === 0 ? "observer.ran" : "observer.failed", source: "observers", key: o.id, detail: { exit, error, ms, last: tail.slice(0, 200) } });
+  out.line = `observers: ${list.length} configured, ran ${o.id} exit ${exit === null ? error : exit} in ${ms} ms`;
+  return out;
+}
+
 // ---------- act: the judge ----------
 function brainJudgeScript() {
   const env = process.env.BRAIN_CLOCK_BRAIN_JUDGE;
@@ -1155,6 +1214,11 @@ function tick(opts, now) {
     try { stalls = observeStalls(now); } catch (e) { stalls = { events: [], line: `missions: COULD-NOT-CHECK ${String(e && e.message || e).slice(0, 300)}`, save: null }; }
     events.push(...stalls.events);
     lines.push(stalls.line);
+    // Scheduled observers, the same way: a failure is one line and one event, never a failed pass.
+    let observers;
+    try { observers = observeScheduled(now); } catch (e) { observers = { events: [], line: `observers: COULD-NOT-RUN ${String(e && e.message || e).slice(0, 300)}`, save: null }; }
+    events.push(...observers.events);
+    lines.push(observers.line);
     // Acting runs after the observe pass and cannot break it: an act failure is one line, not a failed pass.
     let act = null;
     if (a.caps) {
@@ -1181,6 +1245,7 @@ function tick(opts, now) {
     writeJson(snapPath, { at: stamp, homeRepos, sources: nextSources });
     if (!meta.recorded || meta.schema !== STATE_SCHEMA) writeJson(STATE_META, { schema: STATE_SCHEMA, writtenBy: process.env.AUTODEV_RUNTIME_RELEASE || "unpinned", at: stamp });
     if (stalls.save) stalls.save();
+    if (observers.save) observers.save();
     if (act && act.save) act.save();
     const rec = { at: stamp, status: unreadable ? "degraded" : "ok", durationMs: Date.now() - started, events: events.length, unreadable, sources: lines };
     if (act) rec.act = act.lines;
