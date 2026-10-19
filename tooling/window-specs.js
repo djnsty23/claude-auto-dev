@@ -75,6 +75,31 @@ function gateEvidenceFault(rec) {
     return null;
 }
 
+/**
+ * Complete evidence for one gate-fast run record (tooling/gate-fast.js): every fast step and
+ * every touched suite carries a status and an exit or signal, a failed one its output tail,
+ * and the selection either ran or says why it could not.
+ */
+function fastEvidenceFault(rec) {
+    const steps = Array.isArray(rec.evidence) ? rec.evidence : [];
+    if (!steps.length) return 'no step evidence';
+    const t = rec.touched;
+    if (!t || typeof t !== 'object') return 'no touched-suite selection';
+    if (t.error && rec.exit !== 2) return `the selection failed (${t.error}) but the run exited ${rec.exit}`;
+    const suites = t.error ? [] : (Array.isArray(t.evidence) ? t.evidence : null);
+    if (!suites) return 'no touched-suite evidence';
+    if (!t.error && (!Array.isArray(t.selected) || t.selected.length !== suites.length)) return `selected ${(t.selected || []).length} suites but recorded ${suites.length}`;
+    for (const e of [...steps, ...suites]) {
+        if (!['pass', 'fail', 'indeterminate'].includes(e.status)) return `${e.step} reads ${e.status}`;
+        if (!(Number.isInteger(e.exit) || e.signal) && e.status !== 'indeterminate') return `${e.step} has no exit or signal`;
+        if (e.status === 'fail' && (!e.tail || typeof e.tail.text !== 'string')) return `${e.step} failed with no output tail`;
+    }
+    const all = [...steps, ...suites];
+    if (rec.exit === 0 && all.some((e) => e.status !== 'pass')) return `exit 0 but ${all.find((e) => e.status !== 'pass').step} reads ${all.find((e) => e.status !== 'pass').status}`;
+    if (rec.exit === 1 && !all.some((e) => e.status === 'fail')) return 'exit 1 with no failed step';
+    return null;
+}
+
 function runIdTime(id) {
     const m = /^(\d{4})(\d\d)(\d\d)T(\d\d)(\d\d)(\d\d)/.exec(id || '');
     return m ? `${m[1]}-${m[2]}-${m[3]}T${m[4]}:${m[5]}:${m[6]}Z` : null;
@@ -82,7 +107,7 @@ function runIdTime(id) {
 
 const gateWindow = {
     id: 'gate-window',
-    source: 'locks/full-gate.runs/<run>.json runner records (gate-lock.js), and origin/main first-parent history in the repo',
+    source: 'locks/full-gate.runs/<run>.json runner records (gate-lock.js), locks/fast-gate.runs/<run>.json (gate-fast.js), and origin/main first-parent history in the repo',
     // Runner records carry step evidence from 2026-10-13T22:46Z (tail: 641f844d), so the
     // first complete day is 10-14. The gated head is recorded from this change on; a day
     // with a merge counts only through a gate whose head tree is a tree origin/main took.
@@ -112,9 +137,25 @@ const gateWindow = {
                 }
             }
         }
+        // gate:fast is the merge bar for an ordinary PR (CLAUDE.md, 2026-10-17), and from
+        // 2026-10-19 it records the head it read, whether the tree was dirty, and every fast
+        // step and touched suite. A clean, complete, passing record covers its tree. A dirty
+        // one never does: its head is not the tree it graded.
+        const fastDir = at(ctx.home, 'locks', 'fast-gate.runs');
+        let fastNames = [];
+        try { fastNames = fs.readdirSync(fastDir).filter((x) => x.endsWith('.json')); } catch (e) { if (e.code !== 'ENOENT') throw new Error(`${fastDir}: ${e.code || e.message}`); }
+        for (const n of fastNames) {
+            const rec = ctx.readJson(path.join(fastDir, n));
+            if (!rec) { recs.push({ at: runIdTime(n), ok: false, why: `fast ${n} does not parse` }); continue; }
+            const fault = fastEvidenceFault(rec);
+            recs.push({ at: rec.startUtc, ok: !fault, why: fault ? `fast ${rec.runId}: ${fault}` : null });
+            if (!fault && rec.exit === 0 && rec.dirty === false && /^[0-9a-f]{40}$/.test(rec.head || '')) {
+                const tree = ctx.git(['rev-parse', `${rec.head}^{tree}`]);
+                if (tree) gated.push({ day: ctx.dayOf(Date.parse(rec.endUtc || rec.startUtc)), tree });
+            }
+        }
         // A day is covered when nothing landed on origin/main, or when a passing gate's
-        // head tree equals a tree that landed that day. Merges gated only by gate:fast
-        // leave no record, so those days are gaps until gate:fast persists one.
+        // head tree equals a tree that landed that day.
         const since = `${ctx.windowDays[0]}T00:00:00Z`;
         const log = ctx.git(['log', 'origin/main', '--first-parent', `--since=${since}`, '--format=%T %cI']);
         if (log === null) throw new Error('git log origin/main failed, so merge days are unknown');
@@ -496,4 +537,4 @@ const SPECS = [gateWindow, releaseWindow, authorityWindow, hookWindow, workerWin
     costWindow, acceptanceWindow, queueWindow, visibilityWindow, lockingWindow, learningWindow, deliveryWindow,
     capacityWindow, ownerWindow, recoveryWindow];
 
-module.exports = { SPECS, gateEvidenceFault, CLOCK_MS, TICKS_PER_DAY };
+module.exports = { SPECS, gateEvidenceFault, fastEvidenceFault, CLOCK_MS, TICKS_PER_DAY };

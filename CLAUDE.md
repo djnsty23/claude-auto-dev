@@ -11,7 +11,7 @@ A **Claude Code plugin marketplace**. `plugins/` ships into other people's sessi
 
 ```bash
 npm run gate                 # THE GATE: thirteen steps chained with &&. Run this.
-npm run gate:fast            # cheap steps: the merge bar, not the release bar.
+npm run gate:fast            # cheap steps and touched suites: the merge bar.
 npm test                     # every tooling/test-*.js suite, then validate. Step 1 of 13.
                              # It publishes the coverage receipt that check:coverage grades.
 node tooling/bump.js 8.9.0   # the ONLY correct way to change the version
