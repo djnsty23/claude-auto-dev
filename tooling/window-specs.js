@@ -605,16 +605,35 @@ const capacityWindow = {
     },
 };
 
+// restore-drill.js rows. A drill passes only inside 60 minutes with every delivered intent kept,
+// which the writer checks; the reader checks the numbers again rather than trust `ok` alone.
+const DRILL_LIMIT_MS = 60 * 60 * 1000;
+function drillRows(ctx) {
+    return ledger(ctx, 'windows', 'restore-drills.jsonl').filter((r) => r && Number.isFinite(Date.parse(r.at))).map((r) => {
+        const kept = Number.isInteger(r.intentsDelivered) && r.intentsKept === r.intentsDelivered;
+        const fast = Number.isFinite(r.durationMs) && r.durationMs <= DRILL_LIMIT_MS;
+        if (r.ok === true && (!kept || !fast)) return { ...r, ok: false, why: `marked passed with ${r.intentsKept} of ${r.intentsDelivered} intents kept in ${r.durationMs} ms` };
+        return r;
+    });
+}
+function drillTotal(passing) {
+    const n = passing.length;
+    return { ok: n > 0, why: `${n} passing restore drill(s) in the window, needs 1${n ? `, the slowest ${Math.max(...passing.map((r) => r.durationMs))} ms` : ''}` };
+}
+
 const recoveryWindow = {
     id: 'recovery-window',
-    source: 'autodev/events.jsonl runtime events (runtime-release.js) and runtime/backups',
-    admissibleFrom: '2026-10-19',
+    source: 'autodev/windows/restore-drills.jsonl (restore-drill.js) and brain-clock passes',
+    // The drill runs from the brain clock once a release carries restore-drill.js.
+    admissibleFrom: '2026-10-20',
     load(ctx) {
-        const rows = ledger(ctx, 'events.jsonl').filter((r) => r && typeof r.type === 'string' && /^runtime\.restore/.test(r.type));
+        const rows = drillRows(ctx);
+        const days = new Set(ctx.windowDays);
+        const passing = rows.filter((r) => r.ok === true && days.has(ctx.dayOf(Date.parse(r.at))));
         return {
-            records: rows.map((r) => ({ at: r.at, ok: true, why: null })),
+            records: rows.map((r) => ({ at: r.at, ok: r.ok === true, why: r.ok === true ? null : `restore drill failed: ${r.why || 'no reason recorded'}` })),
             coveredDays: clockDays(ctx),
-            totals: [noWriter('a restore drill with its duration and the intents it kept')],
+            totals: [drillTotal(passing)],
         };
     },
 };

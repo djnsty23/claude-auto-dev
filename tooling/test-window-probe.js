@@ -11,7 +11,7 @@
 // the wiring in docs/scorecard-criteria.json is graded too.
 //
 // Prints one summary line:
-//   specs=17 gap_planted=FAIL bad_record=FAIL clean_pass=8 no_writer=9 unreadable=EXIT2
+//   specs=17 gap_planted=FAIL bad_record=FAIL clean_pass=9 no_writer=8 unreadable=EXIT2
 // and sets a nonzero exitCode when any case fails.
 
 const fs = require('fs');
@@ -138,6 +138,23 @@ function realObserve() {
     return observeRow;
 }
 
+// One row from the real restore-drill.js, on a stand-in profile holding two clock state files.
+let drillRow = null;
+function realDrill() {
+    if (drillRow) return drillRow;
+    const claude = path.join(tmpRoot, 'drill-real', 'claude');
+    fs.mkdirSync(path.join(claude, 'autodev', 'brain-clock'), { recursive: true });
+    fs.writeFileSync(path.join(claude, 'autodev', 'brain-clock', 'state-meta.json'), JSON.stringify({ schema: 1 }));
+    fs.writeFileSync(path.join(claude, 'autodev', 'brain-clock', 'last.json'), '{}');
+    const env = { ...process.env, BRAIN_CLOCK_CLAUDE_DIR: claude };
+    for (const k of ['AUTODEV_RUNTIME_DIR', 'ASK_QUEUE_DIR', 'ASK_QUEUE_BOARD']) delete env[k];
+    const r = spawnSync(process.execPath, [path.join(ROOT, 'plugins', 'autodev-core', 'scripts', 'restore-drill.js')], { encoding: 'utf8', windowsHide: true, timeout: 120000, env });
+    const rows = fs.readFileSync(path.join(claude, 'autodev', 'windows', 'restore-drills.jsonl'), 'utf8').split('\n').filter(Boolean);
+    if (r.status !== 0 || rows.length !== 1) throw new Error(`restore-drill.js wrote ${rows.length} rows, exit ${r.status}: ${r.stdout}${r.stderr}`);
+    drillRow = JSON.parse(rows[0]);
+    return drillRow;
+}
+
 const FIX = {
     'gate-window': (h, o) => {
         DAYS.forEach((d, i) => { if (d !== o.gap) gateRun(h, d, i, { exit: 0, evidence: evidence(), head: REPO.heads[d] }); });
@@ -215,15 +232,21 @@ const FIX = {
         clock(h, o.gap ? [o.gap] : []);
         write(h, 'autodev/owner-asks/ledger.jsonl', jsonl(DAYS.map((d) => ({ at: `${d}T09:00:00Z`, type: 'owner-time-start' }))));
     },
-    'recovery-window': (h, o) => clock(h, o.gap ? [o.gap] : []),
+    'recovery-window': (h, o) => {
+        clock(h, o.gap ? [o.gap] : []);
+        const real = realDrill();
+        write(h, 'autodev/windows/restore-drills.jsonl', jsonl(o.noDrill ? [] : DAYS.map((d) => ({ ...real, at: `${d}T03:00:00.000Z`,
+            ...(d === o.bad ? { ok: false, why: '1 delivered intent(s) were no longer delivered (ask-1)' } : {}),
+            ...(d === o.liar ? { intentsKept: 0, intentsDelivered: 1 } : {}) }))));
+    },
 };
 
 // The specs that can pass on records the harness writes today, and those that must fail
 // by name until a writer exists. Written by hand, so narrowing a spec moves a case red.
 const PASSABLE = ['gate-window', 'release-window', 'worker-window', 'instruction-window', 'visibility-window', 'locking-window', 'delivery-window',
-    'capacity-window'];
+    'capacity-window', 'recovery-window'];
 const NO_WRITER = ['authority-window', 'hook-window', 'skill-window', 'cost-window', 'acceptance-window',
-    'queue-window', 'learning-window', 'owner-window', 'recovery-window'];
+    'queue-window', 'learning-window', 'owner-window'];
 // The records a planted bad day must produce, by the line that names it.
 const BAD_LINE = {
     'gate-window': /^violation 2026-11-09T11:00:00.000Z .*failed step 4 \(step 4\) has no output tail$/m,
@@ -240,6 +263,7 @@ const BAD_LINE = {
     'learning-window': /^violation 2026-11-09T00:00:00Z r-2026-11-09-0: exit 1$/m,
     'locking-window': /^violation 2026-11-09T00:00:00Z scripts~rogue\.js@9\.0\.0 took a lock but is not in the inventory$/m,
     'capacity-window': /^violation 2026-11-09T09:00:00Z removed .*protected class/m,
+    'recovery-window': /^violation 2026-11-09T03:00:00.000Z restore drill failed: 1 delivered intent\(s\) were no longer delivered \(ask-1\)$/m,
 };
 const GAP = '2026-11-12';
 const BAD = '2026-11-09';
@@ -367,6 +391,19 @@ try {
     FIX['capacity-window'](cs, { growth: 5 * GIB });
     const csr = probe('capacity-window', cs, REPO.repo);
     check('capacity-window: 5 GiB a day on 600 GiB free stays inside the reserve', csr.status === 0 && /^window=capacity-window covered=14\/14 violations=0 /m.test(csr.out), csr.out);
+    // A17: the real drill row, a window with no drill, and a row marked passed against its own numbers.
+    const rd = realDrill();
+    check('recovery-window: the real drill row passes with the fields the spec reads', rd.ok === true && rd.files === 2 && rd.intentsDelivered === 0 && rd.intentsKept === 0
+        && Number.isFinite(rd.durationMs) && rd.why === null, JSON.stringify(rd));
+    const rn = home();
+    FIX['recovery-window'](rn, { noDrill: true });
+    const rnr = probe('recovery-window', rn, REPO.repo);
+    check('recovery-window: no drill in the window is a short total', rnr.status === 1 && /^short 0 passing restore drill\(s\) in the window, needs 1$/m.test(rnr.out), rnr.out);
+    const rl = home();
+    FIX['recovery-window'](rl, { liar: BAD });
+    const rlr = probe('recovery-window', rl, REPO.repo);
+    check('recovery-window: a row marked passed that lost an intent is a violation', rlr.status === 1
+        && /^violation 2026-11-09T03:00:00.000Z restore drill failed: marked passed with 0 of 1 intents kept in \d+ ms$/m.test(rlr.out), rlr.out);
     // A11 and A14 totals.
     const na = home();
     FIX['visibility-window'](na, { noAck: true });
