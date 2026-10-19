@@ -106,7 +106,7 @@
       "expect": ["evidence: an output sink failing with ENOSPC keeps the step's evidence"] },
     { "id": "E5", "area": "failure evidence", "name": "the runner's record drops the ledger",
       "file": "tooling/gate-lock.js", "probe": "evidence",
-      "from": "outputFaults: faults, evidence: r.evidence };", "to": "outputFaults: faults };",
+      "from": "outputFaults: faults, evidence: r.evidence,", "to": "outputFaults: faults,",
       "expect": ["evidence: the runner's record carries the ledger of every step"] },
     { "id": "E6", "area": "failure evidence", "name": "missing step records read as pass",
       "file": "tooling/gate-steps.js", "probe": "evidence",
