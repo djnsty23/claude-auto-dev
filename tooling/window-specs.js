@@ -446,12 +446,39 @@ const ownerWindow = {
 // A12 locking-window, A13 learning-window
 // ---------------------------------------------------------------------------
 
+// Every shipped module that requires ledger-lock.js, as `<dir>~<file>`. test-window-probe.js
+// greps the plugins for those requires and fails when the grep and this list disagree.
+const LOCK_WRITERS = ['hooks~peer-send-ledger.js', 'scripts~ask-queue.js', 'scripts~brain-clock.js', 'scripts~execution-budget.js',
+    'scripts~production-signals.js', 'scripts~radar-learning.js', 'scripts~watch-panels.js', 'scripts~worker-reconcile.js'];
+
 const lockingWindow = {
     id: 'locking-window',
-    source: 'ledger-lock.js leaves .done files and sweeps them; brain-clock passes',
-    admissibleFrom: '2026-10-19',
+    source: 'autodev/windows/lock-writers/<day>/<writer>@<version> marks (ledger-lock.js), brain-clock passes',
+    // ledger-lock.js marks from the release that ships it. A writer not yet seen fails the total.
+    admissibleFrom: '2026-10-20',
     load(ctx) {
-        return { records: [], coveredDays: clockDays(ctx), totals: [noWriter('which inventoried writer took the ledger lock, on which installed version')] };
+        const base = at(ctx.home, 'windows', 'lock-writers');
+        const recs = [];
+        const seen = new Set();
+        for (const day of ctx.windowDays) {
+            let names = [];
+            try { names = fs.readdirSync(path.join(base, day)); } catch { continue; }
+            for (const n of names.sort()) {
+                const m = /^(.+)@(.+)$/.exec(n);
+                const writer = m ? m[1] : n;
+                const known = LOCK_WRITERS.includes(writer);
+                const versioned = Boolean(m) && m[2] !== 'unknown';
+                if (known && versioned) seen.add(writer);
+                recs.push({ at: `${day}T00:00:00Z`, ok: known && versioned,
+                    why: !known ? `${n} took a lock but is not in the inventory` : versioned ? null : `${n} took a lock with no plugin version` });
+            }
+        }
+        const missing = LOCK_WRITERS.filter((w) => !seen.has(w));
+        return {
+            records: recs,
+            coveredDays: clockDays(ctx),
+            totals: [{ ok: !missing.length, why: `${LOCK_WRITERS.length - missing.length} of ${LOCK_WRITERS.length} inventoried writers took a lock on the installed layer${missing.length ? `, not ${missing.join(', ')}` : ''}` }],
+        };
     },
 };
 
@@ -545,4 +572,4 @@ const SPECS = [gateWindow, releaseWindow, authorityWindow, hookWindow, workerWin
     costWindow, acceptanceWindow, queueWindow, visibilityWindow, lockingWindow, learningWindow, deliveryWindow,
     capacityWindow, ownerWindow, recoveryWindow];
 
-module.exports = { SPECS, gateEvidenceFault, fastEvidenceFault, CLOCK_MS, TICKS_PER_DAY };
+module.exports = { SPECS, LOCK_WRITERS, gateEvidenceFault, fastEvidenceFault, CLOCK_MS, TICKS_PER_DAY };

@@ -11,7 +11,7 @@
 // the wiring in docs/scorecard-criteria.json is graded too.
 //
 // Prints one summary line:
-//   specs=17 gap_planted=FAIL bad_record=FAIL clean_pass=5 no_writer=12 unreadable=EXIT2
+//   specs=17 gap_planted=FAIL bad_record=FAIL clean_pass=7 no_writer=10 unreadable=EXIT2
 // and sets a nonzero exitCode when any case fails.
 
 const fs = require('fs');
@@ -25,6 +25,10 @@ const NOW = '2026-11-20T12:00:00Z';
 // The 14 complete days before NOW, written out by hand rather than computed by the engine.
 const DAYS = ['2026-11-06', '2026-11-07', '2026-11-08', '2026-11-09', '2026-11-10', '2026-11-11', '2026-11-12',
     '2026-11-13', '2026-11-14', '2026-11-15', '2026-11-16', '2026-11-17', '2026-11-18', '2026-11-19'];
+// The shipped modules that require ledger-lock.js, by hand. The spec's own list and a grep of
+// the plugins must both equal it.
+const LOCK_INVENTORY = ['hooks~peer-send-ledger.js', 'scripts~ask-queue.js', 'scripts~brain-clock.js', 'scripts~execution-budget.js',
+    'scripts~production-signals.js', 'scripts~radar-learning.js', 'scripts~watch-panels.js', 'scripts~worker-reconcile.js'];
 const manifest = JSON.parse(fs.readFileSync(path.join(ROOT, 'docs', 'scorecard-criteria.json'), 'utf8'));
 const expectOf = (id) => new RegExp(manifest.aspects.flatMap((a) => a.criteria).find((c) => c.id === id).expect, 'm');
 
@@ -141,7 +145,12 @@ const FIX = {
             ...(o.noAck ? [] : [{ at: `${d}T10:00:00Z`, type: 'receipt', key: `k-${d}`, by: 'owner', how: 'clicked' }]),
         ])));
     },
-    'locking-window': (h, o) => clock(h, o.gap ? [o.gap] : []),
+    // Every inventoried writer marks every day. The bad day adds a writer the inventory lacks.
+    'locking-window': (h, o) => {
+        clock(h, o.gap ? [o.gap] : []);
+        for (const d of DAYS) for (const w of LOCK_INVENTORY) write(h, `autodev/windows/lock-writers/${d}/${w}@9.0.0`, '');
+        if (o.bad) write(h, `autodev/windows/lock-writers/${o.bad}/scripts~rogue.js@9.0.0`, '');
+    },
     'learning-window': (h, o) => {
         clock(h, o.gap ? [o.gap] : []);
         write(h, 'autodev/frontier/runs.jsonl', jsonl(DAYS.flatMap((d) => Array.from({ length: 8 }, (_, i) => ({
@@ -167,9 +176,9 @@ const FIX = {
 
 // The specs that can pass on records the harness writes today, and those that must fail
 // by name until a writer exists. Written by hand, so narrowing a spec moves a case red.
-const PASSABLE = ['gate-window', 'release-window', 'worker-window', 'instruction-window', 'visibility-window', 'delivery-window'];
+const PASSABLE = ['gate-window', 'release-window', 'worker-window', 'instruction-window', 'visibility-window', 'locking-window', 'delivery-window'];
 const NO_WRITER = ['authority-window', 'hook-window', 'skill-window', 'cost-window', 'acceptance-window',
-    'queue-window', 'locking-window', 'learning-window', 'capacity-window', 'owner-window', 'recovery-window'];
+    'queue-window', 'learning-window', 'capacity-window', 'owner-window', 'recovery-window'];
 // The records a planted bad day must produce, by the line that names it.
 const BAD_LINE = {
     'gate-window': /^violation 2026-11-09T11:00:00.000Z .*failed step 4 \(step 4\) has no output tail$/m,
@@ -184,6 +193,7 @@ const BAD_LINE = {
     'queue-window': /^violation 2026-11-09T09:00:00Z t-2026-11-09: UNKNOWN/m,
     'visibility-window': /^violation 2026-11-09T09:00:01Z k-2026-11-09: delivery via toast exited 1$/m,
     'learning-window': /^violation 2026-11-09T00:00:00Z r-2026-11-09-0: exit 1$/m,
+    'locking-window': /^violation 2026-11-09T00:00:00Z scripts~rogue\.js@9\.0\.0 took a lock but is not in the inventory$/m,
     'capacity-window': /^violation 2026-11-09T09:00:00Z removed .*protected class/m,
 };
 const GAP = '2026-11-12';
@@ -270,6 +280,26 @@ try {
         evidence: [{ index: 1, of: 1, step: 'tooling/test-x.js', status: 'fail', exit: 1, signal: null, ms: 900, tail: null }] } });
     const ftr = probe('gate-window', th, REPO.repo);
     check('gate-window: a failed touched suite with no tail is a violation', ftr.status === 1 && new RegExp(`^violation ${BAD}T12:00:00.000Z fast ${BAD}-2: tooling/test-x\\.js failed with no output tail$`, 'm').test(ftr.out), ftr.out);
+    // A12: the inventory matches a grep of the plugins, and a writer never seen is a short total.
+    const plugins = path.join(ROOT, 'plugins');
+    const requirers = [];
+    for (const p of fs.readdirSync(plugins)) for (const dir of ['scripts', 'hooks']) {
+        let names = [];
+        try { names = fs.readdirSync(path.join(plugins, p, dir)); } catch { continue; }
+        for (const n of names) if (n.endsWith('.js') && n !== 'ledger-lock.js'
+            && /require\(['"]\.{1,2}\/(?:scripts\/)?ledger-lock\.js['"]\)/.test(fs.readFileSync(path.join(plugins, p, dir, n), 'utf8'))) requirers.push(`${dir}~${n}`);
+    }
+    const specList = require('./window-specs.js').LOCK_WRITERS;
+    check('locking-window: the inventory equals every shipped module that requires ledger-lock.js',
+        requirers.sort().join() === LOCK_INVENTORY.slice().sort().join() && specList.slice().sort().join() === LOCK_INVENTORY.slice().sort().join(), `grep ${requirers.join(',')} spec ${specList.join(',')}`);
+    const lw = home();
+    clock(lw, []);
+    for (const d of DAYS) for (const w of LOCK_INVENTORY.filter((x) => x !== 'scripts~radar-learning.js')) write(lw, `autodev/windows/lock-writers/${d}/${w}@9.0.0`, '');
+    write(lw, `autodev/windows/lock-writers/${DAYS[2]}/scripts~radar-learning.js@unknown`, '');
+    const lr = probe('locking-window', lw, REPO.repo);
+    check('locking-window: a writer seen only with no version is short by name', lr.status === 1
+        && /^short 7 of 8 inventoried writers took a lock on the installed layer, not scripts~radar-learning\.js$/m.test(lr.out)
+        && /^violation 2026-11-08T00:00:00Z scripts~radar-learning\.js@unknown took a lock with no plugin version$/m.test(lr.out), lr.out);
     // A11 and A14 totals.
     const na = home();
     FIX['visibility-window'](na, { noAck: true });
