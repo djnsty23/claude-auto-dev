@@ -535,10 +535,52 @@ const deliveryWindow = {
 // A15 capacity-window, A17 recovery-window
 // ---------------------------------------------------------------------------
 
+// The trend looks this far ahead of the newest snapshot in the window.
+const TREND_DAYS = 14;
+const GIB = 1024 * 1024 * 1024;
+const gib = (b) => `${(b / GIB).toFixed(1)} GiB`;
+
+/**
+ * The stable-trend total: a least-squares line through each day's last volume reading,
+ * projected TREND_DAYS past the newest one, must leave the free space capacity.js
+ * admits against (its disk reserve for that volume size). Fewer than two days of
+ * readings is short, never a pass.
+ */
+function volumeTrend(snaps, windowDays, dayOf, diskReserve) {
+    const byDay = new Map();
+    for (const s of snaps) {
+        const t = Date.parse(s.takenUtc);
+        const v = s.volume;
+        if (!v || !Number.isFinite(v.usedBytes) || !Number.isFinite(v.totalBytes) || v.totalBytes <= 0) continue;
+        const d = dayOf(t);
+        if (!windowDays.includes(d)) continue;
+        const prev = byDay.get(d);
+        if (!prev || t > prev.t) byDay.set(d, { t, used: v.usedBytes, total: v.totalBytes });
+    }
+    const pts = [...byDay.values()].sort((a, b) => a.t - b.t);
+    if (pts.length < 2) return { ok: false, why: `${pts.length} day(s) of volume readings in the window, the trend needs 2` };
+    const x = pts.map((p) => (p.t - pts[0].t) / 86400000);
+    const mx = x.reduce((a, b) => a + b, 0) / x.length;
+    const my = pts.reduce((a, p) => a + p.used, 0) / pts.length;
+    let num = 0;
+    let den = 0;
+    for (let i = 0; i < pts.length; i++) { num += (x[i] - mx) * (pts[i].used - my); den += (x[i] - mx) ** 2; }
+    const slope = den ? num / den : 0;
+    const last = pts[pts.length - 1];
+    const projectedFree = last.total - (my + slope * (x[x.length - 1] + TREND_DAYS - mx));
+    const reserve = diskReserve(last.total);
+    const sign = slope >= 0 ? '+' : '-';
+    return {
+        ok: projectedFree >= reserve,
+        why: `volume ${sign}${gib(Math.abs(slope))}/day over ${pts.length} days leaves ${gib(projectedFree)} free in ${TREND_DAYS} days, ${projectedFree >= reserve ? 'inside' : 'under'} the ${gib(reserve)} reserve`,
+    };
+}
+
 const capacityWindow = {
     id: 'capacity-window',
-    source: 'autodev/lifecycle/journal.jsonl and snapshots.jsonl (lifecycle.js), never written in production',
-    admissibleFrom: '2026-10-19',
+    source: 'autodev/lifecycle/journal.jsonl and snapshots.jsonl (lifecycle.js), autodev/locks/full-gate.capacity-observe.jsonl (capacity.js observe)',
+    // The observer runs from the brain clock once a release carries `capacity.js observe`.
+    admissibleFrom: '2026-10-20',
     load(ctx) {
         const journal = ledger(ctx, 'lifecycle', 'journal.jsonl');
         const snaps = ledger(ctx, 'lifecycle', 'snapshots.jsonl');
@@ -550,8 +592,16 @@ const capacityWindow = {
             return { at: r.utc, ok: !cls, why: cls ? `removed ${r.path}, protected class ${cls}` : null };
         });
         // lifecycle.js stamps a snapshot `takenUtc` and a journal row `utc`.
-        const snapDays = new Set(snaps.filter((s) => s && Number.isFinite(Date.parse(s.takenUtc))).map((s) => ctx.dayOf(Date.parse(s.takenUtc))));
-        return { records: recs, coveredDays: snapDays, totals: [noWriter('an admission breach (a run admitted past capacity)')] };
+        const goodSnaps = snaps.filter((s) => s && Number.isFinite(Date.parse(s.takenUtc)));
+        const snapDays = new Set(goodSnaps.map((s) => ctx.dayOf(Date.parse(s.takenUtc))));
+        // capacity.js observe: a breach is admitted load past a reserve. An unknown probe
+        // row is neither a breach nor coverage.
+        const obs = ledger(ctx, 'locks', 'full-gate.capacity-observe.jsonl').filter((r) => r && Number.isFinite(Date.parse(r.at)) && !r.unknown);
+        for (const r of obs) recs.push({ at: r.at, ok: r.breach !== true, why: r.breach === true ? `admission breach with ${r.reservations} reservation(s): ${r.why}` : null });
+        const obsDays = new Set(obs.map((r) => ctx.dayOf(Date.parse(r.at))));
+        const covered = new Set([...snapDays].filter((d) => obsDays.has(d)));
+        const { diskReserve } = require('../plugins/autodev-core/scripts/capacity.js');
+        return { records: recs, coveredDays: covered, totals: [volumeTrend(goodSnaps, ctx.windowDays, ctx.dayOf, (t) => diskReserve(t))] };
     },
 };
 

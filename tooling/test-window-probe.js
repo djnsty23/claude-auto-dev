@@ -11,7 +11,7 @@
 // the wiring in docs/scorecard-criteria.json is graded too.
 //
 // Prints one summary line:
-//   specs=17 gap_planted=FAIL bad_record=FAIL clean_pass=7 no_writer=10 unreadable=EXIT2
+//   specs=17 gap_planted=FAIL bad_record=FAIL clean_pass=8 no_writer=9 unreadable=EXIT2
 // and sets a nonzero exitCode when any case fails.
 
 const fs = require('fs');
@@ -41,6 +41,7 @@ function check(name, cond, detail) {
     console.log(`FAIL ${name}${detail ? `: ${String(detail).slice(-900)}` : ''}`);
 }
 
+const GIB = 1024 * 1024 * 1024;
 const tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'window-probe-'));
 let seq = 0;
 function home() { const h = path.join(tmpRoot, `h${seq++}`); fs.mkdirSync(path.join(h, 'autodev'), { recursive: true }); return h; }
@@ -110,12 +111,31 @@ function realSnapshot() {
     fs.mkdirSync(path.join(dir, 'root'), { recursive: true });
     const cfgFile = path.join(dir, 'config.json');
     fs.writeFileSync(cfgFile, JSON.stringify({ stateDir: path.join(dir, 'state'), roots: [path.join(dir, 'root')], reportPaths: [] }));
+    // The volume comes through the writer's own seam, so the trend reads fixed numbers, not this machine's disk.
+    const vol = path.join(dir, 'volume.json');
+    fs.writeFileSync(vol, JSON.stringify({ usedBytes: 400 * GIB, totalBytes: 1000 * GIB }));
     const r = spawnSync(process.execPath, [path.join(ROOT, 'plugins', 'autodev-core', 'scripts', 'lifecycle.js'), 'snapshot', '--config', cfgFile],
-        { encoding: 'utf8', windowsHide: true, timeout: 60000, env: { ...process.env, AUTODEV_LIFECYCLE_PAGEFILE_BYTES: '0' } });
+        { encoding: 'utf8', windowsHide: true, timeout: 60000, env: { ...process.env, AUTODEV_LIFECYCLE_PAGEFILE_BYTES: '0', AUTODEV_LIFECYCLE_VOLUME_FILE: vol } });
     const rows = fs.readFileSync(path.join(dir, 'state', 'snapshots.jsonl'), 'utf8').split('\n').filter(Boolean);
     if (r.status !== 0 || rows.length !== 1) throw new Error(`lifecycle.js snapshot wrote ${rows.length} rows, exit ${r.status}: ${r.stderr}`);
     snapshotRow = JSON.parse(rows[0]);
     return snapshotRow;
+}
+// One row from the real `capacity.js observe`, nothing reserved, for the observe log's field names.
+let observeRow = null;
+function realObserve() {
+    if (observeRow) return observeRow;
+    const dir = path.join(tmpRoot, 'capacity-real');
+    fs.mkdirSync(dir, { recursive: true });
+    const probeFile = path.join(dir, 'probe.json');
+    fs.writeFileSync(probeFile, JSON.stringify({ diskFreeBytes: 600 * GIB, diskTotalBytes: 1000 * GIB, commitFreeBytes: 40 * GIB }));
+    const env = { ...process.env, AUTODEV_GATE_LOCK_PATH: path.join(dir, 'full-gate.lock'), AUTODEV_CAPACITY_PROBE_FILE: probeFile };
+    delete env.AUTODEV_CAPACITY_CONFIG;
+    const r = spawnSync(process.execPath, [path.join(ROOT, 'plugins', 'autodev-core', 'scripts', 'capacity.js'), 'observe'], { encoding: 'utf8', windowsHide: true, timeout: 60000, env });
+    const rows = fs.readFileSync(path.join(dir, 'full-gate.capacity-observe.jsonl'), 'utf8').split('\n').filter(Boolean);
+    if (r.status !== 0 || rows.length !== 1) throw new Error(`capacity.js observe wrote ${rows.length} rows, exit ${r.status}: ${r.stderr}`);
+    observeRow = JSON.parse(rows[0]);
+    return observeRow;
 }
 
 const FIX = {
@@ -182,7 +202,13 @@ const FIX = {
     'capacity-window': (h, o) => {
         // One row from the real writer, re-dated per day, so the fixture has the writer's field names.
         const real = realSnapshot();
-        write(h, 'autodev/lifecycle/snapshots.jsonl', jsonl(DAYS.filter((d) => d !== o.gap).map((d) => ({ ...real, takenUtc: `${d}T09:00:00.000Z` }))));
+        const growth = o.growth || 0;
+        write(h, 'autodev/lifecycle/snapshots.jsonl', jsonl(DAYS.filter((d) => d !== o.gap).map((d, i) => ({ ...real, takenUtc: `${d}T09:00:00.000Z`,
+            volume: { ...real.volume, usedBytes: real.volume.usedBytes + i * growth } }))));
+        const obs = realObserve();
+        write(h, 'autodev/locks/full-gate.capacity-observe.jsonl', jsonl(DAYS.map((d) => ({ ...obs, at: `${d}T10:00:00.000Z`,
+            ...(d === o.breach ? { reservations: 1, classes: ['gate'], breach: true, why: 'disk at X 5.0 GiB free, under the 64.0 GiB reserve' } : {}),
+            ...(d === o.unknown ? { unknown: 'disk at X (the disk probe threw)' } : {}) }))));
         write(h, 'autodev/lifecycle/journal.jsonl', jsonl(o.bad ? [{ utc: `${o.bad}T09:00:00Z`, op: 'remove', state: 'done', path: path.join(os.homedir(), '.claude', 'projects', 'x') }] : []));
     },
     'owner-window': (h, o) => {
@@ -194,9 +220,10 @@ const FIX = {
 
 // The specs that can pass on records the harness writes today, and those that must fail
 // by name until a writer exists. Written by hand, so narrowing a spec moves a case red.
-const PASSABLE = ['gate-window', 'release-window', 'worker-window', 'instruction-window', 'visibility-window', 'locking-window', 'delivery-window'];
+const PASSABLE = ['gate-window', 'release-window', 'worker-window', 'instruction-window', 'visibility-window', 'locking-window', 'delivery-window',
+    'capacity-window'];
 const NO_WRITER = ['authority-window', 'hook-window', 'skill-window', 'cost-window', 'acceptance-window',
-    'queue-window', 'learning-window', 'capacity-window', 'owner-window', 'recovery-window'];
+    'queue-window', 'learning-window', 'owner-window', 'recovery-window'];
 // The records a planted bad day must produce, by the line that names it.
 const BAD_LINE = {
     'gate-window': /^violation 2026-11-09T11:00:00.000Z .*failed step 4 \(step 4\) has no output tail$/m,
@@ -318,6 +345,28 @@ try {
     check('locking-window: a writer seen only with no version is short by name', lr.status === 1
         && /^short 7 of 8 inventoried writers took a lock on the installed layer, not scripts~radar-learning\.js$/m.test(lr.out)
         && /^violation 2026-11-08T00:00:00Z scripts~radar-learning\.js@unknown took a lock with no plugin version$/m.test(lr.out), lr.out);
+    // A15: the writers' field names, a breach, an unknown probe day, and the trend.
+    const ro = realObserve();
+    check('capacity-window: the real observe row carries the fields the spec reads', ['at', 'breach', 'unknown', 'reservations', 'why'].every((k) => k in ro) && ro.breach === false && ro.unknown === null
+        && Number.isFinite(realSnapshot().volume.usedBytes) && Number.isFinite(realSnapshot().volume.totalBytes), JSON.stringify(ro));
+    const cb = home();
+    FIX['capacity-window'](cb, { breach: BAD });
+    const cbr = probe('capacity-window', cb, REPO.repo);
+    check('capacity-window: an admission breach is a violation naming its numbers', cbr.status === 1
+        && /^violation 2026-11-09T10:00:00.000Z admission breach with 1 reservation\(s\): disk at X 5\.0 GiB free, under the 64\.0 GiB reserve$/m.test(cbr.out), cbr.out);
+    const cu = home();
+    FIX['capacity-window'](cu, { unknown: GAP });
+    const cur = probe('capacity-window', cu, REPO.repo);
+    check('capacity-window: a day whose only observation is unknown is a gap, not covered', cur.status === 1 && new RegExp(`^gap ${GAP}$`, 'm').test(cur.out) && !/^violation /m.test(cur.out), cur.out);
+    const ct = home();
+    FIX['capacity-window'](ct, { growth: 30 * GIB });
+    const ctr = probe('capacity-window', ct, REPO.repo);
+    check('capacity-window: a volume filling 30 GiB a day is a short trend total, with no violation', ctr.status === 1
+        && /^short volume \+30\.0 GiB\/day over 14 days leaves -210\.0 GiB free in 14 days, under the 64\.0 GiB reserve$/m.test(ctr.out) && !/^violation /m.test(ctr.out), ctr.out);
+    const cs = home();
+    FIX['capacity-window'](cs, { growth: 5 * GIB });
+    const csr = probe('capacity-window', cs, REPO.repo);
+    check('capacity-window: 5 GiB a day on 600 GiB free stays inside the reserve', csr.status === 0 && /^window=capacity-window covered=14\/14 violations=0 /m.test(csr.out), csr.out);
     // A11 and A14 totals.
     const na = home();
     FIX['visibility-window'](na, { noAck: true });

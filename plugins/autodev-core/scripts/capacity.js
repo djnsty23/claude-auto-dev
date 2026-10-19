@@ -63,6 +63,7 @@
  * admit() and release() also take { now, probe, isAlive } options for in-process suites.
  *
  *   node capacity.js status [--json]                 the ledger, read-only apart from reclaiming dead pids
+ *   node capacity.js observe                         append one sample of admitted load against the reserves
  *   node capacity.js clear-breaker --class <cls>     an operator clears a tripped crash breaker
  *   node capacity.js --help
  */
@@ -485,7 +486,70 @@ function clearBreaker(cls, opts = {}) {
     } catch (e) { return { cleared: false, why: `could not clear (${e.code || e.message})` }; }
 }
 
+/**
+ * One observation of admitted load against the reserves, appended to
+ * `<stem>.capacity-observe.jsonl`. A BREACH is a sample taken while at least one
+ * reservation is outstanding in which free disk on a reserved volume, or free
+ * commit, is under its reserve: the admitted runs together took the machine past
+ * the capacity admission promised to keep. Below the reserve with nothing
+ * reserved is load that admission never saw, recorded as `idleShort`, never a
+ * breach. A probe that cannot read is `unknown`, also never a breach. Returns the
+ * row, or { row: null, why } when it could not be written.
+ */
+function observe(opts = {}) {
+    const env = opts.env || process.env;
+    const base = opts.base || defaultBase(env);
+    const now = opts.now || Date.now;
+    const s = status(opts);
+    if (!s.ledger) return { row: null, why: s.why };
+    const cfg = readConfig(base, env);
+    const config = cfg.config || {};
+    const reservations = s.ledger.reservations;
+    const paths = [path.dirname(base), ...reservations.map((r) => r.path).filter(Boolean)];
+    const seen = new Set();
+    const volumes = [];
+    let commit = null;
+    for (const p of paths) {
+        const smp = (opts.probe || ((x) => sample(x, env)))(p);
+        if (!commit) commit = smp.commit;
+        const key = smp.disk && smp.disk.ok ? String(smp.disk.dev) : `unknown:${p}`;
+        if (seen.has(key)) continue;
+        seen.add(key);
+        volumes.push({ path: path.resolve(p), dev: smp.disk && smp.disk.ok ? smp.disk.dev : null, disk: smp.disk });
+    }
+    const unknown = volumes.filter((v) => !v.disk || !v.disk.ok).map((v) => `disk at ${v.path} (${v.disk ? v.disk.why : 'no probe'})`);
+    if (!commit || !commit.ok) unknown.push(`commit (${commit ? commit.why : 'no probe'})`);
+    const cRes = commitReserve('gate', config);
+    const short = [];
+    for (const v of volumes.filter((x) => x.disk && x.disk.ok)) {
+        const dRes = diskReserve(v.disk.totalBytes, config);
+        if (v.disk.freeBytes < dRes) short.push({ what: 'disk', path: v.path, dev: v.dev, freeBytes: v.disk.freeBytes, reserveBytes: dRes });
+    }
+    if (commit && commit.ok && commit.freeBytes < cRes) short.push({ what: 'commit', freeBytes: commit.freeBytes, reserveBytes: cRes });
+    const reservedOn = (x) => x.what === 'commit' ? reservations.length > 0
+        : reservations.some((r) => r.dev === null || r.dev === undefined || x.dev === null || String(r.dev) === String(x.dev));
+    const breaches = short.filter(reservedOn);
+    const row = {
+        at: new Date(now()).toISOString(),
+        reservations: reservations.length,
+        classes: [...new Set(reservations.map((r) => r.cls))].sort(),
+        volumes: volumes.map((v) => ({ path: v.path, freeBytes: v.disk && v.disk.ok ? v.disk.freeBytes : null, totalBytes: v.disk && v.disk.ok ? v.disk.totalBytes : null })),
+        commitFreeBytes: commit && commit.ok ? commit.freeBytes : null,
+        commitReserveBytes: cRes,
+        unknown: unknown.length ? unknown.join('; ') : null,
+        breach: breaches.length > 0,
+        idleShort: short.length > 0 && !breaches.length,
+        why: short.length ? short.map((x) => `${x.what}${x.path ? ` at ${x.path}` : ''} ${gib(x.freeBytes)} free, under the ${gib(x.reserveBytes)} reserve`).join('; ') : null,
+    };
+    try {
+        fs.mkdirSync(path.dirname(base), { recursive: true });
+        fs.appendFileSync(`${stem(base)}.capacity-observe.jsonl`, JSON.stringify(row) + '\n');
+    } catch (e) { return { row: null, why: `the observation could not be written (${e.code || e.message})` }; }
+    return { row, why: null };
+}
+
 module.exports = {
+    observe,
     CLASSES, DEFAULT_REQUESTS, GIB, DISK_RESERVE_MIN, DISK_RESERVE_MAX, COMMIT_RESERVE_MIN, RESUME_SAMPLES, SAMPLE_SPACING_MS,
     admit, release, status, breakerFor, clearBreaker, sample, probeDisk, probeCommit, evaluate, diskReserve, commitReserve,
     requestSize, ledgerPath, configPath, defaultBase, isOff, waitMs, pollMs,
@@ -498,6 +562,7 @@ module.exports = {
 function help() {
     console.log([
         'usage: node capacity.js status [--json]',
+        '       node capacity.js observe     (one sample of admitted load against the reserves)',
         '       node capacity.js clear-breaker --class <gate|worker|judge|frontier|archive|verify>',
         '',
         'Machine capacity admission for gates, headless workers, judges and verifies. status lists',
@@ -520,6 +585,13 @@ if (require.main === module) {
                 if (c.breaker) console.log(`  ${breakerLine(cls, c.breaker)}`);
                 if (c.deferredUtc) console.log(`  ${cls} deferred since ${c.deferredUtc}, ${(c.healthy || []).length} healthy sample(s): ${c.lastWhy || ''}`);
             }
+        }
+    } else if (cmd === 'observe') {
+        const r = observe();
+        if (!r.row) { console.error(`capacity: ${r.why}`); process.exitCode = 2; } else {
+            const v = r.row;
+            console.log(`capacity: observed ${v.reservations} reservation(s): ${v.breach ? `BREACH ${v.why}` : v.unknown ? `probe unknown: ${v.unknown}` : v.idleShort ? `short with nothing reserved: ${v.why}` : 'inside the reserves'}`);
+            if (v.breach) process.exitCode = 1;
         }
     } else if (cmd === 'clear-breaker') {
         const k = argv.indexOf('--class');
