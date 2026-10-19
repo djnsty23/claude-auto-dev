@@ -102,6 +102,22 @@ function gateRun(h, day, n, rec) {
     write(h, `autodev/locks/full-gate.runs/${runId}.json`, JSON.stringify({ schema: 1, runId, attempts: [{ attempt: 1, exit: rec.exit, finished: true, record: { runId, startUtc: `${day}T11:00:00.000Z`, endUtc: `${day}T11:30:00.000Z`, ...rec } }] }));
 }
 
+// `lifecycle.js snapshot` run once against an empty root in the temp dir, and its row read back.
+let snapshotRow = null;
+function realSnapshot() {
+    if (snapshotRow) return snapshotRow;
+    const dir = path.join(tmpRoot, 'lifecycle-real');
+    fs.mkdirSync(path.join(dir, 'root'), { recursive: true });
+    const cfgFile = path.join(dir, 'config.json');
+    fs.writeFileSync(cfgFile, JSON.stringify({ stateDir: path.join(dir, 'state'), roots: [path.join(dir, 'root')], reportPaths: [] }));
+    const r = spawnSync(process.execPath, [path.join(ROOT, 'plugins', 'autodev-core', 'scripts', 'lifecycle.js'), 'snapshot', '--config', cfgFile],
+        { encoding: 'utf8', windowsHide: true, timeout: 60000, env: { ...process.env, AUTODEV_LIFECYCLE_PAGEFILE_BYTES: '0' } });
+    const rows = fs.readFileSync(path.join(dir, 'state', 'snapshots.jsonl'), 'utf8').split('\n').filter(Boolean);
+    if (r.status !== 0 || rows.length !== 1) throw new Error(`lifecycle.js snapshot wrote ${rows.length} rows, exit ${r.status}: ${r.stderr}`);
+    snapshotRow = JSON.parse(rows[0]);
+    return snapshotRow;
+}
+
 const FIX = {
     'gate-window': (h, o) => {
         DAYS.forEach((d, i) => { if (d !== o.gap) gateRun(h, d, i, { exit: 0, evidence: evidence(), head: REPO.heads[d] }); });
@@ -164,7 +180,9 @@ const FIX = {
         write(h, 'autodev/brain-judge/judgements.jsonl', jsonl(kept.map((t) => ({ at: t.startedAt.replace(/T0/, 'T1'), taskId: t.taskId, mode: 'live', decision: 'accept', applied: true }))));
     },
     'capacity-window': (h, o) => {
-        write(h, 'autodev/lifecycle/snapshots.jsonl', jsonl(DAYS.filter((d) => d !== o.gap).map((d) => ({ utc: `${d}T09:00:00Z` }))));
+        // One row from the real writer, re-dated per day, so the fixture has the writer's field names.
+        const real = realSnapshot();
+        write(h, 'autodev/lifecycle/snapshots.jsonl', jsonl(DAYS.filter((d) => d !== o.gap).map((d) => ({ ...real, takenUtc: `${d}T09:00:00.000Z` }))));
         write(h, 'autodev/lifecycle/journal.jsonl', jsonl(o.bad ? [{ utc: `${o.bad}T09:00:00Z`, op: 'remove', state: 'done', path: path.join(os.homedir(), '.claude', 'projects', 'x') }] : []));
     },
     'owner-window': (h, o) => {

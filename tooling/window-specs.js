@@ -549,7 +549,8 @@ const capacityWindow = {
             const cls = r.op === 'remove' && r.state === 'done' && r.path ? protectedClass(r.path) : null;
             return { at: r.utc, ok: !cls, why: cls ? `removed ${r.path}, protected class ${cls}` : null };
         });
-        const snapDays = new Set(snaps.filter((s) => s && (s.utc || s.at)).map((s) => ctx.dayOf(Date.parse(s.utc || s.at))));
+        // lifecycle.js stamps a snapshot `takenUtc` and a journal row `utc`.
+        const snapDays = new Set(snaps.filter((s) => s && Number.isFinite(Date.parse(s.takenUtc))).map((s) => ctx.dayOf(Date.parse(s.takenUtc))));
         return { records: recs, coveredDays: snapDays, totals: [noWriter('an admission breach (a run admitted past capacity)')] };
     },
 };
