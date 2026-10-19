@@ -269,40 +269,48 @@ const workerWindow = {
 // A6 instruction-window
 // ---------------------------------------------------------------------------
 
-/** The config dirs of every host profile: this one and `<this>-<name>` siblings that keep the log. */
-function profileDirs(home) {
+/** The config dirs of every host profile: this one and `<this>-<name>` siblings that keep `log`. */
+function profileDirs(home, log) {
     const parent = path.dirname(home);
     const base = path.basename(home);
     let sib = [];
     try { sib = fs.readdirSync(parent).filter((n) => n.startsWith(`${base}-`)).map((n) => path.join(parent, n)); } catch { /* only this profile */ }
-    return [home, ...sib.filter((d) => fs.existsSync(path.join(d, 'logs', 'instructions-loaded.jsonl')))];
+    return [home, ...sib.filter((d) => fs.existsSync(path.join(d, 'logs', log)))];
 }
+
+// A fresh session is a start whose source is startup or clear, counted once per session id.
+// resume and compact continue a session that was already measured.
+const FRESH = new Set(['startup', 'clear']);
 
 const instructionWindow = {
     id: 'instruction-window',
-    source: 'logs/instructions-loaded*.jsonl in every profile config dir (hooks/instructions-loaded.js)',
-    // Main-profile rotation keeps about 600 KB, so history before 2026-10-16 is gone.
-    admissibleFrom: '2026-10-16',
+    source: 'logs/instruction-envelope.jsonl(.1) in every profile config dir (hooks/instruction-envelope.js)',
+    // The hook writes the ledger from the release that ships it. A day before its first row is
+    // a gap, never a pass, so a date earlier than the install only delays green.
+    admissibleFrom: '2026-10-20',
     load(ctx) {
-        const dirs = profileDirs(ctx.home);
+        const dirs = profileDirs(ctx.home, 'instruction-envelope.jsonl');
         const recs = [];
         const perProfile = [];
         for (const d of dirs) {
             const logs = path.join(d, 'logs');
-            let names = [];
-            try { names = fs.readdirSync(logs).filter((n) => /^instructions-loaded.*\.jsonl$/.test(n)); } catch { /* counted as no days below */ }
             const days = new Set();
-            for (const n of names) {
+            const seen = new Set();
+            for (const n of ['instruction-envelope.jsonl.1', 'instruction-envelope.jsonl']) {
                 for (const r of ctx.readJsonl(path.join(logs, n)) || []) {
-                    if (!r || r.reason !== 'session_start' || !Number.isFinite(Date.parse(r.at))) continue;
+                    if (!r || !FRESH.has(r.source) || typeof r.sessionId !== 'string' || !Number.isFinite(Date.parse(r.at))) continue;
+                    if (seen.has(r.sessionId)) continue;
+                    seen.add(r.sessionId);
                     days.add(ctx.dayOf(Date.parse(r.at)));
-                    recs.push({ at: r.at, ok: Number(r.bytes) > 0, why: Number(r.bytes) > 0 ? null : `${path.basename(d)}: ${path.basename(String(r.file || ''))} loaded with bytes ${r.bytes}, so the envelope was not measured` });
+                    recs.push({ at: r.at, ok: r.inside === true, why: r.inside === true ? null
+                        : `${path.basename(d)}: session ${r.sessionId.slice(0, 8)} started outside the envelope (rules ${r.rulesTotal} of ${r.budget}, ${r.missing} missing, ${r.conflicts} conflicts)` });
                 }
             }
             perProfile.push(days);
         }
-        const coveredDays = new Set(ctx.windowDays.filter((day) => perProfile.length && perProfile.every((s) => s.has(day))));
-        return { records: recs, coveredDays, totals: [noWriter('a session id, so a fresh session cannot be told from a resumed one')] };
+        // A day counts only when every profile started a fresh session on it.
+        const coveredDays = new Set(ctx.windowDays.filter((day) => perProfile.length && perProfile.every((p) => p.has(day))));
+        return { records: recs, coveredDays };
     },
 };
 
