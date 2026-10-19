@@ -155,6 +155,23 @@ function realDrill() {
     return drillRow;
 }
 
+// One day file from the real host-uptime.js, on an empty event log, for its field names.
+let hostUpRow = null;
+function realHostUp() {
+    if (hostUpRow) return hostUpRow;
+    const claude = path.join(tmpRoot, 'host-up-real', 'claude');
+    const events = path.join(tmpRoot, 'host-up-real', 'events.xml');
+    fs.mkdirSync(claude, { recursive: true });
+    fs.writeFileSync(events, '');
+    const r = spawnSync(process.execPath, [path.join(ROOT, 'plugins', 'autodev-core', 'scripts', 'host-uptime.js'), '--json'], { encoding: 'utf8', windowsHide: true, timeout: 60000,
+        env: { ...process.env, BRAIN_CLOCK_CLAUDE_DIR: claude, AUTODEV_HOST_EVENTS_FILE: events } });
+    const rows = JSON.parse(r.stdout);
+    if (r.status !== 0 || rows.length !== 15) throw new Error(`host-uptime.js wrote ${rows.length} days, exit ${r.status}: ${r.stderr}`);
+    hostUpRow = rows[0];
+    return hostUpRow;
+}
+const hostUp = (h, upOf) => { const real = realHostUp(); for (const d of DAYS) write(h, `autodev/windows/host-up/${d}.json`, JSON.stringify({ ...real, day: d, upMs: upOf(d), downMs: 86400000 - upOf(d) })); };
+
 const FIX = {
     'gate-window': (h, o) => {
         DAYS.forEach((d, i) => { if (d !== o.gap) gateRun(h, d, i, { exit: 0, evidence: evidence(), head: REPO.heads[d] }); });
@@ -417,7 +434,29 @@ try {
     const tk = home();
     FIX['acceptance-window'](tk, { gap: GAP });
     const tr = probe('acceptance-window', tk, REPO.repo);
-    check('acceptance-window: a day without ticks is short of 99.5% host ticks', /^short host ticks 3744 of 4032 \(92\.9%\), needs 99\.5%$/m.test(tr.out), tr.out);
+    check('acceptance-window: a day without ticks is short of 99.5% host ticks', /^short host ticks 3744 of 4032 \(92\.9%\), needs 99\.5%, host up time known for 0 of 14 days$/m.test(tr.out), tr.out);
+    // A9: host-uptime.js day files set the denominator. The host off all of the gap day takes it out.
+    const hu = home();
+    FIX['acceptance-window'](hu, { gap: GAP });
+    hostUp(hu, (d) => (d === GAP ? 0 : 86400000));
+    const hur = probe('acceptance-window', hu, REPO.repo);
+    check('acceptance-window: a day the event log shows the host off leaves the denominator, so the share holds', hur.status === 1 && !/^short host ticks/m.test(hur.out)
+        && /^short no writer records an accept later found wrong/m.test(hur.out), hur.out);
+    const hl = home();
+    FIX['acceptance-window'](hl, { gap: GAP });
+    hostUp(hl, () => 86400000);
+    write(hl, `autodev/windows/host-up/${DAYS[0]}.json`, JSON.stringify({ ...realHostUp(), day: DAYS[0], upMs: 90000000 }));
+    const hlr = probe('acceptance-window', hl, REPO.repo);
+    check('acceptance-window: a host up all day with no ticks is still short, and an impossible day file counts as unknown',
+        /^short host ticks 3744 of 4032 \(92\.9%\), needs 99\.5%, host up time known for 13 of 14 days$/m.test(hlr.out), hlr.out);
+    // A9: the recovery drill total reads restore-drill.js rows, the same rows as A17.
+    const ad = home();
+    FIX['acceptance-window'](ad, {});
+    const adr = probe('acceptance-window', ad, REPO.repo);
+    check('acceptance-window: no drill in the window is a short total', /^short 0 passing restore drill\(s\) in the window, needs 1$/m.test(adr.out), adr.out);
+    write(ad, 'autodev/windows/restore-drills.jsonl', jsonl([{ ...realDrill(), at: `${DAYS[3]}T03:00:00.000Z` }]));
+    const adr2 = probe('acceptance-window', ad, REPO.repo);
+    check('acceptance-window: one passing drill meets the drill total', !/restore drill/m.test(adr2.out) && /^short no writer records an accept later found wrong/m.test(adr2.out), adr2.out);
     // A record before admissibleFrom never counts: the same clean release fixture moved before 10-19.
     const early = home();
     write(early, 'autodev/windows/release-protection.jsonl', jsonl(['2026-10-10', '2026-10-11'].map((d) => ({ at: `${d}T06:00:00Z`, error: null,

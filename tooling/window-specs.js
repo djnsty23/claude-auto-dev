@@ -352,6 +352,14 @@ const costWindow = {
 // A9 acceptance-window
 // ---------------------------------------------------------------------------
 
+const DAY_MS = 24 * 60 * 60 * 1000;
+// host-uptime.js's day file: the ms the host was up that UTC day, or null when absent or malformed.
+function hostUpMs(ctx, day) {
+    const r = ctx.readJson(at(ctx.home, 'windows', 'host-up', `${day}.json`));
+    if (!r || r.day !== day || typeof r.source !== 'string' || !Number.isFinite(r.upMs) || r.upMs < 0 || r.upMs > DAY_MS) return null;
+    return r.upMs;
+}
+
 const acceptanceWindow = {
     id: 'acceptance-window',
     source: 'autodev/brain-judge/judgements.jsonl (brain-judge.js) and brain-clock passes',
@@ -368,16 +376,21 @@ const acceptanceWindow = {
         const from = Date.parse(`${days[0]}T00:00:00Z`);
         const to = Date.parse(`${days[days.length - 1]}T00:00:00Z`) + 24 * 60 * 60 * 1000;
         const n = ticks.filter((t) => Date.parse(t.at) >= from && Date.parse(t.at) < to).length;
-        const expected = days.length * TICKS_PER_DAY;
-        const share = n / expected;
+        // host-uptime.js gives each day the time the host was up, from the OS event log. A day with
+        // no readable record keeps all 24 hours in the denominator, so a missing record never helps.
+        const up = days.map((d) => hostUpMs(ctx, d));
+        const known = up.filter((u) => u !== null).length;
+        const expected = Math.round(up.reduce((a, u) => a + (u === null ? DAY_MS : u), 0) / CLOCK_MS);
+        const share = expected ? n / expected : 0;
+        const passing = drillRows(ctx).filter((r) => r.ok === true && days.includes(ctx.dayOf(Date.parse(r.at))));
         return {
             records: recs,
             coveredDays: clockDays(ctx),
             totals: [
-                // No record says when the host or the task was enabled, so every hour of the window is the denominator.
-                { ok: share >= 0.995, why: `host ticks ${n} of ${expected} (${(share * 100).toFixed(1)}%), needs 99.5%` },
+                { ok: expected > 0 && share >= 0.995, why: `host ticks ${n} of ${expected} (${(share * 100).toFixed(1)}%), needs 99.5%, host up time known for ${known} of ${days.length} days` },
+                // Each task has one live verdict, so no row can show an accept found wrong later.
                 noWriter('an accept later found wrong, the unsafe accept the needs counts'),
-                noWriter('a recovery drill'),
+                drillTotal(passing),
             ],
         };
     },
