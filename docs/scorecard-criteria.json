@@ -1,5 +1,5 @@
 {
-  "description": "Evidence-bound criteria for the harness scorecard (A1 to A17). Read by tooling/scorecard.js. Fixture criteria carry weight 8 per aspect and the operational criterion weight 2, so an aspect proven only by fixtures scores at most 8, and 9 or 10 need operational evidence. A criterion whose suite does not exist yet stays UNKNOWN until its package lands. Policy frozen 2026-10-14, before evaluation. Amended 2026-10-14 after the overnight Brain stall: A9 adds mission-stall and splits its fixture weight 3, 3 and 2. An amendment may add evidence, never remove it. Amended 2026-10-16: credential-boundary is owner-held, because its package N5 narrows the deploy credential the owner chose to keep on 2026-09-23. It keeps its weight 2 and counts zero, so no score rises and A3 is capped at 8 while that decision stands.",
+  "description": "Evidence-bound criteria for the harness scorecard (A1 to A17). Read by tooling/scorecard.js. Fixture criteria carry weight 8 per aspect and the operational criterion weight 2, so an aspect proven only by fixtures scores at most 8, and 9 or 10 need operational evidence. A criterion whose suite does not exist yet stays UNKNOWN until its package lands. Policy frozen 2026-10-14, before evaluation. Amended 2026-10-14 after the overnight Brain stall: A9 adds mission-stall and splits its fixture weight 3, 3 and 2. An amendment may add evidence, never remove it. Amended 2026-10-16: credential-boundary is owner-held, because its package N5 narrows the deploy credential the owner chose to keep on 2026-09-23. It keeps its weight 2 and counts zero, so no score rises and A3 is capped at 8 while that decision stands. Amended 2026-10-19: every operational window criterion gains a probe, tooling/window-probe.js <id>, which grades the 14 complete UTC days before the run from records the harness writes, per tooling/window-specs.js. A day counts only from the day its writer first recorded that evidence completely, nothing is backfilled, and a need no writer records fails by name. The amendment adds evidence only: no need, weight or 14-day span is removed or shortened. gate-evidence also watches the real plugins/autodev-core/scripts/gate-records.js; the tooling/ path it named never existed, so the writer could change unseen.",
   "root": "..",
   "aspects": [
     {
@@ -15,7 +15,7 @@
             "tooling/test-gate-evidence.js",
             "tooling/gate-steps.js",
             "tooling/gate-lock.js",
-            "tooling/gate-records.js"
+            "plugins/autodev-core/scripts/gate-records.js"
           ],
           "weight": 8,
           "populationLabel": "critical mutants killed"
@@ -25,7 +25,13 @@
           "kind": "operational",
           "weight": 2,
           "needs": "14 days of merged-tree gate receipts, every red step with complete evidence",
-          "watch": []
+          "probe": "node tooling/window-probe.js gate-window",
+          "expect": "^window=gate-window covered=14/14 violations=0 records=(?<population>\\d+)$",
+          "watch": [
+            "tooling/window-probe.js",
+            "tooling/window-specs.js"
+          ],
+          "populationLabel": "window records"
         }
       ]
     },
@@ -50,7 +56,13 @@
           "kind": "operational",
           "weight": 2,
           "needs": "owner-set branch and tag protection observed on GitHub for 14 days",
-          "watch": []
+          "probe": "node tooling/window-probe.js release-window",
+          "expect": "^window=release-window covered=14/14 violations=0 records=(?<population>\\d+)$",
+          "watch": [
+            "tooling/window-probe.js",
+            "tooling/window-specs.js"
+          ],
+          "populationLabel": "window records"
         }
       ]
     },
@@ -85,7 +97,13 @@
           "kind": "operational",
           "weight": 2,
           "needs": "14 days of worker runs with zero boundary escapes",
-          "watch": []
+          "probe": "node tooling/window-probe.js authority-window",
+          "expect": "^window=authority-window covered=14/14 violations=0 records=(?<population>\\d+)$",
+          "watch": [
+            "tooling/window-probe.js",
+            "tooling/window-specs.js"
+          ],
+          "populationLabel": "window records"
         }
       ]
     },
@@ -122,7 +140,13 @@
           "kind": "operational",
           "weight": 2,
           "needs": "wall p95 within budget on installed profiles under idle and representative load for 14 days",
-          "watch": []
+          "probe": "node tooling/window-probe.js hook-window",
+          "expect": "^window=hook-window covered=14/14 violations=0 records=(?<population>\\d+)$",
+          "watch": [
+            "tooling/window-probe.js",
+            "tooling/window-specs.js"
+          ],
+          "populationLabel": "window records"
         }
       ]
     },
@@ -148,7 +172,13 @@
           "kind": "operational",
           "weight": 2,
           "needs": "every reserved attempt reconciled within two clock intervals for 14 days",
-          "watch": []
+          "probe": "node tooling/window-probe.js worker-window",
+          "expect": "^window=worker-window covered=14/14 violations=0 records=(?<population>\\d+)$",
+          "watch": [
+            "tooling/window-probe.js",
+            "tooling/window-specs.js"
+          ],
+          "populationLabel": "window records"
         }
       ]
     },
@@ -172,7 +202,13 @@
           "kind": "operational",
           "weight": 2,
           "needs": "fresh sessions on every host profile measured inside the envelope",
-          "watch": []
+          "probe": "node tooling/window-probe.js instruction-window",
+          "expect": "^window=instruction-window covered=14/14 violations=0 records=(?<population>\\d+)$",
+          "watch": [
+            "tooling/window-probe.js",
+            "tooling/window-specs.js"
+          ],
+          "populationLabel": "window records"
         }
       ]
     },
@@ -207,7 +243,13 @@
           "kind": "operational",
           "weight": 2,
           "needs": "held-out routing and outcome non-inferiority over 14 days",
-          "watch": []
+          "probe": "node tooling/window-probe.js skill-window",
+          "expect": "^window=skill-window covered=14/14 violations=0 records=(?<population>\\d+)$",
+          "watch": [
+            "tooling/window-probe.js",
+            "tooling/window-specs.js"
+          ],
+          "populationLabel": "window records"
         }
       ]
     },
@@ -244,7 +286,13 @@
           "kind": "operational",
           "weight": 2,
           "needs": "cost per accepted task reported with matched repeats and quality non-inferiority",
-          "watch": []
+          "probe": "node tooling/window-probe.js cost-window",
+          "expect": "^window=cost-window covered=14/14 violations=0 records=(?<population>\\d+)$",
+          "watch": [
+            "tooling/window-probe.js",
+            "tooling/window-specs.js"
+          ],
+          "populationLabel": "window records"
         }
       ]
     },
@@ -295,7 +343,13 @@
           "kind": "operational",
           "weight": 2,
           "needs": "zero unsafe accepts and 99.5% enabled host ticks over 14 days, plus a recovery drill",
-          "watch": []
+          "probe": "node tooling/window-probe.js acceptance-window",
+          "expect": "^window=acceptance-window covered=14/14 violations=0 records=(?<population>\\d+)$",
+          "watch": [
+            "tooling/window-probe.js",
+            "tooling/window-specs.js"
+          ],
+          "populationLabel": "window records"
         }
       ]
     },
@@ -320,7 +374,13 @@
           "kind": "operational",
           "weight": 2,
           "needs": "account switch drill passed and no lost task over 14 days",
-          "watch": []
+          "probe": "node tooling/window-probe.js queue-window",
+          "expect": "^window=queue-window covered=14/14 violations=0 records=(?<population>\\d+)$",
+          "watch": [
+            "tooling/window-probe.js",
+            "tooling/window-specs.js"
+          ],
+          "populationLabel": "window records"
         }
       ]
     },
@@ -344,7 +404,13 @@
           "kind": "operational",
           "weight": 2,
           "needs": "owner acknowledgment drill passed",
-          "watch": []
+          "probe": "node tooling/window-probe.js visibility-window",
+          "expect": "^window=visibility-window covered=14/14 violations=0 records=(?<population>\\d+)$",
+          "watch": [
+            "tooling/window-probe.js",
+            "tooling/window-specs.js"
+          ],
+          "populationLabel": "window records"
         }
       ]
     },
@@ -381,7 +447,13 @@
           "kind": "operational",
           "weight": 2,
           "needs": "every inventoried writer exercised on the installed operating layer",
-          "watch": []
+          "probe": "node tooling/window-probe.js locking-window",
+          "expect": "^window=locking-window covered=14/14 violations=0 records=(?<population>\\d+)$",
+          "watch": [
+            "tooling/window-probe.js",
+            "tooling/window-specs.js"
+          ],
+          "populationLabel": "window records"
         }
       ]
     },
@@ -406,7 +478,13 @@
           "kind": "operational",
           "weight": 2,
           "needs": "108 bounded calibration runs with sealed held-out tasks",
-          "watch": []
+          "probe": "node tooling/window-probe.js learning-window",
+          "expect": "^window=learning-window covered=14/14 violations=0 records=(?<population>\\d+)$",
+          "watch": [
+            "tooling/window-probe.js",
+            "tooling/window-specs.js"
+          ],
+          "populationLabel": "window records"
         }
       ]
     },
@@ -431,7 +509,13 @@
           "kind": "operational",
           "weight": 2,
           "needs": "at least 30 real tasks over 14 days with first-attempt acceptance of 90% or more",
-          "watch": []
+          "probe": "node tooling/window-probe.js delivery-window",
+          "expect": "^window=delivery-window covered=14/14 violations=0 records=(?<population>\\d+)$",
+          "watch": [
+            "tooling/window-probe.js",
+            "tooling/window-specs.js"
+          ],
+          "populationLabel": "window records"
         }
       ]
     },
@@ -468,7 +552,13 @@
           "kind": "operational",
           "weight": 2,
           "needs": "zero admission breaches, zero protected deletions and a stable trend over 14 days",
-          "watch": []
+          "probe": "node tooling/window-probe.js capacity-window",
+          "expect": "^window=capacity-window covered=14/14 violations=0 records=(?<population>\\d+)$",
+          "watch": [
+            "tooling/window-probe.js",
+            "tooling/window-specs.js"
+          ],
+          "populationLabel": "window records"
         }
       ]
     },
@@ -492,7 +582,13 @@
           "kind": "operational",
           "weight": 2,
           "needs": "owner minutes per accepted task at most 0.8 of baseline",
-          "watch": []
+          "probe": "node tooling/window-probe.js owner-window",
+          "expect": "^window=owner-window covered=14/14 violations=0 records=(?<population>\\d+)$",
+          "watch": [
+            "tooling/window-probe.js",
+            "tooling/window-specs.js"
+          ],
+          "populationLabel": "window records"
         }
       ]
     },
@@ -516,7 +612,13 @@
           "kind": "operational",
           "weight": 2,
           "needs": "a real restore drill inside 60 minutes with no acknowledged intent lost",
-          "watch": []
+          "probe": "node tooling/window-probe.js recovery-window",
+          "expect": "^window=recovery-window covered=14/14 violations=0 records=(?<population>\\d+)$",
+          "watch": [
+            "tooling/window-probe.js",
+            "tooling/window-specs.js"
+          ],
+          "populationLabel": "window records"
         }
       ]
     }
