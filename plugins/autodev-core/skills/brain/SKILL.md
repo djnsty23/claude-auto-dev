@@ -187,6 +187,30 @@ or readable skill file; a bare word in a prompt is not proof it loaded. Require
 small committed units and concise artifact pointers. Reserve independent review
 for material risks; avoid nested fan-outs and duplicate assignments.
 
+**A queued task must be able to finish whole on its first attempt.** The judge
+accepts a run only when its work landed and nothing is left for anyone else, and
+a run that ends on an open PR or an owner's pick is a follow-up or an escalation,
+correctly. So every brief you queue with `unattended-worker.js enqueue` carries
+two things:
+
+- **Its acceptance test, by name.** Name a command that exists at the base SHA,
+  or one the brief tells the worker to write first, and the exact line or exit
+  code that means done (`node tooling/test-x.js` prints `x: 9/9 checks passed`).
+  "Make it work" or "tests pass" names no test. A worker that has to guess its
+  endpoint is the run that comes back as a follow-up.
+- **The merge, done by the worker.** The worker rebases onto `origin/main`, runs
+  the repository's merge-bar gate under its receipt wrapper, and merges its own
+  PR with `merge-lock.js merge --pr <n> --head <sha> --gate-receipt <file>`. Its
+  report gives the merged SHA. This is a DECIDE in the decision policy for the
+  owner's own repositories, so it needs no panel. Where the policy says ASK
+  (payments, client repositories, a production write), the task is not queueable
+  as one unit: split the part that can land from the decision, and raise the
+  decision yourself.
+
+Leave a task out of the queue, rather than choosing a smaller one, when it cannot
+meet both. A run that is trivial so that it gets accepted inflates the delivery
+window it is graded by and proves nothing.
+
 Workers implement with `auto` and the project's actual gate. Brain owns scope,
 sequencing and acceptance. Product edits and conflicts belong to the assigned
 worker; honor the coordinator write guard. Framework fixes can be separately
