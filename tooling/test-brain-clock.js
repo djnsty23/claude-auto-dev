@@ -493,7 +493,7 @@ function actSuite(script) {
     const ev1 = W.events();
     const a1 = acts(ev1);
     check("act pass exit 0", r1.code === 0 && r1.json && r1.json.ok, r1.out);
-    check("--act runs the observe pass too", ev1.some((e) => e.type === "clock.baseline") && r1.json && r1.json.sources.length === 11 && r1.json.sources.includes("missions: 0 stalled, idle 60+ min"), r1.out);
+    check("--act runs the observe pass too", ev1.some((e) => e.type === "clock.baseline") && r1.json && r1.json.sources.length === 12 && r1.json.sources.includes("missions: 0 stalled, idle 60+ min") && r1.json.sources.includes("observers: none configured"), r1.out);
     check("mark-dead dry run: would-mark-dead for D1 and R1", JSON.stringify(keysOf(a1, "act.would-mark-dead")) === JSON.stringify([`D1@${T("11:00")}`, `R1@${T("11:00")}`]), JSON.stringify(a1));
     check("mark-dead dry run writes only would-mark-dead events", a1.length === 2 && a1.every((e) => e.type === "act.would-mark-dead"), JSON.stringify(a1.map((e) => e.type)));
     const d1 = a1.find((e) => e.key.startsWith("D1@"));
