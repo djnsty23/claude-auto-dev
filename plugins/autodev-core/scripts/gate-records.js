@@ -356,7 +356,10 @@ function mergeDescendants(list, observed, nowIso, cap = 500, snap = null) {
  * counter (`readmit-*.json`, tooling/gate-recovery.js) shares the directory
  * and is never pruned: deleting it would hand an old head a fresh budget.
  */
-function pruneRuns(base, maxAgeMs = 14 * 86400000) {
+// 21 days, not 14: the scorecard's gate-window grades the 14 complete days before
+// today, so its first day starts up to 15 days back. Pruning at 14 deleted the
+// start of the window as it was being read.
+function pruneRuns(base, maxAgeMs = 21 * 86400000) {
     let names = [];
     try { names = fs.readdirSync(runsDir(base)); } catch { return 0; }
     let n = 0;

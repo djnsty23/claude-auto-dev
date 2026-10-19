@@ -363,6 +363,8 @@ function runChainChild(root, sentinel, runId, token, waitGo = false, recordsBase
         }
     }
     const startUtc = new Date().toISOString();
+    // Read before the first step, so a tree moved mid-chain cannot be credited.
+    const gatedHead = git(root, ['rev-parse', 'HEAD']) || null;
     const env = { ...process.env, AUTODEV_GATE_RUN_ID: runId || '', AUTODEV_GATE_RUN_TOKEN: token === null ? '' : String(token) };
     // The chain runs one step at a time (gate-steps.js), each step's start and
     // end appended to the run's step records when a records base is given. A
@@ -427,7 +429,10 @@ function runChainChild(root, sentinel, runId, token, waitGo = false, recordsBase
         const rec = { schema: 1, runId, token, originPid: process.ppid, runnerPid: process.pid, startUtc,
                       endUtc: new Date().toISOString(), exit: r.exit, signal: null, infra: scan.hits(), lastStep: scan.lastStep(),
                       failedStep: r.failed ? { index: r.failed.index, step: r.failed.step, signal: r.failed.signal } : null,
-                      outputFaults: faults, evidence: r.evidence };
+                      outputFaults: faults, evidence: r.evidence,
+                      // The tree this run gated, so the scorecard's gate-window can tell a
+                      // gate on a merged tree from one on any other. null when git could not say.
+                      head: gatedHead };
         let sentinelError = null;
         try { fs.writeFileSync(sentinel, `${JSON.stringify(rec)}\n`); } catch (e) { sentinelError = e.code || e.message; }
         process.exitCode = r.exit;

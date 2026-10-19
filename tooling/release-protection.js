@@ -16,7 +16,13 @@
 // bypass always does not protect anything against that account, so it counts
 // as ALLOWED. When GitHub cannot be read, every field is UNKNOWN.
 //
-// Run: node tooling/release-protection.js [--repo owner/name] [--json]
+// Run: node tooling/release-protection.js [--repo owner/name] [--json] [--observe]
+//
+// --observe also appends the reading, with its time, to
+// <config dir>/autodev/windows/release-protection.jsonl. The scorecard's
+// release-window (tooling/window-specs.js) grades 14 days of those lines, so a
+// scheduled --observe is what turns point samples into an observation. An
+// UNKNOWN reading is appended too: a day GitHub could not be read is a gap.
 
 const { spawnSync } = require('child_process');
 
@@ -142,6 +148,17 @@ if (require.main === module) {
     const repo = i >= 0 ? args[i + 1] : repoFromRemote();
     const live = readLive(repo);
     const fields = live.state ? classify(live.state) : UNKNOWN;
+    if (args.includes('--observe')) {
+        let base = null;
+        try { base = require('../plugins/autodev-core/scripts/claude-paths.js').configDir(); } catch { /* reported below */ }
+        if (!base) { console.error('release-protection: no config dir resolved, so the observation was not written'); process.exitCode = 2; } else {
+            const fs = require('fs');
+            const dir = require('path').join(base, 'autodev', 'windows');
+            fs.mkdirSync(dir, { recursive: true });
+            fs.appendFileSync(require('path').join(dir, 'release-protection.jsonl'),
+                `${JSON.stringify({ at: new Date().toISOString(), repo, fields, error: live.error || null })}\n`);
+        }
+    }
     if (args.includes('--json')) console.log(JSON.stringify({ repo, fields, error: live.error || null }));
     else {
         if (live.error) console.error(`release-protection: ${live.error}`);
