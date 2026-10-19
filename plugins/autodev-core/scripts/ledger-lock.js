@@ -84,6 +84,42 @@ function parseOwner(text) {
     } catch { return null; }
 }
 
+// THE EXERCISE MARK. The scorecard's locking-window asks that every inventoried writer
+// take a lock on the installed operating layer. An acquisition by a module running from
+// the plugin cache leaves one empty marker per writer, version and UTC day:
+// <config dir>/autodev/windows/lock-writers/<day>/<dir>~<file>@<version>. It is created
+// with flag wx, so it needs no lock of its own, and a process marks a writer once a day.
+// A writer running from a source checkout leaves nothing, so suites never write a profile.
+const CACHE_SEGMENT = /[\\/]plugins[\\/]cache[\\/]/;
+const FRAME_FILE = /((?:[A-Za-z]:)?[^\s():]+\.[cm]?js):\d+:\d+\)?\s*$/;
+const marked = new Set();
+
+/** The first stack frame outside this file: the module that asked for the lock. */
+function callerFile() {
+    for (const line of String(new Error().stack || '').split('\n').slice(1)) {
+        const m = FRAME_FILE.exec(line);
+        if (!m) continue;
+        const file = m[1].replace(/^file:\/\/\/?/, '');
+        if (path.resolve(file) !== __filename) return file;
+    }
+    return null;
+}
+
+function markExercise() {
+    const file = callerFile();
+    if (!file || !CACHE_SEGMENT.test(file)) return;
+    const day = new Date(now()).toISOString().slice(0, 10);
+    const writer = `${path.basename(path.dirname(file))}~${path.basename(file)}`;
+    const memo = `${day}|${writer}`;
+    if (marked.has(memo)) return;
+    marked.add(memo);
+    let version = 'unknown';
+    try { version = JSON.parse(fs.readFileSync(path.join(path.dirname(file), '..', '.claude-plugin', 'plugin.json'), 'utf8')).version || version; } catch { /* named unknown */ }
+    const dir = path.join(require('./claude-paths.js').configDir(process.env), 'autodev', 'windows', 'lock-writers', day);
+    fs.mkdirSync(dir, { recursive: true });
+    try { fs.closeSync(fs.openSync(path.join(dir, `${writer}@${version}`), 'wx')); } catch (e) { if (e.code !== 'EEXIST') throw e; }
+}
+
 let gateIdentity;
 function identityLib() {
     if (gateIdentity === undefined) {
@@ -300,6 +336,7 @@ function acquireLock(lock, { waitMs = 10000, meta = {} } = {}) {
         }
         fs.closeSync(fd);
         if (!mine) continue;
+        try { markExercise(); } catch { /* the mark is evidence, never a reason to fail a write */ }
         return {
             acquired: true, token, identity, reclaimed: state.reclaimed || null,
             release: () => releaseLock(lock, { token, identity }),
