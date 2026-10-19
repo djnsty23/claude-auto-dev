@@ -243,6 +243,31 @@ try {
     gateRun(other, GAP, 77, { exit: 0, evidence: evidence(), head: REPO.heads[DAYS[0]] });
     const orr = probe('gate-window', other, REPO.repo);
     check('gate-window: a gate on a tree origin/main did not take that day leaves the merge day a gap', orr.status === 1 && new RegExp(`^gap ${GAP}$`, 'm').test(orr.out), orr.out);
+    // A1: a gate-fast run record. Clean and complete covers the merge day; dirty never does;
+    // a failed touched suite with no tail is incomplete evidence.
+    const fastRun = (h, day, n, over = {}) => write(h, `autodev/locks/fast-gate.runs/${day.replace(/-/g, '')}T1200${n}-1.json`, JSON.stringify({
+        kind: 'gate-fast', runId: `${day}-${n}`, head: REPO.heads[day], dirty: false, startUtc: `${day}T12:00:00.000Z`, endUtc: `${day}T12:05:00.000Z`, exit: 0,
+        evidence: [{ index: 1, of: 1, step: 'check:agents-md', status: 'pass', exit: 0, signal: null, ms: 900, tail: { text: '' } }],
+        deferred: ['test'],
+        touched: { base: 'b'.repeat(40), files: 1, suites: 1, selected: [{ suite: 'tooling/test-x.js', because: ['x.js'] }],
+            evidence: [{ index: 1, of: 1, step: 'tooling/test-x.js', status: 'pass', exit: 0, signal: null, ms: 900, tail: { text: '' } }] },
+        ...over }));
+    const fh = home();
+    FIX['gate-window'](fh, { gap: GAP });
+    fastRun(fh, GAP, 1);
+    const fr = probe('gate-window', fh, REPO.repo);
+    check('gate-window: a clean gate-fast record on the landed tree covers the merge day', fr.status === 0 && expectOf('gate-window').test(fr.out) && !/^gap /m.test(fr.out), fr.out);
+    const dh = home();
+    FIX['gate-window'](dh, { gap: GAP });
+    fastRun(dh, GAP, 1, { dirty: true });
+    const dr = probe('gate-window', dh, REPO.repo);
+    check('gate-window: a dirty gate-fast record never covers the merge day', dr.status === 1 && new RegExp(`^gap ${GAP}$`, 'm').test(dr.out), dr.out);
+    const th = home();
+    FIX['gate-window'](th, {});
+    fastRun(th, BAD, 2, { exit: 1, touched: { base: 'b'.repeat(40), files: 1, suites: 1, selected: [{ suite: 'tooling/test-x.js', because: ['x.js'] }],
+        evidence: [{ index: 1, of: 1, step: 'tooling/test-x.js', status: 'fail', exit: 1, signal: null, ms: 900, tail: null }] } });
+    const ftr = probe('gate-window', th, REPO.repo);
+    check('gate-window: a failed touched suite with no tail is a violation', ftr.status === 1 && new RegExp(`^violation ${BAD}T12:00:00.000Z fast ${BAD}-2: tooling/test-x\\.js failed with no output tail$`, 'm').test(ftr.out), ftr.out);
     // A11 and A14 totals.
     const na = home();
     FIX['visibility-window'](na, { noAck: true });

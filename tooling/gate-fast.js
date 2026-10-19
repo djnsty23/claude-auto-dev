@@ -51,16 +51,32 @@
  *   node tooling/gate-fast.js --selftest
  *   node tooling/gate-fast.js --root <dir>   # drive another tree of the same shape
  *
- * Exit: 0 every fast step passed (a PARTIAL pass - read the banner), 1 a fast
- * step failed, 2 indeterminate or the population could not be derived.
+ * TOUCHED SUITES. `npm test` stays deferred, but in a git checkout every
+ * tooling/test-*.js suite whose static reach holds a file changed since the
+ * merge base with --base (default origin/main) runs too (touched-suites.js
+ * says how reach is built). `[measured 2026-10-19]` #425 edited gate-lock.js,
+ * the file a critical mutant in test-gate-evidence.js anchors on, and merged
+ * on this tier with that suite red. A diff that cannot be read against the
+ * base is INDETERMINATE, never an empty selection.
+ *
+ * THE RUN RECORD. In a git checkout each run writes
+ * `<config dir>/autodev/locks/fast-gate.runs/<runId>.json`: the head it read
+ * before the first step, whether the tree was dirty, and every step and
+ * suite with its status, exit and output tail. The scorecard's gate-window
+ * reads it to tie a merge day to the tree that landed.
+ *
+ * Exit: 0 every fast step and touched suite passed (a PARTIAL pass - read the
+ * banner), 1 one failed, 2 indeterminate or the population could not be derived.
  */
 'use strict';
 
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
-const { spawnSync } = require('child_process');
+const { spawn, spawnSync } = require('child_process');
 const { readGateChain } = require('./gate-lock.js');
+const { createTail } = require('./gate-steps.js');
+const touchedSuites = require('./touched-suites.js');
 
 const argv = process.argv.slice(2);
 const has = (f) => argv.includes(f);
@@ -146,6 +162,89 @@ function runStep(step, root) {
 }
 
 // ---------------------------------------------------------------------------
+// Touched suites, and the run record.
+// ---------------------------------------------------------------------------
+
+// test-all.js's per-suite budget, and its env rule: a suite never inherits the operator's
+// profile (CLAUDE_CONFIG_DIR), or a suite that fakes HOME still reaches the real config dir.
+const SUITE_TIMEOUT_MS = 600000;
+const LEAKY_ENV = ['CLAUDE_CONFIG_DIR'];
+const suiteEnv = () => { const env = { ...process.env }; for (const k of LEAKY_ENV) delete env[k]; return env; };
+const SUITE_CONCURRENCY = Math.max(1, Math.min(4, Math.floor(os.cpus().length / 2)));
+
+function git(root, args) {
+    const r = spawnSync('git', args, { cwd: root, encoding: 'utf8', windowsHide: true });
+    return !r.error && r.status === 0 ? r.stdout.trim() : null;
+}
+
+/** True when `root` is the top of a git work tree, so its diff and head mean something. */
+function isRepoRoot(root) {
+    const top = git(root, ['rev-parse', '--show-toplevel']);
+    if (!top) return false;
+    const norm = (p) => { try { p = fs.realpathSync.native(p); } catch { /* keep */ } return process.platform === 'win32' ? p.toLowerCase() : p; };
+    return norm(path.resolve(top)) === norm(path.resolve(root));
+}
+
+/** One suite as a child process, with its output tail. A timeout is INDETERMINATE, not a verdict. */
+function runSuite(suite, root) {
+    return new Promise((resolve) => {
+        const started = Date.now();
+        const tail = createTail();
+        let child;
+        try {
+            child = spawn(process.execPath, [suite], { cwd: root, env: suiteEnv(), stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true });
+        } catch (e) {
+            resolve({ name: suite, status: 'INDETERMINATE', code: null, ms: 0, tail: { text: `could not spawn: ${e.message}`, bytes: 0, truncated: false } });
+            return;
+        }
+        let timedOut = false;
+        const timer = setTimeout(() => { timedOut = true; try { child.kill(); } catch { /* gone */ } }, SUITE_TIMEOUT_MS);
+        child.stdout.on('data', (b) => tail.push(b));
+        child.stderr.on('data', (b) => tail.push(b));
+        child.on('error', (e) => tail.push(`\nspawn error: ${e.message}\n`));
+        child.on('close', (code, signal) => {
+            clearTimeout(timer);
+            const status = timedOut ? 'INDETERMINATE' : (signal ? 'FAIL' : classify(code));
+            if (timedOut) tail.push(`\ntimed out after ${SUITE_TIMEOUT_MS / 60000} min\n`);
+            resolve({ name: suite, status, code, signal: signal || null, ms: Date.now() - started, tail: tail.read() });
+        });
+    });
+}
+
+async function pool(items, n, fn) {
+    const out = new Array(items.length);
+    let next = 0;
+    const lane = async () => { while (next < items.length) { const i = next++; out[i] = await fn(items[i]); } };
+    await Promise.all(Array.from({ length: Math.min(n, items.length) }, lane));
+    return out;
+}
+
+function runIdNow(d = new Date()) {
+    return `${d.toISOString().replace(/[-:]/g, '').replace(/\.\d+Z$/, '')}-${process.pid}`;
+}
+
+/** Writes the run record. Returns its path, or throws. Records older than 21 days are pruned. */
+function writeRecord(rec, env = process.env) {
+    const { configDir } = require('../plugins/autodev-core/scripts/claude-paths.js');
+    const dir = path.join(configDir(env), 'autodev', 'locks', 'fast-gate.runs');
+    fs.mkdirSync(dir, { recursive: true });
+    const file = path.join(dir, `${rec.runId}.json`);
+    const tmp = `${file}.${process.pid}.tmp`;
+    fs.writeFileSync(tmp, JSON.stringify(rec, null, 2));
+    fs.renameSync(tmp, file);
+    for (const n of fs.readdirSync(dir)) {
+        const f = path.join(dir, n);
+        try { if (Date.now() - fs.statSync(f).mtimeMs > 21 * 86400000) fs.unlinkSync(f); } catch { /* in use or gone */ }
+    }
+    return file;
+}
+
+function evidenceRow(r, index, of) {
+    return { index, of, step: r.name, status: r.status.toLowerCase(), exit: Number.isInteger(r.code) ? r.code : null,
+             signal: r.signal || null, ms: r.ms, tail: r.tail || { text: String(r.out || '').slice(-4096), bytes: String(r.out || '').length, truncated: String(r.out || '').length > 4096 } };
+}
+
+// ---------------------------------------------------------------------------
 // Reporting.
 //
 // The banner is the point of this script. `[decided by the operator 2026-09-08]`
@@ -158,10 +257,12 @@ function runStep(step, root) {
 // from an empty scan.
 // ---------------------------------------------------------------------------
 
-function render(ran, deferred, total) {
+function render(ran, deferred, total, touched = null) {
     const lines = [];
-    const failed = ran.filter((r) => r.status === 'FAIL');
-    const indet = ran.filter((r) => r.status === 'INDETERMINATE');
+    const suites = touched && touched.ran ? touched.ran : [];
+    const all = [...ran, ...suites];
+    const failed = all.filter((r) => r.status === 'FAIL');
+    const indet = all.filter((r) => r.status === 'INDETERMINATE');
 
     for (const r of ran) {
         lines.push(`  ${r.status.padEnd(13)} ${r.name.padEnd(20)} exit=${r.code}  ${(r.ms / 1000).toFixed(1)}s`);
@@ -169,12 +270,20 @@ function render(ran, deferred, total) {
     for (const d of deferred) {
         lines.push(`  ${'DEFERRED'.padEnd(13)} ${(d.name || d.raw).padEnd(20)} not run here — \`npm run gate\` runs it`);
     }
+    for (const s of suites) {
+        lines.push(`  ${s.status.padEnd(13)} ${s.name}  exit=${s.code}  ${(s.ms / 1000).toFixed(1)}s  (touched)`);
+    }
 
     lines.push('');
     lines.push(`  ${ran.length} of ${total} gate steps ran. ${deferred.length} DEFERRED.`);
+    if (touched && touched.error) lines.push(`  touched suites: INDETERMINATE, ${touched.error}`);
+    else if (touched) lines.push(`  touched suites: ${suites.length} of ${touched.suites} selected by ${touched.files} changed file(s) since ${String(touched.base).slice(0, 12)}, all run.`);
+    else lines.push('  touched suites: not a git checkout, none selected.');
     lines.push('');
     if (failed.length) {
-        lines.push(`  FAIL — ${failed.length} fast step(s) failed: ${failed.map((f) => f.name).join(', ')}`);
+        lines.push(`  FAIL — ${failed.length} step(s) or touched suite(s) failed: ${failed.map((f) => f.name).join(', ')}`);
+    } else if (touched && touched.error) {
+        lines.push('  INDETERMINATE — the diff could not be read, so no touched suite was selected.');
     } else if (indet.length) {
         lines.push(`  INDETERMINATE — ${indet.map((f) => f.name).join(', ')} exited 2.`);
         lines.push('  Exit 2 is a refusal, not a verdict. Re-run on a quiet tree.');
@@ -285,7 +394,7 @@ function selftest() {
 // suite failing on every mac in this project while CI stayed green.
 // ---------------------------------------------------------------------------
 
-function main() {
+async function main() {
     // --help first: check:entrypoints probes every script in tooling/ with
     // --help inside a scratch copy of the tree. A script that ignored the flag
     // and did its default action instead would spawn the whole fast tier there.
@@ -322,30 +431,66 @@ function main() {
         return;
     }
 
+    // Read before the first step, so a tree moved mid-run cannot be credited.
+    const inRepo = isRepoRoot(root);
+    const startUtc = new Date().toISOString();
+    const runId = runIdNow();
+    const head = inRepo ? git(root, ['rev-parse', 'HEAD']) : null;
+    const dirty = inRepo ? git(root, ['status', '--porcelain']) !== '' : null;
+
     const ran = fast.map((s) => runStep(s, root));
+
+    let touched = null;
+    if (inRepo) {
+        const p = touchedSuites.plan(root, val('--base', 'origin/main'));
+        if (p.error) touched = { error: p.error };
+        else {
+            const list = p.selected.map((s) => s.suite);
+            const out = await pool(list, SUITE_CONCURRENCY, (s) => runSuite(s, root));
+            touched = { base: p.base, files: p.touched.length, suites: p.suites, selected: p.selected, ran: out };
+        }
+    }
 
     // A non-clean step's own output is the actionable part. Print it under the
     // step's name so a reader can tell which of several steps produced it.
-    for (const r of ran) {
+    for (const r of [...ran, ...(touched && touched.ran ? touched.ran : [])]) {
         if (r.status === 'PASS') continue;
         console.log(`\n--- ${r.name} (exit ${r.code}) ---`);
-        console.log((r.out || '').trimEnd());
+        console.log((r.out !== undefined ? r.out : r.tail.text).trimEnd());
     }
+
+    const suitesRan = touched && touched.ran ? touched.ran : [];
+    const every = [...ran, ...suitesRan];
+    if (every.some((r) => r.status === 'FAIL')) process.exitCode = 1;
+    else if ((touched && touched.error) || every.some((r) => r.status === 'INDETERMINATE')) process.exitCode = 2;
+    else process.exitCode = 0;
 
     if (has('--json')) {
         console.log(JSON.stringify({
             total: steps.length, ran: ran.length, deferred: deferred.length,
             steps: ran.map(({ name, status, code, ms }) => ({ name, status, code, ms })),
             deferredSteps: deferred.map((d) => d.name || d.raw),
+            touched: touched && (touched.error ? { error: touched.error }
+                : { base: touched.base, files: touched.files, suites: suitesRan.map(({ name, status, code, ms }) => ({ name, status, code, ms })) }),
         }, null, 2));
     } else {
         console.log('\ngate:fast — the cheap steps of `npm run gate`, run independently\n');
-        console.log(render(ran, deferred, steps.length));
+        console.log(render(ran, deferred, steps.length, touched));
     }
 
-    if (ran.some((r) => r.status === 'FAIL')) process.exitCode = 1;
-    else if (ran.some((r) => r.status === 'INDETERMINATE')) process.exitCode = 2;
-    else process.exitCode = 0;
+    if (inRepo) {
+        const rec = {
+            kind: 'gate-fast', runId, head, dirty, startUtc, endUtc: new Date().toISOString(), exit: process.exitCode,
+            evidence: ran.map((r, i) => evidenceRow(r, i + 1, ran.length)),
+            deferred: deferred.map((d) => d.name || d.raw),
+            touched: touched.error ? { error: touched.error } : {
+                base: touched.base, files: touched.files, suites: touched.suites,
+                selected: touched.selected.map((s) => ({ suite: s.suite, because: s.because.slice(0, 5) })),
+                evidence: suitesRan.map((r, i) => evidenceRow(r, i + 1, suitesRan.length)),
+            },
+        };
+        try { console.log(`  run record: ${path.basename(writeRecord(rec))}`); } catch (e) { console.error(`gate-fast: run record NOT written: ${e.message}`); }
+    }
 }
 
-main();
+main().catch((e) => { console.error(`INDETERMINATE — gate-fast crashed: ${e && e.stack || e}`); process.exitCode = 2; });
