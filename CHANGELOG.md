@@ -41,6 +41,9 @@
 - `security-gate`: a bot-challenged page or route is indeterminate (#418).
 - `steer-log --help` prints usage instead of running the full report (#410).
 - Test children Node aborts with no output are re-run once (#414, #416).
+- `test-capacity-observe` goes red when `capacity.js` is broken. Its holder's
+  exit was awaited on a listener added after the child had died, so the event
+  loop drained and the suite exited 0 over nine failed checks.
 
 ## [8.193.0]
 

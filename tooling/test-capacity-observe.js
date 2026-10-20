@@ -45,13 +45,19 @@ process.stdin.on('data', () => {}); process.stdin.on('end', () => { if (r.admitt
     const file = path.join(root, 'holder.js');
     fs.writeFileSync(file, body);
     const child = spawn(process.execPath, [file], { env, stdio: ['pipe', 'pipe', 'pipe'] });
+    // Listen for exit at spawn: a holder that dies early (a broken admit) has already
+    // exited by the time the suite releases it, and a listener added then never fires.
+    const exited = new Promise((res) => child.on('exit', res));
     return new Promise((resolve) => {
         let out = '';
-        child.stdout.on('data', (d) => { out += d; if (/\n/.test(out)) resolve({ child, out }); });
-        child.on('exit', () => resolve({ child, out }));
+        child.stdout.on('data', (d) => { out += d; if (/\n/.test(out)) resolve({ child, out, exited }); });
+        exited.then(() => resolve({ child, out, exited }));
     });
 }
 
+// Red until the last line says otherwise, so a pending await that drains the event loop
+// exits 1 instead of 0.
+process.exitCode = 1;
 (async () => {
     let held = null;
     try {
@@ -86,7 +92,7 @@ process.stdin.on('data', () => {}); process.stdin.on('end', () => { if (r.admitt
         check('every run appended exactly one row', rows().length === 6, rows().length);
 
         held.child.stdin.end();
-        await new Promise((res) => held.child.on('exit', res));
+        await held.exited;
         held = null;
         setProbe({ diskFreeBytes: 5 * GIB, commitFreeBytes: 40 * GIB });
         r = observe();
