@@ -1,5 +1,47 @@
 # Changelog
 
+## [8.194.0]
+
+### Scorecard windows
+
+- `tooling/window-probe.js` grades each operational window over its 14 real days,
+  so a window can pass once its writer has run that long (#425).
+- `capacity.js observe` records admission breaches beside the capacity ledger,
+  and the capacity window grades the volume trend (#430). Lifecycle snapshot days
+  are read from `takenUtc`, the field the writer stamps (#429).
+- `restore-drill.js` drills backup, loss and restore of the clock state on a
+  scratch copy, and the recovery window grades its rows (#431).
+- `host-uptime.js` reads the Windows event log into daily up time, so the
+  acceptance window counts ticks only against hours the host was up (#432).
+- `ledger-lock` marks each writer that takes a lock from the installed layer
+  (#428), and the instruction-envelope hook logs each session start with its
+  session id (#427).
+
+### Brain
+
+- The clock runs read-only observers listed in
+  `autodev/brain-clock/observers.json`, at most one per pass and each at most
+  once per `everyMin` (#427).
+- A queued brief names its acceptance test and merges its own PR (#433).
+- The Brain session is kept out of every auto-archive (#421).
+
+### Gates and release
+
+- autodev PRs merge on `gate:fast` through merge-lock, and the full gate binds
+  the release (#419). `gate:fast` runs the suites a diff touches and records
+  the head it gated (#427).
+- gate-lock names the full gated head, so a plain gate log is a receipt.
+- check-suites keys its pair cache on what a suite can read (#422).
+
+### Fixes
+
+- `frontier`: every run records its plan arm, and a re-run no longer replaces a
+  preregistered cell's result (#423, #424).
+- `typecheck`: the Stop hook checks the worktree the session edits (#420).
+- `security-gate`: a bot-challenged page or route is indeterminate (#418).
+- `steer-log --help` prints usage instead of running the full report (#410).
+- Test children Node aborts with no output are re-run once (#414, #416).
+
 ## [8.193.0]
 
 ### Release
