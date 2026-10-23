@@ -113,6 +113,30 @@ Use the product's own worktree, never its live main tree.
    and keeps the key apart. Spawn an `Agent` with only `pairs.json` and the images, then
    `unslop-sweep.js pair-score <dir> --verdicts <json>` reports the after side's win rate.
 
+## Before publish: generic template tells
+
+The rules above measure geometry, so a perfectly aligned page can still be the
+template every agent ships. Before any publish of a site build, run the pinned
+`impeccable detect` through the probe, against the local base URL or the built
+source directory:
+
+```bash
+node "${CLAUDE_PLUGIN_ROOT}/scripts/impeccable-probe.js" http://localhost:PORT
+```
+
+Exit 0 is clean, 1 is findings (purple gradients, overused fonts, nested cards,
+cream palettes, buzzword copy and the rest of its rules) and 2 is indeterminate.
+**Exit 2 is never a pass**: npx absent, impeccable failed, output unparseable, or
+a directory that held no scannable file. Report it as "not run" and fix the
+cause. Findings go into the report beside the mechanical ones and become stories
+the same way. A tell the owner keeps on purpose is recorded as a brand rule in
+`design-review`, never silenced. Use `design-review` around this sweep for the
+full ledger: its `generic-tells` row takes the probe's `--out` artifact, and its
+untested rows stay unknown. A zero count here and a positive vision opinion
+cannot fill those gaps.
+
+The probe runs only when this step is run. No hook calls it and nothing runs per turn.
+
 ## The scorecard
 
 Every capture writes a row to `scorecard.json`: rule hits by rule id, the axe violation count
@@ -124,7 +148,8 @@ null and prints n/a, never 0.
 
 Routes swept of planned, unsampled patterns, widths, signed-in status, findings by rule
 **with the number of captures each rule judged**, the top 10 ranked findings with their
-measured values and thresholds, stories added, the compare table and verdict, the blind-judge
+measured values and thresholds, the impeccable probe's exit and findings by rule (or "not
+run" with its reason), stories added, the compare table and verdict, the blind-judge
 win rate, and the advisory vision list kept apart.
 
 ## Where it is wired
