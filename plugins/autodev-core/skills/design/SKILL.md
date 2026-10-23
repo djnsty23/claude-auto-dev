@@ -45,6 +45,38 @@ feature work preserves established tokens, structure and interaction patterns:
 
 Choose a clear direction and execute with precision. Bold maximalism and refined minimalism both work - the key is **intentionality, not intensity**.
 
+## Direction brief (required before any code)
+
+A new site, landing page or visual redesign starts with a written direction
+brief. No markup, component or token is written until it exists. Routine
+feature work inside an established product skips it and keeps that product's
+system. The brief names:
+
+1. **Three references from `design-refs-kb`**, queried by the client's industry
+   and by the tone chosen above. **At least two come from outside the client's
+   industry**, so the site borrows a craft idea rather than a competitor's look.
+   For each, name the one thing taken from it. When `design-refs-kb` is not
+   installed, say so in the brief and pick three award-level sites by hand under
+   the same rule. Never fall back to a list of SaaS homepages: copying them is
+   how the template look spreads.
+2. **One signature moment**: the single interaction, layout or visual a visitor
+   will remember, and the section it lives in.
+3. **A type pairing off the overused list.** Inter, Geist, Roboto as a display
+   face, Poppins and Montserrat are refused for display and body alike. Name the
+   display and the text face, with their source and weights.
+4. **A committed palette**: the ground, the ink, one dominant colour and one
+   accent, as hex values with their roles. Not a purple-to-blue gradient on
+   white, and not the safe cream background.
+
+Then, for a site build:
+
+- **Load the `motion-design` skill** and plan the signature moment and the page
+  motion with it, before building.
+- **Ship the options artifact first**: two or three real variants of the
+  direction, with real content, so the owner picks before the build starts.
+- **Before publish**, run the `unslop` sweep, which includes the pinned
+  `impeccable detect` probe for template tells.
+
 ## Implementation
 
 Create working code (React/Vue/HTML) that is:
@@ -128,7 +160,7 @@ accessible, consistent components unless observed evidence supports a change:
 
 | Signal | What It Looks Like | Fix |
 |--------|-------------------|-----|
-| **Safe font** | Inter, Roboto, system-ui | Pick a distinctive font from Google Fonts |
+| **Safe font** | Inter, Geist, Roboto as display, Poppins, Montserrat | Pick the pairing in the direction brief |
 | **Purple gradient** | Purple/blue gradient on white | Choose a committed palette, not a safe default |
 | **Card grid** | 3 identical cards in a row | Break the pattern — vary sizes, overlap, offset |
 | **Centered everything** | All content centered, symmetric | Use asymmetry, left-align text, vary alignment |
@@ -182,21 +214,6 @@ named thresholds, so the screenshots you inspect come with numbers.
 Check for trimmed text, unintended overlap, scroll behavior, consistent spacing,
 focus/keyboard operation, supported themes and reduced motion. Visual appeal is
 not evidence that a control performs the intended action.
-
-## Reference Designs (Study Before Designing)
-
-These represent the quality bar — match their craft, not their style:
-
-| Site | Why It's Good |
-|------|---------------|
-| linear.app | Clean dark UI, subtle motion, sharp typography, keyboard-first |
-| vercel.com | Minimal, high contrast, excellent CRO and hierarchy |
-| stripe.com | Editorial feel, generous spacing, clear information architecture |
-| raycast.com | Dark UI done right, motion with purpose, developer aesthetic |
-| notion.so | Warm minimalism, playful illustrations, accessible color system |
-| cal.com | Open source aesthetic, clean forms, purposeful use of color |
-
-Study 1-2 before starting any design work. Note what makes them memorable, then apply that thinking to your own direction.
 
 ## Pro Tips
 
