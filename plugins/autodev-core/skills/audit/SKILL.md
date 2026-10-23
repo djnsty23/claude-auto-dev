@@ -167,6 +167,10 @@ unverified candidates into completed work.
 
 ## Focused Audit
 
+For a recurring rendered design and usability improvement loop, use
+`design-review` with `unslop` and `design`. Keep its subjective findings advisory,
+and route reproduced implementation defects back through this audit process.
+
 User can audit specific features:
 - `audit auth` → Only scan auth-related files
 - `audit dashboard` → Only scan dashboard components
