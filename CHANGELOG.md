@@ -1,5 +1,28 @@
 # Changelog
 
+## [8.195.0]
+
+### Context depth
+
+- `context-depth-nudge`: with an auto-compact window configured, the Stop reason
+  always says compaction follows and tells the session to keep working, never to
+  ask for a fresh session or spawn a continuation chip. At 300k on a 300k window
+  it used to say compaction was not coming (#439).
+
+### Design
+
+- A design review keeps an evidence ledger and runs a pinned impeccable probe as a
+  slop gate. A new site or redesign writes a direction brief (three references,
+  two outside the client's industry, one signature moment, a committed palette and
+  type pairing) before any code (#436).
+
+### Fixes
+
+- `window-specs`: cost-window tasks are dated by their last attempt, and only the
+  newest outcome row per task counts (#438).
+- `window-probe`: a failed git read names git's own cause (#437).
+- `test-runtime-restore`: lock-exercise marks stay out of the real profile (#437).
+
 ## [8.194.0]
 
 ### Scorecard windows
