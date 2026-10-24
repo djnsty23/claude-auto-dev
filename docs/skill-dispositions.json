@@ -172,6 +172,24 @@
     },
     {
       "plugin": "autodev-core",
+      "name": "cost-reconcile",
+      "invocable": true,
+      "status": "proposed",
+      "evidence": {
+        "fires30d": {
+          "model": 0,
+          "typed": 0,
+          "preload": 0
+        },
+        "lastFired": null,
+        "listingBytes": null
+      },
+      "disposition": "retain",
+      "drill": false,
+      "reason": "New on 2026-10-25 from a cluster of cost-estimate corrections (charged unit, billed versus gross versus pending, unknown read as zero). No other skill owns spend or quota figures."
+    },
+    {
+      "plugin": "autodev-core",
       "name": "design",
       "invocable": true,
       "status": "proposed",
@@ -187,6 +205,24 @@
       "disposition": "retain",
       "drill": false,
       "reason": "Fired 29 time(s) in the window, last on 2026-09-23. No overlap found that would justify a merge."
+    },
+    {
+      "plugin": "autodev-core",
+      "name": "design-review",
+      "invocable": true,
+      "status": "proposed",
+      "evidence": {
+        "fires30d": {
+          "model": 0,
+          "typed": 0,
+          "preload": 0
+        },
+        "lastFired": null,
+        "listingBytes": null
+      },
+      "disposition": "retain",
+      "drill": false,
+      "reason": "New on 2026-10-23, so the 30-day census predates it. It owns rendered review with a ledger; unslop owns the measured layout sweep and design owns creation."
     },
     {
       "plugin": "autodev-core",

@@ -1,12 +1,37 @@
 ---
 name: rule-windows
-description: "Windows-specific development rules: host-aware command wrappers, supervised servers, environment inheritance, native exit status and path conventions. Load only when working on Windows."
-when_to_use: "Background rules that apply only on Windows hosts. Not user-invocable."
+description: "Windows host traps for commands and scripts: Git Bash versus PowerShell syntax, heredoc and inline-script mangling, Python cp1252 file I/O, native exit status, MSYS path rewriting, killing a process tree, supervised servers. Load on a win32 host before writing a shell command, script or .ps1."
+when_to_use: "On a win32 host: before writing a .ps1, a PowerShell or Git Bash block for someone to run, a heredoc or inline node/python script, Python file reads or writes, or a command that kills a process or frees a port; and when a command on Windows fails with a quoting, encoding, path or exit-status surprise. Not user-invocable."
 user-invocable: false
 allowed-tools: Read, Grep, Glob
 paths:
   - "**/*.ps1"
 ---
+
+## Before the command
+
+Each line is a trap that has already cost a rerun on a Windows host.
+
+- **Inline scripts get mangled.** A heredoc or `node -e`/`python -c` body passed
+  through Git Bash can lose backslashes and quotes with exit 0. Write the script
+  to a file and run it by path.
+- **Python file I/O defaults to cp1252.** Pass `encoding='utf-8', newline='\n'`
+  on every `open()`. Rewrite in place via a temp file plus `os.replace`, then
+  check the byte count.
+- **`python` in Git Bash can be the Store stub**, which hangs. Use `py -3`.
+- **A `.ps1` stops on native failures only when told to.** Set
+  `$ErrorActionPreference = 'Stop'` and
+  `$PSNativeCommandUseErrorActionPreference = $true` (pwsh 7.3+), or check
+  `$LASTEXITCODE` after each native command.
+- **MSYS rewrites `/api/...` style arguments into Windows paths.** Prefix the
+  command with `MSYS_NO_PATHCONV=1`.
+- **Stopping a background task can stop only its shell wrapper.** Kill the tree
+  by PID (`taskkill //F //T //PID <pid>` in Git Bash), then assert the PID is
+  gone and the port is free.
+- **`:` is not a safe field delimiter** because drive letters contain it. Use
+  `|` or a tab, and print one parsed value as a control.
+- **Label each block for the shell that runs it.** A block for a person to paste
+  is one complete `powershell` fence; never mix shells in one fence.
 
 ## MCP Servers
 - For `.cmd` launchers such as an `npx` shim when the MCP host cannot execute

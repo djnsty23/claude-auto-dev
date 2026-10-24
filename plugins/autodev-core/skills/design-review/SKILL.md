@@ -1,7 +1,7 @@
 ---
 name: design-review
-description: Review an existing interface using rendered evidence, design judgment and task-usability checks. Use when the user asks to diagnose visual defects or verify UI changes through a repeatable design review loop.
-when_to_use: "The user requests an iterative review of an existing interface or verification of visual and interaction defects against a named task and approved product references."
+description: "Review the screens a user works through from rendered evidence: real content, every modal and state, narrow and wide viewports, and whether the task gets done. Use when a page or flow looks off, when asked to rate or bug-hunt screens, and before saying a UI change is done."
+when_to_use: "Invoked when the user says \"design review\", \"review the UI\", \"rate the pages\", \"bug hunt\", \"tested on mobile\", \"check it on mobile\", \"the layout could be better\" or \"looks off\", when a UI fix has been claimed and the screen has not been looked at since the last edit, and before closing any visual or interaction defect."
 allowed-tools: Read, Write, Edit, Grep, Glob, Bash
 user-invocable: true
 argument-hint: "[workflow or existing review.json]"
@@ -33,8 +33,9 @@ nothing graded it before publish.
 
 Read `${CLAUDE_SKILL_DIR}/references/record-format.md` to create a definition.
 Declare cases BEFORE capture: route, viewport, role, realistic data and state.
-Include long content, missing values, loading, failure/retry, narrow screens and
-the useful outcome. Define acceptance checks from requirements, not observations.
+Include long content, missing values, loading, failure/retry, narrow screens,
+wide screens (1440 and 1920, where sibling sections must share edges), every
+modal with its primary action tapped at phone width, and the useful outcome. Define acceptance checks from requirements, not observations.
 Generate the ledger using the shipped CLI:
 
 ```bash
