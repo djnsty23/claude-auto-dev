@@ -1,7 +1,7 @@
 ---
 name: cost-reconcile
 description: "Reconcile what something costs from the bill, the usage and the quota together, before any spend number is reported or a paid run starts: charged unit, billed versus gross versus pending, invoice cadence, built-in limits, and unknown kept apart from zero."
-when_to_use: "Invoked when the user says \"cost\", \"how much will it cost\", \"why is X burning\", \"billing\", \"invoice\", \"quota\", \"usage limit\", \"spend\" or \"minutes\", when a number about money, credits, minutes or tokens is about to go in a report, and before starting any paid batch, rerun or upgrade."
+when_to_use: "Invoked when the user says \"cost\", \"how much will it cost\", \"why is X burning\", \"the bill\", \"invoice\", \"quota\", \"usage limit\", \"spend\" or \"minutes\", when a number about money, credits, minutes or tokens is about to go in a report, and before starting any paid batch, rerun or upgrade."
 allowed-tools: Bash, Read, Grep, Glob, WebFetch
 model: opus
 user-invocable: true
