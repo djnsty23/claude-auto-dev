@@ -134,12 +134,16 @@ function defaultHome(env = process.env) {
     try { return require('../plugins/autodev-core/scripts/claude-paths.js').configDir(env); } catch { return null; }
 }
 
-/** git in `repo`: stdout trimmed, or null when git failed. */
+/** git in `repo`: stdout trimmed, or null when git failed, with the cause in `.lastError`. */
 function gitIn(repo) {
-    return (args) => {
+    const git = (args) => {
         const r = require('child_process').spawnSync('git', args, { cwd: repo, encoding: 'utf8', windowsHide: true, timeout: 30000, maxBuffer: 16 * 1024 * 1024 });
-        return !r.error && r.status === 0 ? r.stdout.trim() : null;
+        if (!r.error && r.status === 0) return r.stdout.trim();
+        const said = String(r.stderr || '').trim().split(/\r?\n/).pop() || 'no stderr';
+        git.lastError = `git ${args[0]} in ${repo}: ${r.error ? (r.error.code || r.error.message) : `exit ${r.status}${r.signal ? ` ${r.signal}` : ''}`}, ${said}`;
+        return null;
     };
+    return git;
 }
 
 function run(id, { home, repo, now, git }) {

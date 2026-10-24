@@ -158,7 +158,7 @@ const gateWindow = {
         // head tree equals a tree that landed that day.
         const since = `${ctx.windowDays[0]}T00:00:00Z`;
         const log = ctx.git(['log', 'origin/main', '--first-parent', `--since=${since}`, '--format=%T %cI']);
-        if (log === null) throw new Error('git log origin/main failed, so merge days are unknown');
+        if (log === null) throw new Error(`git log origin/main failed (${ctx.git.lastError || 'no cause recorded'}), so merge days are unknown`);
         const landed = new Map(); // day -> Set<tree>
         for (const line of log.split(/\r?\n/).filter(Boolean)) {
             const [tree, when] = line.split(' ');

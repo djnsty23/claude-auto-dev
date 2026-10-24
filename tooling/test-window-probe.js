@@ -470,6 +470,15 @@ try {
     const u = spawnSync(process.execPath, [PROBE, 'release-window', '--home', empty, '--now', NOW], { encoding: 'utf8', windowsHide: true });
     const u2 = spawnSync(process.execPath, [PROBE, 'worker-window', '--home', empty, '--now', NOW], { encoding: 'utf8', windowsHide: true });
     check('a missing source exits 2 COULD NOT READ', u.status === 2 && /COULD NOT READ/.test(u.stdout) && u2.status === 2, `${u.status} ${u.stdout} ${u2.status}`);
+    // A git read that fails says why. --repo is a directory outside any work tree, confirmed first.
+    const noRepo = path.join(tmpRoot, 'not-a-repo');
+    fs.mkdirSync(noRepo);
+    const top = spawnSync('git', ['rev-parse', '--show-toplevel'], { cwd: noRepo, encoding: 'utf8', windowsHide: true });
+    const gh = home();
+    FIX['gate-window'](gh, {});
+    const gr = probe('gate-window', gh, noRepo);
+    check('gate-window: a failed git log exits 2 and names git\'s own cause', top.status !== 0 && gr.status === 2
+        && /^COULD NOT READ .*git log origin\/main failed \(git log in .*not-a-repo: exit \d+, .*not a git repository/m.test(gr.out), `${top.status} ${gr.status} ${gr.out}`);
     check('every spec ran its gap plant', counts.gap === 17, counts.gap);
 } finally {
     fs.rmSync(tmpRoot, { recursive: true, force: true });
