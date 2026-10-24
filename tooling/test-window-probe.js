@@ -197,8 +197,11 @@ const FIX = {
         rulesTotal: d === o.bad ? 33000 : 30000, budget: 32000, envelopeTotal: 38000, missing: 0, conflicts: 0 })))),
     'skill-window': (h, o) => write(h, 'autodev/frontier/runs.jsonl', jsonl(DAYS.filter((d) => d !== o.gap).map((d) => ({
         run: `r-${d}`, startedAt: `${d}T09:00:00Z`, finishedAt: `${d}T09:10:00Z`, routedTo: 'audit', pass: d !== o.bad })))),
-    'cost-window': (h, o) => write(h, 'autodev/delivery/outcomes.jsonl', jsonl(DAYS.filter((d) => d !== o.gap).map((d) => ({
-        at: `${d}T09:00:00Z`, taskId: `t-${d}`, accepted: true, costUsd: d === o.bad ? null : 4.5 })))),
+    // The real row shape: sync stamps `at` the next morning, the task's day is its last attempt.
+    'cost-window': (h, o) => write(h, 'autodev/delivery/outcomes.jsonl', jsonl(DAYS.filter((d) => d !== o.gap).flatMap((d) => [
+        { type: 'attempt', at: `${d}T23:30:00Z`, key: `t-${d}@1`, taskId: `t-${d}`, costUsd: null },
+        { type: 'outcome', at: `${d}T23:30:00Z`, taskId: `t-${d}`, lastAttemptAt: `${d}T09:00:00Z`, accepted: true, costUsd: d === o.bad ? null : 4.5 },
+    ]))),
     'acceptance-window': (h, o) => {
         clock(h, o.gap ? [o.gap] : []);
         write(h, 'autodev/brain-judge/judgements.jsonl', jsonl(DAYS.map((d) => ({ at: `${d}T09:00:00Z`, taskId: `t-${d}`, mode: 'live', decision: 'accept', applied: d !== o.bad }))));
@@ -470,6 +473,26 @@ try {
     const u = spawnSync(process.execPath, [PROBE, 'release-window', '--home', empty, '--now', NOW], { encoding: 'utf8', windowsHide: true });
     const u2 = spawnSync(process.execPath, [PROBE, 'worker-window', '--home', empty, '--now', NOW], { encoding: 'utf8', windowsHide: true });
     check('a missing source exits 2 COULD NOT READ', u.status === 2 && /COULD NOT READ/.test(u.stdout) && u2.status === 2, `${u.status} ${u.stdout} ${u2.status}`);
+    // cost-window grades each task once, on its newest outcome row, on the day of its last attempt.
+    const cw = home();
+    FIX['cost-window'](cw, {});
+    fs.appendFileSync(path.join(cw, 'autodev/delivery/outcomes.jsonl'), jsonl([
+        { type: 'outcome', at: `${DAYS[2]}T23:30:00Z`, taskId: 'redo', lastAttemptAt: `${DAYS[2]}T09:00:00Z`, accepted: true, costUsd: null },
+        { type: 'outcome', at: `${DAYS[3]}T23:30:00Z`, taskId: 'redo', lastAttemptAt: `${DAYS[2]}T09:00:00Z`, accepted: true, costUsd: 3 },
+        { type: 'outcome', at: `${DAYS[5]}T23:30:00Z`, taskId: 'old', lastAttemptAt: '2026-10-01T09:00:00Z', accepted: true, costUsd: null },
+    ]));
+    const cwr = probe('cost-window', cw, REPO.repo);
+    check('cost-window: a superseded outcome row and a task last attempted before the window are not violations',
+        !/^violation /m.test(cwr.out) && /records=15$/m.test(cwr.out), cwr.out);
+    const costTot = home();
+    write(costTot, 'autodev/delivery/outcomes.jsonl', jsonl([
+        { type: 'outcome', at: `${DAYS[1]}T23:30:00Z`, taskId: 'old-accept', lastAttemptAt: '2026-10-01T09:00:00Z', accepted: true, costUsd: 9 },
+        ...DAYS.map((d) => ({ type: 'outcome', at: `${d}T23:30:00Z`, taskId: `t-${d}`, lastAttemptAt: `${d}T09:00:00Z`, accepted: false, costUsd: 2 })),
+    ]));
+    const costTotR = probe('cost-window', costTot, REPO.repo);
+    check('cost-window: an accepted task from before the window does not meet the accepted-cost total',
+        /^short 0 accepted tasks carry a cost$/m.test(costTotR.out), costTotR.out);
+
     // A git read that fails says why. --repo is a directory outside any work tree, confirmed first.
     const noRepo = path.join(tmpRoot, 'not-a-repo');
     fs.mkdirSync(noRepo);
