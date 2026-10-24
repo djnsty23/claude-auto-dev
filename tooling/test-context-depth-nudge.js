@@ -280,7 +280,8 @@ function blocked(r) {
 
 // --- an auto-compact window changes the instruction ---------------------------
 {
-    const noChip = (j) => j && !j.reason.includes('spawn_task') && /Do not spawn a continuation chip/.test(j.reason);
+    const noChip = (j) => j && !j.reason.includes('spawn_task') && /do not spawn a continuation chip/i.test(j.reason)
+        && /do not ask for a fresh session/.test(j.reason);
 
     const box = sandbox();
     fs.writeFileSync(path.join(box.config, 'settings.json'), JSON.stringify({ autoCompactWindow: 320000 }));
@@ -304,12 +305,22 @@ function blocked(r) {
     const p = blocked(run({ input: stop(projBox, 's-proj', 262_000), box: projBox }));
     check('project settings env.CLAUDE_CODE_AUTO_COMPACT_WINDOW: no chip', noChip(p));
 
-    // A window the session is already past did not compact it: fall back.
+    // A Stop that reads a depth past the window still compacts on the next request.
+    // [measured 2026-10-25] compaction works at the window (150 in six days), so
+    // the old "already exceeded, compaction is not coming" reason was false.
     const pastBox = sandbox();
     fs.writeFileSync(path.join(pastBox.config, 'settings.json'), JSON.stringify({ autoCompactWindow: 320000 }));
     const past = blocked(run({ input: stop(pastBox, 's-past', 402_578), box: pastBox }));
-    check('402k against a 320k window: compaction did not come, so the chip returns',
-        !!past && past.reason.includes('spawn_task') && /already exceeded/.test(past.reason), past && past.reason.slice(-400));
+    check('402k against a 320k window: compaction follows on the next request, no chip',
+        noChip(past) && /on the next request/.test(past.reason) && !/not coming/.test(past.reason),
+        past && past.reason.slice(-400));
+
+    // The second band of the default 250k line lands exactly on a 300k window.
+    const edgeBox = sandbox();
+    fs.writeFileSync(path.join(edgeBox.config, 'settings.json'), JSON.stringify({ autoCompactWindow: 300000 }));
+    const edge = blocked(run({ input: stop(edgeBox, 's-edge', 300_000), box: edgeBox }));
+    check('300k depth on a 300k window: compaction follows, never "not coming"',
+        noChip(edge) && !/not coming/.test(edge.reason), edge && edge.reason.slice(-400));
 
     const junkBox = sandbox();
     fs.writeFileSync(path.join(junkBox.config, 'settings.json'), '{ not json');
