@@ -333,13 +333,26 @@ const skillWindow = {
 
 const costWindow = {
     id: 'cost-window',
-    source: 'autodev/delivery/outcomes.jsonl (delivery-outcomes.js), never written in production',
-    admissibleFrom: '2026-10-19',
+    source: 'autodev/delivery/outcomes.jsonl outcome rows (delivery-outcomes.js sync, a brain-clock observer)',
+    // `sync` first ran in production at 2026-10-24T22:59Z and runs from the clock after it, so
+    // 10-25 is the first day whose tasks were synced by a live writer.
+    admissibleFrom: '2026-10-25',
     load(ctx) {
-        const rows = ledger(ctx, 'delivery', 'outcomes.jsonl');
-        const accepted = rows.filter((r) => r && r.accepted && Number.isFinite(r.costUsd));
+        // sync appends an attempt row per attempt and an outcome row per task, and appends again
+        // whenever one changes, stamping `at` with the sync time. The evidence is the task, so
+        // each task is graded once, on its newest outcome row, on the day of its last attempt.
+        // A first sync over old tasks therefore lands on their own days, never on the sync day.
+        const latest = new Map();
+        for (const r of ledger(ctx, 'delivery', 'outcomes.jsonl')) {
+            if (!r || r.type !== 'outcome' || typeof r.taskId !== 'string' || !Number.isFinite(Date.parse(r.at))) continue;
+            const prev = latest.get(r.taskId);
+            if (!prev || Date.parse(r.at) >= Date.parse(prev.at)) latest.set(r.taskId, r);
+        }
+        const tasks = [...latest.values()].filter((r) => Number.isFinite(Date.parse(r.lastAttemptAt)));
+        const days = new Set(ctx.windowDays.filter((d) => d >= costWindow.admissibleFrom));
+        const accepted = tasks.filter((r) => r.accepted === true && Number.isFinite(r.costUsd) && days.has(ctx.dayOf(Date.parse(r.lastAttemptAt))));
         return {
-            records: rows.map((r) => ({ at: r.at, ok: Number.isFinite(r.costUsd), why: `${r.taskId}: no cost` })),
+            records: tasks.map((r) => ({ at: r.lastAttemptAt, ok: Number.isFinite(r.costUsd), why: `${r.taskId}: no cost` })),
             totals: [
                 { ok: accepted.length > 0, why: `${accepted.length} accepted tasks carry a cost` },
                 noWriter('matched repeats with a quality comparison for cost per accepted task'),
