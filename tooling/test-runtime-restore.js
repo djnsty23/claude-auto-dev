@@ -22,6 +22,8 @@
  *                         nothing. With --restore the compatible backup returns and passes work.
  *   duplicate_schedulers  the number of passes that ran their judge while another pass was inside
  *                         its own. Concurrent launches and a held lock must make it 0.
+ *   isolation             (exit code only) the fake cache's lock-exercise marks land in the fake
+ *                         profile, and the real profile gains no unversioned mark from this run.
  *
  * Prints one "PASS <name>" or "FAIL <name>" line per check, then exactly
  *   restore=PASS selected_hash=PASS newer_cache_ignored=PASS schema_rollback=PASS duplicate_schedulers=0
@@ -38,7 +40,7 @@ const SUBJECT = path.resolve(__dirname, '../plugins/autodev-core/scripts/runtime
 const SOURCE = process.env.RUNTIME_RESTORE_SCRIPTS ? path.resolve(process.env.RUNTIME_RESTORE_SCRIPTS) : path.dirname(SUBJECT);
 const CAPS = ['tick', '--observe', '--act', 'mark-dead,settle-finished,settle-unattended,judge', '--live'];
 
-const results = { restore: [], selected_hash: [], newer_cache_ignored: [], schema_rollback: [], duplicate_schedulers: [] };
+const results = { restore: [], selected_hash: [], newer_cache_ignored: [], schema_rollback: [], duplicate_schedulers: [], isolation: [] };
 function check(field, name, ok, detail) {
     results[field].push(!!ok);
     process.stdout.write(`${ok ? 'PASS' : 'FAIL'} ${field}: ${name}${ok ? '' : ': ' + String(detail === undefined ? '' : detail).slice(0, 500)}\n`);
@@ -109,7 +111,10 @@ function baseEnv(claude) {
         BRAIN_CLOCK_GH_FIXTURE: path.join(ROOT, 'gh.json'), BRAIN_CLOCK_PS: 'off',
         RR_CALLS: CALLS, RR_NEWER_MARKER: NEWER_MARKER,
     });
-    for (const k of ['AUTODEV_RUNTIME_DIR', 'AUTODEV_RUNTIME_RELEASE', 'BRAIN_CLOCK_BRAIN_JUDGE', 'BRAIN_CLOCK_WORKER_RECONCILE', 'BRAIN_CLOCK_HEADLESS_WORKER', 'BRAIN_CLOCK_UNATTENDED_WORKER', 'CLAUDE_CONFIG_DIR']) delete env[k];
+    for (const k of ['AUTODEV_RUNTIME_DIR', 'AUTODEV_RUNTIME_RELEASE', 'BRAIN_CLOCK_BRAIN_JUDGE', 'BRAIN_CLOCK_WORKER_RECONCILE', 'BRAIN_CLOCK_HEADLESS_WORKER', 'BRAIN_CLOCK_UNATTENDED_WORKER']) delete env[k];
+    // The fake cache sits under plugins/cache, so ledger-lock.js takes it for an installed layer
+    // and marks the exercise in configDir(). Without this the mark lands in the real profile.
+    env.CLAUDE_CONFIG_DIR = claude;
     return env;
 }
 const ENV = baseEnv(CLAUDE);
@@ -151,7 +156,22 @@ async function holdLock(env, clockFile) {
     return { info, release: () => new Promise((resolve) => { h.stdin.end(); if (h.exitCode !== null) resolve(); else h.on('exit', resolve); }) };
 }
 
+// Unversioned lock-exercise marks under a profile, for the days this run can touch. The
+// installed layer always marks a version, so a new @unknown in the real profile is this run's.
+const REAL_PROFILE = require('../plugins/autodev-core/scripts/claude-paths.js').configDir(process.env);
+const markDays = () => [...new Set([new Date(Date.now() - 60000), new Date(), new Date(Date.now() + 60000)].map((d) => d.toISOString().slice(0, 10)))];
+function unversionedMarks(profile) {
+    const out = [];
+    for (const day of markDays()) {
+        let names = [];
+        try { names = fs.readdirSync(path.join(profile, 'autodev', 'windows', 'lock-writers', day)); } catch { continue; }
+        for (const n of names) if (n.endsWith('@unknown')) out.push(`${day}/${n}`);
+    }
+    return out;
+}
+
 async function main() {
+    const realBefore = new Set(unversionedMarks(REAL_PROFILE));
     fs.writeFileSync(path.join(ROOT, 'gh.json'), J({ open: {}, view: {} }));
     fs.mkdirSync(path.join(DESKTOP, 'claude-code-sessions', 'acct', 'org'), { recursive: true });
     fs.writeFileSync(path.join(DESKTOP, 'claude-code-sessions', 'acct', 'org', 'scheduled-tasks.json'), J({ scheduledTasks: [] }));
@@ -355,6 +375,14 @@ async function main() {
         await h.release();
         check('duplicate_schedulers', 'while another process holds the lock a pass skips and runs nothing', h.info && h.info.acquired && held.code === 0 && held.json && held.json.skipped === true && calls().length === j0, held.out);
         check('duplicate_schedulers', 'while the lock is held backup, restore and activate refuse rather than wait it out', a.code !== 0 && a.json && a.json.error.code === 'lock-held' && !fs.existsSync(path.join(STATE, 'lock.json')), a.out);
+    }
+
+    // ------------------------------------------------------------ isolation
+    {
+        const fake = unversionedMarks(CLAUDE);
+        check('isolation', 'the fake cache marks its lock exercise in the fake profile', fake.some((m) => m.endsWith('scripts~brain-clock.js@unknown')), fake.join(', ') || 'no mark');
+        const leaked = unversionedMarks(REAL_PROFILE).filter((m) => !realBefore.has(m));
+        check('isolation', `the real profile ${REAL_PROFILE} gains no unversioned mark`, leaked.length === 0, leaked.join(', '));
     }
 
     const field = (k) => (results[k].length && results[k].every(Boolean) ? 'PASS' : 'FAIL');
