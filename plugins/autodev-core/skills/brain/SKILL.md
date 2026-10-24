@@ -326,12 +326,13 @@ record: the session id survives a compaction, so `~/.claude/brain-role.json`
 stays claimed. Compaction is a remedy for CONTEXT DEPTH, not the answer to the
 next paragraph, and filing it as both is how that outage was first misdiagnosed.
 
-`[inferred 2026-09-22]` compaction at the configured window is documented and
-was not observed in a headless `-p` probe. Until a Desktop session is measured
-compacting there, check the depth after the handoff turn. If it keeps climbing
-past the window, the hook's reason falls back to a continuation chip, and that
-chip is the successor path: brief it with the handoff by absolute path, then
-verify it has claimed `~/.claude/brain-role.json` before you go quiet.
+`[measured 2026-10-25]` Desktop sessions compact at the configured window: 150
+compactions in six days of one machine's transcripts with `autoCompactWindow`
+300000, the Brain among them. A Stop can read a depth past the window before
+the next request compacts, so the hook still says compaction follows there. A
+worker that claims it "can't compact" keeps working: it writes its handoff at a
+natural break and never stops or asks for a fresh session over context depth.
+The continuation chip is only for a host with no window configured.
 
 **A self-clear does not shed context. Only a fresh session or a compaction
 does.** `[measured 2026-09-16]` One interactive Brain (claude-opus-5, bypass

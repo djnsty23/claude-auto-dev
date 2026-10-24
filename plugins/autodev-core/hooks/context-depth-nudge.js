@@ -25,9 +25,12 @@ if (process.env.CLAUDE_PLUGIN_OPTION_CONTEXT_NUDGE === 'false') process.exit(0);
 // is on disk, and session-start.js points the compacted session back at it.
 //
 // When no window is configured, compaction is not coming, so the reason falls
-// back to the continuation chip. When one is configured but the depth is
-// already at or past it, compaction evidently did not fire, and the chip text
-// is used for the same reason.
+// back to the continuation chip. When one is configured, compaction follows even
+// if this Stop reads a depth at or past it: the harness compacts on the next
+// request, and the 250k line plus 50k bands put the second band exactly on a
+// 300k window. `[measured 2026-10-25]` 150 compactions in six days of this
+// machine's transcripts with autoCompactWindow 300000. Telling a session there
+// that "compaction is not coming" invites it to stop and ask for a fresh session.
 //
 // WHY A BLOCK CANNOT LOOP. A blocked Stop makes the model take another turn and
 // then Stop again, with stop_hook_active set. This hook is silent whenever that
@@ -290,7 +293,7 @@ if (!writeState(statePath, { bucket, depth, at: Date.now() })) silent();
 
 const k = (n) => Math.round(n / 1000) + 'k';
 const window = autoCompactWindow(cwd);
-const compactionFollows = window != null && depth < window;
+const compactionFollows = window != null;
 const handoff = path.join(cwd, '.claude', 'handoffs', 'RESUME-' + sessionId.slice(0, 8) + '.md');
 const sessionExit = path.join(__dirname, '..', 'scripts', 'session-exit.js');
 
@@ -312,13 +315,13 @@ let forModel = 'CONTEXT DEPTH IS ' + depth.toLocaleString('en-US') + ' TOKENS, P
 let forOperator = 'Context depth ' + k(depth) + ' tokens, past the ' + k(softLine) + ' soft line. ';
 if (compactionFollows) {
     forModel += 'Then end the turn. Auto-compaction is configured at a ' + k(window)
-        + ' window, so it follows at this break, and the session start after it points '
-        + 'you back at the handoff. Do not spawn a continuation chip.';
+        + ' window, so it follows at this break' + (depth >= window ? ' (on the next request)' : '')
+        + ', and the session start after it points you back at the handoff. Keep working '
+        + 'after it: do not stop, do not ask for a fresh session, and do not spawn a '
+        + 'continuation chip.';
     forOperator += 'Saving the handoff before auto-compaction (' + k(window) + ' window).';
 } else {
-    forModel += (window != null
-        ? 'The ' + k(window) + ' auto-compact window is already exceeded, so compaction is not coming. '
-        : 'No auto-compact window is configured, so compaction is not coming. ')
+    forModel += 'No auto-compact window is configured, so compaction is not coming. '
         + 'Call spawn_task for a continuation chip BEFORE you go quiet: a fresh worktree '
         + 'does not contain the gitignored handoff, so its prompt names the handoff by '
         + 'ABSOLUTE path, repeats the first move and the traps inline, and ends with this '
