@@ -69,7 +69,22 @@ Assert the expected behavior against both captures: the before fails for the
 defect’s reason, the after satisfies the same criterion, and a valid control
 still works. Inspect screenshots when visual behavior matters. Byte inequality
 alone proves nothing: timestamps or unrelated pixels can differ while the bug
-persists. Identical screenshots can be valid for a nonvisual fix; then use an
+persists.
+
+The after capture has to walk the path the user walks. These claims have each
+been closed on the weaker evidence and reopened:
+
+| Claim | Settled by | Not settled by |
+|---|---|---|
+| Sign-in works | A RETURNING user: a session from before the change reloads, signs out and signs back in, at phone width | One fresh login in a clean profile |
+| A modal or form works on a phone | Its primary action tapped at 390 wide, then the saved value read back | A screenshot of the modal open |
+| A write works | Reload, or a second device, then read the stored row back | The optimistic UI state |
+| A scheduled job or producer is fixed | Trigger it and read the output it wrote, with a new timestamp | The code change |
+| A config change took effect | A log line or response from the real consumer showing the new value | The config diff |
+| A regression test guards the fix | It fails with the fix reverted, then passes | It passes once |
+| A cleanup or delete is safe | Before and after record sets: only owned rows changed | A green suite |
+| A delegated agent finished | Its diff, plus your own rerun of its check | Its report |
+| It is live | `ship` Step 5 on every entry point | A deploy status of Ready | Identical screenshots can be valid for a nonvisual fix; then use an
 observable that actually distinguishes the behavior instead of forcing pixels
 to change. For output contracts, compare meaningful fields and retain raw logs.
 

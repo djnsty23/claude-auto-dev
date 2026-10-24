@@ -105,10 +105,10 @@ generation time over the rules on disk:
 
 | variant | bytes | dated claims kept |
 |---|---|---|
-| A  full body | 118,792 | 16 of 16 |
-| B  description + first paragraph + dated PARAGRAPHS + Never/Always ← emitted | 20,008 | 16 of 16 |
-| B′ same, but dated LINES instead of paragraphs | 14,669 | 1 of 16 |
-| C  description only | 6,666 | 0 of 16 |
+| A  full body | 120,508 | 16 of 16 |
+| B  description + first paragraph + dated PARAGRAPHS + Never/Always ← emitted | 20,186 | 16 of 16 |
+| B′ same, but dated LINES instead of paragraphs | 14,614 | 0 of 16 |
+| C  description only | 6,774 | 0 of 16 |
 
 ### rule-ab-testing
 
@@ -384,7 +384,9 @@ Full text: `plugins/autodev-core/skills/rule-verification/SKILL.md`
 
 **paths:** `**/*.ps1`
 
-Windows-specific development rules: host-aware command wrappers, supervised servers, environment inheritance, native exit status and path conventions. Load only when working on Windows.
+Windows host traps for commands and scripts: Git Bash versus PowerShell syntax, heredoc and inline-script mangling, Python cp1252 file I/O, native exit status, MSYS path rewriting, killing a process tree, supervised servers. Load on a win32 host before writing a shell command, script or .ps1.
+
+Each line is a trap that has already cost a rerun on a Windows host.
 
 Historical correction, 2026-08-17: a particular host's background/preview
 facilities invalidated its old ban on starting dev servers. That observation

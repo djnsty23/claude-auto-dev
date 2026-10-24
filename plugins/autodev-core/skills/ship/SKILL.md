@@ -1,7 +1,7 @@
 ---
 name: ship
-description: Pre-deploy checklist with review, security, and test verification. Use when ready to deploy.
-when_to_use: "Invoked when the user says \"ship\"."
+description: "Deploy, release or promote a change and prove the served version is the one that was tested: gates, security, target identity, then the live check on every entry point. Use whenever a change is about to reach staging or production, or before saying it is live."
+when_to_use: "Invoked when the user says \"ship\", \"deploy\", \"release\", \"cut the release\", \"go live\", \"push to prod\", \"prod apply\", \"promote\" or \"is it live\", after a staging or preview deploy that needs its check, and before any report that says a change is deployed or live."
 allowed-tools: Bash, Read, Grep, Glob, Task, mcp__Claude_Browser__*
 model: opus
 user-invocable: true
@@ -311,8 +311,9 @@ Run it BEFORE the merge. Load [references/tracking-parity.md](references/trackin
 | Check | How | Pass Criteria |
 |-------|-----|---------------|
 | **Page loads** | Open deploy URL | No 404, no blank screen |
+| **Every entry point** | Each custom domain, `www` and apex, alias and app-store build users reach, plus every link into a changed route (old sign-in links included) | Each serves `deployed_candidate_sha`; none serves the old route or copy |
 | **No console errors** | Available driver console inspection | No new unexplained errors during the tested flow |
-| **Auth flow** | Login → protected page → logout | All transitions work |
+| **Auth flow** | Login → protected page → logout, then a RETURNING user: a session from before the deploy reloads, signs out and back in, at phone width | All transitions work, no loop, flicker or forced restart |
 | **Critical path** | Complete main user action | End-to-end success |
 | **API calls** | Inspect request/response and resulting state | Expected authorization, domain payload, persistence and failure behavior |
 | **Mobile layout** | Test supported viewport/device sizes | Intended navigation and content usable, no unintended overflow |
