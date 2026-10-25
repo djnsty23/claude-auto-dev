@@ -21,6 +21,9 @@
 - `check-grill-ledger.js` lints a grilling ledger so every "Decided for you"
   item carries a code and a reason, with a planted-defect suite. The chain gains
   a UI first-pass step (#450).
+- `idea-conveyor.js` sorts incoming ideas, enqueues the new-app stage chain,
+  turns review points into decisions that silence approves, and records a
+  receipt per stage (#452).
 
 ## [8.196.0]
 
