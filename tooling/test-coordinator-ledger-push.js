@@ -164,8 +164,12 @@ expectBlock('C. a closed record shadowed by a newer live one licenses no push', 
 // A record enqueue would never write: a default branch.
 writeLedger([record({ branch: 'main' })]);
 expectBlock('C. a closed record naming a default branch licenses no push to it', run(`git -C "${WT}" push origin main`));
-// A relative worktree in the record resolves against nothing knowable.
-writeLedger([record({ worktree: path.relative(process.cwd(), WT) })]);
+// A relative worktree in the record resolves against nothing knowable. Built
+// from segments, not path.relative: across Windows drives (repo on D:, temp on
+// C: on CI) path.relative returns an absolute path, which licenses the push.
+const RELATIVE_WT = path.join('product', '.claude', 'worktrees', path.basename(WT));
+if (path.isAbsolute(RELATIVE_WT)) throw new Error(`planted relative worktree is absolute: ${RELATIVE_WT}`);
+writeLedger([record({ worktree: RELATIVE_WT })]);
 expectBlock('C. a record with a relative worktree licenses no push', run(`git -C "${WT}" push origin ${BRANCH}`));
 
 fs.rmSync(fixture, { recursive: true, force: true });
