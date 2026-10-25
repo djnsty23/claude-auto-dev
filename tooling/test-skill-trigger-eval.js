@@ -80,6 +80,11 @@ try {
     fs.writeFileSync(bigFile, big.map((r) => JSON.stringify(r)).join('\n') + '\n');
     const sig = run(['report', bigFile, '--base', 'before']);
     check('--base exits 3 on a significant drop', sig.status === 3 && /ship in after 0\/6 vs 6\/6, p=0\.001 SIGNIFICANT/.test(sig.stdout), `status=${sig.status} ${sig.stdout.slice(-300)}`);
+    // The shapes a real headless run ends with: the one-turn cap, and an expired login.
+    const { parseStream, runError } = require(SUBJECT);
+    const end = (r) => parseStream(JSON.stringify({ type: 'result', ...r }));
+    check('the one-turn cap is not an error', runError(end({ subtype: 'error_max_turns', is_error: true }), 1) === false, 'max_turns flagged');
+    check('an expired login is an error, so the report drops it', runError(end({ subtype: 'success', is_error: true, result: 'Failed to authenticate: OAuth session expired' }), 1) === true, 'auth failure graded as a miss');
     const nobase = run(['report', fixture, '--base', 'nope']);
     check('--base naming an absent arm exits 2', nobase.status === 2, `status=${nobase.status}`);
 } finally {
