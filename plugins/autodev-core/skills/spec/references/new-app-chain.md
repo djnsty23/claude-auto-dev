@@ -11,6 +11,18 @@ by hand in the same session. It ran with no spec, no backlog, no setup stories a
 compacted four times. Two account blockers surfaced mid-build, and a recorded decision was reversed with
 no trace.
 
+## Contents
+
+- The steps
+- Step 1: the interview and the decision card
+- Step 2: spec, plus the module map
+- Steps 3 to 5: scaffold, modules, provision
+- Step 6: auto
+- Step 7: two independent reviews
+- Steps 8 and 9
+- Phase 2: the works
+- A dry walk
+
 ## The steps
 
 | # | Step | Reads | Writes |
