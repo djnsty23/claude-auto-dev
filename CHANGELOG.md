@@ -12,6 +12,16 @@
   2.8 s to 230 ms on a 693 MB store. Verdicts and output bytes are unchanged on
   every real transcript and fixture measured (#447).
 
+### Skills
+
+- `spec` owns a nine-step new-app chain in `references/new-app-chain.md`:
+  grilling, spec, setup-project, a module scaffold, provisioning, build, review
+  with a second-model pass, design review, ship. Each step names its handoff
+  artifact. `setup-project` points to it (#449).
+- `check-grill-ledger.js` lints a grilling ledger so every "Decided for you"
+  item carries a code and a reason, with a planted-defect suite. The chain gains
+  a UI first-pass step (#450).
+
 ## [8.196.0]
 
 ### Fleet
