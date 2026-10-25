@@ -11,6 +11,10 @@
   coordinator's own desktop record instead of parsing the whole store: about
   2.8 s to 230 ms on a 693 MB store. Verdicts and output bytes are unchanged on
   every real transcript and fixture measured (#447).
+- `unattended-worker.js` runs git with `windowsHide`, so no console window
+  opens on Windows when a detached reconcile child calls it. A new suite,
+  `test-detached-spawns.js`, fails on any detached spawn outside the three
+  reviewed ones (#454).
 
 ### Skills
 
