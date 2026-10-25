@@ -654,6 +654,95 @@ const LIVE = (() => {
         !!noOrigin && !/on the trunk/.test(noCtx), noCtx.split('\n')[0]);
 }
 
+// --- L1: latency against a large desktop store ---------------------------------
+/* `[measured 2026-10-25]` the store on one machine held 2,397 records, 693 MB,
+   and the notice path parsed every one of them to count records it never
+   printed: 3.5 s of a 5 s timeout, which the hook hit 3 times in 3 runs. The
+   coordinator's record is now opened by its file name. A wall-clock bound is
+   only evidence if something slow fails it, so the same bound runs against a
+   PLANTED copy of this tree that asks for the count again, and that copy must
+   fail it. */
+{
+    const LAT_BUDGET_MS = 120;
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'sbr-lat-'));
+    const bigStore = path.join(root, 'big');
+    const filler = JSON.stringify(Array.from({ length: 900 }, (_, k) => ({ role: 'user', n: k, text: 'message ' + k, parts: [k, k * 2, 'p' + k] })));
+    for (let b = 0; b < 4; b++) {
+        const bucket = path.join(bigStore, 'acct', 'bucket' + b);
+        fs.mkdirSync(bucket, { recursive: true });
+        for (let i = 0; i < 100; i++) {
+            fs.writeFileSync(path.join(bucket, `local_other-${b}-${i}.json`),
+                '{"sessionId":"local_other-' + b + '-' + i + '","cliSessionId":"x' + i + '","isArchived":true,"messages":' + filler + '}');
+        }
+    }
+    fs.writeFileSync(path.join(bigStore, 'acct', 'bucket3', 'local_brain-desk.json'),
+        JSON.stringify({ sessionId: 'local_brain-desk', cliSessionId: 'brain-1', isArchived: false }));
+    const smallStore = path.join(root, 'small', 'acct', 'bucket');
+    fs.mkdirSync(smallStore, { recursive: true });
+    fs.writeFileSync(path.join(smallStore, 'local_brain-desk.json'),
+        JSON.stringify({ sessionId: 'local_brain-desk', cliSessionId: 'brain-1', isArchived: false }));
+
+    const repo = makeRepo();
+    const role = writeRole({ session_id: 'brain-1', peer_name: 'brain-peer', desktop_session_id: 'local_brain-desk' });
+    const state = stateFilePath();
+    // Every run takes the notice path: a prior sha that is not HEAD, no cooldown.
+    const timed = (hook, store) => {
+        LEDGER.write(state, 'lat', { sha: '0000000', at: 0, reportedAt: null });
+        const t0 = process.hrtime.bigint();
+        const r = sb.runVerdict(process.execPath, [hook], {
+            input: JSON.stringify({ session_id: 'lat', cwd: repo }),
+            encoding: 'utf8',
+            env: Object.assign({}, process.env, {
+                AUTODEV_BRAIN_ROLE_FILE: role, AUTODEV_BRAIN_REPORT_STATE: state,
+                AUTODEV_BRAIN_REPORT_COOLDOWN_MIN: '0', AUTODEV_SESSIONS_DIR: LIVE.sessions,
+                CLAUDE_SESSION_STORE: store,
+            }),
+        });
+        return { ms: Number(process.hrtime.bigint() - t0) / 1e6, j: spoke({ out: r.stdout || '', err: r.stderr || '', status: r.status }) };
+    };
+    const median = (a) => [...a].sort((x, y) => x - y)[Math.floor(a.length / 2)];
+    // Big and small interleaved, so a load spike lands on both sides. One
+    // re-measure on a miss: a spike is not a regression, a second miss is.
+    const extraMs = (hook) => {
+        const once = () => {
+            const b = [], s = [];
+            for (let i = 0; i < 5; i++) { b.push(timed(hook, bigStore).ms); s.push(timed(hook, path.join(root, 'small')).ms); }
+            return median(b) - median(s);
+        };
+        const first = once();
+        return first < LAT_BUDGET_MS ? first : Math.min(first, once());
+    };
+    const addressed = (j) => !!j && /local_brain-desk/.test(j.hookSpecificOutput.additionalContext)
+        && !/DOES NOT NAME A LIVE COORDINATOR/.test(j.hookSpecificOutput.additionalContext)
+        && !/could not be checked/.test(j.hookSpecificOutput.additionalContext);
+
+    const one = timed(HOOK, bigStore);
+    check('L1: a 401-record store still resolves the coordinator by its desktop id', addressed(one.j),
+        one.j ? one.j.hookSpecificOutput.additionalContext.split('\n')[0] : 'silent');
+    const extra = extraMs(HOOK);
+    check(`L1: a 401-record store costs < ${LAT_BUDGET_MS} ms over a 1-record one (${Math.round(extra)} ms)`, extra < LAT_BUDGET_MS);
+
+    // The plant: this tree, asking checkBrainRole for the store count again.
+    // The anchor is asserted, so a renamed option fails here rather than
+    // leaving a plant that changed nothing.
+    const plant = path.join(root, 'plant');
+    const pluginRoot = path.join(__dirname, '..', 'plugins', 'autodev-core');
+    fs.cpSync(path.join(pluginRoot, 'hooks'), path.join(plant, 'hooks'), { recursive: true });
+    fs.cpSync(path.join(pluginRoot, 'scripts'), path.join(plant, 'scripts'), { recursive: true });
+    const hFile = path.join(plant, 'hooks', 'stop-brain-report.js');
+    const anchor = 'countStore: false';
+    const src = fs.readFileSync(hFile, 'utf8');
+    check('L1: the planted slow path found its anchor in this tree', src.includes(anchor));
+    if (src.includes(anchor)) {
+        fs.writeFileSync(hFile, src.replace(anchor, 'countStore: true'));
+        const planted = timed(hFile, bigStore);
+        check('L1: the plant still answers correctly (it is slow, not wrong)', addressed(planted.j));
+        const plantExtra = extraMs(hFile);
+        check(`L1: the planted full store parse FAILS the same bound (${Math.round(plantExtra)} ms >= ${LAT_BUDGET_MS} ms)`, plantExtra >= LAT_BUDGET_MS);
+    }
+    try { fs.rmSync(root, { recursive: true, force: true }); } catch { /* best effort */ }
+}
+
 const lost = sb.lostVerdict();
 console.log('');
 console.log(sb.tally(pass, fail, lost ? 1 : 0));

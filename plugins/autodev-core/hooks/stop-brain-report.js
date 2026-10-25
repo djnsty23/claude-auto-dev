@@ -285,7 +285,7 @@ const where = [
 let verdict = null;
 try {
     const { checkBrainRole } = require(path.join(__dirname, '..', 'scripts', 'check-brain-role.js'));
-    verdict = checkBrainRole({ roleFile: roleFilePath(), role });
+    verdict = checkBrainRole({ roleFile: roleFilePath(), role, countStore: false });
 } catch {
     verdict = null;
 }

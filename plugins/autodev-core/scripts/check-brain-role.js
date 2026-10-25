@@ -138,9 +138,24 @@ function readLiveSessions(dir) {
     return out;
 }
 
-/** Walk the store (it nests) for one `local_<id>.json` record by its sessionId. */
-function findStoreRecord(store, desktopId) {
-    const out = { store, readable: false, records: 0, archived: 0, record: null };
+/**
+ * Walk the store (it nests) for one `local_<id>.json` record by its sessionId.
+ *
+ * `{ count: false }` is the hot path for a hook. `[measured 2026-10-25]` a store
+ * of 2,397 records and 693 MB took 3.5 s to parse in full, inside a 5 s Stop
+ * hook, to find ONE record. Records are named for their id, so this walks the
+ * directories by name and parses only the file named `<id>.json`. `records` is
+ * then a count of names, `archived` is null (not counted, never zero), and
+ * `counted` is false. With no file of that name, it falls back to the full
+ * parse, which also matches a record by the sessionId inside it.
+ */
+function findStoreRecord(store, desktopId, opts) {
+    const count = !(opts && opts.count === false);
+    if (!count && store && desktopId) {
+        const fast = findStoreRecordByName(store, String(desktopId));
+        if (fast.record) return fast;
+    }
+    const out = { store, readable: false, records: 0, archived: 0, record: null, counted: true };
     if (!store) return out;
     const want = desktopId ? String(desktopId) : null;
     const walk = (dir, depth) => {
@@ -165,6 +180,30 @@ function findStoreRecord(store, desktopId) {
     return out;
 }
 
+/** The name-only walk behind `{ count: false }`: parses one file at most. */
+function findStoreRecordByName(store, want) {
+    const out = { store, readable: false, records: 0, archived: null, record: null, counted: false };
+    const target = want + '.json';
+    const walk = (dir, depth) => {
+        if (depth > STORE_DEPTH) return;
+        let entries;
+        try { entries = fs.readdirSync(dir, { withFileTypes: true }); } catch { return; }
+        out.readable = true;
+        for (const e of entries) {
+            const p = path.join(dir, e.name);
+            if (e.isDirectory()) { walk(p, depth + 1); continue; }
+            if (!e.isFile() || !e.name.startsWith('local_') || !e.name.endsWith('.json')) continue;
+            out.records++;
+            if (out.record || e.name !== target) continue;
+            const rec = readJSON(p);
+            if (!rec || typeof rec !== 'object') continue;
+            out.record = { file: p, sessionId: String(rec.sessionId || ''), cliSessionId: String(rec.cliSessionId || ''), isArchived: !!rec.isArchived, title: rec.title || null };
+        }
+    };
+    walk(store, 0);
+    return out;
+}
+
 /** The shape every result carries, so a caller never needs a null check. */
 function emptyReach() {
     return { usable: [], unusable: [], unchecked: [], collision: false };
@@ -173,7 +212,7 @@ function emptyReach() {
 /**
  * The check. Never throws.
  *
- * @param {{roleFile?:string, role?:object, sessionsDir?:string, store?:string|null}} [opts]
+ * @param {{roleFile?:string, role?:object, sessionsDir?:string, store?:string|null, countStore?:boolean}} [opts]
  * @returns {{state:'absent'|'ok'|'degraded'|'fault', roleFile:string, role:object|null,
  *            faults:Array<{code:string, detail:string, field:string|null, short:string}>,
  *            lines:string[],
@@ -277,7 +316,7 @@ function checkBrainRole(opts) {
         }
     }
 
-    found = findStoreRecord(store, role.desktop_session_id);
+    found = findStoreRecord(store, role.desktop_session_id, { count: o.countStore !== false });
     if (typeof role.desktop_session_id === 'string' && role.desktop_session_id) {
         if (!found.readable) {
             lines.push('desktop_session_id ' + role.desktop_session_id + ' -> NOT CHECKED: no readable desktop store' + (store ? ' at ' + store : ''));
