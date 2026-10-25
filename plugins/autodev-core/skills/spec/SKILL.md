@@ -1,7 +1,7 @@
 ---
 name: spec
-description: Turns a one-line product idea into a spec, a data model and a prd.json backlog, so setup-project and auto can run without a manual planning hop. Use when the user describes something to build rather than a change to make.
-when_to_use: "Invoked when the user says \"spec\", or describes a product in a sentence — \"build me a habit tracker with streaks\", \"I want a tool that watches competitor pricing\". NOT for changes to an existing feature; that is a story, not a spec."
+description: Turns a one-line product idea into a spec, a data model and a prd.json backlog, so setup-project and auto can run without a manual planning hop. Use when the user describes something to build rather than a change to make, and as step 2 of the new-app chain it owns.
+when_to_use: "Invoked when the user says \"spec\", or describes a product in a sentence — \"build me a habit tracker with streaks\", \"I want a tool that watches competitor pricing\", \"new app\", \"new site\". NOT for changes to an existing feature; that is a story, not a spec."
 allowed-tools: Bash, Read, Write, Edit, Glob, Grep, AskUserQuestion
 model: opus
 user-invocable: true
@@ -28,6 +28,15 @@ person can do, and says how you would know it works.** `check-spec-output.js`
 catches structural omissions and several vague wording patterns. A pass does
 not establish that the plan is complete or its acceptance conditions useful;
 review the actual core loop before handing it to a worker.
+
+## New app or site: run the whole chain
+
+A new app, site or tool is one nine-step pipeline: interview, spec, setup-project, a module
+scaffolder, provisioning, auto, two independent reviews, design-review plus unslop, ship. Each step
+hands the next a file under `docs/new-app/`, and the decision ledger is the operator's control point.
+Load [references/new-app-chain.md](references/new-app-chain.md) before step 1 of a new app.
+When `docs/new-app/01-grill.md` exists, it replaces the question in step 1 below: read it and ask
+only what it left open.
 
 ## Step 1 — Infer hard, ask at most once
 
