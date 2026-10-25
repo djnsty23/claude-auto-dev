@@ -1,5 +1,17 @@
 # Changelog
 
+## [8.197.0]
+
+### Hooks
+
+- Two autodev-core Stop hooks no longer reach their 5 s timeout on large
+  machines. `stop-auto-check` scans a transcript for panel lines with
+  `Buffer.indexOf` and resumes from saved state instead of parsing every line:
+  1114 ms to 53 ms on a 369 MB transcript. `stop-brain-report` opens the
+  coordinator's own desktop record instead of parsing the whole store: about
+  2.8 s to 230 ms on a 693 MB store. Verdicts and output bytes are unchanged on
+  every real transcript and fixture measured (#447).
+
 ## [8.196.0]
 
 ### Fleet
