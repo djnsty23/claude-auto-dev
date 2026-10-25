@@ -11,6 +11,16 @@
   closed unattended-worker ledger record. Any other push stays blocked. The brain
   skill and the judge rubric describe the same handoff (#443).
 
+### Skills
+
+- The auto, brain and ship skills load faster: each SKILL.md is cut to about 12 KB,
+  and the detail moved into references the skill names. design-review triggers on
+  more of the phrasings people use for it: held-out cases rose from 0/12 to 6/12.
+  A held-out eval of 198 prompts from the last 30 days, 1980 runs, found no skill
+  triggering less often than before #441 (one-sided Fisher p < 0.05). Results are
+  in docs/evals/skill-triggers-2026-10-25.md, and tooling/skill-trigger-eval.js
+  reruns them (#445).
+
 ## [8.195.0]
 
 ### Context depth
