@@ -27,7 +27,9 @@
  *        [--samples 3] [--model claude-opus-5-5] [--effort high] [--concurrency 4] [--only id,id]
  *        [--config-dir <dir>] [--timeout-ms 300000] [--max-turns 1] [--keep-stream <dir>]
  *   node tooling/skill-trigger-eval.js archive --ref <commit> --to <dir>   plugins/ of a commit, for a before arm
- *   node tooling/skill-trigger-eval.js report <jsonl>... [--json]           per-skill rates and the confusion table
+ *   node tooling/skill-trigger-eval.js report <jsonl>... [--base <arm>] [--json]
+ *        per-skill rates and the confusion table; --base adds a one-sided Fisher
+ *        exact test per skill against that arm and exits 3 on a drop with p < 0.05
  *   node tooling/skill-trigger-eval.js hook                                 the PreToolUse guard (reads stdin)
  *   node tooling/skill-trigger-eval.js --selftest
  *
@@ -50,7 +52,7 @@ const HELP = `skill-trigger-eval.js - first-turn skill trigger eval over two plu
       [--model claude-opus-5-5] [--effort high] [--concurrency 4] [--only id,id]
       [--config-dir <dir>] [--timeout-ms 300000] [--max-turns 1] [--keep-stream <dir>]
   archive --ref <commit> --to <dir>
-  report <jsonl>... [--json]
+  report <jsonl>... [--base <arm>] [--json]   exit 3: a skill fell significantly below --base
   hook
   --selftest
 `;
@@ -319,7 +321,40 @@ function summarise(rows) {
     return { arms, expected, perSkill, confusion, stolen, totals, rows: rows.length, excluded };
 }
 
-function renderReport(s) {
+/**
+ * One-sided Fisher exact p that arm B's rate is this low or lower when both
+ * arms share one true rate: P(X <= bHits), X hypergeometric. A drop at n=3 is
+ * mostly noise, and this is what tells the two apart.
+ */
+function fisherLower(aHits, aRuns, bHits, bRuns) {
+    const lf = (n) => { let s = 0; for (let i = 2; i <= n; i++) s += Math.log(i); return s; };
+    const lc = (n, k) => lf(n) - lf(k) - lf(n - k);
+    const K = aHits + bHits;
+    const N = aRuns + bRuns;
+    let p = 0;
+    for (let x = Math.max(0, K - aRuns); x <= Math.min(bHits, K); x++) {
+        p += Math.exp(lc(K, x) + lc(N - K, bRuns - x) - lc(N, bRuns));
+    }
+    return Math.min(1, p);
+}
+
+/** Skills whose rate in an arm is below the base arm's, with the one-sided p. */
+function drops(s, base, alpha) {
+    const out = [];
+    for (const k of s.expected) {
+        const b = s.perSkill[k][base];
+        if (!b || !b.runs) continue;
+        for (const a of s.arms) {
+            const c = s.perSkill[k][a];
+            if (a === base || !c || !c.runs || c.hits / c.runs >= b.hits / b.runs) continue;
+            const p = fisherLower(b.hits, b.runs, c.hits, c.runs);
+            out.push({ skill: k, arm: a, base: `${b.hits}/${b.runs}`, got: `${c.hits}/${c.runs}`, p, significant: p < alpha });
+        }
+    }
+    return out;
+}
+
+function renderReport(s, base, alpha = 0.05) {
     const lines = [];
     const frac = (c) => (c ? `${c.hits}/${c.runs}` : '-');
     lines.push(`population: ${s.rows} run(s), ${s.excluded} excluded (arm mismatch or error), `
@@ -336,6 +371,12 @@ function renderReport(s) {
         lines.push(`| ${k} | ${s.arms.map((a) => frac(s.perSkill[k][a])).join(' | ')} | ${steals.join(' / ')} |`);
     }
     lines.push(`| **all** | ${s.arms.map((a) => frac(s.totals[a])).join(' | ')} | |`);
+    if (base) {
+        const d = drops(s, base, alpha);
+        lines.push('');
+        lines.push(`Below base arm ${base} (one-sided Fisher exact, alpha ${alpha}): `
+            + (d.map((x) => `${x.skill} in ${x.arm} ${x.got} vs ${x.base}, p=${x.p.toFixed(3)}${x.significant ? ' SIGNIFICANT' : ''}`).join('; ') || 'none'));
+    }
     for (const a of s.arms) {
         lines.push('');
         lines.push(`Confusion, arm ${a}: expected skill (row) against what the first turn loaded.`);
@@ -355,12 +396,16 @@ function renderReport(s) {
 }
 
 function cmdReport(args) {
-    const files = args.filter((a) => !a.startsWith('--'));
+    const base = opt(args, '--base', null);
+    const files = args.filter((a, i) => !a.startsWith('--') && args[i - 1] !== '--base');
     if (!files.length) { process.stderr.write(HELP); return 2; }
     const rows = files.flatMap(readRows);
     const s = summarise(rows);
-    process.stdout.write(args.includes('--json') ? JSON.stringify(s, null, 2) + '\n' : renderReport(s));
-    return rows.length ? 0 : 1;
+    if (base && !s.arms.includes(base)) { process.stderr.write(`report: no rows for base arm ${base}\n`); return 2; }
+    if (base) s.drops = drops(s, base, 0.05);
+    process.stdout.write(args.includes('--json') ? JSON.stringify(s, null, 2) + '\n' : renderReport(s, base));
+    if (!rows.length) return 1;
+    return s.drops && s.drops.some((x) => x.significant) ? 3 : 0;
 }
 
 function selftest() {
@@ -402,6 +447,11 @@ function selftest() {
     t('stealing is attributed to the loaded skill', s.stolen.a.ship === 1 && !s.stolen.b.ship);
     t('a turn that loads nothing is (none)', s.confusion.b.prove['(none)'] === 1);
     t('the report prints its population', /^population: 4 run\(s\), 1 excluded/.test(renderReport(s)));
+    t('fisher: 3/3 against 0/3 is p=0.05', Math.abs(fisherLower(3, 3, 0, 3) - 0.05) < 1e-9);
+    t('fisher: an equal rate is not a drop', fisherLower(2, 4, 2, 4) > 0.5);
+    t('fisher: 5/6 against 3/6 is noise', fisherLower(5, 6, 3, 6) > 0.2);
+    t('fisher: 30/30 against 10/30 is significant', fisherLower(30, 30, 10, 30) < 1e-6);
+    t('a drop below the base arm is listed, not significant at n=1', drops(s, 'a', 0.05).length === 1 && drops(s, 'a', 0.05)[0].significant === false);
     process.stdout.write(`selftest: ${passed} passed, ${failed} failed\n`);
     return failed ? 1 : 0;
 }
@@ -432,4 +482,4 @@ if (require.main === module) {
     });
 }
 
-module.exports = { parseStream, checkArm, grade, hook, summarise, renderReport, treeSkills, treeDigest };
+module.exports = { parseStream, checkArm, grade, hook, summarise, renderReport, fisherLower, drops, treeSkills, treeDigest };
