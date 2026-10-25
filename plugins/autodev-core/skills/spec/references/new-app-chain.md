@@ -17,6 +17,7 @@ no trace.
 - Step 1: the interview and the decision card
 - Step 2: spec, plus the module map
 - Steps 3 to 5: scaffold, modules, provision
+- Step 5b: the UI first pass
 - Step 6: auto
 - Step 7: two independent reviews
 - Steps 8 and 9
@@ -32,6 +33,7 @@ no trace.
 | 3 | `setup-project` (create mode) | `SPEC.md` stack and services | scaffold, `CLAUDE.md`, `.env.example`, gate scripts, `03-setup.md` |
 | 4 | Module scaffolder, when the operator has a module registry | `02-modules.md` | installed modules, its lock file, `04-modules.md` |
 | 5 | Provisioning, the operator's script or the setup stories by hand | `SPEC.md` External services | env names in the secret store, setup stories flipped, `05-provision.md` |
+| 5b | UI first pass, one builder turn | a real sample of the work object, the design kit tokens and logo | the core screen, screenshots at 1440 and 390, `05b-ui.md` |
 | 6 | `auto`, in a fresh worker | `SPEC.md`, `prd.json`, `01-grill.md` | commits, story passes |
 | 7 | `review` plus an independent second reviewer | the diff since the scaffold | `07-review.md` |
 | 8 | `design-review` plus `unslop` | the running app | review file, scorecard, `08-design.md` |
@@ -77,6 +79,14 @@ session, which nobody reads, has not been sent.
 **Ledger shape, checked by every step.** Codes are unique. **By** is one of the three values. Lock step is
 one of spec, setup, modules, provision, build, ship. Status is `open`, `locked at <step>` once that step's
 artifact is written, or `superseded by DYn`. A row that narrows an earlier row supersedes it.
+Each step runs the linter before it hands on, and a red result means the step is not done:
+
+```bash
+node "${CLAUDE_PLUGIN_ROOT}/scripts/check-grill-ledger.js" docs/new-app/01-grill.md
+```
+
+Exit 0 is clean, 1 lists each finding with its line, 2 means the ledger could not be read. An empty
+ledger is a finding, never a pass. The step that wrote the bad row fixes it.
 
 With no grilling skill installed, spec step 1 is the interview. Write its answers and assumptions to
 `01-grill.md` in the same shape, so later steps read one format.
@@ -110,6 +120,37 @@ Run this skill as written, with three additions:
   variable name present, a REST probe answering. Provisioning flips them to `true`. Only the story that needs
   a deployed app (sign-in on a preview, for example) carries the setup story in `blockedBy`. Sign-in and the
   core loop build against a local Supabase or a stub, so `auto` always has actionable stories.
+
+## Step 5b: the UI first pass
+
+The core screen is built once, by one builder turn, before `auto` starts. The UI the operator liked most
+came from exactly this shape: the real documents rendered before any code, tokens written in the same
+patch as the layout, and the builder screenshotting both widths before handing over.
+
+**Inputs.** A real sample of the product's work object (the actual PDF, invoice, report or record a user
+opens, never a lorem placeholder), the operator's design kit tokens and its logo. With no design kit, the
+scaffold's token file stands in, and the phase 2 brand kit replaces it. `05b-ui.md` names each input
+and its commit.
+
+**Builder.** Codex on `gpt-6-astra` at medium effort, one turn. The prompt has this shape:
+
+1. Name the work object and attach the sample.
+2. An outcome heading: what the user has achieved when the screen is done.
+3. The user's path as numbered steps.
+4. Controls are contextual: each sits beside the thing it acts on.
+5. Every style goes through tokens. No literal colour, size or font in a component.
+6. Every UI state: empty, loading, error, success, signed out and forbidden.
+7. Screenshot at 1440 and 390 wide before finishing, and fix what the screenshots show.
+
+**Gate.** In order, each red sends the builder back with the failing output:
+
+- The operator's layout verify script, a Playwright run at 1440x1000 and 390x844, asserts no horizontal
+  overflow and no page errors at both sizes.
+- Contrast passes in the light and the dark theme.
+- `design-review`, then `unslop`, on the running screen.
+
+`05b-ui.md` records the screenshots, each gate result and the builder's prompt. Fix stories from the
+gate go to `prd.json` for step 6.
 
 ## Step 6: auto
 
@@ -153,5 +194,5 @@ model elsewhere in the chain.
 ## A dry walk
 
 To check the chain without spending anything, run it on a throwaway idea in a scratch directory with every
-external step in its dry-run mode. Confirm that each of the nine artifacts exists, names its input and agrees
-with the ledger.
+external step in its dry-run mode. Confirm that each of the nine artifacts and `05b-ui.md` exists, names its
+input and agrees with the ledger, and that `check-grill-ledger.js` exits 0 on the final ledger.
