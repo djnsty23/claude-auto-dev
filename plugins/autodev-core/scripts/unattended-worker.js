@@ -229,7 +229,9 @@ const sameDir = (a, b) => {
 };
 
 function git(repo, args, timeoutMs) {
-    const r = spawnSync('git', ['-C', repo, ...args], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], timeout: timeoutMs });
+    // windowsHide: under a detached (console-less) parent such as the reconcile verify child, an
+    // unhidden console program gets a new VISIBLE console window on Windows.
+    const r = spawnSync('git', ['-C', repo, ...args], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], timeout: timeoutMs, windowsHide: true });
     // A timed-out git is a failed step the caller reports, not a missing git.
     if (r.error && r.error.code === 'ETIMEDOUT') return { status: null, stdout: '', stderr: `timed out after ${timeoutMs} ms` };
     if (r.error) fault('git-unavailable', r.error.message);
