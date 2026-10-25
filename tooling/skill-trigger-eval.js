@@ -141,6 +141,18 @@ function checkArm(init, pluginsDir) {
     return { ok: true, why: '' };
 }
 
+/**
+ * Did the run fail rather than choose? No result event on a non-zero exit, or a
+ * result flagged is_error for any reason but the one-turn cap (an expired login,
+ * a usage limit, an API error). Those rows carry `err` and the report drops them,
+ * so a rerun fills them instead of counting them as misses.
+ */
+function runError(parsed, status) {
+    const res = parsed.result;
+    if (!res) return status !== 0;
+    return Boolean(res.is_error) && res.subtype !== 'error_max_turns';
+}
+
 /** Grade one run against its case. */
 function grade(kase, parsed, autodevSkills) {
     const want = [kase.expected].concat(kase.accept || []);
@@ -249,7 +261,7 @@ async function cmdRun(args) {
             const parsed = parseStream(r.stdout);
             const armCheck = checkArm(parsed.init, pluginsDir);
             const g = grade(c, parsed, skills);
-            const errored = r.status !== 0 && !parsed.result;
+            const errored = runError(parsed, r.status);
             if (errored) errors++;
             if (g.hit) hits++;
             ran++;
@@ -257,7 +269,7 @@ async function cmdRun(args) {
                 arm, digest, model, effort, id: c.id, expected: c.expected, accept: c.accept || [], sample: s,
                 hit: g.hit, skills: g.skills, otherSkills: g.otherSkills, firstTools: parsed.firstTools.slice(0, 6),
                 armOk: armCheck.ok, armWhy: armCheck.why || undefined, status: r.status, ms: r.ms,
-                err: errored ? String(r.stderr).slice(-300) : undefined,
+                err: errored ? String((parsed.result && parsed.result.result) || r.stderr).slice(-300) : undefined,
             };
             fs.appendFileSync(out, JSON.stringify(row) + '\n');
             process.stdout.write(`${arm} ${c.id} s${s} ${g.hit ? 'HIT ' : 'miss'} `
@@ -426,6 +438,11 @@ function selftest() {
     const g = grade({ expected: 'prove' }, p, ['ship', 'prove']);
     t('a skill loaded for another expectation is a miss', g.hit === false && g.skills.join() === 'ship');
     t('accept widens the hit', grade({ expected: 'prove', accept: ['ship'] }, p, ['ship', 'prove']).hit === true);
+    const ended = (r) => parseStream(JSON.stringify({ type: 'result', ...r }));
+    t('the one-turn cap is a normal end', runError(ended({ is_error: true, subtype: 'error_max_turns' }), 1) === false);
+    t('an expired login is an error, not a miss', runError(ended({ is_error: true, subtype: 'success', result: 'Failed to authenticate' }), 1) === true);
+    t('no result on a non-zero exit is an error', runError(parseStream(''), 1) === true);
+    t('a clean text answer is not an error', runError(ended({ is_error: false, subtype: 'success' }), 0) === false);
     t('hook lets Skill through silently', hook(JSON.stringify({ tool_name: 'Skill' })) === '');
     t('hook denies Bash', /"deny"/.test(hook(JSON.stringify({ tool_name: 'Bash' }))));
     t('hook denies an unparseable event', /"deny"/.test(hook('{')));
@@ -482,4 +499,4 @@ if (require.main === module) {
     });
 }
 
-module.exports = { parseStream, checkArm, grade, hook, summarise, renderReport, fisherLower, drops, treeSkills, treeDigest };
+module.exports = { parseStream, checkArm, runError, grade, hook, summarise, renderReport, fisherLower, drops, treeSkills, treeDigest };
