@@ -1,5 +1,16 @@
 # Changelog
 
+## [8.196.0]
+
+### Fleet
+
+- Queued product work can land again. A headless builder commits and gates, and
+  the Brain pushes, opens the PR and merges through merge-lock. The
+  `coordinator-write-guard` now allows exactly one product write by the
+  coordinator: a non-force `git push origin claude/<slug>` from the worktree of a
+  closed unattended-worker ledger record. Any other push stays blocked. The brain
+  skill and the judge rubric describe the same handoff (#443).
+
 ## [8.195.0]
 
 ### Context depth
