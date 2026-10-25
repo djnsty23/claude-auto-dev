@@ -3,6 +3,49 @@
 Non-obvious choices, and where the work that implements them actually landed.
 One entry per decision, newest first.
 
+## 2026-10-25: the Brain pushes a closed worker's branch, and the builder never pushes
+
+`[measured 2026-10-25]` No product task queued with `unattended-worker.js
+enqueue` could land. Worker `v-li-caption-614b` gated vistek `10d8e2c5` green
+and stopped unpushed. Three sources disagreed: `worker-authority.js` denies the
+headless builder `git push` ("belongs to the Brain"), `coordinator-write-guard.js`
+blocks the Brain's `git push` in any product repo, and the brain skill told the
+worker to push and merge itself. Driving the guard with a fixture role file
+reproduced it: the Brain's `git -C <worktree> push origin claude/<slug>` exits 2,
+while `gh pr create` and `node merge-lock.js` already pass, because the rail
+parses only `git`.
+
+The design is the one `worker-authority.js` already states: privileged actions
+stay with the Brain, the broker the worker cannot call. The builder commits and
+gates on its branch and stops. The Brain reads the result, pushes the branch,
+opens the PR and merges with `merge-lock.js` on the worker's gate receipt. The
+brain skill says so, and the judge rubric in `brain-judge.js` counts a gated,
+unpushed commit left for the coordinator as done.
+
+The guard gained one exemption, `closedRunPush`. It allows a `git push` whose
+effective directory is the worktree of the newest ledger record for that
+worktree, when that record is `closed` and its branch is `claude/<slug>`. The
+arguments must be exactly `origin` and that branch, with only `-u`, quiet,
+verbose, porcelain, dry-run or progress flags. A force of any spelling, another
+refspec, `-c`, `--git-dir`, `--work-tree` or a leading environment assignment
+voids it. Any failure to read the ledger also voids it, so the block stands.
+Every other product write by the coordinator still blocks.
+`tooling/test-coordinator-ledger-push.js` drives both halves as a subprocess.
+
+**Why not let the builder push.** The builder's guard reads tool-call text, not
+an OS boundary. Pushing needs the stored git login, which any process the
+worker starts can then reach, and its prompt carries product-repo content that
+could steer it. A push from the worker would also land before anyone read the
+result, so a branch the judge would refuse is already public. With the Brain
+pushing, the only actor holding the
+login is the one that read the report, and the push is tied to a ledger record
+whose run has ended, so no live worker writes under it.
+
+**What this does not defend.** The ledger is a file the Brain can write, and the
+role file can be removed. This rail stops a coordinator's mistakes, such as
+retargeting PRs or pushing a branch nobody queued. It does not stop a
+coordinator set on bypassing it.
+
 ## 2026-10-17: an autodev PR merges on gate:fast, and the full gate binds the release
 
 The operator chose this on 2026-10-17. It replaces the 2026-10-02 bar for this

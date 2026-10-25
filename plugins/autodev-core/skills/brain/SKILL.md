@@ -188,9 +188,9 @@ small committed units and concise artifact pointers. Reserve independent review
 for material risks; avoid nested fan-outs and duplicate assignments.
 
 **A queued task must be able to finish whole on its first attempt.** The judge
-accepts a run only when its work landed and nothing is left for anyone else, and
-a run that ends on an open PR or an owner's pick is a follow-up or an escalation,
-correctly. So every brief you queue with `unattended-worker.js enqueue` carries
+accepts a run only when nothing is left but your landing step: a gated, committed
+branch the brief told the worker to leave for you counts as done. A run that ends
+ungated, red or on an owner's pick is a follow-up or an escalation, correctly. So every brief you queue with `unattended-worker.js enqueue` carries
 two things:
 
 - **Its acceptance test, by name.** Name a command that exists at the base SHA,
@@ -198,14 +198,20 @@ two things:
   code that means done (`node tooling/test-x.js` prints `x: 9/9 checks passed`).
   "Make it work" or "tests pass" names no test. A worker that has to guess its
   endpoint is the run that comes back as a follow-up.
-- **The merge, done by the worker.** The worker rebases onto `origin/main`, runs
-  the repository's merge-bar gate under its receipt wrapper, and merges its own
-  PR with `merge-lock.js merge --pr <n> --head <sha> --gate-receipt <file>`. Its
-  report gives the merged SHA. This is a DECIDE in the decision policy for the
-  owner's own repositories, so it needs no panel. Where the policy says ASK
-  (payments, client repositories, a production write), the task is not queueable
-  as one unit: split the part that can land from the decision, and raise the
-  decision yourself.
+- **A gated commit from the worker, and the landing by you.** A headless builder
+  may not push or write through `gh` (`worker-authority.js`). The worker rebases
+  onto `origin/main`, commits on its branch, runs the repository's merge-bar gate
+  under its receipt wrapper, and stops. Its report gives the head SHA and the
+  receipt path. Once the record is `closed`, you land it: `git -C <worktree> push
+  -u origin claude/<slug>`, `gh pr create`, then `merge-lock.js merge --pr <n>
+  --head <sha> --gate-receipt <file>`. The coordinator write guard allows that
+  one push, of a closed record's branch from its worktree, and blocks every other
+  product write of yours (docs/decisions.md, 2026-10-25). A moved base makes
+  merge-lock refuse: queue a follow-up to rebase and re-gate. This is a DECIDE in
+  the decision policy for the owner's own repositories, so it needs no panel.
+  Where the policy says ASK (payments, client repositories, a production write),
+  the task is not queueable as one unit: split the part that can land from the
+  decision, and raise the decision yourself.
 
 Leave a task out of the queue, rather than choosing a smaller one, when it cannot
 meet both. A run that is trivial so that it gets accepted inflates the delivery
