@@ -142,6 +142,31 @@ function checkArm(init, pluginsDir) {
 }
 
 /**
+ * One session id per arm, so every run in it sees the same first turn. The
+ * environment block names a scratchpad directory that embeds the session id,
+ * and it sits before the prompt, so a fresh id per run made two samples of one
+ * case differ there and each wrote ~28k tokens of cache instead of reading the
+ * first sample's. --no-session-persistence lets the id repeat.
+ */
+function armSessionId(arm, digest) {
+    const h = crypto.createHash('sha256').update(`skill-trigger-eval\0${arm}\0${digest}`).digest('hex');
+    return `${h.slice(0, 8)}-${h.slice(8, 12)}-4${h.slice(13, 16)}-8${h.slice(17, 20)}-${h.slice(20, 32)}`;
+}
+
+/**
+ * Sample-major order: every case's sample 0, then every sample 1. Samples of one
+ * case never run at the same time, so a later one reads the cache an earlier
+ * one wrote (1h TTL) instead of racing it.
+ */
+function runOrder(cases, samples, done) {
+    const queue = [];
+    for (let s = 0; s < samples; s++) for (const c of cases) {
+        if (!done.has(`${c.id}\0${s}`)) queue.push([c, s]);
+    }
+    return queue;
+}
+
+/**
  * Did the run fail rather than choose? No result event on a non-zero exit, or a
  * result flagged is_error for any reason but the one-turn cap (an expired login,
  * a usage limit, an API error). Those rows carry `err` and the report drops them,
@@ -240,14 +265,12 @@ async function cmdRun(args) {
     const env = { ...process.env };
     if (opt(args, '--config-dir')) env.CLAUDE_CONFIG_DIR = opt(args, '--config-dir');
     const base = ['-p', '--output-format', 'stream-json', '--verbose', '--max-turns', maxTurns,
-        '--model', model, '--effort', effort, '--permission-prompts', 'none', '--settings', settings];
+        '--model', model, '--effort', effort, '--permission-prompts', 'none', '--settings', settings,
+        '--session-id', armSessionId(arm, digest), '--no-session-persistence'];
     for (const p of PLUGINS) base.push('--plugin-dir', path.join(pluginsDir, p));
 
-    const done = new Set(readRows(out).map((r) => `${r.arm}\0${r.id}\0${r.sample}`));
-    const queue = [];
-    for (const c of cases) for (let s = 0; s < samples; s++) {
-        if (!done.has(`${arm}\0${c.id}\0${s}`)) queue.push([c, s]);
-    }
+    const done = new Set(readRows(out).filter((r) => r.arm === arm).map((r) => `${r.id}\0${r.sample}`));
+    const queue = runOrder(cases, samples, done);
     process.stdout.write(`population: ${cases.length} case(s) x ${samples} sample(s), ${queue.length} to run, `
         + `arm ${arm} (${digest}, ${skills.length} skills), model ${model}, effort ${effort}\n`);
     let errors = 0;
@@ -262,6 +285,7 @@ async function cmdRun(args) {
             const armCheck = checkArm(parsed.init, pluginsDir);
             const g = grade(c, parsed, skills);
             const errored = runError(parsed, r.status);
+            const usage = (parsed.result && parsed.result.usage) || {};
             if (errored) errors++;
             if (g.hit) hits++;
             ran++;
@@ -269,6 +293,8 @@ async function cmdRun(args) {
                 arm, digest, model, effort, id: c.id, expected: c.expected, accept: c.accept || [], sample: s,
                 hit: g.hit, skills: g.skills, otherSkills: g.otherSkills, firstTools: parsed.firstTools.slice(0, 6),
                 armOk: armCheck.ok, armWhy: armCheck.why || undefined, status: r.status, ms: r.ms,
+                cacheRead: usage.cache_read_input_tokens, cacheWrite: usage.cache_creation_input_tokens, input: usage.input_tokens,
+                cacheWrite5m: usage.cache_creation && usage.cache_creation.ephemeral_5m_input_tokens,
                 err: errored ? String((parsed.result && parsed.result.result) || r.stderr).slice(-300) : undefined,
             };
             fs.appendFileSync(out, JSON.stringify(row) + '\n');
@@ -438,6 +464,10 @@ function selftest() {
     const g = grade({ expected: 'prove' }, p, ['ship', 'prove']);
     t('a skill loaded for another expectation is a miss', g.hit === false && g.skills.join() === 'ship');
     t('accept widens the hit', grade({ expected: 'prove', accept: ['ship'] }, p, ['ship', 'prove']).hit === true);
+    const order = runOrder([{ id: 'a' }, { id: 'b' }], 2, new Set(['b\u00000'])).map(([c, n]) => `${c.id}${n}`).join();
+    t('samples of one case are spaced apart, done rows skipped', order === 'a0,a1,b1');
+    t('one session id per arm, a valid uuid', armSessionId('p4', 'x') === armSessionId('p4', 'x')
+        && armSessionId('p4', 'x') !== armSessionId('main', 'x') && /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-8[0-9a-f]{3}-[0-9a-f]{12}$/.test(armSessionId('p4', 'x')));
     const ended = (r) => parseStream(JSON.stringify({ type: 'result', ...r }));
     t('the one-turn cap is a normal end', runError(ended({ is_error: true, subtype: 'error_max_turns' }), 1) === false);
     t('an expired login is an error, not a miss', runError(ended({ is_error: true, subtype: 'success', result: 'Failed to authenticate' }), 1) === true);
@@ -499,4 +529,4 @@ if (require.main === module) {
     });
 }
 
-module.exports = { parseStream, checkArm, runError, grade, hook, summarise, renderReport, fisherLower, drops, treeSkills, treeDigest };
+module.exports = { parseStream, checkArm, runError, runOrder, armSessionId, grade, hook, summarise, renderReport, fisherLower, drops, treeSkills, treeDigest };
