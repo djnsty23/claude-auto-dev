@@ -22,6 +22,7 @@ no trace.
 - Step 7: two independent reviews
 - Steps 8 and 9
 - Phase 2: the works
+- Unattended intake: the idea conveyor
 - A dry walk
 
 ## The steps
@@ -190,6 +191,16 @@ above). Then step 9's exit re-enters step 6 with sprint 2, and steps 7 to 9 run 
 A plan that needs deep judgement (a data model with money or multi-tenant access, a migration path, a
 module boundary) gets one pass from the `plan-reviewer` agent before sprint 1 starts. Do not use that
 model elsewhere in the chain.
+
+## Unattended intake: the idea conveyor
+
+`scripts/idea-conveyor.js` starts this chain from the idea hubs with nobody watching. `intake` classifies
+each exported idea as skipped, parked, a feature in a live product, or a full website, applying the
+eligibility rule as code. A feature enqueues steps 1, 2 and 6 to 9 through `unattended-worker.js enqueue
+--after`. A full website enqueues steps 1 and 2 only, and `tick` then posts one blocking start decision.
+Every stage ends with a `receipt` (gate command, exit code, artifact) and, when it decided anything,
+a `review-point`. A non-blocking review point is approved by silence once the next stage starts. Hub writes
+are never made by the script: they wait in its outbox for the coordinator's preview and confirm.
 
 ## A dry walk
 
