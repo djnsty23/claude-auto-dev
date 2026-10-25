@@ -65,6 +65,23 @@ try {
     check('  separates a non-autodev skill from nothing', /\(other\) 1/.test(rep.stdout), rep.stdout);
     const none = run(['report', path.join(tmp, 'absent.jsonl')]);
     check('report on no rows exits 1', none.status === 1, `status=${none.status}`);
+
+    // --base: 1/1 against 0/2 is a drop but noise, so exit 0 and say so. A
+    // 6/6 against 0/6 drop is significant and exits 3.
+    const noise = run(['report', fixture, '--base', 'before']);
+    check('--base lists a drop at small n without failing', noise.status === 0
+        && /Below base arm before .*prove in after 0\/2 vs 1\/1, p=0\.333(?! SIGNIFICANT)/.test(noise.stdout), `status=${noise.status} ${noise.stdout}`);
+    const big = [];
+    for (let i = 0; i < 6; i++) {
+        big.push({ arm: 'before', id: 'q', expected: 'ship', sample: i, hit: true, skills: ['ship'], otherSkills: [], armOk: true });
+        big.push({ arm: 'after', id: 'q', expected: 'ship', sample: i, hit: false, skills: [], otherSkills: [], armOk: true });
+    }
+    const bigFile = path.join(tmp, 'big.jsonl');
+    fs.writeFileSync(bigFile, big.map((r) => JSON.stringify(r)).join('\n') + '\n');
+    const sig = run(['report', bigFile, '--base', 'before']);
+    check('--base exits 3 on a significant drop', sig.status === 3 && /ship in after 0\/6 vs 6\/6, p=0\.001 SIGNIFICANT/.test(sig.stdout), `status=${sig.status} ${sig.stdout.slice(-300)}`);
+    const nobase = run(['report', fixture, '--base', 'nope']);
+    check('--base naming an absent arm exits 2', nobase.status === 2, `status=${nobase.status}`);
 } finally {
     fs.rmSync(tmp, { recursive: true, force: true });
 }
