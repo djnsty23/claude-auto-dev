@@ -16,10 +16,9 @@ boundary. Completion means the promised behavior was observed in the intended
 environment and its evidence recorded. Plans, workers and green builds are
 intermediate results.
 
-This is the active procedure. Historical notes are not shipped with the plugin.
-They live in the autodev repository at `docs/history-brain-2026-09-09.md`, for
-investigating a specific earlier incident only. Their quoted permissions, tool
-availability and superseded instructions are not current policy.
+This is the active procedure. Historical notes live in the autodev repository
+at `docs/history-brain-2026-09-09.md`, for investigating an earlier incident
+only: their quoted permissions and instructions are not current policy.
 
 ## 1. Establish scope and capabilities
 
@@ -45,33 +44,16 @@ Missing warnings, empty hook populations and untested function modules are not
 proof that controls ran.
 
 For fleet coordination, run `brain-brief.js`, `fleet-status.js` and
-`fleet-overlap.js`. Bind the repo set to the mandate and exclude client or
-retired projects unless assigned. A `brain-brief.js` exit 2 means that set is
-incomplete. Read populations and COULD-NOT-CHECK results; advisory exit 0 does
-not establish health. Read current git refs and PR content before acting.
+`fleet-overlap.js` over the mandate's repo set, client or retired projects
+excluded unless assigned. A `brain-brief.js` exit 2 means that set is
+incomplete; advisory exit 0 does not establish health. Read current git refs and
+PR content before acting.
 
-Before claiming an existing fleet role, read its live registries. `session_id`
-is the CLI UUID; `peer_name` and `desktop_session_id` are separate addresses,
-joined through the desktop record's `cliSessionId`. Never derive one by editing
-another's spelling. Preserve the prior `brain-role.json` record and scope
-`home_repos` to the coordinator's own writable repos. Run `check-brain-role.js
---json`; require an `ok` record naming this session. Exit 0 also covers an absent
-role. Where this runtime has no compatible registry, use its native agent return
-channel and state that Claude's fleet hooks do not cover it. Notify existing
-workers of an address change only within the user's authorized coordination.
-
-When the record is `degraded`, use its positively verified reachable address
-for existing work and re-stamp the stale field before broadcasting the record.
-A decayed peer name does not mean the coordinator disappeared. A `fault` or
-unchecked address requires diagnosis; a missing check is not proof of death.
-
-Before the first PR is bound to this session, call `mcp__ccd_pr__set_monitor`
-with `auto_archive_on_close: false`, then read `ccd_pr get_status self` and
-require that switch to read false. The app archives an idle session once a bound
-PR merges or closes, and binding an open PR clears the exemption an unarchive
-gives. Only the session itself can set this override. `[measured 2026-10-17]`
-Brain 40 held release PR #409, merged a day earlier, and the app archived it the
-moment its last turn ended.
+Load [references/fleet-role.md](references/fleet-role.md) before claiming an
+existing fleet role, and before the first PR is bound to this session: it holds
+the address registries, `check-brain-role.js --json`, and the
+`mcp__ccd_pr__set_monitor` call with `auto_archive_on_close: false` that keeps a
+merge from archiving this session.
 
 ## 2. Turn the mission into executable outcomes
 
@@ -81,7 +63,7 @@ avoid duplicating work. A branch title is a lead, not a description of its diff.
 
 For a new idea, load `spec`, then `setup-project` and `core`. Infer ordinary
 choices and record assumptions. Continue into building when already requested;
-“say auto to start” does not complete a build request. Add missing capabilities
+"say auto to start" does not complete a build request. Add missing capabilities
 to an existing product's backlog. Small direct fixes need no invented sprint.
 Each capability names an actor, trigger, observable outcome and verification
 method. Write dependency IDs in `blockedBy` and concrete acceptance conditions.
@@ -89,96 +71,31 @@ Include persistence after reload, invalid input, access boundaries, recovery and
 loading/empty/error/success states where applicable. Identify external setup and
 the release step. A wording check does not prove completeness or database access.
 
-Use `workPlan(prd)` from `scripts/prd-states.js` for dependency-ready work from
-all sprints, as Auto and its Stop hook do. For missions recorded in the store,
-`scripts/mission-supervisor.js tick` is one bounded pass over that plan: it
-settles claimed missions (reconcile, deliver, accept the envelope or fail the
-attempt with the store's retry codes), starts what is ready or past its
-backoff through the dispatcher, admits each mission in its own worktree with
-`--worktrees`, and reports exhausted, blocked and invalid work by name. It
-never loops, never writes `prd.json`, and reports an accepted envelope as
-awaiting verification, never as done. Keep pending, failed, done, deferred,
-needs-setup and invalid records distinct. No ready work with unresolved stories
-means blocked or inconsistent, never complete. Diagnose dependency faults once,
-preserve the blocker and work elsewhere; retry only after a relevant condition
-changes. Do not reactivate deferred work to manufacture a fresh queue.
-
-A mission with no `prd.json` registers its queue so the Stop hook can hold it:
-`node "${CLAUDE_PLUGIN_ROOT}/scripts/mission-queue.js" start --mission "<goal>"`, then
-`add <id> <title>` per item. Move items as they change: `set <id> inflight` once a
-worker or wakeup will bring you back, `blocked --note "<who>"` for a person,
-`done` or `dropped` with the evidence. The Stop hook blocks while any item is
-`pending`. A failed command leaves its item pending: retry it, or record the
-blocker. `stalled --minutes 60` lists missions stopped with pending work.
+Plan with `workPlan(prd)` from `scripts/prd-states.js`, or one bounded
+`scripts/mission-supervisor.js tick` for missions in the store. A mission with
+no `prd.json` registers its queue with `scripts/mission-queue.js` so the Stop
+hook can hold it. Load [references/mission-records.md](references/mission-records.md)
+for both. Keep pending, failed, done, deferred, needs-setup and invalid records
+distinct. No ready work with unresolved stories means blocked or inconsistent,
+never complete. Diagnose dependency faults once, preserve the blocker and work
+elsewhere; retry only after a relevant condition changes. Do not reactivate
+deferred work to manufacture a fresh queue.
 
 ## 3. Start bounded workers with one owner per unit
 
 Load `isolate` and `rule-agent-concurrency`. Before dispatch, record story,
-worker, repository, base SHA, worktree, owned paths and return artifact. Record
-it durably, not in the conversation: `scripts/mission-contract.js` turns the
-story's acceptance criterion, verified repository identity and base SHA into an
-immutable contract, and `scripts/mission-store.js` `admit` then `claim`
-persist it under a fenced owner (both answer `--help`). The same story at the
-same base yields the same contract; a changed criterion is refused under the
-original event, so stale evidence cannot be carried forward by re-admitting. The
-store records and fences; it starts nothing, delivers nothing and verifies
-nothing, and every status it returns says `verified: false`. One
-coordinator assigns this mission's work. A decision log is not a cross-machine
-lease; inspect existing ownership, including `mission-store.js status`,
-before a second dispatch.
+worker, repository, base SHA, worktree, owned paths and return artifact, durably
+through `scripts/mission-contract.js` and `scripts/mission-store.js`. One
+coordinator assigns this mission's work; inspect existing ownership before a
+second dispatch.
 
-Choose a channel that actually starts work:
-
-- Use available native agents or workflows for bounded work in this mission.
-  Assign an isolated worktree at `<repo>/.claude/worktrees/<name>`, and name that
-  path in the brief: a brief that says only "a new worktree" gets one beside the
-  repo. Verify the worker's actual cwd, origin and
-  base before edits. Agents may inherit the parent's directory. For a worker
-  that is a local Node script, `scripts/mission-dispatch.js start` is that
-  boundary: it forks the worker in the contract root with no shell, waits for
-  it to register with the store, reads back its pid, cwd and HEAD, and refuses
-  a readback that disagrees with the contract; after a crash, `reconcile`
-  reports prepared, terminal, live or unknown and never starts a second
-  worker. Any other adapter answers `awaiting-start` and records nothing.
-- Reuse an authorized existing worker through a channel that wakes it. Read
-  back identity and started state once, then use completion events or bounded
-  waits. A queued message is not an acknowledgment or a running process.
-- Create desktop chips when the user requests separate tasks or that is the
-  available transport. Keep them `awaiting-start` until started. A chip needing
-  a click cannot satisfy unattended dispatch. If no autonomous channel exists,
-  name that limitation instead of assuming execution or generating more chips.
-- Start a separate unattended session, where the desktop scheduler exists, with
-  `scripts/unattended-worker.js`. Its `brief` refuses a slug already claimed and
-  prints `create_scheduled_task` arguments whose prompt opens with `git worktree
-  add`, because the run opens in the coordinator's shared origin checkout. Call
-  `mcp__scheduled-tasks__create_scheduled_task` with them (no schedule), then
-  `mcp__scheduled-tasks__run_scheduled_task`, then `record` the returned session
-  id. Deleting the task archives its session, so run `settle` with the run's
-  status from `mcp__scheduled-tasks__list_task_runs`; call
-  `mcp__scheduled-tasks__delete_scheduled_task` only when it answers
-  `deleteSafe: true`, then `deleted`. A `started` record is a session id, not
-  proof that STEP 0 passed: read the session's events.
-- Queue work the Brain clock starts with no session open:
-  `unattended-worker.js enqueue --repo <path> --slug <slug> --brief-file <file>
-  --return <address> [--after <taskId>]`. The clock's `judge` capability runs
-  `scripts/brain-judge.js tick` every pass. It closes a finished headless run,
-  judges it (accept, follow-up or escalate) with a tool-less `claude -p`, and
-  starts ready work through `unattended-worker.js launch`: at most 2 running,
-  2 launched an hour, 6 judge runs an hour. A task with `--after` starts only
-  once each dependency is closed as succeeded with an `accept` or `follow-up`
-  verdict. `brain-judge.js switch --judge <mode> --start <mode>` is the kill
-  switch, with modes off, dry and live. A step is live only when the switch
-  says live AND the clock pass is live, and no switch file means dry. Three
-  failed clock passes stop judging and starting. When you read a closed
-  record yourself, write your call with `unattended-worker.js verdict
-  --task-id <id> --decision <d> --reason <why> --by brain`: a judge never
-  overwrites it, and `brain-judge.js compare` grades the judge against it.
-- Sweep each product with a user-facing surface for layout slop on a schedule
-  (weekly, and after a batch of UI merges): write the brief with
-  `unslop-sweep.js brief --repo <path> --base http://localhost:<port> --return <address>`
-  to a file, then queue it with `unattended-worker.js enqueue --slug unslop-<product>`.
-  The worker runs the `unslop` skill locally, writes component stories, fixes
-  them through `auto`, and returns the compare verdict and before/after counts.
+Choose a channel that actually starts work. Load
+[references/dispatch-channels.md](references/dispatch-channels.md) before the
+first dispatch: native agents in a named worktree at
+`<repo>/.claude/worktrees/<name>`, an unattended session or the Brain clock
+queue through `scripts/unattended-worker.js`, and the scheduled unslop sweep. A
+queued message, a chip awaiting a click or a `started` record is not a running
+worker: read back identity and started state.
 
 Every brief stands alone: mission, acceptance, exact refs, evidence, ownership,
 permitted actions, actual verification commands, artifact path and return
@@ -187,35 +104,12 @@ or readable skill file; a bare word in a prompt is not proof it loaded. Require
 small committed units and concise artifact pointers. Reserve independent review
 for material risks; avoid nested fan-outs and duplicate assignments.
 
-**A queued task must be able to finish whole on its first attempt.** The judge
-accepts a run only when nothing is left but your landing step: a gated, committed
-branch the brief told the worker to leave for you counts as done. A run that ends
-ungated, red or on an owner's pick is a follow-up or an escalation, correctly. So every brief you queue with `unattended-worker.js enqueue` carries
-two things:
-
-- **Its acceptance test, by name.** Name a command that exists at the base SHA,
-  or one the brief tells the worker to write first, and the exact line or exit
-  code that means done (`node tooling/test-x.js` prints `x: 9/9 checks passed`).
-  "Make it work" or "tests pass" names no test. A worker that has to guess its
-  endpoint is the run that comes back as a follow-up.
-- **A gated commit from the worker, and the landing by you.** A headless builder
-  may not push or write through `gh` (`worker-authority.js`). The worker rebases
-  onto `origin/main`, commits on its branch, runs the repository's merge-bar gate
-  under its receipt wrapper, and stops. Its report gives the head SHA and the
-  receipt path. Once the record is `closed`, you land it: `git -C <worktree> push
-  -u origin claude/<slug>`, `gh pr create`, then `merge-lock.js merge --pr <n>
-  --head <sha> --gate-receipt <file>`. The coordinator write guard allows that
-  one push, of a closed record's branch from its worktree, and blocks every other
-  product write of yours (docs/decisions.md, 2026-10-25). A moved base makes
-  merge-lock refuse: queue a follow-up to rebase and re-gate. This is a DECIDE in
-  the decision policy for the owner's own repositories, so it needs no panel.
-  Where the policy says ASK (payments, client repositories, a production write),
-  the task is not queueable as one unit: split the part that can land from the
-  decision, and raise the decision yourself.
-
-Leave a task out of the queue, rather than choosing a smaller one, when it cannot
-meet both. A run that is trivial so that it gets accepted inflates the delivery
-window it is graded by and proves nothing.
+**A queued task must be able to finish whole on its first attempt.** Every brief
+queued with `unattended-worker.js enqueue` names its acceptance test (a command
+and the exact line or exit code that means done), and ends in a gated commit the
+worker leaves for you to land through `merge-lock.js`. The landing steps and
+the ASK split are in `references/dispatch-channels.md`. Leave a task out of the
+queue, rather than choosing a smaller one, when it cannot meet both.
 
 Workers implement with `auto` and the project's actual gate. Brain owns scope,
 sequencing and acceptance. Product edits and conflicts belong to the assigned
@@ -228,23 +122,20 @@ Read the commit and artifacts, not just the worker's summary. Load `prove`:
 capture a defect before editing and compare the same observable afterwards.
 For new behavior record that no earlier implementation existed.
 
-Reconcile required hook verdicts and actual tool results with the worker's
-lifecycle status. A native `completed` turn can follow a blocked hook with no
-process error. Do not promote that lifecycle receipt into verified acceptance;
-an unloaded item list is not evidence that no work occurred.
+Reconcile hook verdicts and actual tool results with the worker's lifecycle
+status: a native `completed` turn can follow a blocked hook with no process
+error, and is not verified acceptance.
 
-Execute acceptance through the actual interface. UI verification includes
-internal/admin pages: drive the flow at supported desktop and mobile sizes,
-inspect console/network errors, and verify resulting data and reload behavior.
-A screenshot or HTTP 200 alone proves neither a mutation nor authorization.
-Use an isolated account/environment for writes; unauthorized production tests
-remain unresolved instead of being run or counted as passed.
+Execute acceptance through the actual interface, internal/admin pages included:
+drive the flow at desktop and mobile sizes, inspect console/network errors, and
+verify resulting data and reload behavior. A screenshot or HTTP 200 alone proves
+neither a mutation nor authorization. Writes use an isolated account; an
+unauthorized production test stays unresolved, never run or counted as passed.
 
-Run the project's complete gate on the exact candidate commit. Confirm every
-required stage ran, with real populations and preserved exit codes. An unrelated
-success cannot excuse a skipped required job. Use `check-pr-ready.js` for PR
-triage, not product acceptance or deployment permission. Re-run integration
-checks after a rebase or changed base.
+Run the project's complete gate on the exact candidate commit, every required
+stage with real populations and preserved exit codes. `check-pr-ready.js` is PR
+triage, not acceptance or deployment permission. Re-run integration checks after
+a rebase or changed base.
 
 Load `review`, or `adversarial-loop` for harness/security/verification changes.
 Fix findings or record disconfirming evidence. Freeze acceptance scope after the
@@ -252,15 +143,10 @@ audit pass and queue independent new scope. Repeated identical observations add
 no evidence. A score is not a completion condition. Set `passes: true` only when
 the story's acceptance evidence exists; subjective realness does not replace it.
 
-Before merging, read `ccd_pr get_status self`. When `auto_archive_on_close` is
-true and a PR is bound, the merge archives this session and removes its
-worktree. Move the worktree off the PR branch, `unbind_pr`, confirm `bound:
-false`, then merge with `--match-head-commit` pinned to the head CI ran on. The
-switch is readable; do not infer it from archived session records. Before that,
-run `session-sweep.js --self`: a `local-only(...)` blocker names the gitignored
-files (an `.env.local`, for one) that go with the worktree when it is removed,
-and they have to be copied out first. `[measured 2026-09-16]` a merge with the
-switch on took a worktree whose `.env.local` held a key no other checkout had.
+Before merging, read `ccd_pr get_status self` and follow the merge steps in
+`references/fleet-role.md`: with `auto_archive_on_close` true and a PR bound,
+the merge archives this session and removes its worktree, gitignored files
+included.
 
 ## 5. Release and verify the live result
 
@@ -270,12 +156,10 @@ Apply production conditions BEFORE that action. Inspect the platform target;
 a preview command can assign a first production deployment.
 
 Before promotion, record tested SHA/base, gate command/output, affected surfaces,
-expected target, live verification plan and an executable rollback procedure.
-Bind evidence to that candidate; regenerating a ledger must not transfer ticks
-to changed code. A ledger is recorded assertions, not independent proof. Check
-the candidate against the current base; resolve a platform that cannot deploy
-the tested candidate before promotion. Afterwards read the platform's actual
-SHA/environment and drive the promised live flows.
+expected target, live verification plan and an executable rollback procedure,
+bound to that candidate: a regenerated ledger must not transfer ticks to changed
+code. Afterwards read the platform's actual SHA/environment and drive the
+promised live flows.
 
 If live verification fails, stop later releases, preserve the failed attempt,
 execute the authorized recovery procedure, and verify the recovered behavior.
@@ -286,121 +170,24 @@ not update running sessions.
 ## 6. Recover and hand over
 
 Consume completion/failure events and inspect durable work. Stop hooks request
-reports; they are not acknowledged message queues. Keep dispatch records until
-results are acknowledged: after a restart, `mission-store.js status` returns
-the mission's attempts, results, launches and outbox as recorded, and a replayed
-event returns its first answer instead of acting twice. A cooldown, crash or
-first Stop may emit no report. A worker's result lives in the store's outbox
-from the moment it enqueued it; `scripts/mission-deliver.js deliver` consumes
-it once, recovers a lost acknowledgement without a second send, reports an
-exhausted send budget instead of retrying, and `status` keeps sent, received,
-quarantined, rejected and accepted apart. `accept` records only that the
-envelope matches the contract; it is not verification.
-Before retrying, inspect commits, the working tree and journal: a timed-out
-worker may still be running. Never kill by command pattern or spawn blindly.
+reports; they are not acknowledged message queues, and a cooldown, crash or
+first Stop may emit none. Keep dispatch records until results are acknowledged
+(`references/mission-records.md`). Before retrying, inspect commits, the working
+tree and journal: a timed-out worker may still be running. Never kill by command
+pattern or spawn blindly.
 
-Use `workflow-run-triage.js`, then the existing workflow's resume mechanism for
-unfinished calls. A redispatch proposal is not a restart. Quota exhaustion needs
-a supported scheduler/reset event to run later; a Stop hook cannot wake a dead
-process. Record the recovery command if no automatic mechanism exists. Promise
-monitoring only after an authorized monitor is installed and verified.
+Use `workflow-run-triage.js`, then the workflow's resume mechanism for
+unfinished calls. Quota exhaustion needs a scheduler/reset event to run later; a
+Stop hook cannot wake a dead process. Promise monitoring only after an
+authorized monitor is installed and verified.
 
-### A coordinator has nobody to wake it and no one to stop for
-
-Both halves of this section's ending assume something above you. Neither is true
-in this seat, and each cost a measured outage on 2026-09-11.
-
-**Approaching the context limit, compact in place. Do not stop, and do not spawn
-a successor.** The instruction elsewhere in this workflow (finish the step, write
-the handoff, tell whoever is coordinating, and stop) is a no-op when the Brain IS
-the coordinator: there is nobody to tell and nobody to resume the work. One Brain
-announced stopping about six times between 300k and 706k and never handed over,
-so its sessions kept working with nothing to integrate what they finished. The
-fix that followed was a successor spawned as a chip, and a chip needs a person to
-click it. `[measured 2026-09-22]` 23 Brains in 27 hours meant 22 hand-overs, each one
-waiting on a click.
-
-So the Brain keeps its seat and sheds the context instead. With an auto-compact
-window configured (`autoCompactWindow` in settings, recommended 320k in
-`docs/recommended-settings.json`), the context-depth Stop hook holds your Stop
-once at the 250k soft line. When it does, finish the unit you are in, refresh the
-handoff with `session-exit.js --out` at the path the hook names, re-point its
-START HERE, and end the turn. Compaction lands after the state is on disk, and
-the SessionStart that follows it names the handoff and the fleet ledger
-(`unattended-worker.js status`) to re-read. Keep your address and your role
-record: the session id survives a compaction, so `~/.claude/brain-role.json`
-stays claimed. Compaction is a remedy for CONTEXT DEPTH, not the answer to the
-next paragraph, and filing it as both is how that outage was first misdiagnosed.
-
-`[measured 2026-10-25]` Desktop sessions compact at the configured window: 150
-compactions in six days of one machine's transcripts with `autoCompactWindow`
-300000, the Brain among them. A Stop can read a depth past the window before
-the next request compacts, so the hook still says compaction follows there. A
-worker that claims it "can't compact" keeps working: it writes its handoff at a
-natural break and never stops or asks for a fresh session over context depth.
-The continuation chip is only for a host with no window configured.
-
-**A self-clear does not shed context. Only a fresh session or a compaction
-does.** `[measured 2026-09-16]` One interactive Brain (claude-opus-5, bypass
-permissions) issued the session-management self-clear (`clear_session` with
-`session_id: "self"`) eight times between 364k and 557k tokens of context. The
-first call was refused because a user message was queued behind the turn; the
-other seven answered that the conversation would be cleared when the turn
-ended. After each accepted clear the process restarted (new pid, SessionStart
-hooks re-ran, `peer_name` reset to the session title), the session id stayed
-the same, and the next turn read the whole transcript again: 364,478 tokens
-after the first clear, 557,606 after the last, never fewer than before. The
-only drop in that session was the harness's own automatic compaction, at
-967,210 tokens down to 29,546, after which the queue survived only as far as
-the compaction summary carried it. Measured by summing `input_tokens`,
-`cache_read_input_tokens` and `cache_creation_input_tokens` per assistant turn
-in the session's transcript under `~/.claude/projects/`; re-measure the same
-way after a harness change before trusting a different result.
-
-So at the context line, do not reach for `mcp__ccd_session_mgmt__clear_session`
-expecting relief. Write and mirror the handoff, re-point its START HERE, and let
-the compaction above shed the context. If the clear is issued anyway, re-stamp
-`peer_name` in the role record afterwards, because `check-brain-role.js --json`
-reads `degraded` (dead peer) until then, and issue it only when nothing is
-inbound: a queued user message, peer message or task notification drops it.
-
-**Dispatch workers with no click through `scripts/unattended-worker.js`.**
-`mcp__scheduled-tasks__run_scheduled_task` called from this interactive session
-starts a Desktop session in seconds and asks nobody (`[measured 2026-09-22]`
-4.3 s). The dispatch steps are the unattended bullet in "Choose a channel that
-actually starts work" above. Brief the worker knowing what that session cannot
-do:
-
-- It is unattended. No one answers a panel, and it runs on its brief alone.
-- It cannot receive `mcp__ccd_session_mgmt__send_message`, so a mid-run
-  correction never arrives. Put everything in the brief, and name a report file
-  as its return channel.
-- It cannot be cleared from outside, and it cannot call `run_scheduled_task`
-  itself, so a worker never dispatches a worker. Fan-out stays with you.
-- It starts in your origin checkout, and the tool takes no cwd. The STEP 0 that
-  `brief` writes (`git worktree add`, then `cd` on every command) is the only
-  thing keeping it out of the shared tree. STEP 0 also links the worktree's
-  node_modules to the main checkout's (`shared-install.js link`). A chip or
-  any other brief you write by hand carries the same line after its
-  `git worktree add`: `node "$(printf '%s\n' "${CLAUDE_CONFIG_DIR:-$HOME/.claude}"/plugins/cache/*/autodev-core/*/scripts/shared-install.js | sort -V | tail -1)" link .`
-
-**With an empty inbox, DRIVE. Fan the work out to background agents from this
-session.** Reporting and waiting for an inbound peer message is not coordination;
-it makes the coordinator idle exactly when its sessions go quiet to run long
-gates. The same Brain merged 15 PRs in the 4h15m it had traffic, then 0 in the
-next 4h53m, because every turn ended by waiting to be spoken to. Work needing no
-message to arrive first: rebasing stale PRs, sequencing a stack, re-measuring a
-board whose base has moved, chasing a blocked session. **A task chip is not this
-mechanism**: step 3 already rules a chip out for unattended dispatch, and an
-empty inbox overnight is that case exactly — one raised then sits unclicked
-until morning. Background agents started from your own session, and unattended
-workers started with `unattended-worker.js`, run without anyone clicking, and
-you keep coordinating while they do. A self-scheduled wake
-is not it either: waking to an empty inbox and reporting again repeats the
-failure on a timer. The one exception is polling a board: a dynamic `/loop`
-that wakes every 300 to 1800 s, reads the board and dispatches what it finds
-is a poll, not a driver. The work it finds still runs in background agents or
-unattended workers.
+**This seat has nobody to wake it and no one to stop for.** Approaching the
+context limit, compact in place: do not stop, and do not spawn a successor. A
+self-clear does not shed context. With an empty inbox, drive: fan work out to
+background agents or unattended workers, never a chip. Load
+[references/coordinator-seat.md](references/coordinator-seat.md) at the 250k
+soft line, before any `mcp__ccd_session_mgmt__clear_session`, and whenever the
+inbox is empty.
 
 For a stalled item record the hypothesis, last meaningful evidence and next
 experiment. Continue independent stories and keep failed work unresolved. At
