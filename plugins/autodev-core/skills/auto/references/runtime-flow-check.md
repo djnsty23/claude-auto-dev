@@ -1,6 +1,11 @@
 # Runtime flow check
 
-The steps, exit codes and measured reach of the runtime flow check in the auto skill. "As above" in step 1 means the dev-server block in SKILL.md, under Verification.
+A screenshot cannot tell a handler that ran from one nested where it never
+runs; both produce one green picture. `[measured 2026-08-16]` that is the
+common first-pass failure, 112 incomplete flows against 20 crashes in one
+repo (`docs/failure-evidence.md`).
+
+The steps, exit codes and measured reach of the runtime flow check in the auto skill. "As above" in step 1 means the dev-server block in [task-checks.md](task-checks.md), under Verification by task type.
 
 1. Start or find the dev server exactly as above.
 2. Drive the **primary flow the criterion describes** with the browser tools:

@@ -2,6 +2,15 @@
 
 What auto does once every story in a sprint is done: verify, archive, bump, then continue or ask.
 
+## Contents
+
+- Auto Sprint Transition
+- Decision Matrix
+- Auto-Continue (Obvious Work)
+- Ask User (No Obvious Work or Limit Reached)
+- Completion summary
+- Quick reference
+
 ## Auto Sprint Transition
 
 When all pending tasks are done, auto handles the sprint lifecycle — but verifies the work first and surfaces a summary before bumping.
@@ -78,3 +87,37 @@ What's next?
 ```
 
 Keep the auto flag while asking. If the user picks "Done for now", write `.claude/auto-exit` with the Write tool; the Stop hook removes this session's flag.
+
+## Completion summary
+
+Printed when `plan.complete` holds. A `needs-setup` story keeps the sprint
+incomplete, but its "Blocked on you" line is printed whenever the run stops.
+
+```
+All [N] tasks complete.
+
+Summary:
+- [X] features implemented
+- [X] bugs fixed
+- [X] improvements made
+
+Blocked on you: [K] ([ids]) — one line each: what it waits for, since when.
+(Omit the line when K is 0. Print it from `prd-mark-needs-setup.js --list`,
+ which reads blockedReason and blockedAt, rather than from memory.)
+
+Run `progress` to see full results.
+```
+
+## Quick reference
+
+| Situation | Action |
+|-----------|--------|
+| No prd.json | Bootstrap from context |
+| All done + issues found | Brainstorm (auto-creates stories) |
+| All done + clean code | Ask user for next action |
+| All done + already auto-sprinted | Ask user (limit reached) |
+| Build broken | Fix first |
+| Task fails | Retry 2x, then skip |
+| UX task | Browser verify |
+| Blocked task | Skip, work on unblocked |
+| < 5 tasks, no sprint | Work directly |
