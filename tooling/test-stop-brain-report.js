@@ -666,7 +666,7 @@ const LIVE = (() => {
     const LAT_BUDGET_MS = 120;
     const root = fs.mkdtempSync(path.join(os.tmpdir(), 'sbr-lat-'));
     const bigStore = path.join(root, 'big');
-    const filler = JSON.stringify(Array.from({ length: 900 }, (_, k) => ({ role: 'user', n: k, text: 'message ' + k, parts: [k, k * 2, 'p' + k] })));
+    const filler = JSON.stringify(Array.from({ length: 3600 }, (_, k) => ({ role: 'user', n: k, text: 'message ' + k, parts: [k, k * 2, 'p' + k] })));
     for (let b = 0; b < 4; b++) {
         const bucket = path.join(bigStore, 'acct', 'bucket' + b);
         fs.mkdirSync(bucket, { recursive: true });
