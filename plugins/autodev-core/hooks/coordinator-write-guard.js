@@ -103,6 +103,8 @@ if (process.argv.includes('--help') || process.argv.includes('-h')) {
         + 'Refuses git commit / push / merge / rebase when a Brain role file names this session\n'
         + 'and the work tree or --git-dir is outside the home repos that role file declares.\n'
         + 'pull and fetch are excluded: a coordinator updating a clone to READ it is the job.\n'
+        + 'One product push is allowed: `git push [-u] origin claude/<slug>` from the worktree of a CLOSED\n'
+        + 'unattended-worker ledger record ($CLAUDE_CONFIG_DIR/autodev/unattended-workers.json) naming that branch.\n'
         + 'Role file: $AUTODEV_BRAIN_ROLE_FILE, else ~/.claude/brain-role.json. Absent = inert.\n'
         + 'Also ASKS (permissionDecision: ask on stdout) before git commit/push/merge/rebase/cherry-pick/am, but only\n'
         + 'when a bypass flag is present: --no-verify, commit/am -n, or -c core.hooksPath=. In an unattended run\n'
@@ -365,6 +367,7 @@ function parseGitSegment(segment, cwd) {
     // Leading environment assignments: FOO=bar git commit
     while (i < toks.length && /^[A-Za-z_][A-Za-z0-9_]*=/.test(toks[i])) i++;
     if (i >= toks.length) return null;
+    const envCount = i;
 
     const exe = path.basename(toks[i]).toLowerCase().replace(/\.(exe|cmd|bat)$/, '');
     if (exe !== 'git') return null;
@@ -372,18 +375,82 @@ function parseGitSegment(segment, cwd) {
 
     let dir = cwd;
     let gitDir = null;
+    // Global options other than -C, kept so closedRunPush can refuse any that
+    // could send a push somewhere its arguments do not name (-c url.*.insteadOf).
+    const globals = [];
     for (; i < toks.length; i++) {
         const t = toks[i];
         if (t === '-C') { const v = toks[++i]; if (v) dir = resolveArg(dir, v); continue; }
-        if (t.startsWith('--work-tree=')) { dir = resolveArg(dir, t.slice(12)); continue; }
-        if (t === '--work-tree') { const v = toks[++i]; if (v) dir = resolveArg(dir, v); continue; }
+        if (t.startsWith('--work-tree=')) { globals.push(t); dir = resolveArg(dir, t.slice(12)); continue; }
+        if (t === '--work-tree') { globals.push(t); const v = toks[++i]; if (v) dir = resolveArg(dir, v); continue; }
         if (t.startsWith('--git-dir=')) { gitDir = resolveArg(dir, t.slice(10)); continue; }
         if (t === '--git-dir') { const v = toks[++i]; if (v) gitDir = resolveArg(dir, v); continue; }
-        if (t === '-c' || t === '--exec-path' || t === '--namespace') { i++; continue; }
-        if (t.startsWith('-')) continue;               // any other global flag
-        return { sub: t.toLowerCase(), dir, gitDir };  // first non-flag word is the subcommand
+        if (t === '-c' || t === '--exec-path' || t === '--namespace') { globals.push(t); i++; continue; }
+        if (t.startsWith('-')) { globals.push(t); continue; }   // any other global flag
+        // First non-flag word is the subcommand.
+        return { sub: t.toLowerCase(), dir, gitDir, envCount, globals, args: toks.slice(i + 1).map(unwrap) };
     }
     return null;
+}
+
+// ===========================================================================
+// THE ONE PRODUCT WRITE THE COORDINATOR MAKES: pushing a closed worker's branch.
+// Added 2026-10-25. docs/decisions.md, "the Brain pushes a closed worker's branch".
+//
+// `[measured 2026-10-25]` worker v-li-caption-614b gated vistek 10d8e2c5 green
+// and stopped unpushed. A headless builder may not push (worker-authority.js:
+// "git push belongs to the Brain"), and this rail refused the Brain the same
+// push, so no queued product task could land. The broker the worker authority
+// names has to be able to broker.
+//
+// The exemption is as narrow as the handoff: a `git push` whose effective
+// directory is the worktree of an unattended-worker ledger record, where the
+// NEWEST record for that worktree is `closed` (its run has ended, so no worker
+// is still writing there), with exactly `origin` and that record's branch as
+// arguments. No force of any spelling (a `+` refspec, --force*, --mirror,
+// --all, --tags, --delete), no `-c`, --git-dir, --work-tree or leading env
+// assignment that could send the push somewhere its arguments do not name, and
+// no other refspec. Every other product write still blocks. `gh pr create` and
+// `node merge-lock.js` were never in this rail's scope: it parses `git`.
+//
+// The ledger is read only after a push has already been judged foreign, so the
+// quiet path does not pay for it. Any failure to read it means no exemption,
+// and the block stands: this is the one place in the file that fails CLOSED,
+// because failing open here would turn a read error into a product push.
+// ===========================================================================
+
+const PUSH_FLAGS_OK = new Set(['-u', '--set-upstream', '-q', '--quiet', '-v', '--verbose', '--porcelain',
+    '--dry-run', '--progress', '--no-progress']);
+
+/** The ledger unattended-worker.js writes. Same default it uses. */
+const ledgerPath = () => path.join(configDir(), 'autodev', 'unattended-workers.json');
+
+/** The closed ledger record whose branch this push sends, or null. Never throws. */
+function closedRunPush(g) {
+    try {
+        if (g.sub !== 'push' || g.gitDir || g.envCount || g.globals.length) return null;
+        const positional = [];
+        for (const a of g.args) {
+            if (a.startsWith('-')) { if (!PUSH_FLAGS_OK.has(a)) return null; continue; }
+            positional.push(a);
+        }
+        if (positional.length !== 2 || positional[0] !== 'origin') return null;
+        const ledger = JSON.parse(fs.readFileSync(ledgerPath(), 'utf8'));
+        if (!ledger || !Array.isArray(ledger.records)) return null;
+        // Records are appended, so the last one naming a worktree is the current
+        // claim on it. A reused slug with a live run behind it is not closed.
+        const named = ledger.records.filter((r) => r && typeof r.worktree === 'string' && path.isAbsolute(r.worktree)
+            && typeof r.branch === 'string' && isInside(r.worktree, g.dir));
+        const rec = named[named.length - 1];
+        // enqueue names every branch claude/<slug>: a record naming a default
+        // branch was not written by it, and never licenses a push to one.
+        if (!rec || rec.state !== 'closed' || !/^claude\/[a-z0-9][a-z0-9-]*$/.test(rec.branch)) return null;
+        const b = rec.branch;
+        const spellings = [b, `refs/heads/${b}`, `${b}:${b}`, `refs/heads/${b}:refs/heads/${b}`];
+        return spellings.includes(positional[1]) ? rec : null;
+    } catch {
+        return null;
+    }
 }
 
 /**
@@ -741,6 +808,7 @@ try {
             .filter((d) => !homes.some((h) => isInside(h, d)))
             .filter((d) => !(SCRATCH_LOCAL_VERBS.has(g.sub) && scratch.some((s) => isInside(s, d))));
         if (!foreign.length) continue;
+        if (closedRunPush(g)) continue;
         hits.push({ ...g, at: foreign[0] });
     }
     if (!hits.length) allow();
@@ -767,6 +835,8 @@ try {
         + `Scanned ${segments.length} command segment${segments.length === 1 ? '' : 's'}, `
         + `${hits.length} outside the home repo${homes.length > 1 ? 's' : ''}`
         + `${hits.length > 1 ? ` (${hits.map((x) => 'git ' + x.sub).join(', ')})` : ''}.\n`
+        + (h.sub === 'push' ? `The one push allowed is a closed unattended-worker run's branch, from its worktree: `
+            + `git -C <worktree> push [-u] origin <branch>, as its record in ${ledgerPath()} names them.\n` : '')
         + `To stand down the role deliberately, remove ${rolePath}.\n`);
     process.exit(2);
 } catch (err) {
