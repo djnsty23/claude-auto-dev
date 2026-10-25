@@ -1,7 +1,7 @@
 ---
 name: design-review
-description: "Review the screens a user works through from rendered evidence: real content, every modal and state, narrow and wide viewports, and whether the task gets done. Use when a page or flow looks off, when asked to rate or bug-hunt screens, and before saying a UI change is done."
-when_to_use: "Invoked when the user says \"design review\", \"review the UI\", \"rate the pages\", \"bug hunt\", \"tested on mobile\", \"check it on mobile\", \"the layout could be better\" or \"looks off\", when a UI fix has been claimed and the screen has not been looked at since the last edit, and before closing any visual or interaction defect."
+description: "Look at the rendered screens before UI work is called done: rate or score pages and modals, bug-hunt a flow, or check a page that looks off on phones or wide screens. Judge it with real content, every state (empty, loading, error) and whether the user's task completes. Use when asked to rate all pages, do a UX or conversion pass, or before saying a UI change is done."
+when_to_use: "Invoked when the user says \"design review\", \"review the UI\", \"rate the pages\", \"rate all pages\", \"score the screens\", \"UX pass\", \"conversion pass\", \"bug hunt\", \"tested on mobile\", \"check it on mobile\", \"the layout could be better\", \"looks off\" or \"looks wrong\", when a page, modal or panel was declared done but nobody looked at it on phones and wide screens since the last edit, and before closing any visual or interaction defect."
 allowed-tools: Read, Write, Edit, Grep, Glob, Bash
 user-invocable: true
 argument-hint: "[workflow or existing review.json]"
