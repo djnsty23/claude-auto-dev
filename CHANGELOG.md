@@ -16,6 +16,16 @@
   two outside the client's industry, one signature moment, a committed palette and
   type pairing) before any code (#436).
 
+### Skills
+
+- `ship`, `prove`, `design-review` and `rule-windows` describe the situations and
+  words that should load them, so the model reaches for them. `ship` checks every
+  entry point and a returning user's sign-in at phone width. `prove` maps each kind
+  of claim to the evidence that settles it. `rule-windows` lists the traps to check
+  before a command (#441).
+- New `cost-reconcile` skill: name the charged unit, keep billed, gross and pending
+  apart, and treat an unknown figure as unknown, not zero (#441).
+
 ### Fixes
 
 - `window-specs`: cost-window tasks are dated by their last attempt, and only the
