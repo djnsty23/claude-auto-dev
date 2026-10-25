@@ -22,6 +22,9 @@ Check the working directory:
 - **Empty/new destination within the requested scope** → **Create mode**.
 - **Existing project** → **Onboard mode**; preserve its stack and conventions
   unless the request authorizes a migration. Do not scaffold over existing work.
+- **New-app chain destination**: no manifest, and only `docs/`, `SPEC.md`, `prd.json`,
+  `specs/`, `supabase/` and `.git` → **Create mode**. Scaffold in a temp directory and
+  merge it in, keeping those files.
 
 ---
 
@@ -110,6 +113,7 @@ If the user described features or provided a plan:
 - Follow the core skill's story format
 
 Do NOT generate generic starters ("Auth flow", "Dashboard layout"). If there is no plan, skip prd.json entirely.
+An existing `prd.json` (written by `spec`) is left untouched.
 
 ### Step 8: Git Init + First Commit
 
@@ -221,6 +225,9 @@ only when the user requested that integration.
 Load `references/version-defaults.md` as a dated starting point, then verify the
 selected versions and compatibility against official sources before scaffolding.
 Keep existing lockfile versions when onboarding unless upgrading is in scope.
+In the new-app chain (`spec/references/new-app-chain.md`), pin to the versions the operator's sibling
+live apps run, read from their manifests (with none, use the defaults above and say so), and
+write `docs/new-app/03-setup.md`.
 Record the resolved versions and successful install/build/behavior evidence;
 this skill does not maintain a second independent version table.
 
