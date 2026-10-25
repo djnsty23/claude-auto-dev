@@ -75,6 +75,8 @@ const ACCEPTED = [
         why: 'ledgerPath() names it <sid>.<project hash>.json under the profile: one file per session and project, with one writer.' },
     { file: 'plugins/autodev-core/scripts/check-queue-drained.js', kind: 'rewrite', path: 'stateFile',
         why: 'The caller keys it by a hash of the transcript path, so one session owns each file. Losing it costs one full reprint.' },
+    { file: 'plugins/autodev-core/scripts/check-queue-drained.js', kind: 'replace', path: 'stateFile',
+        why: 'One file per transcript, keyed by a hash of its path. Each writer renames in a whole state for a prefix ending on a line boundary, so a lost update leaves an older valid prefix and the next Stop rescans from there.' },
     { file: 'plugins/autodev-core/scripts/fleet-intent.js', kind: 'rewrite', path: "recordPath('r', 'claude/x', tmp)",
         why: 'The --selftest writes a temp dir it created.' },
     { file: 'plugins/autodev-core/scripts/gate-identity.js', kind: 'replace', path: 'cacheFile',
