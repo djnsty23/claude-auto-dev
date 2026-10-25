@@ -768,6 +768,113 @@ for (const [label, prd, expected] of [
     check('F16: and the owner keeps blocking', run(dir, { session_id: 'sess-a' }).decision?.decision === 'block');
 }
 
+// ------------------------------------------- L1: latency on a large transcript
+//
+// `[measured 2026-10-25]` this hook read the whole transcript into one string
+// and JSON-parsed every line on every Stop: 1.13 s on a 368 MB transcript, the
+// largest of 4,618 on the machine, and it hit its 5 s timeout 4 times in 715
+// runs. The scan now finds panel lines with Buffer.indexOf and resumes from a
+// per-transcript state, so an unchanged 64 MB transcript must cost about what
+// an empty one does. A wall-clock bound is only evidence if something slow
+// fails it, so the same bound is run against a PLANTED copy of the old full
+// parse, derived from this tree, and that copy must fail it.
+{
+    const LAT_MB = 64;
+    const LAT_BUDGET_MS = 120;
+    const panelRows = (i, labels, picks) => [
+        JSON.stringify({ type: 'assistant', message: { content: [{ type: 'tool_use', id: 'toolu_panel' + i, name: 'AskUserQuestion', input: { questions: [{ options: labels.map((l) => ({ label: l })) }] } }] } }),
+        JSON.stringify({ type: 'user', message: { content: [{ type: 'tool_result', tool_use_id: 'toolu_panel' + i, content: 'Your questions have been answered: "Q"="' + picks.join(',') + '". You can now continue.' }] } }),
+    ];
+    // Filler shaped like real rows (many keys, nested arrays), because parse
+    // cost per byte is what the old path spent and a long flat string is cheap.
+    const writeTranscript = (file, mb) => {
+        const fd = fs.openSync(file, 'w');
+        fs.writeSync(fd, panelRows(1, ['Ship the fix', 'Stop here'], ['Ship the fix']).join('\n') + '\n');
+        const target = mb * 1024 * 1024;
+        let written = 0;
+        let lines = [];
+        for (let n = 0; written < target; n++) {
+            const a = JSON.stringify({ type: 'assistant', message: { content: [{ type: 'tool_use', id: 'toolu_f' + n, name: 'Bash', input: { command: 'echo ' + n } }] } });
+            const u = JSON.stringify({ parentUuid: 'p' + n, isSidechain: false, type: 'user', uuid: 'u' + n, timestamp: '2026-10-25T00:00:00.000Z', message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: 'toolu_f' + n, content: Array.from({ length: 24 }, (_, k) => ({ type: 'text', text: 'line ' + k, n: k, ok: true })) }] }, toolUseResult: { stdout: 'ab', stderr: '', interrupted: false, rows: Array.from({ length: 12 }, (_, k) => [k, k * 2, 'c' + k]) } });
+            lines.push(a, u);
+            written += a.length + u.length + 2;
+            if (lines.length >= 2000) { fs.writeSync(fd, lines.join('\n') + '\n'); lines = []; }
+        }
+        if (lines.length) fs.writeSync(fd, lines.join('\n') + '\n');
+        fs.writeSync(fd, panelRows(2, ['Ship the fix', 'Something else'], ['Ship the fix']).join('\n') + '\n');
+        fs.closeSync(fd);
+    };
+    const big = path.join(TMP, 'lat-big.jsonl');
+    const small = path.join(TMP, 'lat-small.jsonl');
+    writeTranscript(big, LAT_MB);
+    writeTranscript(small, 0);
+    const dir = project();
+    const latCfg = path.join(TMP, 'lat-cfg');
+
+    const timed = (hook, t) => {
+        const t0 = process.hrtime.bigint();
+        const r = sb.runVerdict(process.execPath, [hook], {
+            input: JSON.stringify({ session_id: 'lat', cwd: dir, hook_event_name: 'Stop', transcript_path: t }),
+            encoding: 'utf8', cwd: dir, env: hookEnv(latCfg),
+        });
+        let decision = null;
+        try { decision = JSON.parse(r.stdout); } catch { /* stays null */ }
+        return { ms: Number(process.hrtime.bigint() - t0) / 1e6, decision };
+    };
+    const median = (a) => [...a].sort((x, y) => x - y)[Math.floor(a.length / 2)];
+    // Big and small interleaved, so a load spike lands on both sides. One
+    // re-measure on a miss: a spike is not a regression, a second miss is.
+    const extraMs = (hook) => {
+        const once = () => {
+            const b = [], s = [];
+            for (let i = 0; i < 5; i++) { b.push(timed(hook, big).ms); s.push(timed(hook, small).ms); }
+            return median(b) - median(s);
+        };
+        const first = once();
+        return first < LAT_BUDGET_MS ? first : Math.min(first, once());
+    };
+
+    const carried = (d) => /\[queue\] 1 selected item\(s\) were offered again.*"Ship the fix" \(2 panels\)/.test(d?.systemMessage || '');
+    const cold = timed(HOOK, big);
+    check('L1: a 64 MB transcript still yields the carried item on a full scan', cold.decision?.decision === 'approve' && carried(cold.decision));
+    const warm = timed(HOOK, big);
+    check('L1: and the same answer from the resumed state', warm.decision?.decision === 'approve' && carried(warm.decision));
+    const extra = extraMs(HOOK);
+    check(`L1: an unchanged 64 MB transcript costs < ${LAT_BUDGET_MS} ms over an empty one (${Math.round(extra)} ms)`, extra < LAT_BUDGET_MS);
+
+    // Growth after the state was saved: the appended panel is read, and the
+    // count moves from 2 to 3.
+    fs.appendFileSync(big, panelRows(3, ['Ship the fix', 'Later'], ['Ship the fix']).join('\n') + '\n');
+    const grown = timed(HOOK, big);
+    check('L1: a panel appended after the state was saved is read on the next Stop',
+        /"Ship the fix" \(3 panels\)/.test(grown.decision?.systemMessage || ''));
+
+    // The plant: this tree, with the scanner replaced by a parse of every line
+    // and the hook's state dropped. Anchors are asserted, so a renamed function
+    // fails here rather than leaving a plant that changed nothing.
+    const plant = path.join(TMP, 'lat-plant');
+    fs.cpSync(path.join(PLUGIN_ROOT, 'hooks'), path.join(plant, 'hooks'), { recursive: true });
+    fs.cpSync(path.join(PLUGIN_ROOT, 'scripts'), path.join(plant, 'scripts'), { recursive: true });
+    const qFile = path.join(plant, 'scripts', 'check-queue-drained.js');
+    const qAnchor = 'function scanBuffer(buf, panels, byId) {';
+    const qSrc = fs.readFileSync(qFile, 'utf8');
+    const hFile = path.join(plant, 'hooks', 'stop-auto-check.js');
+    const hAnchor = 'analyse(transcript, { stateFile: stateFileFor(transcript) })';
+    const hSrc = fs.readFileSync(hFile, 'utf8');
+    const anchored = qSrc.includes(qAnchor) && hSrc.includes(hAnchor);
+    check('L1: the planted slow path found both anchors in this tree', anchored);
+    if (anchored) {
+        fs.writeFileSync(qFile, qSrc.replace(qAnchor, qAnchor
+            + "\n    for (const l of buf.toString('utf8').split('\\n')) { try { addRecord(JSON.parse(l), panels, byId); } catch { /* planted */ } }\n    return;"));
+        fs.writeFileSync(hFile, hSrc.replace(hAnchor, 'analyse(transcript)'));
+        const planted = timed(hFile, big);
+        check('L1: the plant still answers correctly (it is slow, not wrong)', /"Ship the fix" \(3 panels\)/.test(planted.decision?.systemMessage || ''));
+        const plantExtra = extraMs(hFile);
+        check(`L1: the planted full parse FAILS the same bound (${Math.round(plantExtra)} ms >= ${LAT_BUDGET_MS} ms)`, plantExtra >= LAT_BUDGET_MS);
+    }
+    for (const f of [big, small]) { try { fs.unlinkSync(f); } catch { /* best effort */ } }
+}
+
 // ---------------------------------------------------------------- report
 
 let pass = 0, fail = 0, skipped = 0;

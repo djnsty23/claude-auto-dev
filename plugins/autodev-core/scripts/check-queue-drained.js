@@ -34,52 +34,226 @@ const RECOMMENDED_RE = /\s*\(recommended\)\s*$/i;
 const clean = (l) => String(l).replace(RECOMMENDED_RE, '').trim();
 const norm = (l) => clean(l).toLowerCase();
 
+/** Fold one parsed transcript record into the panel list. */
+function addRecord(rec, panels, byId) {
+    const content = rec && rec.message && rec.message.content;
+    if (!Array.isArray(content)) return;
+
+    for (const part of content) {
+        if (!part) continue;
+        if (part.type === 'tool_use' && part.name === 'AskUserQuestion') {
+            const labels = [];
+            for (const q of (part.input && part.input.questions) || []) {
+                for (const o of q.options || []) labels.push(o.label);
+            }
+            const panel = { id: part.id, labels, selected: null };
+            byId.set(part.id, panel);
+            panels.push(panel);
+        } else if (part.type === 'tool_result' && byId.has(part.tool_use_id)) {
+            // The answer string joins labels with commas - and labels CONTAIN
+            // commas ("Merge #17, then clear #16"). Splitting on comma shreds
+            // them, so test each of THIS panel's own labels for containment
+            // instead. The selftest pins this: it plants a comma in a label.
+            const panel = byId.get(part.tool_use_id);
+            const text = JSON.stringify(part.content);
+            panel.selected = panel.labels.filter((l) => text.includes(l));
+        }
+    }
+}
+
+/* A TRANSCRIPT IS NOT PARSED LINE BY LINE ANY MORE. `[measured 2026-10-25]`
+   transcripts on one machine run to 368 MB, and the Stop hook that calls this
+   read the whole file into one string and JSON-parsed every line, on every
+   turn. Only two kinds of line can change the answer: one naming
+   AskUserQuestion (a panel) and one whose "tool_use_id" is a panel's id (its
+   answer). Buffer.indexOf finds both without decoding the rest, and only the
+   lines they land in are parsed. An id that cannot be read cleanly after the
+   key parses its line, so an odd shape costs time, never a missed answer.
+
+   EVERY panel id counts, not only the unanswered ones. `[measured 2026-10-25]`
+   one transcript in 4,503 carried a second tool_result for an answered panel
+   ("[Request interrupted by user for tool use]" after a rewind), and the full
+   parse let that second result overwrite the first. */
+const ASK = Buffer.from('AskUserQuestion');
+const RESULT_KEY = Buffer.from('"tool_use_id"');
+const SCAN_CHUNK = 8 * 1024 * 1024;
+
+/** The id after a `"tool_use_id"` key at `at`, or null when it cannot be read cleanly. */
+function idAfter(buf, at) {
+    let i = at + RESULT_KEY.length;
+    const limit = Math.min(buf.length, i + 256);
+    while (i < limit && (buf[i] === 32 || buf[i] === 9)) i++;
+    if (buf[i] !== 58) return null;                                   // ':'
+    i++;
+    while (i < limit && (buf[i] === 32 || buf[i] === 9)) i++;
+    if (buf[i] !== 34) return null;                                   // '"'
+    const close = buf.indexOf(34, i + 1);
+    if (close === -1 || close > limit) return null;
+    if (buf.subarray(i + 1, close).includes(92)) return null;         // an escape: let the parse decide
+    return buf.toString('latin1', i + 1, close);
+}
+
+/** Scans whole lines in `buf`, folding every line a needle lands in. */
+function scanBuffer(buf, panels, byId) {
+    let nextAsk = buf.indexOf(ASK, 0);
+    let nextResult = buf.indexOf(RESULT_KEY, 0);
+    let pos = 0;
+    while (pos < buf.length) {
+        if (nextAsk !== -1 && nextAsk < pos) nextAsk = buf.indexOf(ASK, pos);
+        if (nextResult !== -1 && nextResult < pos) nextResult = buf.indexOf(RESULT_KEY, pos);
+        let hit;
+        if (nextResult !== -1 && (nextAsk === -1 || nextResult < nextAsk)) {
+            hit = nextResult;
+            const id = idAfter(buf, hit);
+            if (id !== null && !byId.has(id)) { pos = hit + 1; continue; }
+        } else if (nextAsk !== -1) {
+            hit = nextAsk;
+        } else {
+            return;
+        }
+        const start = buf.lastIndexOf(10, hit) + 1;
+        let end = buf.indexOf(10, hit);
+        if (end === -1) end = buf.length;
+        let rec = null;
+        try { rec = JSON.parse(buf.toString('utf8', start, end)); } catch { /* a foreign or partial line */ }
+        if (rec) addRecord(rec, panels, byId);
+        pos = end + 1;
+    }
+}
+
+/**
+ * Reads `file` from `offset` in fixed chunks and folds the matching lines of
+ * every WHOLE line into `panels`. Returns the offset just past the last
+ * newline, and the bytes after it (a final line with no newline yet), which
+ * the caller folds or not.
+ */
+function scanFile(file, offset, panels, byId) {
+    const fd = fs.openSync(file, 'r');
+    try {
+        const size = fs.fstatSync(fd).size;
+        let pos = offset;
+        let carry = Buffer.alloc(0);
+        while (pos < size) {
+            const len = Math.min(SCAN_CHUNK, size - pos);
+            const chunk = Buffer.allocUnsafe(len);
+            const got = fs.readSync(fd, chunk, 0, len, pos);
+            if (got <= 0) break;
+            pos += got;
+            const buf = carry.length ? Buffer.concat([carry, chunk.subarray(0, got)]) : chunk.subarray(0, got);
+            const cut = buf.lastIndexOf(10);
+            if (cut === -1) { carry = Buffer.from(buf); continue; }
+            scanBuffer(buf.subarray(0, cut + 1), panels, byId);
+            carry = Buffer.from(buf.subarray(cut + 1));
+        }
+        return { offset: pos - carry.length, tail: carry };
+    } finally {
+        fs.closeSync(fd);
+    }
+}
+
+function finish(panels) {
+    for (const p of panels) p.work = (p.selected || []).filter((l) => !STOP_RE.test(String(l).trim()));
+    return panels.filter((p) => p.selected && p.selected.length);
+}
+
 /**
  * Pull every ANSWERED panel out of a transcript, oldest first.
  * Accepts a path, or an array of already-parsed records (the selftest uses that).
  */
 function collectPanels(source) {
-    const records = Array.isArray(source)
-        ? source
-        : fs.readFileSync(source, 'utf8').split('\n').filter(Boolean).map((l) => {
-            try { return JSON.parse(l); } catch { return null; }
-        }).filter(Boolean);
-
     const panels = [];
     const byId = new Map();
-
-    for (const rec of records) {
-        const content = rec && rec.message && rec.message.content;
-        if (!Array.isArray(content)) continue;
-
-        for (const part of content) {
-            if (part.type === 'tool_use' && part.name === 'AskUserQuestion') {
-                const labels = [];
-                for (const q of (part.input && part.input.questions) || []) {
-                    for (const o of q.options || []) labels.push(o.label);
-                }
-                const panel = { id: part.id, labels, selected: null };
-                byId.set(part.id, panel);
-                panels.push(panel);
-            } else if (part.type === 'tool_result' && byId.has(part.tool_use_id)) {
-                // The answer string joins labels with commas - and labels CONTAIN
-                // commas ("Merge #17, then clear #16"). Splitting on comma shreds
-                // them, so test each of THIS panel's own labels for containment
-                // instead. The selftest pins this: it plants a comma in a label.
-                const panel = byId.get(part.tool_use_id);
-                const text = JSON.stringify(part.content);
-                panel.selected = panel.labels.filter((l) => text.includes(l));
-            }
-        }
+    if (Array.isArray(source)) {
+        for (const rec of source) addRecord(rec, panels, byId);
+    } else {
+        // A final line with no newline is a whole record when nothing is
+        // writing it (a fixture, a finished session), so it is read too.
+        const { tail } = scanFile(source, 0, panels, byId);
+        if (tail.length) scanBuffer(tail, panels, byId);
     }
+    return finish(panels);
+}
 
-    for (const p of panels) p.work = (p.selected || []).filter((l) => !STOP_RE.test(l.trim()));
-    return panels.filter((p) => p.selected && p.selected.length);
+/* RESUMABLE, for the Stop hook. A transcript only grows, so the panels found
+   in its first N bytes are the same on the next turn: the state file keeps
+   them with N, and the next call reads only what was appended. The state is
+   trusted only for the same path, a size no smaller than N, and the same
+   first KB; anything else, or any unreadable state, is a full scan. A state
+   that cannot be written costs the next turn a full scan, never a wrong answer.
+   The open final line is folded AFTER the state is saved, so the saved panels
+   never hold a record the next call would read a second time. */
+const STATE_VERSION = 1;
+const HEAD_BYTES = 1024;
+
+function headDigest(file) {
+    const fd = fs.openSync(file, 'r');
+    try {
+        const buf = Buffer.alloc(HEAD_BYTES);
+        const got = fs.readSync(fd, buf, 0, HEAD_BYTES, 0);
+        return require('crypto').createHash('sha1').update(buf.subarray(0, got)).digest('hex');
+    } finally {
+        fs.closeSync(fd);
+    }
+}
+
+const STATE_MAX_AGE_MS = 7 * 86400000;
+
+/** Deletes other transcripts' states older than a week. Best effort. */
+function pruneStates(dir, keep) {
+    try {
+        const cutoff = Date.now() - STATE_MAX_AGE_MS;
+        for (const name of fs.readdirSync(dir)) {
+            const f = path.join(dir, name);
+            if (f === keep || !name.endsWith('.json')) continue;
+            try { if (fs.statSync(f).mtimeMs < cutoff) fs.unlinkSync(f); } catch { /* raced */ }
+        }
+    } catch { /* a directory we cannot list costs stale files, nothing more */ }
+}
+
+/** The state file the Stop hook keeps for one transcript, under the active profile. */
+function stateFileFor(transcript) {
+    const key = require('crypto').createHash('sha256').update(path.resolve(transcript)).digest('hex').slice(0, 16);
+    return path.join(claudePaths.configDir(), 'autodev', 'queue-scan', key + '.json');
+}
+
+const copyPanels = (list) => list.map((p) => ({ id: p.id, labels: p.labels, selected: p.selected }));
+
+function collectPanelsResumable(file, stateFile) {
+    const resolved = path.resolve(file);
+    const size = fs.statSync(file).size;
+    const head = size >= HEAD_BYTES ? headDigest(file) : null;
+    let prior = null;
+    try {
+        const s = JSON.parse(fs.readFileSync(stateFile, 'utf8'));
+        if (head && s && s.v === STATE_VERSION && s.path === resolved && s.head === head
+            && Number.isInteger(s.offset) && s.offset >= HEAD_BYTES && s.offset <= size
+            && Array.isArray(s.panels)) prior = s;
+    } catch { /* absent or unreadable: full scan */ }
+
+    const panels = prior ? copyPanels(prior.panels) : [];
+    const byId = new Map(panels.map((p) => [p.id, p]));
+    const from = prior ? prior.offset : 0;
+    const { offset, tail } = scanFile(file, from, panels, byId);
+    if (head && (!prior || offset !== from) && offset >= HEAD_BYTES) {
+        const tmp = stateFile + '.' + process.pid + '.tmp';
+        try {
+            fs.mkdirSync(path.dirname(stateFile), { recursive: true });
+            fs.writeFileSync(tmp, JSON.stringify({ v: STATE_VERSION, path: resolved, head, offset, panels: copyPanels(panels) }));
+            fs.renameSync(tmp, stateFile);
+        } catch {
+            try { fs.unlinkSync(tmp); } catch { /* never created */ }
+        }
+        if (!prior) pruneStates(path.dirname(stateFile), stateFile);
+    }
+    if (tail.length) scanBuffer(tail, panels, byId);
+    return finish(panels);
 }
 
 /** Pure analysis, so the CLI, the hook and the selftest cannot diverge. */
-function analyse(source) {
-    const panels = collectPanels(source);
+function analyse(source, opts = {}) {
+    const panels = opts.stateFile && !Array.isArray(source)
+        ? collectPanelsResumable(source, opts.stateFile)
+        : collectPanels(source);
     const actionable = panels.reduce((n, p) => n + p.work.length, 0);
 
     const seen = new Map();
@@ -428,4 +602,4 @@ if (require.main === module) {
     process.exit(0);
 }
 
-module.exports = { analyse, report, collectPanels };
+module.exports = { analyse, report, collectPanels, stateFileFor };

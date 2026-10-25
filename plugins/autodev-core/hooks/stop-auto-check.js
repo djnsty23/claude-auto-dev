@@ -220,8 +220,8 @@ try {
         try {
             const transcript = payload && (payload.transcript_path || payload.transcriptPath);
             if (transcript && fs.existsSync(transcript)) {
-                const { analyse } = require(path.join(__dirname, '..', 'scripts', 'check-queue-drained.js'));
-                const r = analyse(transcript);
+                const { analyse, stateFileFor } = require(path.join(__dirname, '..', 'scripts', 'check-queue-drained.js'));
+                const r = analyse(transcript, { stateFile: stateFileFor(transcript) });
                 if (r.carried.length) {
                     const items = r.carried.map((c) => `"${c.label}" (${c.panels} panels)`).join(', ');
                     // SAY WHAT WAS OBSERVED, NOT WHY IT HAPPENED.
