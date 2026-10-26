@@ -574,7 +574,7 @@ function status(opts) {
 }
 
 const COMMAND_FLAGS = {
-    intake: ['source', 'ideas', 'config', 'dry-run', 'state', 'ledger'],
+    intake: ['source', 'ideas', 'config', 'limit', 'dry-run', 'state', 'ledger'],
     'review-point': ['idea', 'stage', 'question', 'option', 'recommended', 'row', 'blocking', 'state'],
     receipt: ['idea', 'stage', 'command', 'exit', 'artifact', 'state'],
     tick: ['decisions', 'state', 'ledger'],

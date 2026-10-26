@@ -285,7 +285,12 @@ check('intake: population line reads all four', counts.read === 4 && counts.feat
     check('limit: only one chain reaches the ledger', recs.length === 6, String(recs.length));
     const r2 = pass1();
     check('limit: the next pass starts the held idea', r2.value && r2.value.counts.feature === 1 && r2.value.counts.held === 0 && r2.value.counts.unchanged === 1, JSON.stringify(r2.value && r2.value.counts));
-    check('limit: --limit 0 is refused', pass1(['--limit', '0']).code === 'usage');
+    // Name the refusal: a bare usage code also passed while intake refused --limit as an unread flag.
+    const zero = pass1(['--limit', '0']);
+    check('limit: --limit 0 is refused as not a whole number from 1', zero.code === 'usage' && /whole number from 1/.test(zero.json.error.message), zero.stdout);
+    const wider = writeIdeas('two-more.json', [vistekRow('v-lim-c', ELIGIBLE_TEXT.replace('print', 'email')), vistekRow('v-lim-d', ELIGIBLE_TEXT.replace('print', 'save'))]);
+    const r3 = cli(['intake', '--source', 'vistek', '--ideas', wider, '--config', CONFIG, '--state', limState, '--ledger', limLedger, '--limit', '2']);
+    check('limit: --limit 2 is read and starts both', r3.value && r3.value.counts.feature === 2 && r3.value.counts.held === 0, r3.stdout);
 }
 
 // --- refusals that guard the inputs.
