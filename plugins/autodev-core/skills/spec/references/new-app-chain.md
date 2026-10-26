@@ -196,7 +196,9 @@ model elsewhere in the chain.
 
 `scripts/idea-conveyor.js` starts this chain from the idea hubs with nobody watching. `intake` classifies
 each exported idea as skipped, parked, a feature in a live product, or a full website, applying the
-eligibility rule as code. A feature enqueues steps 1, 2 and 6 to 9 through `unattended-worker.js enqueue
+eligibility rule as code. A feature must name a code surface, and must not be analysis, outward publishing
+(social posts, articles), ad spend or waiting on a person. `--limit` (default 1) caps starts per pass, and
+the rest wait for the next pass. A feature enqueues steps 1, 2 and 6 to 9 through `unattended-worker.js enqueue
 --after`. A full website enqueues steps 1 and 2 only, and `tick` then posts one blocking start decision.
 Every stage ends with a `receipt` (gate command, exit code, artifact) and, when it decided anything,
 a `review-point`. A non-blocking review point is approved by silence once the next stage starts. Hub writes

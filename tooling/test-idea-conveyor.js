@@ -99,6 +99,23 @@ const tooBig = vistekRow('v-big', 'Admin rework: ' + Array.from({ length: 9 }, (
         const v = c(vistekRow('v-' + cls, `Settings page: ${text} for the admin.`));
         check(`classify: ${cls} parks`, v.class === 'parked' && v.reasons.some((r) => r.includes(cls)), JSON.stringify(v));
     }
+    // Each clause below came from the first live dry pass, where these shapes read as features.
+    // Every plant is the eligible text plus one clause, and must park for that clause alone.
+    const parksFor = (label, text, reason) => {
+        const v = c(vistekRow('v-plant', text));
+        check(`classify: ${label} parks for that alone`, v.class === 'parked' && v.reasons.length === 1 && reason.test(v.reasons[0]), JSON.stringify(v));
+    };
+    parksFor('ad spend', `${ELIGIBLE_TEXT} Then a month of Meta ads.`, /ASK class money/);
+    parksFor('a cost split', `${ELIGIBLE_TEXT} Split the costul 50/50.`, /ASK class money/);
+    parksFor('a social post', `${ELIGIBLE_TEXT} Share the offer on LinkedIn too.`, /ASK class outward publishing/);
+    parksFor('an article', 'Articol: ce verifica un audit, cu link spre pagina de verificare.', /ASK class outward publishing/);
+    parksFor('an analysis', 'Analizeaza lead-ul trimis duminica seara si raporteaza.', /analysis or research/);
+    parksFor('a keyword study', 'Find informational keywords with real volume and rank them in a table.', /analysis or research/);
+    parksFor('no code surface', 'Three short lines about what Vistek does, for Miki to read.', /names no code surface/);
+    parksFor('a pick still pending', `${ELIGIBLE_TEXT} Build the version she picks.`, /waits on a person/);
+    parksFor('an unconfirmed premise', `${ELIGIBLE_TEXT} The split nu este confirmata.`, /waits on a person/);
+    check('classify: a "studiu de caz" page is still a feature', c(vistekRow('v-case', 'Rescrie pagina de studiu de caz, cu URL nou si link in meniu.')).class === 'feature');
+    check('classify: blog layout fixes that mention "articole" are still a feature', c(vistekRow('v-blog', 'Corecturi blog: latime completa, FAQ pliabil, widget ultimele articole.')).class === 'feature');
     const hub = (title, summary) => classify(normalise('hub', { id: 'h1', title, summary, status: 'new' }), config);
     check('classify: a hub idea without #claude is skipped', hub('Totals row', 'product:vistek move the totals row under the items').class === 'skipped');
     check('classify: a hub idea for a product that is not live parks', /not a configured live repo/.test(hub('#claude Totals', 'product:old-site move the totals row under the items').reasons.join()));
@@ -249,6 +266,26 @@ check('intake: population line reads all four', counts.read === 4 && counts.feat
     check('full website: and enqueues no build stage here', mine().length === 2);
     const note = state().outbox.find((w) => w.idea === key && w.tool === 'mcp__nvision-hub__hub_notes_add');
     check('full website: hub idea notes go straight onto the idea', note && note.args.ideaId === site.id && !note.needs, JSON.stringify(note));
+}
+
+// --- one start per pass: the rest are held, written nowhere, and judged again next pass.
+{
+    const limState = path.join(scratch, 'limit', 'state.json');
+    const limLedger = path.join(scratch, 'limit-ledger.json');
+    const two = writeIdeas('two.json', [vistekRow('v-lim-a', ELIGIBLE_TEXT), vistekRow('v-lim-b', ELIGIBLE_TEXT.replace('print', 'share'))]);
+    const pass1 = (extra = []) => cli(['intake', '--source', 'vistek', '--ideas', two, '--config', CONFIG, '--state', limState, '--ledger', limLedger, ...extra]);
+    const r = pass1();
+    const v = r.value || {};
+    check('limit: two eligible ideas, the default starts one', v.counts && v.counts.feature === 2 && v.counts.held === 1, JSON.stringify(v.counts));
+    const held = (v.results || []).filter((x) => x.held === 'limit').map((x) => x.key);
+    check('limit: the second in input order is the one held', held.join() === 'vistek:v-lim-b', held.join());
+    const s = JSON.parse(fs.readFileSync(limState, 'utf8'));
+    check('limit: the held idea is not in state', !s.ideas['vistek:v-lim-b'] && s.ideas['vistek:v-lim-a'], Object.keys(s.ideas).join());
+    const recs = JSON.parse(fs.readFileSync(limLedger, 'utf8')).records;
+    check('limit: only one chain reaches the ledger', recs.length === 6, String(recs.length));
+    const r2 = pass1();
+    check('limit: the next pass starts the held idea', r2.value && r2.value.counts.feature === 1 && r2.value.counts.held === 0 && r2.value.counts.unchanged === 1, JSON.stringify(r2.value && r2.value.counts));
+    check('limit: --limit 0 is refused', pass1(['--limit', '0']).code === 'usage');
 }
 
 // --- refusals that guard the inputs.
