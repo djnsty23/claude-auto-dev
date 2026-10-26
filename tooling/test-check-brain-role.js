@@ -146,6 +146,12 @@ try {
         fs.existsSync(SESSIONS) && fs.existsSync(STORE)
         && /^population: not read \(no role file to check against\)/m.test(absent.out)
         && !/UNREADABLE|NOT FOUND/.test(absent.out), absent.out);
+    // With no --role the file comes from AUTODEV_BRAIN_ROLE_FILE, the path every Stop hook reads.
+    const envRole = role(null);
+    const viaEnv = run(['--json'], { AUTODEV_BRAIN_ROLE_FILE: envRole });
+    check('no --role: reads AUTODEV_BRAIN_ROLE_FILE, absent there',
+        viaEnv.status === 0 && (() => { try { const j = JSON.parse(viaEnv.out); return path.resolve(j.roleFile) === path.resolve(envRole) && j.state === 'absent'; } catch { return false; } })(),
+        viaEnv.out.slice(0, 300));
     const absentJson = run(['--json', '--role', role(null)]);
     check('  and --json marks it unscanned with null readable flags, not false',
         (() => { try { const p = JSON.parse(absentJson.out).population; return p.scanned === false && p.sessionsReadable === null && p.storeReadable === null; } catch { return false; } })(),

@@ -262,6 +262,17 @@ check('intake: population line reads all four', counts.read === 4 && counts.feat
     check('help: returns usage, exit 0', help.status === 0 && /Usage: node idea-conveyor\.js intake/.test(help.stdout));
 }
 
+// --- status, and the default state and ledger under the sandboxed HOME.
+{
+    const s = cli(withState(['status']));
+    check('status: reads the state the run wrote', s.status === 0 && path.resolve(s.value.state) === path.resolve(STATE) && s.value.ideasRead === Object.keys(state().ideas).length && s.value.ideasRead > 0, s.stdout.slice(0, 300));
+    const bare = cli(['status']);
+    const defaultFile = path.join(home, '.claude', 'autodev', 'conveyor', 'state.json');
+    check('status: with no --state reads the config dir default, empty there', bare.status === 0 && path.resolve(bare.value.state) === path.resolve(defaultFile) && bare.value.ideasRead === 0, bare.stdout.slice(0, 300));
+    const t = cli(['tick']);
+    check('tick: with no --ledger reads the config dir default and starts nothing', t.status === 0, t.stdout.slice(0, 300));
+}
+
 fs.rmSync(scratch, { recursive: true, force: true });
 console.log(`\n${pass} passed, ${fail} failed, ${pass + fail} checks`);
 process.exitCode = fail ? 1 : 0;
