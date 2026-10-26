@@ -45,10 +45,19 @@
  * reason: the product resolves to a configured live repo that exists; the idea
  * is marked for Claude (vistek owner andy, the purple reaction; a hub idea
  * carries the tag #claude); about 8 stories at most (an explicit `stories`
- * count, else the enumerated items); and no ASK class (money, credentials, DNS,
- * production data, new product scope) matches its text. The ASK detectors are
- * keyword lists and over-match on purpose: a false park costs a person one look,
- * a false start costs an unattended run touching an ASK class.
+ * count, else the enumerated items); no ASK class (money including ad spend,
+ * credentials, DNS, production data, new product scope, outward publishing such
+ * as social posts and articles) matches its text; it names a code surface (a
+ * page, button, form, report, endpoint, bug); it is not analysis or research;
+ * and it is not waiting on a person ("once she picks", "not confirmed"). The
+ * detectors are keyword lists and over-match on purpose: a false park costs a
+ * person one look, a false start costs an unattended run touching an ASK class.
+ * The first live dry pass showed why the last three exist: without them social
+ * posts, a blog article, a keyword study and a lead analysis all read as features.
+ *
+ * ONE START PER PASS by default (--limit). Ideas past the limit are reported as
+ * held and written nowhere, so the next pass judges them afresh. Input order
+ * decides who goes first.
  *
  * REVIEW POINTS (G2). `review-point` records one decision per stage exit, its
  * Decided-for-you rows in the question and the recommended option first,
@@ -64,7 +73,7 @@
  * mirror idea in the Conveyor project), so the idea page is the trail.
  *
  * Usage:
- *   node idea-conveyor.js intake --source hub|vistek --ideas <file> --config <file> [--dry-run] [--state <file>] [--ledger <file>]
+ *   node idea-conveyor.js intake --source hub|vistek --ideas <file> --config <file> [--limit <n>, default 1] [--dry-run] [--state <file>] [--ledger <file>]
  *   node idea-conveyor.js review-point --idea <key> --stage <C1..C9> --question <text> --option <key>=<label> [--option ...]
  *        --recommended <key> [--row "<code>: <text>" ...] [--blocking] [--state <file>]
  *   node idea-conveyor.js receipt --idea <key> --stage <C1..C9> --command <gate command> --exit <n> [--artifact <link>] [--state <file>]
@@ -87,7 +96,7 @@ const OPUS = 'claude-opus-5-5';
 const MAX_STORIES = 8;
 
 const USAGE = [
-    'Usage: node idea-conveyor.js intake --source hub|vistek --ideas <file> --config <file> [--dry-run] [--state <file>] [--ledger <file>]',
+    'Usage: node idea-conveyor.js intake --source hub|vistek --ideas <file> --config <file> [--limit <n>, default 1] [--dry-run] [--state <file>] [--ledger <file>]',
     '       node idea-conveyor.js review-point --idea <key> --stage <C1..C9> --question <text> --option <key>=<label> [--option ...] --recommended <key> [--row "<code>: <text>" ...] [--blocking] [--state <file>]',
     '       node idea-conveyor.js receipt --idea <key> --stage <C1..C9> --command <gate command> --exit <n> [--artifact <link>] [--state <file>]',
     '       node idea-conveyor.js tick [--decisions <file>] [--state <file>] [--ledger <file>]',
@@ -119,12 +128,17 @@ const CLOSED = { hub: ['done', 'dropped', 'building'], vistek: ['facut', 'respin
 const FULL_SITE = /\b(?:new|full|whole)\s+(?:web\s?site|site|web\s?app|app|application|platform)\b|\b(?:site|website|aplica[tț]ie|platform[aă])\s+nou[aă]?\b|\bfrom scratch\b/i;
 // The ASK classes of the decision policy. Each list over-matches on purpose.
 const ASK = [
-    ['money', /\b(?:pric(?:e|es|ing)|pre[tț](?:ul|uri)?|tarif\w*|stripe|checkout|payments?|pl[aă][tț][aăi]\w*|billing|factur\w*|invoices?|abonament\w*|subscriptions?|refunds?|discounts?|paid plans?|charges?)\b/i],
+    ['money', /\b(?:pric(?:e|es|ing)|pre[tț](?:ul|uri)?|tarif\w*|stripe|checkout|payments?|pl[aă][tț][aăi]\w*|billing|factur\w*|invoices?|abonament\w*|subscriptions?|refunds?|discounts?|paid plans?|charges?|costs?|cost(?:ul|uri|urile|ului)|buget\w*|budgets?|reclam\w*|ads|ad spend|cpc)\b/i],
     ['credentials', /\b(?:passwords?|parol[aăe]\w*|api[ -]?keys?|secrets?|credentials?|tokens?|oauth (?:client|app)|cheie api|login details)\b/i],
     ['DNS', /\b(?:dns|cname|nameservers?|mx records?|domains?|domeni(?:u|ul|i))\b/i],
     ['production data', /\b(?:production data|prod(?:uction)? (?:db|database)|backfill|(?:delete|remove|wipe) (?:rows|users|records|data)|date(?:le)? de produc[tț]ie|migrate (?:the )?data|bulk (?:update|delete))\b/i],
     ['new scope', /\b(?:new product|produs nou|new business(?: line)?|new revenue stream|new service line|serviciu nou)\b/i],
+    ['outward publishing', /\b(?:instagram|facebook|linkedin|tiktok|youtube|postar[ei]\w*|posts?|postez\w*|newsletter\w*|carusel\w*|carousels?|campani[ea]\w*|campaigns?)\b|^\s*(?:articol|article|blog post)\b/im],
 ];
+// The other eligibility clauses. CODE_SURFACE must match; NOT_CODE and WAITING must not.
+const CODE_SURFACE = /\b(?:pagin\w*|pages?|meniu\w*|menus?|buton\w*|buttons?|formular\w*|forms?|cta|tab(?:s|ul|uri)?|layout|l[aă][tț]ime|width|widget\w*|faq|cuprins|url\w*|links?|linkul\w*|noindex|nofollow|canonical|scor\w*|scores?|afi[sș]\w*|display\w*|admin|dashboard\w*|ui|ux|component\w*|endpoints?|api|routes?|bugs?|erori?|errors?|crash\w*|fix\w*|repar\w*|mobil\w*|filt(?:er|ru)\w*|export\w*|import\w*|tabel\w*|tables?|modal\w*|c[aâ]mp(?:uri|ul)?|fields?|integr\w*|cron|notific\w*|search|c[aă]utare|detec\w*|raport\w*|reports?|screens?|ecran\w*|header|footer|login|sign[- ]?in|checkbox|dropdown|sidebar|bullets?)\b/i;
+const NOT_CODE = /\b(?:strategi[ae]?\w*|studi(?:u|ul|i|ului)\b(?!\s+de\s+caz)|study|studies|analiz\w*|analy[sz]\w*|research|cercet\w*|cuvinte cheie|keywords?)\b/i;
+const WAITING = /\b(?:feedback follows|once (?:the|her|his|their|she|he|they|miki|andy)\b[^.\n]{0,40}\b(?:arrives?|picks?|decides?|confirms?|sends?|approves?)|(?:she|he|they|miki|andy) picks|nu (?:este|e) confirmat[aă]?|not (?:yet )?confirmed|valid[aă]m [îi]mpreun[aă]|awaiting|waiting (?:on|for)|a[sș]tept[aă]m)\b/i;
 
 function fault(code, message) { const e = new Error(message || code); e.publicCode = code; throw e; }
 
@@ -133,7 +147,7 @@ function parseArgs(argv) {
     const flags = ['help', 'dry-run', 'blocking', 'all'];
     const repeat = ['option', 'row'];
     const known = [...flags, ...repeat, 'source', 'ideas', 'config', 'state', 'ledger', 'idea', 'stage', 'question', 'recommended',
-        'command', 'exit', 'artifact', 'decisions', 'id', 'result-id'];
+        'command', 'exit', 'artifact', 'decisions', 'id', 'result-id', 'limit'];
     for (let i = 0; i < argv.length; i++) {
         const a = argv[i];
         if (a === '--help' || a === '-h' || a === 'help') { out.help = true; continue; }
@@ -253,8 +267,13 @@ function classify(idea, config) {
     if (stories > MAX_STORIES) reasons.push(`about ${stories} stories, over the ${MAX_STORIES} one sprint holds`);
     for (const [cls, re] of ASK) {
         const m = idea.text.match(re);
-        if (m) reasons.push(`touches the ASK class ${cls} (matched "${m[0]}")`);
+        if (m) reasons.push(`touches the ASK class ${cls} (matched "${m[0].trim()}")`);
     }
+    const notCode = idea.text.match(NOT_CODE);
+    if (notCode) reasons.push(`analysis or research, not a code change (matched "${notCode[0]}")`);
+    else if (!CODE_SURFACE.test(idea.text)) reasons.push('names no code surface (page, button, form, report, endpoint, bug)');
+    const waiting = idea.text.match(WAITING);
+    if (waiting) reasons.push(`waits on a person (matched "${waiting[0]}")`);
     if (reasons.length) return { class: 'parked', reasons, product: productKey };
     return { class: 'feature', reasons: [`a change to live product ${productKey}, about ${stories} stories`], product: productKey, repo, stories };
 }
@@ -340,13 +359,16 @@ function queueNote(s, entry, body, sourceUrl) {
 
 function intake(opts) {
     if (!['hub', 'vistek'].includes(opts.source)) fault('usage', '--source must be hub or vistek');
+    if (opts.limit !== undefined && !/^[1-9]\d{0,3}$/.test(opts.limit)) fault('usage', '--limit must be a whole number from 1');
+    const limit = opts.limit === undefined ? 1 : Number(opts.limit);
     const config = readConfig(opts.config);
     const raw = readJson(opts.ideas, 'ideas');
     const rows = Array.isArray(raw) ? raw : (raw && Array.isArray(raw.ideas) ? raw.ideas : fault('ideas-unreadable', 'expected an array or {ideas: [...]}'));
     const ideas = rows.map((r) => normalise(opts.source, r));
     const unreadable = ideas.filter((i) => !i).length;
-    const counts = { read: rows.length, unreadable, unchanged: 0, skipped: 0, parked: 0, feature: 0, 'full-website': 0 };
+    const counts = { read: rows.length, unreadable, unchanged: 0, skipped: 0, parked: 0, feature: 0, 'full-website': 0, held: 0 };
     const results = [];
+    let started = 0;
     const run = (s) => {
         s.config = { hub: config.hub };
         for (const idea of ideas.filter(Boolean)) {
@@ -361,6 +383,11 @@ function intake(opts) {
                 ...(prior && prior.mirrorId ? { mirrorId: prior.mirrorId } : {}), ...(prior && prior.mirrorOutbox ? { mirrorOutbox: prior.mirrorOutbox } : {}) };
             const result = { key: idea.key, class: verdict.class, reasons: verdict.reasons };
             results.push(result);
+            // Past the limit an eligible idea is written nowhere, so the next pass judges it afresh.
+            if (CHAINS[verdict.class]) {
+                if (started >= limit) { result.held = 'limit'; counts.held++; continue; }
+                started++;
+            }
             if (opts['dry-run']) continue;
             s.ideas[idea.key] = entry;
             if (verdict.class === 'skipped') continue;
