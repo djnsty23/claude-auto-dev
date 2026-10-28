@@ -61,13 +61,16 @@
 // `[measured 2026-10-29]` the Brain held every panel under AWAY and still asked.
 // It ended turns with a next-step question (wrap_up `ask` and `actions`), once
 // with `blocked: true` at 21:12Z, and the fleet waited on the operator all
-// night. A start_session `offer` waits for an answer the same way. Holding only
-// AskUserQuestion moved the question, it did not remove it.
+// night. A start_session waits for a click on "Allow Claude to start another
+// session?", in bypassPermissions too. Holding only AskUserQuestion moved the
+// question, it did not remove it.
 //
 // Same state, same switch, same fail-open: under an active AWAY a wrap_up that
-// carries a question and an offer card are held, and everything else passes.
-// A recap-only wrap_up and an own_initiative card wait on nobody, so they are
-// never touched.
+// carries a question and every start but an own_initiative card are held. A
+// recap-only wrap_up and a proposal card wait on nobody, so they pass. In a
+// session that is not the Brain (brain-role.json), the message routes the held
+// question to the Brain by id: the operator's standing order is that every
+// question goes there while he is away.
 
 const LABEL_MARK = /\s*\(recommended\)\s*$/i;   // "Do the thing (Recommended)"
 const DESC_MARK = /^\s*\(recommended\)/i;       // "(Recommended) Because ..."
@@ -124,7 +127,7 @@ function activeAway() {
     return state && state.state === 'active' ? state : null;
 }
 
-function awayBranch(questions) {
+function awayBranch(questions, sessionId) {
     const state = activeAway();
     if (!state) return 0;
 
@@ -139,6 +142,7 @@ function awayBranch(questions) {
         `Panel held: the operator declared AWAY until ${state.until} (${mins} min left).\n`
         + (state.words ? `Their words: ${state.words.split('\n')[0].slice(0, 160)}\n` : '')
         + '\n'
+        + brainRoute(sessionId)
         + 'Do not wait. Resolve it here, by branch:\n'
         + '  1. Covered by a standing rule or order -> act, log, continue.\n'
         + '  2. Reversible and not covered -> take the option below, log it with the\n'
@@ -170,11 +174,38 @@ function askIn(name, input) {
             || (Array.isArray(input.actions) && input.actions.length > 0);
         return asks ? 'a next-step question' : null;
     }
-    if (name === START_SESSION && input.initiation === 'offer') return 'an offer card';
+    // Every start but a proposal card opens "Allow Claude to start another session?", and
+    // `[measured 2026-10-29]` it does so under bypassPermissions too. own_initiative only
+    // renders a card, so it waits on nobody.
+    if (name === START_SESSION && input.initiation !== 'own_initiative') return 'a session start';
     return null;
 }
 
-function heldAsk(name, what) {
+/** The Brain's role file, or null. Read only to route a held question; any failure is null. */
+function brainRole(env = process.env) {
+    try {
+        const fs = require('fs');
+        const path = require('path');
+        const dir = env.CLAUDE_CONFIG_DIR || path.join(require('os').homedir(), '.claude');
+        const r = JSON.parse(fs.readFileSync(env.AUTODEV_BRAIN_ROLE_FILE || path.join(dir, 'brain-role.json'), 'utf8'));
+        return r && r.role === 'brain' && typeof r.session_id === 'string' ? r : null;
+    } catch {
+        return null;
+    }
+}
+
+/** Where a held question goes: a session that is not the Brain hands it to the Brain. */
+function brainRoute(sessionId) {
+    const role = brainRole();
+    if (!role) return '';
+    if (sessionId && sessionId === role.session_id) return '';
+    const to = typeof role.desktop_session_id === 'string' ? role.desktop_session_id : role.session_id;
+    return 'This session is not the Brain. Send the question or the brief to the Brain\n'
+        + `with mcp__ccd_session_mgmt__send_message to ${to}, then keep working on\n`
+        + 'everything it does not block. The Brain decides or parks it.\n\n';
+}
+
+function heldAsk(name, what, sessionId) {
     const state = activeAway();
     if (!state) return 0;
     const mins = Math.max(0, Math.round((state.msRemaining || 0) / 60000));
@@ -182,13 +213,14 @@ function heldAsk(name, what) {
         ? 'Send wrap_up again with the recap alone: no ask, no actions, no blocked.\n'
             + 'Decide the question yourself by the branches below, put the decision in\n'
             + 'the recap, and end the turn without a question in your closing text.\n'
-        : 'Use initiation "user_asked" when the operator asked for this work. Otherwise\n'
-            + 'do it here, or propose it with "own_initiative", which waits on nobody.\n';
+        : 'A start waits for the operator to click Allow. Queue the work on the\n'
+            + 'headless channel (scripts/unattended-worker.js enqueue), which needs no\n'
+            + 'click, do it here, or propose it with "own_initiative".\n';
     process.stderr.write(
         `Ask held: the operator declared AWAY until ${state.until} (${mins} min left),\n`
         + `and this call carries ${what} that waits for an answer nobody can give.\n`
         + (state.words ? `Their words: ${state.words.split('\n')[0].slice(0, 160)}\n` : '')
-        + '\n' + redo + '\n'
+        + '\n' + brainRoute(sessionId) + redo + '\n'
         + '  1. Covered by a standing rule or order -> act, log, continue.\n'
         + '  2. Reversible and not covered -> take the recommended choice, log it in\n'
         + '     DECISIONS-<date>.md, and continue.\n'
@@ -210,7 +242,7 @@ function main(raw) {
     const input = (payload && (payload.tool_input || payload.toolInput)) || {};
     if (name !== 'AskUserQuestion') {
         const what = typeof input === 'object' ? askIn(name, input) : null;
-        return what ? heldAsk(name, what) : 0;
+        return what ? heldAsk(name, what, payload.session_id) : 0;
     }
 
     const questions = input.questions;
@@ -219,7 +251,7 @@ function main(raw) {
     // The mark first: branch 2 says take the RECOMMENDED option, so a panel
     // with none has nothing to take. Make it well-formed, then self-resolve.
     const bad = styleOff ? [] : unmarkedQuestions(questions);
-    if (!bad.length) return awayBranch(questions);
+    if (!bad.length) return awayBranch(questions, payload.session_id);
 
     const lines = bad.map((b) => `  question ${b.index}: ${b.question}`);
     process.stderr.write(
