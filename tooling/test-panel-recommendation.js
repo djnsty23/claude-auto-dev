@@ -24,7 +24,9 @@ const check = (name, cond) => {
 const run = (payload, env) => spawnSync('node', [HOOK], {
     input: typeof payload === 'string' ? payload : JSON.stringify(payload),
     encoding: 'utf8',
-    env: Object.assign({}, process.env, { AUTODEV_AWAY_CHECK: 'off' }, env || {}),
+    // The operator's real brain-role.json is never read either: a case names its own.
+    env: Object.assign({}, process.env, { AUTODEV_AWAY_CHECK: 'off',
+        AUTODEV_BRAIN_ROLE_FILE: path.join(require('os').tmpdir(), `no-brain-role-${process.pid}.json`) }, env || {}),
 });
 
 const panel = (questions) => ({ tool_name: 'AskUserQuestion', tool_input: { questions } });
@@ -190,12 +192,32 @@ check('a recap-only wrap_up passes silently under AWAY', r.status === 0 && (r.st
 r = run(wrap({ ask: '   ', actions: [], blocked: false }), AWAY_ON);
 check('empty ask, empty actions and blocked: false pass', r.status === 0);
 
-r = run(start('offer'), AWAY_ON);
-check('an offer card is held under AWAY', r.status === 2 && /user_asked/.test(r.stderr || ''));
-for (const init of ['user_asked', 'own_initiative']) {
+// `[measured 2026-10-29]` a user_asked start opened "Allow Claude to start another session?"
+// in a bypassPermissions session, so every start but a proposal card waits on a click.
+for (const init of ['offer', 'user_asked', undefined]) {
     r = run(start(init), AWAY_ON);
-    check(`a ${init} start passes under AWAY`, r.status === 0 && (r.stderr || '') === '');
+    check(`a ${init || 'default'} start is held under AWAY and points at the headless channel`,
+        r.status === 2 && /unattended-worker\.js enqueue/.test(r.stderr || ''));
 }
+r = run(start('own_initiative'), AWAY_ON);
+check('an own_initiative card passes under AWAY', r.status === 0 && (r.stderr || '') === '');
+r = run(start('user_asked'), { AUTODEV_AWAY_FILE: EXPIRED, AUTODEV_AWAY_CHECK: '' });
+check('a user_asked start passes when AWAY has expired', r.status === 0 && (r.stderr || '') === '');
+
+// All questions go to the Brain: a held ask in any other session names the Brain to send it to.
+const ROLE = awayFile('brain-role.json', JSON.stringify({ role: 'brain', session_id: 'brain-cli', desktop_session_id: 'local_brain' }));
+const asSession = (p, id) => Object.assign(p, { session_id: id });
+r = run(asSession(wrap({ ask: 'Ship it?' }), 'worker-cli'), Object.assign({ AUTODEV_BRAIN_ROLE_FILE: ROLE }, AWAY_ON));
+check('a worker\'s held wrap_up question is routed to the Brain by id',
+    r.status === 2 && /not the Brain/.test(r.stderr || '') && /send_message to local_brain/.test(r.stderr || ''));
+r = run(asSession(marked(), 'worker-cli'), Object.assign({ AUTODEV_BRAIN_ROLE_FILE: ROLE }, AWAY_ON));
+check('a worker\'s held panel is routed to the Brain too', r.status === 2 && /send_message to local_brain/.test(r.stderr || ''));
+r = run(asSession(start('user_asked'), 'worker-cli'), Object.assign({ AUTODEV_BRAIN_ROLE_FILE: ROLE }, AWAY_ON));
+check('a worker\'s held start is routed to the Brain', r.status === 2 && /send_message to local_brain/.test(r.stderr || ''));
+r = run(asSession(wrap({ ask: 'Ship it?' }), 'brain-cli'), Object.assign({ AUTODEV_BRAIN_ROLE_FILE: ROLE }, AWAY_ON));
+check('the Brain itself is not told to message itself', r.status === 2 && !/not the Brain/.test(r.stderr || ''));
+r = run(asSession(wrap({ ask: 'Ship it?' }), 'worker-cli'), AWAY_ON);
+check('no readable role file still holds, with no route line', r.status === 2 && !/not the Brain/.test(r.stderr || ''));
 
 for (const [label, file] of [['expired', EXPIRED], ['absent', MISSING], ['malformed', BROKEN]]) {
     r = run(wrap({ ask: 'Ship it?', blocked: true }), { AUTODEV_AWAY_FILE: file, AUTODEV_AWAY_CHECK: '' });
