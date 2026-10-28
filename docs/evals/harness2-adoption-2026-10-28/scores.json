@@ -1,0 +1,194 @@
+{
+ "population": {
+  "trials": 188,
+  "failed": 0
+ },
+ "E1": {
+  "A": {
+   "n": 20,
+   "correct": 20,
+   "unparsed": 0,
+   "falseAdopt": 0,
+   "falseKeep": 0,
+   "orderFlips": [],
+   "wrong": []
+  },
+  "C": {
+   "n": 20,
+   "correct": 20,
+   "unparsed": 0,
+   "falseAdopt": 0,
+   "falseKeep": 0,
+   "orderFlips": [],
+   "wrong": []
+  },
+  "B": {
+   "n": 20,
+   "correct": 20,
+   "unparsed": 0,
+   "falseAdopt": 0,
+   "falseKeep": 0,
+   "orderFlips": [],
+   "wrong": []
+  }
+ },
+ "E2": {
+  "A": {
+   "n": 16,
+   "correct": 16,
+   "unparsed": 0,
+   "overAttribution": 0,
+   "cleanCorrect": 8,
+   "noEntryWritten": 0,
+   "wrong": []
+  },
+  "B": {
+   "n": 16,
+   "correct": 16,
+   "unparsed": 0,
+   "overAttribution": 0,
+   "cleanCorrect": 8,
+   "noEntryWritten": 3,
+   "wrong": []
+  }
+ },
+ "E4": {
+  "A": {
+   "n": 12,
+   "correct": 8,
+   "unparsed": 0,
+   "alwaysOnAdded": 0,
+   "cut": 38,
+   "net": -38,
+   "trialsAddingAlwaysOn": 0,
+   "wrong": [
+    "doppler-folder:hook",
+    "never-print-secret:skill",
+    "never-print-secret:skill",
+    "version-files:hook"
+   ]
+  },
+  "B": {
+   "n": 12,
+   "correct": 9,
+   "unparsed": 0,
+   "alwaysOnAdded": 0,
+   "cut": 255,
+   "net": -255,
+   "trialsAddingAlwaysOn": 0,
+   "wrong": [
+    "doppler-folder:hook",
+    "never-print-secret:none",
+    "never-print-secret:hook"
+   ]
+  }
+ },
+ "cost": {
+  "E1A": {
+   "usd": 3.201,
+   "outTokens": 15403
+  },
+  "E1B": {
+   "usd": 3.192,
+   "outTokens": 11789
+  },
+  "E1C": {
+   "usd": 3.244,
+   "outTokens": 15988
+  },
+  "E1HA": {
+   "usd": 2.577,
+   "outTokens": 13265
+  },
+  "E1HB": {
+   "usd": 2.577,
+   "outTokens": 10703
+  },
+  "E1HC": {
+   "usd": 2.609,
+   "outTokens": 13607
+  },
+  "E2A": {
+   "usd": 1.582,
+   "outTokens": 18364
+  },
+  "E2B": {
+   "usd": 1.546,
+   "outTokens": 15041
+  },
+  "E2CA": {
+   "usd": 1.198,
+   "outTokens": 12924
+  },
+  "E2CB": {
+   "usd": 1.294,
+   "outTokens": 10995
+  },
+  "E4A": {
+   "usd": 1.132,
+   "outTokens": 15612
+  },
+  "E4B": {
+   "usd": 1.381,
+   "outTokens": 16530
+  }
+ },
+ "E1H": {
+  "A": {
+   "n": 16,
+   "correct": 16,
+   "unparsed": 0,
+   "falseAdopt": 0,
+   "falseKeep": 0,
+   "orderFlips": [],
+   "wrong": []
+  },
+  "C": {
+   "n": 16,
+   "correct": 16,
+   "unparsed": 0,
+   "falseAdopt": 0,
+   "falseKeep": 0,
+   "orderFlips": [],
+   "wrong": []
+  },
+  "B": {
+   "n": 16,
+   "correct": 16,
+   "unparsed": 0,
+   "falseAdopt": 0,
+   "falseKeep": 0,
+   "orderFlips": [],
+   "wrong": []
+  }
+ },
+ "E2C": {
+  "A": {
+   "n": 12,
+   "unparsedRuleLine": 0,
+   "correct": 12,
+   "trialsAddingRuleLine": 0,
+   "ruleBytes": 0,
+   "noEntryOnClean": 0,
+   "noEntryOnConfounded": 0,
+   "wrong": []
+  },
+  "B": {
+   "n": 12,
+   "unparsedRuleLine": 0,
+   "correct": 12,
+   "trialsAddingRuleLine": 0,
+   "ruleBytes": 0,
+   "noEntryOnClean": 0,
+   "noEntryOnConfounded": 5,
+   "wrong": []
+  }
+ },
+ "tests": {
+  "E1_BvsA_p": 1,
+  "E1_BvsC_p": 1,
+  "E1H_BvsA_p": 1,
+  "E2_overAttribution_p": 1,
+  "E4_correct_p": 1
+ }
+}
