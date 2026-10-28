@@ -109,7 +109,9 @@ if (process.argv.includes('--help') || process.argv.includes('-h')) {
         + 'Also ASKS (permissionDecision: ask on stdout) before git commit/push/merge/rebase/cherry-pick/am, but only\n'
         + 'when a bypass flag is present: --no-verify, commit/am -n, or -c core.hooksPath=. In an unattended run\n'
         + '(AI_AGENT ends _harness, or CLAUDE_CODE_ENTRYPOINT starts sdk-) the same text is a note, not a gate.\n'
-        + 'Either way the justification belongs in the commit or PR body.');
+        + 'Either way the justification belongs in the commit or PR body.\n'
+        + 'In every session, refuses a SUBAGENT (agent_id in the payload) `git push` that updates main or master:\n'
+        + 'a refspec destination, HEAD or no refspec on a checked-out default branch, --all, --mirror or --branches.');
     process.exit(0);
 }
 
@@ -554,6 +556,78 @@ function rawMergeSegment(segments) {
 }
 
 // ===========================================================================
+// THE FOURTH GUARD IN THIS FILE: a subagent never pushes a default branch.
+// Added 2026-10-28, from a colleague's as-built redline (Δ9) that denies every
+// subagent push while a mission runs.
+//
+// `[measured 2026-10-28]` over 30 days, 618 subagent transcripts ran 80 `git
+// push` calls: 61 to claude/*, 18 to other feature branches, 1 bare, 0 to main
+// or master. The redline as written would have refused all 80, so this keeps
+// only the hazard: a push that updates main or master. On a product repo that
+// push is a production deploy, and main moves only by PR through merge-lock.js.
+//
+// Every session, role file or not, because a dispatched subagent is not the
+// coordinator (isSubagent above) and the role check exempts it. The main
+// thread is not touched: deploy-identity names repos where a required merge
+// commit is made locally. A refspec's destination decides, after `+` and
+// `refs/heads/`; `HEAD` and a push with no refspec resolve to the current
+// branch, read with one `git symbolic-ref` only on that path. --all, --mirror
+// and --branches push main too. Anything unreadable fails open, like the rest
+// of this file outside the closed-run exemption.
+// ===========================================================================
+
+const DEFAULT_BRANCHES = new Set(['main', 'master']);
+const PUSH_VALUE_OPTS = new Set(['-o', '--push-option', '--repo', '--receive-pack', '--exec']);
+
+/** The branch `dir` has checked out, or null. Never throws. */
+function currentBranch(dir) {
+    try {
+        const r = require('child_process').spawnSync('git', ['-C', dir, 'symbolic-ref', '--quiet', '--short', 'HEAD'],
+            { encoding: 'utf8', timeout: 3000, windowsHide: true });
+        return r.status === 0 ? r.stdout.trim() : null;
+    } catch {
+        return null;
+    }
+}
+
+/** What a parsed `git push` sends to a default branch, as a short label, or null. */
+function defaultBranchPush(g) {
+    const positional = [];
+    for (let i = 0; i < g.args.length; i++) {
+        const a = g.args[i];
+        if (a === '--all' || a === '--mirror' || a === '--branches') return a;
+        if (PUSH_VALUE_OPTS.has(a)) { i++; continue; }
+        if (/^\d*[<>]/.test(a)) { if (/^\d*[<>]+$/.test(a)) i++; continue; }   // a redirection and its target
+        if (a.startsWith('-')) continue;
+        positional.push(a);
+    }
+    const refspecs = positional.slice(1);
+    let cur;
+    const branchOf = (name) => (name === 'HEAD' ? (cur === undefined ? (cur = currentBranch(g.dir)) : cur) : name);
+    for (const r of refspecs) {
+        const dst = branchOf((r.includes(':') ? r.slice(r.indexOf(':') + 1) : r).replace(/^\+/, '').replace(/^refs\/heads\//, ''));
+        if (DEFAULT_BRANCHES.has(dst)) return r === dst ? dst : `${dst} (refspec ${r})`;
+    }
+    if (refspecs.length) return null;
+    const head = branchOf('HEAD');
+    return head && DEFAULT_BRANCHES.has(head) ? `${head} (the branch checked out in ${g.dir})` : null;
+}
+
+/** The first segment where a subagent pushes a default branch, or null. Tracks `cd` like the role check. */
+function subagentDefaultPush(segments, cwd) {
+    let here = cwd;
+    for (const seg of segments) {
+        const moved = cdTarget(seg, here);
+        if (moved) { here = moved; continue; }
+        const g = parseGitSegment(seg, here);
+        if (!g || g.sub !== 'push') continue;
+        const hit = defaultBranchPush(g);
+        if (hit) return { target: hit, dir: g.dir };
+    }
+    return null;
+}
+
+// ===========================================================================
 // THE SECOND GUARD IN THIS FILE: `--no-verify` ASKS. Added 2026-09-08.
 //
 // WHY IT LIVES HERE. `[measured 2026-09-08]` on this machine under load 38,
@@ -611,6 +685,18 @@ try {
                     + `To turn enforcement off, remove ${marker}.\n`);
                 process.exit(2);
             }
+        }
+    }
+
+    // The fourth guard: blocks before the ask, and before the role file, which exempts subagents.
+    if (isSubagent(data) && /\bpush\b/.test(command)) {
+        const hit = subagentDefaultPush(commandSegments(stripNonCommandText(command)), cwd);
+        if (hit) {
+            process.stderr.write(`Blocked: this subagent's \`git push\` would update ${hit.target} on the remote `
+                + `of ${hit.dir}. A default branch moves only by PR through merge-lock.js, and on a product `
+                + 'repo this push is a production deploy.\n'
+                + 'Push a claude/<slug> branch instead and open a PR. The parent session merges it.\n');
+            process.exit(2);
         }
     }
 

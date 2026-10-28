@@ -1201,6 +1201,57 @@ const verdicts = {};
     verdicts.fail_open = foOk ? 'PASS' : 'FAIL';
 }
 
+// ---------------------------------------------------------------------------
+// M. A SUBAGENT NEVER PUSHES A DEFAULT BRANCH. Added 2026-10-28.
+//
+//    [measured 2026-10-28] 30 days of subagent transcripts: 80 `git push`
+//    calls, 61 to claude/*, 18 to other feature branches, 1 bare, 0 to main or
+//    master. Section L lets a subagent push, so this guard is the one thing
+//    standing between a dispatched worker and a production deploy. It holds
+//    with no role file, and the main thread is not its business.
+// ---------------------------------------------------------------------------
+{
+    const sub = { agent_id: 'a1b2c3', agent_type: 'general-purpose' };
+    const subPush = (command, over = {}) => run({ roleFile: ABSENT, payload: bash(command, { ...sub, ...over }) });
+    const expectPushBlock = (label, res) => check(label,
+        res.exit === 2 && /^Blocked: this subagent's `git push` would update (main|master)/.test(res.stderr),
+        `exit ${res.exit}, stderr ${JSON.stringify(res.stderr.slice(0, 90))}`);
+
+    expectPushBlock('M. subagent `git push origin main` blocks', subPush('git push origin main'));
+    expectPushBlock('M. subagent `HEAD:main` blocks', subPush('git push origin HEAD:main'));
+    expectPushBlock('M. subagent `+main` (a force refspec) blocks', subPush('git push origin +main'));
+    expectPushBlock('M. subagent `refs/heads/master` blocks', subPush('git push origin feature:refs/heads/master'));
+    expectPushBlock('M. subagent delete `:main` blocks', subPush('git push origin :main'));
+    expectPushBlock('M. subagent push after a value option still blocks', subPush('git push -o ci.skip origin main'));
+    expectPushBlock('M. subagent `git -C <repo> push origin main` blocks', subPush(`git -C "${OTHER_REPO}" push origin main`));
+    expectPushBlock('M. subagent push chained after a cd blocks', subPush(`cd "${OTHER_REPO}" && git push -u origin main`));
+    check('M. subagent `--all` blocks (it carries main)',
+        subPush('git push --all origin').exit === 2);
+    check('M. subagent `--mirror` blocks', subPush('git push --mirror origin').exit === 2);
+
+    expectSilentAllow('M. subagent `git push origin claude/x` is allowed', subPush('git push origin claude/x'));
+    expectSilentAllow('M. subagent `-u origin HEAD:claude/x` is allowed', subPush('git push -u origin HEAD:claude/x'));
+    expectSilentAllow('M. a branch whose name contains main is not main', subPush('git push origin fix-main-nav'));
+    expectSilentAllow('M. subagent echoing a push command is text', subPush('echo "git push origin main"'));
+    expectSilentAllow('M. subagent pushing with stderr redirected to a branch', subPush('git push origin claude/x 2>&1'));
+    expectSilentAllow('M. the MAIN thread `git push origin main` is not this guard\'s business',
+        run({ roleFile: ABSENT, payload: bash('git push origin main') }));
+    expectSilentAllow('M. agent_type alone is the main thread', run({ roleFile: ABSENT, payload: bash('git push origin main', { agent_type: 'x' }) }));
+
+    // A bare push names no branch: it pushes the current one, read from the repo.
+    const bare = path.join(fixture, 'bare-push');
+    const init = runBudgeted('git', ['init', '-q', '-b', 'main', bare], { encoding: 'utf8', timeout: 60000 });
+    if (init.status === 0) {
+        expectPushBlock('M. subagent bare `git push` on main blocks (current branch read)', subPush('git push', { cwd: bare }));
+        expectPushBlock('M. subagent `git push origin HEAD` on main blocks', subPush('git push origin HEAD', { cwd: bare }));
+        runBudgeted('git', ['-C', bare, 'checkout', '-q', '-b', 'claude/w'], { encoding: 'utf8', timeout: 60000 });
+        expectSilentAllow('M. CONTROL: the same bare push on claude/w is allowed', subPush('git push', { cwd: bare }));
+        expectSilentAllow('M. CONTROL: `origin HEAD` on claude/w is allowed', subPush('git push origin HEAD', { cwd: bare }));
+    } else {
+        check('M. git init available for the bare-push cases', false, init.stderr.slice(0, 80));
+    }
+}
+
 fs.rmSync(fixture, { recursive: true, force: true });
 
 // The population, not a bare verdict: what was driven, and how. Without it a
@@ -1209,7 +1260,7 @@ console.log(`\n${tally(pass, fail, infra)}`);
 console.log(`subject: ${path.relative(path.resolve(__dirname, '..'), HOOK)}, `
     + `driven as a subprocess ${pass + fail} times over `
     + `${['inert-without-role', 'the ban', 'mention-is-not-execution', 'cwd escapes',
-        'role ownership', 'dead claim', 'fail-open', 'home-prefix expansion', 'no-verify ask', 'merge-lock', 'subagent and scratch', 'mutation'].length} case groups; `
+        'role ownership', 'dead claim', 'fail-open', 'home-prefix expansion', 'no-verify ask', 'merge-lock', 'subagent and scratch', 'subagent default-branch push', 'mutation'].length} case groups; `
     + `every allow asserted zero bytes on BOTH stdout and stderr.`);
 if (fail) console.log(`failed: ${failures.join(' | ')}`);
 if (infra) console.log(`indeterminate: ${indeterminate.join(' | ')}`);
