@@ -168,6 +168,48 @@ check('  and it still names an option, falling back to #1 when nothing is marked
 r = run(marked(), { AUTODEV_AWAY_FILE: path.join(awayDir, 'a', 'b', 'c.md'), AUTODEV_AWAY_CHECK: '' });
 check('an unreachable AWAY path fails open', r.status === 0);
 
+// ---------------------------------------------------------------------------
+// THE OTHER ASK CHANNELS (added 2026-10-29). `[measured 2026-10-29]` the Brain
+// held every panel and still asked through wrap_up questions, one of them
+// `blocked: true`. Each held case is paired with the call that asks nothing.
+// ---------------------------------------------------------------------------
+const AWAY_ON = { AUTODEV_AWAY_FILE: ACTIVE, AUTODEV_AWAY_CHECK: '' };
+const wrap = (input) => ({ tool_name: 'mcp__ccd_turn__wrap_up', tool_input: Object.assign({ recap: 'Done.' }, input) });
+const start = (initiation) => ({ tool_name: 'mcp__ccd_session__start_session', tool_input: { title: 'x', initiation } });
+
+r = run(wrap({ ask: 'Ship it?', actions: [{ label: 'Yes' }] }), AWAY_ON);
+check('an active AWAY holds a wrap_up question', r.status === 2);
+check('  and tells the session to resend the recap alone', /recap alone: no ask, no actions, no blocked/.test(r.stderr || ''));
+check('  and carries the branch-3 classes', /money, production rows/.test(r.stderr || ''));
+r = run(wrap({ blocked: true }), AWAY_ON);
+check('blocked: true alone is held', r.status === 2);
+r = run(wrap({ actions: [{ label: 'Yes' }] }), AWAY_ON);
+check('buttons without an ask are held', r.status === 2);
+r = run(wrap({}), AWAY_ON);
+check('a recap-only wrap_up passes silently under AWAY', r.status === 0 && (r.stderr || '') === '');
+r = run(wrap({ ask: '   ', actions: [], blocked: false }), AWAY_ON);
+check('empty ask, empty actions and blocked: false pass', r.status === 0);
+
+r = run(start('offer'), AWAY_ON);
+check('an offer card is held under AWAY', r.status === 2 && /user_asked/.test(r.stderr || ''));
+for (const init of ['user_asked', 'own_initiative']) {
+    r = run(start(init), AWAY_ON);
+    check(`a ${init} start passes under AWAY`, r.status === 0 && (r.stderr || '') === '');
+}
+
+for (const [label, file] of [['expired', EXPIRED], ['absent', MISSING], ['malformed', BROKEN]]) {
+    r = run(wrap({ ask: 'Ship it?', blocked: true }), { AUTODEV_AWAY_FILE: file, AUTODEV_AWAY_CHECK: '' });
+    check(`${label} AWAY lets a wrap_up question through`, r.status === 0 && (r.stderr || '') === '');
+}
+r = run(wrap({ ask: 'Ship it?' }), { AUTODEV_AWAY_FILE: ACTIVE, AUTODEV_AWAY_CHECK: 'off' });
+check('AUTODEV_AWAY_CHECK=off releases the wrap_up hold', r.status === 0);
+r = run(wrap({ ask: 'Ship it?' }), { AUTODEV_AWAY_FILE: ACTIVE, AUTODEV_PANEL_CHECK: 'off', AUTODEV_AWAY_CHECK: '' });
+check('the STYLE switch leaves the wrap_up hold armed', r.status === 2);
+r = run({ tool_name: 'mcp__ccd_turn__wrap_up', tool_input: null }, AWAY_ON);
+check('a null wrap_up input fails open', r.status === 0);
+r = run({ tool_name: 'mcp__other__wrap_up', tool_input: { ask: 'x' } }, AWAY_ON);
+check('a same-named tool on another server passes', r.status === 0);
+
 fs.rmSync(awayDir, { recursive: true, force: true });
 
 console.log('');
