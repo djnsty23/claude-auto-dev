@@ -268,6 +268,37 @@ function lex(src) {
     return segs;
 }
 
+// `[measured 2026-10-29]` three workers lost their report: the text scan read words inside the
+// report's heredoc body ("gh repo archive", "doppler", a backticked path) as commands and denied
+// the write. A quoted delimiter turns expansion off, and when every command in the call only
+// copies, prints or reads (INERT), nothing can run the body, so it is data. A body in a call that
+// runs anything else (a shell, an interpreter, `cat > x.sh` then `bash x.sh`, a pipe into one),
+// and an unquoted or unterminated body, stay in the scan.
+const INERT = new Set(['cat', 'tee', 'mkdir', 'cd', 'test', '[', 'echo', 'printf', 'true', 'ls', 'wc', 'head', 'tail', 'cut', 'grep', 'sort']);
+
+/** The command with its quoted heredoc bodies removed, when every command in it is INERT. */
+function stripDataHeredocs(src) {
+    const lines = String(src).split('\n');
+    const out = [];
+    for (let i = 0; i < lines.length; i++) {
+        const line = lines[i];
+        out.push(line);
+        const m = /<<(-?)\s*(['"])([A-Za-z_][A-Za-z0-9_]*)\2/.exec(line);
+        // One heredoc on the line, and never a here-string (<<<), which has no body to skip.
+        if (!m || /<<</.test(line) || (line.match(/<</g) || []).length !== 1) continue;
+        const end = (l) => (m[1] === '-' ? l.replace(/\r$/, '').replace(/^\t+/, '') : l.replace(/\r$/, '')) === m[3];
+        let j = i + 1;
+        while (j < lines.length && !end(lines[j])) j++;
+        if (j >= lines.length) continue;
+        i = j - 1;
+    }
+    const stripped = out.join('\n');
+    if (stripped === String(src)) return stripped;
+    const segs = lex(stripped);
+    const inert = (s) => { const w = s.words.filter((x, n) => !(n === 0 && /^[A-Za-z_][A-Za-z0-9_]*=/.test(x))); return !w.length || INERT.has(exeName(w[0])); };
+    return segs && segs.every(inert) ? stripped : String(src);
+}
+
 /** The executable's bare name: no directory, no quotes, no .exe. */
 function exeName(word) {
     return slash(word).split('/').pop().toLowerCase().replace(/\.(exe|cmd|bat|com)$/, '');
@@ -549,6 +580,7 @@ function analyseCommand(cmd, auth, cwd, dialect = 'bash', depth = 0) {
     if (typeof cmd !== 'string') return deny('unreadable', 'the command is not text');
     if (depth > 6) return deny('opaque-exec', 'the command nests wrappers deeper than the guard reads');
     if (auth.bash === 'none') return deny('tool-not-in-authority', `a ${auth.kind} run has no shell`);
+    if (dialect === 'bash') cmd = stripDataHeredocs(cmd);
     const text = scanText(cmd, auth, dialect);
     if (text) return text;
     if (dialect === 'code') return null;
