@@ -37,22 +37,38 @@
  * is reported as not merged. A session with no link is unattributed. Rows
  * before the span are not counted, so a PR whose work started earlier reads low.
  *
+ * UNATTRIBUTED KINDS. [measured 2026-10-28] 21% of 30 days' spend had no
+ * link, and the report could not say what it was. Each unattributed session
+ * now gets one kind, first match wins:
+ *   routine       the desktop session record names a scheduledTaskId
+ *   branch        its rows were written on a branch with no PR merged in the span
+ *   scratch       its cwd is under the OS temp dir and in no GitHub repo
+ *   outside repo  its cwd is in no GitHub repo
+ *   repo trunk    its cwd is a GitHub repo on trunk, and nothing links it
+ *   no cwd        the transcript names no cwd
+ * The desktop records are read from the app's claude-code-sessions dir, or
+ * --sessions-dir. An absent dir reads as absent in the population line, and
+ * every session then falls through to the later kinds.
+ *
  * Prices come from quota-burn.js priceUsage, required, never copied.
  *
  *   node work-cost.js                   last 7 days, human summary
  *   node work-cost.js --days 14 --json
  *   node work-cost.js --top 20          how many PRs the summary lists
  *   node work-cost.js --repo owner/name also read this repo's merged PRs
+ *   node work-cost.js --sessions-dir D  read desktop session records from D
  *
  * Exit 0 measured. Exit 2 when an input could not be read: no transcript
  * directory, no merged-PR list from any repo, or a worker ledger that exists
  * and does not parse.
  */
 const fs = require('fs');
+const os = require('os');
 const path = require('path');
 const { spawnSync } = require('child_process');
 const claudePaths = require('./claude-paths.js');
 const { priceUsage, transcripts } = require('./quota-burn.js');
+const { desktopSessionsDir, readSessions } = require('./delivery-outcomes.js');
 
 const argv = process.argv.slice(2);
 const has = (n) => argv.includes('--' + n);
@@ -67,6 +83,8 @@ const REPO = /^[\w.-]+\/[\w.-]+$/;
 const BRANCH = /^\w[\w./-]*$/;
 // Evidence kinds, strongest first.
 const KINDS = ['create', 'branch', 'checkout', 'merge'];
+// What an unattributed session was, in the order the first match wins.
+const UNATTRIBUTED = ['routine', 'branch', 'scratch', 'outside repo', 'repo trunk', 'no cwd'];
 
 function textOf(content) {
     if (typeof content === 'string') return content;
@@ -240,6 +258,35 @@ function attribute(sessions, byBranch) {
     }
 }
 
+/**
+ * A path compared case-blind on win32, through the real path of its nearest
+ * existing ancestor: a deleted scratch dir under a short-named or symlinked
+ * temp dir (RUNNER~1, /var/folders) must still compare under it.
+ */
+function canonical(p) {
+    let head = path.resolve(p);
+    const tail = [];
+    for (;;) {
+        try { head = fs.realpathSync.native(head); break; } catch { /* walk up */ }
+        const up = path.dirname(head);
+        if (up === head) break;
+        tail.unshift(path.basename(head));
+        head = up;
+    }
+    const r = path.join(head, ...tail);
+    return process.platform === 'win32' ? r.toLowerCase() : r;
+}
+
+/** The kind of an unattributed session, per UNATTRIBUTED. */
+function unattributedKind(s, routineOf, tmp) {
+    if (routineOf.has(s.id)) return 'routine';
+    if (s.onBranch.size) return 'branch';
+    if (!s.cwd) return 'no cwd';
+    if (repoOfCwd(s.cwd)) return 'repo trunk';
+    const rel = path.relative(tmp, canonical(s.cwd));
+    return rel && !rel.startsWith('..') && !path.isAbsolute(rel) ? 'scratch' : 'outside repo';
+}
+
 function median(xs) {
     if (!xs.length) return null;
     const a = xs.slice().sort((x, y) => x - y);
@@ -328,13 +375,36 @@ function measure(opts) {
     }
 
     attribute(sessions, byBranch);
+    const recs = readSessions(opts.sessionsDir);
+    const routineOf = new Map();
+    for (const r of recs.records) {
+        if (typeof r.cliSessionId === 'string' && typeof r.scheduledTaskId === 'string' && r.scheduledTaskId) {
+            routineOf.set(r.cliSessionId, r.scheduledTaskId);
+        }
+    }
+    const tmp = canonical(os.tmpdir());
+    const byKind = Object.fromEntries(UNATTRIBUTED.map((k) => [k, { cost: 0, sessions: 0 }]));
+    const routines = new Map();
     const totals = { cost: 0, merged: 0, notMerged: 0, unattributed: 0 };
     const via = { create: 0, branch: 0, checkout: 0, merge: 0 };
     let linkedToMerged = 0;
     let onlyNotMerged = 0;
     for (const s of sessions) {
         totals.cost += s.cost;
-        if (!s.links.size) { totals.unattributed += s.cost; continue; }
+        if (!s.links.size) {
+            totals.unattributed += s.cost;
+            const kind = unattributedKind(s, routineOf, tmp);
+            byKind[kind].cost += s.cost;
+            byKind[kind].sessions++;
+            if (kind === 'routine') {
+                const id = routineOf.get(s.id);
+                const r = routines.get(id) || { id, cost: 0, sessions: 0 };
+                r.cost += s.cost;
+                r.sessions++;
+                routines.set(id, r);
+            }
+            continue;
+        }
         const share = 1 / s.links.size;
         let strongest = null;
         for (const [k, kind] of s.links) {
@@ -367,8 +437,13 @@ function measure(opts) {
             unattributed: sessions.filter((s) => !s.links.size).length, via,
             repos: repos.size, reposUnreadable: unreadable, mergedPrs: prs.size,
             prsWithSessions: list.filter((p) => p.sessions > 0).length,
+            sessionRecords: { state: recs.state, read: recs.records.length, unreadable: recs.bad, routines: routineOf.size },
         },
         cost: totals,
+        unattributed: {
+            byKind,
+            routines: [...routines.values()].sort((a, b) => b.cost - a.cost),
+        },
         prs: list,
         passes: {
             headless: hl.present ? passes(hl.records, (r) => r.code, (r) => r.startedAt,
@@ -405,6 +480,19 @@ function printHuman(r, top) {
             + `${usd(r.cost.unattributed)} (${pct(r.cost.unattributed, r.cost.cost)}) unattributed`,
     ];
     p.reposUnreadable.forEach((u, i) => lines.push(`  unreadable repo ${i + 1} of ${p.reposUnreadable.length}: ${u}`));
+    const sr = p.sessionRecords;
+    lines.push(sr.state === 'read'
+        ? `desktop session records: ${sr.read} read, ${sr.unreadable} unreadable, ${sr.routines} name a scheduled task`
+        : `desktop session records: 0 read, the dir is ${sr.state}, so no session reads as routine`);
+    lines.push('unattributed by kind: ' + UNATTRIBUTED.map((k) => {
+        const b = r.unattributed.byKind[k];
+        return `${usd(b.cost)} ${k} (${b.sessions} session(s))`;
+    }).join(', '));
+    const rt = r.unattributed.routines;
+    if (rt.length) {
+        lines.push(`top ${Math.min(5, rt.length)} of ${rt.length} routine(s): `
+            + rt.slice(0, 5).map((x) => `${x.id} ${usd(x.cost)} in ${x.sessions}`).join(', '));
+    }
     const shown = r.prs.filter((x) => x.sessions > 0).slice(0, top);
     lines.push(`top ${shown.length} merged PR(s) by cost:`);
     shown.forEach((x, i) => {
@@ -433,6 +521,7 @@ function main() {
             '  node work-cost.js --days 14 --json',
             '  node work-cost.js --top 20          how many PRs the summary lists (default 10)',
             '  node work-cost.js --repo owner/name also read this repo\'s merged PRs',
+            '  node work-cost.js --sessions-dir D  read desktop session records from D',
             '',
             'Exit 0 measured, 2 when transcripts, every merged-PR list, or a ledger could not be read.',
         ].join('\n'));
@@ -444,7 +533,11 @@ function main() {
         process.exitCode = 2;
         return;
     }
-    const r = measure({ days, sinceMs: Date.now() - days * 86400000, repos: all('repo') });
+    const sessionsDir = val('sessions-dir', null);
+    const r = measure({
+        days, sinceMs: Date.now() - days * 86400000, repos: all('repo'),
+        sessionsDir: sessionsDir ? path.resolve(sessionsDir) : desktopSessionsDir(),
+    });
     if (!r.ok) {
         if (has('json')) console.log(JSON.stringify({ ok: false, reason: r.reason }));
         console.error('work-cost: COULD NOT MEASURE: ' + r.reason);

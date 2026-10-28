@@ -107,10 +107,25 @@ function config(files, ledgers) {
     return cfg;
 }
 
+// The child's OS temp dir, so a scratch cwd can sit under it and every other
+// fixture dir sits outside it. It is a link to the real dir, as a short-named
+// or symlinked temp dir is (RUNNER~1, /var/folders), so a deleted scratch dir
+// under it must still compare under it. Desktop session records default to an
+// absent dir.
+const TMP_REAL = path.join(ROOT, 'tmp-real');
+fs.mkdirSync(TMP_REAL, { recursive: true });
+const CHILD_TMP = path.join(ROOT, 'tmp');
+fs.symlinkSync(TMP_REAL, CHILD_TMP, process.platform === 'win32' ? 'junction' : 'dir');
+const NO_SESSIONS = path.join(ROOT, 'no-sessions');
+
 function run(cfg, argv, extraEnv) {
-    const r = spawnSync(process.execPath, [SUBJECT].concat(argv), {
+    const args = argv.includes('--sessions-dir') || (extraEnv && extraEnv.NO_SESSIONS_FLAG)
+        ? argv : argv.concat(['--sessions-dir', NO_SESSIONS]);
+    const r = spawnSync(process.execPath, [SUBJECT].concat(args), {
         encoding: 'utf8',
-        env: Object.assign({}, process.env, { CLAUDE_CONFIG_DIR: cfg, WORK_COST_GH: GH_STUB }, extraEnv || {}),
+        env: Object.assign({}, process.env, {
+            CLAUDE_CONFIG_DIR: cfg, WORK_COST_GH: GH_STUB, TEMP: CHILD_TMP, TMP: CHILD_TMP, TMPDIR: CHILD_TMP,
+        }, extraEnv || {}),
     });
     let j = null;
     try { j = JSON.parse(r.stdout); } catch { /* null */ }
@@ -412,6 +427,116 @@ check('--repo adds a repo no session named', /"--repo","acme\/other"/.test(argvL
 {
     const { r } = run(CFG, ['--help']);
     check('--help exits 0 and names the exit codes', r.status === 0 && /Exit 0 measured, 2 when/.test(r.stdout), r.stdout);
+}
+
+// --------------------------------------------------------- unattributed kinds
+//
+// Opus 5 output at $25 per MTok. Unattributed, first match wins:
+//   R1 10k on feat/zzz with a routine record (routine beats branch)  = $0.25 routine
+//   R2 20k on trunk, same routine                                    = $0.50 routine
+//   B1 40k on claude/never in the repo                               = $1.00 branch
+//   B2 4k on claude/tmp-branch in a non-repo temp dir (branch first) = $0.10 branch
+//   T1 20k in a temp dir that exists                                 = $0.50 scratch
+//   T2 10k in a temp dir since deleted                               = $0.25 scratch
+//   O1 80k in a non-repo dir outside temp                            = $2.00 outside repo
+//   O2 40k the same, its record names no scheduled task              = $1.00 outside repo
+//   P1 20k in the repo on main                                       = $0.50 repo trunk
+//   N1 4k with no cwd on any row                                     = $0.10 no cwd
+// L1 ran gh pr create (merged #11) and has a routine record: linked, never a kind.
+
+{
+    const SCRATCH = path.join(CHILD_TMP, 'skill-eval-a');
+    fs.mkdirSync(SCRATCH, { recursive: true });
+    const GONE = path.join(CHILD_TMP, 'skill-eval-gone');
+    const PLAIN = path.join(ROOT, 'plain');
+    fs.mkdirSync(PLAIN, { recursive: true });
+    const out = (k) => ({ output_tokens: k * 1000 });
+    const u = (s, cwd, id, k) => usageRow(s, cwd, ago(H), id, 'r' + id, 'claude-opus-5', out(k));
+    const KIND_FILES = {
+        'k/R1.jsonl': [on('feat/zzz', u('R1', REPO_DIR, 'kr1', 10))],
+        'k/R2.jsonl': [on('main', u('R2', REPO_DIR, 'kr2', 20))],
+        'k/B1.jsonl': [on('claude/never', u('B1', REPO_DIR, 'kb1', 40))],
+        'k/B2.jsonl': [on('claude/tmp-branch', u('B2', SCRATCH, 'kb2', 4))],
+        'k/T1.jsonl': [u('T1', SCRATCH, 'kt1', 20)],
+        'k/T2.jsonl': [u('T2', GONE, 'kt2', 10)],
+        'k/O1.jsonl': [u('O1', PLAIN, 'ko1', 80)],
+        'k/O2.jsonl': [u('O2', PLAIN, 'ko2', 40)],
+        'k/P1.jsonl': [on('main', u('P1', REPO_DIR, 'kp1', 20))],
+        'k/N1.jsonl': [Object.fromEntries(Object.entries(u('N1', undefined, 'kn1', 4)).filter(([key]) => key !== 'cwd'))],
+        'k/L1.jsonl': [
+            bash('L1', REPO_DIR, ago(H), 'tl1', 'gh pr create --title x'),
+            result('L1', REPO_DIR, ago(H), 'tl1', 'https://github.com/acme/widgets/pull/11\n'),
+            u('L1', REPO_DIR, 'kl1', 40),
+        ],
+    };
+    const KCFG = config(KIND_FILES);
+    const SESS = path.join(ROOT, 'sessions');
+    const rec = (dir, file, body) => {
+        fs.mkdirSync(path.join(SESS, dir), { recursive: true });
+        fs.writeFileSync(path.join(SESS, dir, file), typeof body === 'string' ? body : JSON.stringify(body), 'utf8');
+    };
+    rec('acct/org', 'local_0001.json', { sessionId: 'local_0001', cliSessionId: 'R1', scheduledTaskId: 'board-tick' });
+    rec('acct/org', 'local_0002.json', { sessionId: 'local_0002', cliSessionId: 'R2', scheduledTaskId: 'board-tick' });
+    rec('acct/org', 'local_0003.json', { sessionId: 'local_0003', cliSessionId: 'L1', scheduledTaskId: 'pr-bot' });
+    rec('acct/org', 'local_0004.json', { sessionId: 'local_0004', cliSessionId: 'O2', title: 'started by hand' });
+    rec('acct/org', 'local_0005.json', { sessionId: 'local_0005', cliSessionId: 'NOT-IN-SPAN', scheduledTaskId: 'idle-task' });
+    rec('acct/org', 'local_0006.json', '{not json');
+    rec('acct/org', 'deleted_local_0007.json', { sessionId: 'local_0007', cliSessionId: 'O1', scheduledTaskId: 'deleted-task' });
+
+    ghData(GH_ALL);
+    const { r, j: jk } = run(KCFG, ['--json', '--sessions-dir', SESS]);
+    const k = jk?.unattributed?.byKind || {};
+    const is = (kind, cost, sessions) => near(k[kind]?.cost, cost, 1e-9) && k[kind]?.sessions === sessions;
+    check('kinds: the run exits 0', r.status === 0, r.stderr);
+    check('kinds: a routine record wins over the branch its rows were written on, and over trunk',
+        is('routine', 0.75, 2), JSON.stringify(k.routine));
+    check('kinds: a non-trunk branch with no merged PR is branch, even in a temp dir', is('branch', 1.1, 2), JSON.stringify(k.branch));
+    check('kinds: a non-repo cwd under the OS temp dir is scratch, deleted or not', is('scratch', 0.75, 2), JSON.stringify(k.scratch));
+    check('kinds: a non-repo cwd outside temp is outside repo, a deleted_ record and a record with no task included',
+        is('outside repo', 3, 2), JSON.stringify(k['outside repo']));
+    check('kinds: a repo cwd on trunk with no link is repo trunk', is('repo trunk', 0.5, 1), JSON.stringify(k['repo trunk']));
+    check('kinds: a session whose rows name no cwd is no cwd', is('no cwd', 0.1, 1), JSON.stringify(k['no cwd']));
+    const sumKinds = Object.values(k).reduce((s, x) => s + x.cost, 0);
+    check('kinds: the kinds add up to the unattributed total', near(sumKinds, jk?.cost?.unattributed, 1e-9)
+        && near(jk?.cost?.unattributed, 6.2, 1e-9), sumKinds + ' vs ' + jk?.cost?.unattributed);
+    check('kinds: a linked session with a routine record stays linked, never a kind',
+        near(jk?.cost?.merged, 1, 1e-9) && jk?.population?.unattributed === 10, JSON.stringify(jk?.cost));
+    check('kinds: routines aggregate by task id, a linked one left out',
+        JSON.stringify(jk?.unattributed?.routines) === JSON.stringify([{ id: 'board-tick', cost: 0.75, sessions: 2 }]),
+        JSON.stringify(jk?.unattributed?.routines));
+    check('kinds: the record population counts read, unreadable and named tasks, deleted_ files skipped',
+        JSON.stringify(jk?.population?.sessionRecords) === JSON.stringify({ state: 'read', read: 5, unreadable: 1, routines: 4 }),
+        JSON.stringify(jk?.population?.sessionRecords));
+
+    const { r: rh } = run(KCFG, ['--sessions-dir', SESS]);
+    check('kinds: the summary prints the record population',
+        /^desktop session records: 5 read, 1 unreadable, 4 name a scheduled task$/m.test(rh.stdout), rh.stdout);
+    check('kinds: the summary prints every kind in order with its sessions',
+        /^unattributed by kind: \$1 routine \(2 session\(s\)\), \$1 branch \(2 session\(s\)\), \$1 scratch \(2 session\(s\)\), \$3 outside repo \(2 session\(s\)\), \$1 repo trunk \(1 session\(s\)\), \$0 no cwd \(1 session\(s\)\)$/m.test(rh.stdout),
+        rh.stdout);
+    check('kinds: the summary names the top routines', /^top 1 of 1 routine\(s\): board-tick \$1 in 2$/m.test(rh.stdout), rh.stdout);
+
+    const { j: ja, r: ra } = run(KCFG, ['--json', '--sessions-dir', path.join(ROOT, 'absent')]);
+    const ka = ja?.unattributed?.byKind || {};
+    check('kinds: an absent records dir reads as absent, and the routines fall through',
+        ja?.population?.sessionRecords?.state === 'absent' && ka.routine?.sessions === 0
+        && ka.branch?.sessions === 3 && ka['repo trunk']?.sessions === 2, JSON.stringify(ja?.population?.sessionRecords) + JSON.stringify(ka));
+    const { r: rah } = run(KCFG, ['--sessions-dir', path.join(ROOT, 'absent')]);
+    check('kinds: the summary says the records dir is absent',
+        ra.status === 0 && /^desktop session records: 0 read, the dir is absent, so no session reads as routine$/m.test(rah.stdout), rah.stdout);
+
+    // With no flag the app's own dir is read, found from the platform's config base.
+    const HOME = path.join(ROOT, 'home');
+    const env = { USERPROFILE: HOME, HOME, APPDATA: path.join(HOME, 'AppData', 'Roaming'), XDG_CONFIG_HOME: path.join(HOME, '.config') };
+    const { desktopSessionsDir } = require(path.resolve(__dirname, '..', 'plugins', 'autodev-core', 'scripts', 'delivery-outcomes.js'));
+    const appDir = desktopSessionsDir(env);
+    fs.mkdirSync(path.join(appDir, 'a', 'o'), { recursive: true });
+    fs.writeFileSync(path.join(appDir, 'a', 'o', 'local_0100.json'),
+        JSON.stringify({ sessionId: 'local_0100', cliSessionId: 'P1', scheduledTaskId: 'nightly' }), 'utf8');
+    const { j: jd } = run(KCFG, ['--json'], { ...env, NO_SESSIONS_FLAG: '1' });
+    check('kinds: with no flag the app\'s claude-code-sessions dir is read',
+        jd?.population?.sessionRecords?.read === 1 && jd?.unattributed?.routines?.[0]?.id === 'nightly',
+        JSON.stringify(jd?.population?.sessionRecords));
 }
 
 // -------------------------------------------------------------------- report
