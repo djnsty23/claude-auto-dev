@@ -73,7 +73,7 @@
         ]
       },
       {
-        "matcher": "AskUserQuestion",
+        "matcher": "AskUserQuestion|mcp__ccd_turn__wrap_up|mcp__ccd_session__start_session",
         "hooks": [
           {
             "type": "command",

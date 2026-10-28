@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 'use strict';
 
-// PreToolUse on AskUserQuestion. rules/options-protocol.md requires that every
+// PreToolUse on AskUserQuestion, wrap_up and start_session. rules/options-protocol.md requires that every
 // question block mark one option (Recommended); a block without one is a menu,
 // and a menu pushes the ranking work back onto the reader.
 //
@@ -54,6 +54,20 @@
 // Fails open like everything else here: if the state cannot be read, the panel
 // goes to the operator, which is the safe direction. Three of the four AWAY
 // states mean "ask" for the same reason.
+//
+// ---------------------------------------------------------------------------
+// THIRD JOB, added 2026-10-29: the other ask channels.
+//
+// `[measured 2026-10-29]` the Brain held every panel under AWAY and still asked.
+// It ended turns with a next-step question (wrap_up `ask` and `actions`), once
+// with `blocked: true` at 21:12Z, and the fleet waited on the operator all
+// night. A start_session `offer` waits for an answer the same way. Holding only
+// AskUserQuestion moved the question, it did not remove it.
+//
+// Same state, same switch, same fail-open: under an active AWAY a wrap_up that
+// carries a question and an offer card are held, and everything else passes.
+// A recap-only wrap_up and an own_initiative card wait on nobody, so they are
+// never touched.
 
 const LABEL_MARK = /\s*\(recommended\)\s*$/i;   // "Do the thing (Recommended)"
 const DESC_MARK = /^\s*\(recommended\)/i;       // "(Recommended) Because ..."
@@ -95,9 +109,9 @@ function recommendedOption(question) {
  * Every failure path returns 0. A panel reaching the operator is the safe
  * outcome; a panel swallowed by a defect in here is a turn nobody can finish.
  */
-function awayBranch(questions) {
-    if (String(process.env.AUTODEV_AWAY_CHECK || '').toLowerCase() === 'off') return 0;
-
+/** The active AWAY state, or null for every other state and every failure. */
+function activeAway() {
+    if (String(process.env.AUTODEV_AWAY_CHECK || '').toLowerCase() === 'off') return null;
     let state;
     try {
         // Sibling module inside this same plugin, resolved from __dirname, so
@@ -105,10 +119,14 @@ function awayBranch(questions) {
         ({ readAwayState: state } = require('../scripts/away-state.js'));
         state = state();
     } catch {
-        return 0;   // cannot read the state -> the operator can be asked
+        return null;   // cannot read the state -> the operator can be asked
     }
+    return state && state.state === 'active' ? state : null;
+}
 
-    if (!state || state.state !== 'active') return 0;
+function awayBranch(questions) {
+    const state = activeAway();
+    if (!state) return 0;
 
     const mins = Math.max(0, Math.round((state.msRemaining || 0) / 60000));
     const picks = questions.map((q, i) => {
@@ -141,6 +159,47 @@ function awayBranch(questions) {
     return 2;
 }
 
+const WRAP_UP = 'mcp__ccd_turn__wrap_up';
+const START_SESSION = 'mcp__ccd_session__start_session';
+
+/** What a non-panel call would ask the operator, or null when it asks nothing. */
+function askIn(name, input) {
+    if (name === WRAP_UP) {
+        const asks = input.blocked === true
+            || (typeof input.ask === 'string' && input.ask.trim() !== '')
+            || (Array.isArray(input.actions) && input.actions.length > 0);
+        return asks ? 'a next-step question' : null;
+    }
+    if (name === START_SESSION && input.initiation === 'offer') return 'an offer card';
+    return null;
+}
+
+function heldAsk(name, what) {
+    const state = activeAway();
+    if (!state) return 0;
+    const mins = Math.max(0, Math.round((state.msRemaining || 0) / 60000));
+    const redo = name === WRAP_UP
+        ? 'Send wrap_up again with the recap alone: no ask, no actions, no blocked.\n'
+            + 'Decide the question yourself by the branches below, put the decision in\n'
+            + 'the recap, and end the turn without a question in your closing text.\n'
+        : 'Use initiation "user_asked" when the operator asked for this work. Otherwise\n'
+            + 'do it here, or propose it with "own_initiative", which waits on nobody.\n';
+    process.stderr.write(
+        `Ask held: the operator declared AWAY until ${state.until} (${mins} min left),\n`
+        + `and this call carries ${what} that waits for an answer nobody can give.\n`
+        + (state.words ? `Their words: ${state.words.split('\n')[0].slice(0, 160)}\n` : '')
+        + '\n' + redo + '\n'
+        + '  1. Covered by a standing rule or order -> act, log, continue.\n'
+        + '  2. Reversible and not covered -> take the recommended choice, log it in\n'
+        + '     DECISIONS-<date>.md, and continue.\n'
+        + '  3. IRREDUCIBLE -> money, production rows, deletes of unmeasured shared\n'
+        + '     state, or taste on a daily surface. Record it as BLOCKED and take the\n'
+        + '     next queue item.\n'
+        + `Read: ${state.file}. Set AUTODEV_AWAY_CHECK=off to disable this branch.\n`
+    );
+    return 2;
+}
+
 function main(raw) {
     const styleOff = String(process.env.AUTODEV_PANEL_CHECK || '').toLowerCase() === 'off';
 
@@ -148,9 +207,12 @@ function main(raw) {
     try { payload = JSON.parse(raw); } catch { return 0; }
 
     const name = payload && (payload.tool_name || payload.toolName);
-    if (name !== 'AskUserQuestion') return 0;
-
     const input = (payload && (payload.tool_input || payload.toolInput)) || {};
+    if (name !== 'AskUserQuestion') {
+        const what = typeof input === 'object' ? askIn(name, input) : null;
+        return what ? heldAsk(name, what) : 0;
+    }
+
     const questions = input.questions;
     if (!Array.isArray(questions) || !questions.length) return 0;
 

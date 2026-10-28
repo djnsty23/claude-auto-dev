@@ -34,9 +34,14 @@ omit the tool's requested working directory; its thread cwd cannot establish
 where a command will write. Keep reservations through uncertain worker exits,
 and require operation/acceptance evidence beyond native turn completion.
 
-Keep the question channel available. An away window may route reversible
-choices to Brain; denying the question tool removes the escalation route.
-Confirm role and return-address validity before workers rely on the coordinator.
+When the user says they are away, asleep, or wants no panels, declare it before
+the next tool call: write the AWAY file `scripts/away-state.js` reads, with an
+`until:` line and their words. From then until it expires, nothing asks the
+user. No panel, no wrap_up `ask`, `actions` or `blocked`, no `offer` card, no
+question in closing text. The `panel-recommendation` hook holds all four.
+Decide reversible choices, log them, record irreducible ones as blocked, and
+end each turn with a recap. Never deny the question tool in settings: workers
+route their questions to Brain through it. Confirm role and return-address validity before workers rely on the coordinator.
 Report meaningful completions, failures and required user actions according to
 the user's notification preferences.
 
