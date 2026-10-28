@@ -278,6 +278,16 @@ function profileDirs(home, log) {
     return [home, ...sib.filter((d) => fs.existsSync(path.join(d, 'logs', log)))];
 }
 
+// A profile whose login was given up writes `logs/instruction-envelope.retired.json`,
+// { retiredAt: 'YYYY-MM-DD', reason }. From that day it is no longer required to start a session,
+// and its earlier rows still count. A fresh session on or after retiredAt voids the marker, so a
+// profile still in use cannot be excused. Amended 2026-10-29 for ~/.claude-b, expired 2026-10-25.
+function retiredDay(ctx, dir) {
+    const m = ctx.readJson(path.join(dir, 'logs', 'instruction-envelope.retired.json'));
+    return m && typeof m.retiredAt === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(m.retiredAt)
+        && typeof m.reason === 'string' && m.reason.trim() ? m.retiredAt : null;
+}
+
 // A fresh session is a start whose source is startup or clear, counted once per session id.
 // resume and compact continue a session that was already measured.
 const FRESH = new Set(['startup', 'clear']);
@@ -306,10 +316,12 @@ const instructionWindow = {
                         : `${path.basename(d)}: session ${r.sessionId.slice(0, 8)} started outside the envelope (rules ${r.rulesTotal} of ${r.budget}, ${r.missing} missing, ${r.conflicts} conflicts)` });
                 }
             }
-            perProfile.push(days);
+            const retired = retiredDay(ctx, d);
+            perProfile.push({ days, retired: retired && ![...days].some((day) => day >= retired) ? retired : null });
         }
-        // A day counts only when every profile started a fresh session on it.
-        const coveredDays = new Set(ctx.windowDays.filter((day) => perProfile.length && perProfile.every((p) => p.has(day))));
+        // A day counts only when every profile not yet retired on it started a fresh session on it.
+        const coveredDays = new Set(ctx.windowDays.filter((day) => perProfile.length
+            && perProfile.every((p) => (p.retired && day >= p.retired) || p.days.has(day))));
         return { records: recs, coveredDays };
     },
 };
