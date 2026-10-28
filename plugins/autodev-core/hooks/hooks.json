@@ -68,7 +68,8 @@
             "type": "command",
             "command": "node",
             "args": ["${CLAUDE_PLUGIN_ROOT}/hooks/pre-tool-filter.js"],
-            "timeout": 5
+            "timeout": 5,
+            "onFailure": "block"
           }
         ]
       },
@@ -79,7 +80,8 @@
             "type": "command",
             "command": "node",
             "args": ["${CLAUDE_PLUGIN_ROOT}/hooks/panel-recommendation.js"],
-            "timeout": 5
+            "timeout": 5,
+            "onFailure": "block"
           }
         ]
       },
@@ -90,7 +92,8 @@
             "type": "command",
             "command": "node",
             "args": ["${CLAUDE_PLUGIN_ROOT}/hooks/peer-message-budget.js"],
-            "timeout": 5
+            "timeout": 5,
+            "onFailure": "block"
           }
         ]
       },
@@ -101,19 +104,22 @@
             "type": "command",
             "command": "node",
             "args": ["${CLAUDE_PLUGIN_ROOT}/hooks/coordinator-write-guard.js"],
-            "timeout": 5
+            "timeout": 5,
+            "onFailure": "block"
           },
           {
             "type": "command",
             "command": "node",
             "args": ["${CLAUDE_PLUGIN_ROOT}/hooks/headless-guard.js"],
-            "timeout": 5
+            "timeout": 5,
+            "onFailure": "block"
           },
           {
             "type": "command",
             "command": "node",
             "args": ["${CLAUDE_PLUGIN_ROOT}/hooks/shared-install-guard.js"],
-            "timeout": 5
+            "timeout": 5,
+            "onFailure": "block"
           }
         ]
       },
@@ -124,7 +130,8 @@
             "type": "command",
             "command": "node",
             "args": ["${CLAUDE_PLUGIN_ROOT}/hooks/artifact-write-guard.js"],
-            "timeout": 5
+            "timeout": 5,
+            "onFailure": "block"
           }
         ]
       }
