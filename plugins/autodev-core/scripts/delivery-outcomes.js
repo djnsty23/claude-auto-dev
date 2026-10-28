@@ -21,12 +21,38 @@
  *                            keyed `<taskId>@<worker startedAt>`.
  *   PR facts                 an injected reader: production asks `gh` with a
  *                            timeout, a suite passes --pr-facts <json>.
+ *   desktop session records  the Claude desktop app's `claude-code-sessions`
+ *                            directory, one `local_<id>.json` per session. A
+ *                            session another session started carries
+ *                            `spawnedFrom`, and every one carries `prs` with
+ *                            the app's last-known state. This is the app's own
+ *                            state, not a documented interface: an absent or
+ *                            unreadable directory reads as no side sessions and
+ *                            says so in the population, never as zero work.
  *
  * ATTRIBUTION. A task's attempts are the headless runs with its code. When two
  * tasks share a code, a run belongs to the earliest task whose latest attempt
  * started at or after it, and a run after every task's latest attempt matches
  * no task and is only counted in the population. An attribution stored once is
  * kept.
+ *
+ * SIDE SESSIONS. [measured 2026-10-28] since 10-15 the fleet's work runs in
+ * desktop side sessions, which no worker ledger records. A spawned session
+ * with at least one PR is one task `side:<session id>` with one attempt,
+ * accepted when any PR merged, rejected when every PR closed unmerged. Its
+ * standing check covers the merged PRs only. A recorded MERGED or CLOSED is
+ * trusted, because neither was seen stale (418 and 105 PRs); every stale
+ * state seen was OPEN, so an OPEN PR is asked of the PR facts reader. A
+ * session with no PR is counted in the population, not as a task. A rework
+ * started as a new session is not linked to the first, so for side sessions
+ * first-attempt acceptance equals acceptance. Cost is null: desktop
+ * transcripts carry no total_cost_usd.
+ *
+ * PR FACTS BUDGET. sync stops asking PR facts after 45 s so it fits the
+ * observer's 90 s timeout, oldest task first, and keeps settled answers (a
+ * closed PR, a merge older than the window) beside the store, as
+ * `outcomes.pr-facts.json` for `outcomes.jsonl`, so a
+ * backlog drains across runs instead of being re-asked.
  *
  * OUTCOME PER TASK.
  *   attempts               runs attributed to it.
@@ -56,6 +82,7 @@
  * no PR has standingDay7 null.
  */
 const fs = require('fs');
+const os = require('os');
 const path = require('path');
 const { spawnSync } = require('child_process');
 const claudePaths = require('./claude-paths.js');
@@ -65,15 +92,18 @@ const STAND_DAYS = 7;
 const ABANDON_DAYS = 7;
 const MATCH_SLACK_MS = 60 * 1000;
 const GH_TIMEOUT_MS = 20 * 1000;
+// [measured 2026-10-28] brain-clock runs the sync observer under a 90 s timeout, and a first sync
+// over the side sessions asked 893 PRs in over ten minutes. 45 s plus one 20 s call fits.
+const GH_BUDGET_MS = 45 * 1000;
 const PR_RE = /https:\/\/github\.com\/([A-Za-z0-9_.-]+)\/([A-Za-z0-9_.-]+)\/pull\/(\d+)/g;
 const STORE_VERSION = 1;
 
 const USAGE = [
     'usage: node delivery-outcomes.js sync [--ledger <file>] [--headless-ledger <file>] [--judge-dir <dir>]',
-    '                                      [--store <file>] [--pr-facts <json>] [--now <iso>] [--json]',
+    '                                      [--sessions-dir <dir>] [--store <file>] [--pr-facts <json>] [--now <iso>] [--json]',
     '       node delivery-outcomes.js report [--store <file>] [--json]',
     '',
-    'sync    read the worker, headless and judge ledgers, ask PR facts (gh, or --pr-facts), and append',
+    'sync    read the worker, headless and judge ledgers and the desktop side sessions, ask PR facts (gh, or --pr-facts), and append',
     '        changed attempt and outcome rows to the store. Prints the counts and their population.',
     'report  print the counts from the store only, with their population. Writes nothing.',
     '',
@@ -116,7 +146,80 @@ function defaultPaths(env = process.env) {
         headlessLedger: path.join(autodev, 'headless-workers.json'),
         judgeDir: path.join(autodev, 'brain-judge'),
         store: path.join(autodev, 'delivery', 'outcomes.jsonl'),
+        sessionsDir: desktopSessionsDir(env),
     };
+}
+
+/** Where the Claude desktop app keeps its session records on this platform. */
+function desktopSessionsDir(env = process.env, platform = process.platform) {
+    const home = env.USERPROFILE || env.HOME || os.homedir();
+    const base = platform === 'win32' ? env.APPDATA || path.join(home, 'AppData', 'Roaming')
+        : platform === 'darwin' ? path.join(home, 'Library', 'Application Support')
+            : env.XDG_CONFIG_HOME || path.join(home, '.config');
+    return path.join(base, 'Claude', 'claude-code-sessions');
+}
+
+/**
+ * Every `local_<id>.json` session record up to three levels under dir.
+ * { records, bad, state } where state is 'read', 'absent' or 'not asked'.
+ */
+function readSessions(dir) {
+    if (!dir) return { records: [], bad: 0, state: 'not asked' };
+    const files = [];
+    const walk = (d, depth) => {
+        let ents; try { ents = fs.readdirSync(d, { withFileTypes: true }); } catch { return false; }
+        for (const e of ents) {
+            const p = path.join(d, e.name);
+            if (e.isDirectory()) { if (depth < 3) walk(p, depth + 1); } else if (/^local_[0-9a-f-]+\.json$/i.test(e.name)) files.push(p);
+        }
+        return true;
+    };
+    if (!walk(dir, 0)) return { records: [], bad: 0, state: 'absent' };
+    const records = []; let bad = 0;
+    for (const file of files.sort()) {
+        const j = readJson(file);
+        if (j && typeof j === 'object' && typeof j.sessionId === 'string') records.push(j); else bad++;
+    }
+    return { records, bad, state: 'read' };
+}
+
+const isoOf = (t) => { const n = typeof t === 'number' ? t : ms(t); return n === null || !Number.isFinite(n) ? null : new Date(n).toISOString(); };
+
+/**
+ * One attempt per spawned session with a PR. prFacts answers only for a PR the
+ * app still shows OPEN; without it an OPEN PR leaves the attempt undecided. An
+ * OPEN PR the stored attempt already holds as merged is not asked again: these
+ * asks run on every sync, before any stored outcome is reused, and the app
+ * leaves a merged PR OPEN for as long as nobody reopens the session.
+ */
+function sideAttempts(records, prFacts, stored = new Map()) {
+    const out = []; let spawned = 0; let noPr = 0;
+    for (const r of records) {
+        if (!r.spawnedFrom || typeof r.spawnedFrom !== 'object') continue;
+        const startedAt = isoOf(r.createdAt);
+        if (!startedAt) continue;
+        spawned++;
+        const prs = (Array.isArray(r.prs) ? r.prs : []).map((p) => (p && parsePrUrl(p.url) ? { url: p.url, state: p.state } : null)).filter(Boolean);
+        if (!prs.length) { noPr++; continue; }
+        const taskId = `side:${r.sessionId}`;
+        const key = attemptKey(taskId, startedAt);
+        const was = stored.get(key);
+        const mergedBefore = new Set(was && was.decision === 'accept' && Array.isArray(was.prs) ? was.prs : []);
+        for (const p of prs) {
+            if (p.state !== 'OPEN') continue;
+            if (mergedBefore.has(p.url)) { p.state = 'MERGED'; continue; }
+            if (!prFacts) continue;
+            const facts = prFacts(p.url);
+            if (facts && facts.state) p.state = facts.state;
+        }
+        const merged = prs.filter((p) => p.state === 'MERGED').map((p) => p.url);
+        const allClosed = prs.every((p) => p.state === 'CLOSED');
+        out.push({ key, taskId, code: 'side', startedAt,
+            runStatus: merged.length ? 'succeeded' : allClosed ? 'failed' : 'running',
+            decision: merged.length ? 'accept' : null, decisionBy: merged.length ? 'merged' : null,
+            costUsd: null, judgeCostUsd: 0, prs: merged.length ? merged : prs.map((p) => p.url) });
+    }
+    return { attempts: out, spawned, noPr };
 }
 
 /** Sum of total_cost_usd over every stream-json `result` event (a resumed run has one per process); null when none. */
@@ -157,7 +260,7 @@ const startOfKey = (key) => { const i = String(key || '').lastIndexOf('@'); retu
 // ---------------------------------------------------------------- sources
 
 /** Every input, resolved and read. The worker ledger is required; the others may be absent. */
-function readSources({ ledger, headlessLedger, judgeDir }) {
+function readSources({ ledger, headlessLedger, judgeDir, sessionsDir }) {
     const w = readJson(ledger);
     if (w === null) fault('unreadable', `${ledger} does not exist`);
     if (!w || !Array.isArray(w.records)) fault('unreadable', `${ledger}: no records array`);
@@ -168,10 +271,11 @@ function readSources({ ledger, headlessLedger, judgeDir }) {
     const runs = (h ? h.records : []).map((r) => ({ ...r, log: at(r.log), report: at(r.report) }));
     const judgements = readJsonl(path.join(judgeDir, 'judgements.jsonl'));
     const judgeRuns = readJsonl(path.join(judgeDir, 'runs.jsonl'));
+    const sessions = readSessions(sessionsDir);
     return {
-        tasks: w.records, runs,
+        tasks: w.records, runs, sessions,
         judgements: judgements ? judgements.rows : [], judgeRuns: judgeRuns ? judgeRuns.rows : [],
-        files: { ledger, headlessLedger: h ? headlessLedger : null, judgements: judgements ? 'read' : 'absent', judgeRuns: judgeRuns ? 'read' : 'absent' },
+        files: { ledger, headlessLedger: h ? headlessLedger : null, judgements: judgements ? 'read' : 'absent', judgeRuns: judgeRuns ? 'read' : 'absent', sessions: sessions.state },
     };
 }
 
@@ -180,9 +284,9 @@ const attemptKey = (code, startedAt) => `${code}@${startedAt}`;
 
 /**
  * Attempts per task, from the live ledgers merged over the stored ones.
- * Returns { byTask: Map taskId -> attempts sorted by start, unmatched, notStarted }.
+ * Returns { byTask: Map taskId -> attempts sorted by start, unmatched, notStarted, side }.
  */
-function buildAttempts(src, stored = new Map()) {
+function buildAttempts(src, stored = new Map(), { prFacts = null } = {}) {
     const started = src.tasks.filter((r) => r.taskId && r.startedAt);
     const notStarted = src.tasks.length - started.length;
     const latestOf = new Map();
@@ -225,6 +329,8 @@ function buildAttempts(src, stored = new Map()) {
     }
     const byTask = new Map();
     for (const a of live.values()) { if (!byTask.has(a.taskId)) byTask.set(a.taskId, []); byTask.get(a.taskId).push(a); }
+    const side = sideAttempts((src.sessions && src.sessions.records) || [], prFacts, stored);
+    for (const a of side.attempts) { live.set(a.key, a); byTask.set(a.taskId, [a]); }
     // The attempt a `<taskId>@<worker startedAt>` key names: the first one started at or after that launch.
     const attemptFor = (taskId, key) => {
         const t = ms(startOfKey(key));
@@ -260,7 +366,7 @@ function buildAttempts(src, stored = new Map()) {
         if (!a.judgeCostUsd && typeof s.judgeCostUsd === 'number') a.judgeCostUsd = s.judgeCostUsd;
     }
     for (const list of byTask.values()) list.sort((a, b) => ms(a.startedAt) - ms(b.startedAt));
-    return { byTask, unmatched, notStarted };
+    return { byTask, unmatched, notStarted, side: { spawned: side.spawned, noPr: side.noPr, tasks: side.attempts.length } };
 }
 
 function attemptFields(a) {
@@ -411,6 +517,19 @@ function ghPrFacts(url, { run = spawnSync, timeoutMs = GH_TIMEOUT_MS } = {}) {
     return { state: pr.state, mergedAt: pr.mergedAt || null, revertedAt: iso(reverts[0]), reopenedAt: iso(reopens[0]) };
 }
 
+/**
+ * A reader that stops asking once budgetMs has passed and answers null, which leaves the
+ * outcome unread and not final, so the next sync asks again. tally counts both.
+ */
+function budgeted(reader, budgetMs, clock = Date.now) {
+    const start = clock(); const tally = { asked: 0, skipped: 0 };
+    const read = (url) => {
+        if (clock() - start >= budgetMs) { tally.skipped++; return null; }
+        tally.asked++; return reader(url);
+    };
+    return { read, tally };
+}
+
 function memo(reader) {
     const cache = new Map();
     return (url) => { if (!cache.has(url)) cache.set(url, reader(url)); return cache.get(url); };
@@ -441,18 +560,46 @@ function sync(opts) {
     const src = readSources(p);
     const store = readStore(p.store);
     const before = store || { attempts: new Map(), outcomes: new Map() };
-    const { byTask, unmatched, notStarted } = buildAttempts(src, before.attempts);
-    const prFacts = memo(opts.prFacts || ((url) => ghPrFacts(url)));
-    const outcomes = [...byTask.keys()].sort().map((id) => {
+    const budget = budgeted(opts.prFacts || ((url) => ghPrFacts(url)), opts.budgetMs ?? GH_BUDGET_MS, opts.clock);
+    // [measured 2026-10-28] without this a budgeted sync stalled: 22 PRs the app shows OPEN
+    // were CLOSED and re-asked every run, and a task holding more PRs than one budget reads
+    // never became final. A closed PR, or a merge older than the window, cannot change the
+    // day-7 answer, so it is kept beside the store and never asked twice. A closed PR that is
+    // later reopened and merged is missed; none has been seen.
+    const cacheFile = p.store.replace(/\.jsonl$/, '') + '.pr-facts.json';
+    const cache = readJson(cacheFile) || {};
+    const settled = (f) => !!f && (f.state === 'CLOSED'
+        || (f.state === 'MERGED' && ms(f.mergedAt) !== null && now - ms(f.mergedAt) > STAND_DAYS * DAY_MS));
+    let hits = 0; let kept = 0;
+    const prFacts = memo((url) => {
+        if (cache[url] && typeof cache[url] === 'object') { hits++; return cache[url]; }
+        const f = budget.read(url);
+        if (settled(f)) { cache[url] = f; kept++; }
+        return f;
+    });
+    const { byTask, unmatched, notStarted, side } = buildAttempts(src, before.attempts, { prFacts });
+    // Oldest first, so a budget cut leaves the newest unread and the backlog drains across runs.
+    const first = (id) => byTask.get(id)[0].startedAt || '';
+    const oldest = [...byTask.keys()].sort((a, b) => (first(a) < first(b) ? -1 : first(a) > first(b) ? 1 : a < b ? -1 : 1));
+    const computed = new Map(oldest.map((id) => {
         const prev = before.outcomes.get(id);
         const fresh = computeOutcome(id, byTask.get(id), { now, prFacts: () => null });
         // Reuse a final stored outcome when the attempts are unchanged; otherwise ask the PR facts.
         if (prev && isFinal(prev) && prev.attempts === fresh.attempts && prev.accepted === fresh.accepted && prev.costUsd === fresh.costUsd) {
             const { at, v, type, ...o } = prev;
-            return o;
+            return [id, o];
         }
-        return computeOutcome(id, byTask.get(id), { now, prFacts });
-    });
+        const skippedBefore = budget.tally.skipped;
+        const o = computeOutcome(id, byTask.get(id), { now, prFacts });
+        // A read the budget skipped says nothing new: keep the last stored outcome rather than
+        // append a row that only swaps its reason for "unreadable" until the next run.
+        if (budget.tally.skipped > skippedBefore && prev && prev.attempts === fresh.attempts) {
+            const { at, v, type, ...kept } = prev;
+            return [id, kept];
+        }
+        return [id, o];
+    }));
+    const outcomes = [...byTask.keys()].sort().map((id) => computed.get(id));
     const at = new Date(now).toISOString();
     const rows = [];
     for (const list of byTask.values()) for (const a of list) {
@@ -469,10 +616,19 @@ function sync(opts) {
         fs.mkdirSync(path.dirname(p.store), { recursive: true });
         fs.appendFileSync(p.store, rows.map((r) => JSON.stringify(r)).join('\n') + '\n');
     }
+    if (kept && !opts.dryRun) {
+        fs.mkdirSync(path.dirname(cacheFile), { recursive: true });
+        fs.writeFileSync(cacheFile + '.tmp', JSON.stringify(cache));
+        fs.renameSync(cacheFile + '.tmp', cacheFile);
+    }
     const c = counts(outcomes);
     const population = `population: ${c.tasks} task(s) with an attempt from ${p.ledger} (${src.tasks.length} record(s), ${notStarted} not started); `
         + `${src.runs.length} headless run(s), ${src.runs.length - unmatched} matched a task, ${unmatched} matched none; `
-        + `${src.judgements.length} judgement(s), ${src.judgeRuns.length} judge run(s); store ${p.store}: ${rows.length} row(s) appended`;
+        + `${src.judgements.length} judgement(s), ${src.judgeRuns.length} judge run(s); `
+        + `side sessions ${src.files.sessions}${src.sessions.state === 'read'
+            ? `: ${src.sessions.records.length} record(s), ${src.sessions.bad} unreadable, ${side.spawned} spawned, ${side.tasks} with a PR, ${side.noPr} with none` : ''}; `
+        + `PR facts: ${hits} settled from ${path.basename(cacheFile)}, ${budget.tally.asked} asked${budget.tally.skipped ? `, ${budget.tally.skipped} left unread after the ${(opts.budgetMs ?? GH_BUDGET_MS) / 1000} s budget` : ''}; `
+        + `store ${p.store}: ${rows.length} row(s) appended`;
     return { counts: c, summary: summaryLine(c), population, details: detailLines(outcomes), outcomes, appended: rows.length, store: p.store };
 }
 
@@ -491,7 +647,7 @@ function report(opts) {
 
 function parseArgs(argv) {
     const out = { _: [] };
-    const valued = new Set(['ledger', 'headless-ledger', 'judge-dir', 'store', 'pr-facts', 'now']);
+    const valued = new Set(['ledger', 'headless-ledger', 'judge-dir', 'sessions-dir', 'store', 'pr-facts', 'now']);
     for (let i = 0; i < argv.length; i++) {
         const a = argv[i];
         if (a === '--help' || a === '-h') { out.help = true; continue; }
@@ -517,6 +673,7 @@ function main(argv) {
     if (o.ledger) paths.ledger = path.resolve(o.ledger);
     if (o['headless-ledger']) paths.headlessLedger = path.resolve(o['headless-ledger']);
     if (o['judge-dir']) paths.judgeDir = path.resolve(o['judge-dir']);
+    if (o['sessions-dir']) paths.sessionsDir = path.resolve(o['sessions-dir']);
     if (o.store) paths.store = path.resolve(o.store);
     let res;
     if (cmd === 'sync') {
@@ -541,5 +698,6 @@ if (require.main === module) {
 module.exports = {
     logCost, prRefs, parsePrUrl, runStatusOf, readSources, buildAttempts, decisive, standing, computeOutcome, computeAll,
     counts, summaryLine, detailLines, fileFacts, ghPrFacts, readStore, sync, report, parseArgs, main, defaultPaths,
+    desktopSessionsDir, readSessions, sideAttempts, budgeted,
     STAND_DAYS, ABANDON_DAYS,
 };
