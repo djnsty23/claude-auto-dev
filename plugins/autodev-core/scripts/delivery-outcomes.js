@@ -45,8 +45,19 @@
  * state seen was OPEN, so an OPEN PR is asked of the PR facts reader. A
  * session with no PR is counted in the population, not as a task. A rework
  * started as a new session is not linked to the first, so for side sessions
- * first-attempt acceptance equals acceptance. Cost is null: desktop
- * transcripts carry no total_cost_usd.
+ * first-attempt acceptance equals acceptance.
+ *
+ * SESSION COST. Desktop transcripts carry no total_cost_usd, so a side session,
+ * or a desktop-channel worker whose record names its session, is priced from
+ * its transcript: the session's `<cliSessionId>.jsonl` under the profile's
+ * `projects` dir plus every transcript in the `<cliSessionId>/` dir beside it
+ * (its subagents), one usage row per response (the last row of a response),
+ * at quota-burn.js list prices. It is list price, not what a subscription
+ * bills. A missing transcript, or one with no usage row, is null, never 0.
+ * A priced session is kept beside the store as `outcomes.session-cost.json`
+ * with the size and mtime of every file it read, and is read again only when
+ * one changed. Pricing stops after 20 s per sync, like the PR facts, and an
+ * unpriced attempt keeps the cost already stored.
  *
  * PR FACTS BUDGET. sync stops asking PR facts after 45 s so it fits the
  * observer's 90 s timeout, oldest task first, and keeps settled answers (a
@@ -86,6 +97,7 @@ const os = require('os');
 const path = require('path');
 const { spawnSync } = require('child_process');
 const claudePaths = require('./claude-paths.js');
+const { priceUsage, responseKey } = require('./quota-burn.js');
 
 const DAY_MS = 24 * 3600 * 1000;
 const STAND_DAYS = 7;
@@ -95,12 +107,15 @@ const GH_TIMEOUT_MS = 20 * 1000;
 // [measured 2026-10-28] brain-clock runs the sync observer under a 90 s timeout, and a first sync
 // over the side sessions asked 893 PRs in over ten minutes. 45 s plus one 20 s call fits.
 const GH_BUDGET_MS = 45 * 1000;
+// Transcript pricing shares the observer's 90 s with the PR facts: 45 + 20 + one 20 s gh call fits.
+const COST_BUDGET_MS = 20 * 1000;
 const PR_RE = /https:\/\/github\.com\/([A-Za-z0-9_.-]+)\/([A-Za-z0-9_.-]+)\/pull\/(\d+)/g;
 const STORE_VERSION = 1;
 
 const USAGE = [
     'usage: node delivery-outcomes.js sync [--ledger <file>] [--headless-ledger <file>] [--judge-dir <dir>]',
-    '                                      [--sessions-dir <dir>] [--store <file>] [--pr-facts <json>] [--now <iso>] [--json]',
+    '                                      [--sessions-dir <dir>] [--projects-dir <dir>] [--store <file>] [--pr-facts <json>]',
+    '                                      [--now <iso>] [--json]',
     '       node delivery-outcomes.js report [--store <file>] [--json]',
     '',
     'sync    read the worker, headless and judge ledgers and the desktop side sessions, ask PR facts (gh, or --pr-facts), and append',
@@ -147,6 +162,7 @@ function defaultPaths(env = process.env) {
         judgeDir: path.join(autodev, 'brain-judge'),
         store: path.join(autodev, 'delivery', 'outcomes.jsonl'),
         sessionsDir: desktopSessionsDir(env),
+        projectsDir: path.join(claudePaths.configDir(env), 'projects'),
     };
 }
 
@@ -192,7 +208,7 @@ const isoOf = (t) => { const n = typeof t === 'number' ? t : ms(t); return n ===
  * asks run on every sync, before any stored outcome is reused, and the app
  * leaves a merged PR OPEN for as long as nobody reopens the session.
  */
-function sideAttempts(records, prFacts, stored = new Map()) {
+function sideAttempts(records, prFacts, stored = new Map(), costOf = () => null) {
     const out = []; let spawned = 0; let noPr = 0;
     for (const r of records) {
         if (!r.spawnedFrom || typeof r.spawnedFrom !== 'object') continue;
@@ -217,9 +233,82 @@ function sideAttempts(records, prFacts, stored = new Map()) {
         out.push({ key, taskId, code: 'side', startedAt,
             runStatus: merged.length ? 'succeeded' : allClosed ? 'failed' : 'running',
             decision: merged.length ? 'accept' : null, decisionBy: merged.length ? 'merged' : null,
-            costUsd: null, judgeCostUsd: 0, prs: merged.length ? merged : prs.map((p) => p.url) });
+            costUsd: costOf(r), judgeCostUsd: 0, prs: merged.length ? merged : prs.map((p) => p.url) });
     }
     return { attempts: out, spawned, noPr };
+}
+
+/** Every `.jsonl` under dir, recursively, sorted. */
+function jsonlUnder(dir) {
+    const out = [];
+    let ents; try { ents = fs.readdirSync(dir, { withFileTypes: true }); } catch { return out; }
+    for (const e of ents) {
+        const p = path.join(dir, e.name);
+        if (e.isDirectory()) out.push(...jsonlUnder(p)); else if (e.isFile() && e.name.endsWith('.jsonl')) out.push(p);
+    }
+    return out.sort();
+}
+
+/** List-price cost of transcript texts: the last usage row of each response, priced once. */
+function transcriptCost(texts) {
+    const last = new Map(); let n = 0;
+    for (const text of texts) {
+        for (const line of String(text).split('\n')) {
+            if (!line.includes('"usage"')) continue;
+            let j; try { j = JSON.parse(line); } catch { continue; }
+            const m = j && j.message;
+            if (!m || !m.usage) continue;
+            last.set(responseKey(j) || `row${n++}`, { u: m.usage, model: m.model || null });
+        }
+    }
+    if (!last.size) return null;
+    let cost = 0;
+    for (const { u, model } of last.values()) cost += priceUsage(u, model).cost;
+    return { cost: round(cost), responses: last.size };
+}
+
+/**
+ * A reader from a desktop session record to its list-price cost, or null. It finds the
+ * transcript under projectsDir, reuses a cached price while every file it read is unchanged,
+ * and stops reading after budgetMs. tally counts priced, reused, missing and skipped.
+ */
+function sessionCoster(projectsDir, cache, { budgetMs = COST_BUDGET_MS, clock = Date.now } = {}) {
+    const tally = { priced: 0, reused: 0, missing: 0, skipped: 0 };
+    let index = null;
+    // Started on the first read, so a sync with nothing to price never reads the clock.
+    let start = null;
+    const find = (id) => {
+        if (!index) {
+            index = new Map();
+            let slugs = []; try { slugs = fs.readdirSync(projectsDir, { withFileTypes: true }).filter((e) => e.isDirectory()); } catch { /* none */ }
+            for (const s of slugs) {
+                let names = []; try { names = fs.readdirSync(path.join(projectsDir, s.name)); } catch { continue; }
+                for (const n of names) if (n.endsWith('.jsonl')) index.set(n.slice(0, -6), path.join(projectsDir, s.name, n));
+            }
+        }
+        return index.get(id) || null;
+    };
+    const costOf = (rec) => {
+        const id = rec && typeof rec.cliSessionId === 'string' && /^[0-9a-f-]{8,}$/i.test(rec.cliSessionId) ? rec.cliSessionId : null;
+        if (!id || !projectsDir) return null;
+        const main = find(id);
+        if (!main) { tally.missing++; return null; }
+        const files = [main, ...jsonlUnder(main.slice(0, -6))];
+        let sig;
+        try { sig = files.map((f) => { const st = fs.statSync(f); return `${st.size}:${Math.floor(st.mtimeMs)}`; }).join(','); } catch { tally.missing++; return null; }
+        const hit = cache[id];
+        if (hit && hit.sig === sig && Number.isFinite(hit.cost)) { tally.reused++; return hit.cost; }
+        if (start === null) start = clock();
+        else if (clock() - start >= budgetMs) { tally.skipped++; return null; }
+        const texts = [];
+        for (const f of files) { try { texts.push(fs.readFileSync(f, 'utf8')); } catch { tally.missing++; return null; } }
+        const priced = transcriptCost(texts);
+        if (!priced) { tally.missing++; return null; }
+        cache[id] = { sig, cost: priced.cost, responses: priced.responses };
+        tally.priced++;
+        return priced.cost;
+    };
+    return { costOf, tally };
 }
 
 /** Sum of total_cost_usd over every stream-json `result` event (a resumed run has one per process); null when none. */
@@ -286,7 +375,7 @@ const attemptKey = (code, startedAt) => `${code}@${startedAt}`;
  * Attempts per task, from the live ledgers merged over the stored ones.
  * Returns { byTask: Map taskId -> attempts sorted by start, unmatched, notStarted, side }.
  */
-function buildAttempts(src, stored = new Map(), { prFacts = null } = {}) {
+function buildAttempts(src, stored = new Map(), { prFacts = null, costOf = () => null } = {}) {
     const started = src.tasks.filter((r) => r.taskId && r.startedAt);
     const notStarted = src.tasks.length - started.length;
     const latestOf = new Map();
@@ -319,17 +408,20 @@ function buildAttempts(src, stored = new Map(), { prFacts = null } = {}) {
             decision: null, decisionBy: null, costUsd: logCost(readText(run.log)), judgeCostUsd: 0, prs: prRefs(readText(run.report)),
         });
     }
-    // A started task with no headless run (a desktop-channel worker) is one attempt of unknown cost.
+    // A started task with no headless run (a desktop-channel worker) is one attempt, priced from
+    // its session's transcript when the record names a session the desktop app still holds.
+    const sessionById = new Map(((src.sessions && src.sessions.records) || []).map((r) => [r.sessionId, r]));
     for (const rec of started) {
         if ([...live.values()].some((a) => a.taskId === rec.taskId) || [...stored.values()].some((a) => a.taskId === rec.taskId)) continue;
         const key = attemptKey(codeOf(rec), rec.startedAt);
         live.set(key, { key, taskId: rec.taskId, code: codeOf(rec), startedAt: rec.startedAt, runStatus: rec.runStatus || 'running',
-            decision: null, decisionBy: null, costUsd: null, judgeCostUsd: 0, prs: prRefs(readText(rec.report)) });
+            decision: null, decisionBy: null, costUsd: rec.sessionId && sessionById.has(rec.sessionId) ? costOf(sessionById.get(rec.sessionId)) : null,
+            judgeCostUsd: 0, prs: prRefs(readText(rec.report)) });
         latestOf.set(rec.taskId, rec.startedAt);
     }
     const byTask = new Map();
     for (const a of live.values()) { if (!byTask.has(a.taskId)) byTask.set(a.taskId, []); byTask.get(a.taskId).push(a); }
-    const side = sideAttempts((src.sessions && src.sessions.records) || [], prFacts, stored);
+    const side = sideAttempts((src.sessions && src.sessions.records) || [], prFacts, stored, costOf);
     for (const a of side.attempts) { live.set(a.key, a); byTask.set(a.taskId, [a]); }
     // The attempt a `<taskId>@<worker startedAt>` key names: the first one started at or after that launch.
     const attemptFor = (taskId, key) => {
@@ -577,7 +669,10 @@ function sync(opts) {
         if (settled(f)) { cache[url] = f; kept++; }
         return f;
     });
-    const { byTask, unmatched, notStarted, side } = buildAttempts(src, before.attempts, { prFacts });
+    const costFile = p.store.replace(/\.jsonl$/, '') + '.session-cost.json';
+    const costCache = readJson(costFile) || {};
+    const coster = sessionCoster(p.projectsDir, costCache, { budgetMs: opts.costBudgetMs ?? COST_BUDGET_MS, clock: opts.clock });
+    const { byTask, unmatched, notStarted, side } = buildAttempts(src, before.attempts, { prFacts, costOf: coster.costOf });
     // Oldest first, so a budget cut leaves the newest unread and the backlog drains across runs.
     const first = (id) => byTask.get(id)[0].startedAt || '';
     const oldest = [...byTask.keys()].sort((a, b) => (first(a) < first(b) ? -1 : first(a) > first(b) ? 1 : a < b ? -1 : 1));
@@ -621,6 +716,11 @@ function sync(opts) {
         fs.writeFileSync(cacheFile + '.tmp', JSON.stringify(cache));
         fs.renameSync(cacheFile + '.tmp', cacheFile);
     }
+    if (coster.tally.priced && !opts.dryRun) {
+        fs.mkdirSync(path.dirname(costFile), { recursive: true });
+        fs.writeFileSync(costFile + '.tmp', JSON.stringify(costCache));
+        fs.renameSync(costFile + '.tmp', costFile);
+    }
     const c = counts(outcomes);
     const population = `population: ${c.tasks} task(s) with an attempt from ${p.ledger} (${src.tasks.length} record(s), ${notStarted} not started); `
         + `${src.runs.length} headless run(s), ${src.runs.length - unmatched} matched a task, ${unmatched} matched none; `
@@ -628,6 +728,7 @@ function sync(opts) {
         + `side sessions ${src.files.sessions}${src.sessions.state === 'read'
             ? `: ${src.sessions.records.length} record(s), ${src.sessions.bad} unreadable, ${side.spawned} spawned, ${side.tasks} with a PR, ${side.noPr} with none` : ''}; `
         + `PR facts: ${hits} settled from ${path.basename(cacheFile)}, ${budget.tally.asked} asked${budget.tally.skipped ? `, ${budget.tally.skipped} left unread after the ${(opts.budgetMs ?? GH_BUDGET_MS) / 1000} s budget` : ''}; `
+        + `session cost: ${coster.tally.priced} priced, ${coster.tally.reused} reused from ${path.basename(costFile)}, ${coster.tally.missing} with no transcript${coster.tally.skipped ? `, ${coster.tally.skipped} left unpriced after the ${(opts.costBudgetMs ?? COST_BUDGET_MS) / 1000} s budget` : ''}; `
         + `store ${p.store}: ${rows.length} row(s) appended`;
     return { counts: c, summary: summaryLine(c), population, details: detailLines(outcomes), outcomes, appended: rows.length, store: p.store };
 }
@@ -647,7 +748,7 @@ function report(opts) {
 
 function parseArgs(argv) {
     const out = { _: [] };
-    const valued = new Set(['ledger', 'headless-ledger', 'judge-dir', 'sessions-dir', 'store', 'pr-facts', 'now']);
+    const valued = new Set(['ledger', 'headless-ledger', 'judge-dir', 'sessions-dir', 'projects-dir', 'store', 'pr-facts', 'now']);
     for (let i = 0; i < argv.length; i++) {
         const a = argv[i];
         if (a === '--help' || a === '-h') { out.help = true; continue; }
@@ -674,6 +775,7 @@ function main(argv) {
     if (o['headless-ledger']) paths.headlessLedger = path.resolve(o['headless-ledger']);
     if (o['judge-dir']) paths.judgeDir = path.resolve(o['judge-dir']);
     if (o['sessions-dir']) paths.sessionsDir = path.resolve(o['sessions-dir']);
+    if (o['projects-dir']) paths.projectsDir = path.resolve(o['projects-dir']);
     if (o.store) paths.store = path.resolve(o.store);
     let res;
     if (cmd === 'sync') {
@@ -698,6 +800,6 @@ if (require.main === module) {
 module.exports = {
     logCost, prRefs, parsePrUrl, runStatusOf, readSources, buildAttempts, decisive, standing, computeOutcome, computeAll,
     counts, summaryLine, detailLines, fileFacts, ghPrFacts, readStore, sync, report, parseArgs, main, defaultPaths,
-    desktopSessionsDir, readSessions, sideAttempts, budgeted,
+    desktopSessionsDir, readSessions, sideAttempts, budgeted, transcriptCost, sessionCoster,
     STAND_DAYS, ABANDON_DAYS,
 };
