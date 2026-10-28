@@ -187,6 +187,16 @@ function main() {
         ['git push after a status', 'git status && git push'], ['hooksPath that can run a push', 'git -c core.hooksPath=hooks commit -m x'],
         ['gh pr merge', 'gh pr merge 12 --squash'], ['gh pr create', 'gh pr create --fill'], ['gh release create', 'gh release create v1.0.0'],
         ['gh api POST', 'gh api -X POST repos/o/r/issues -f title=x'], ['gh api with a field', 'gh api repos/o/r/issues -f title=x'],
+        // A heredoc body is data only when cat or tee copies it into a file and nothing in the command runs it.
+        ['quoted heredoc fed to bash', "bash <<'EOF'\ngit push\nEOF"],
+        ['quoted heredoc from cat piped into sh', "cat <<'EOF' | sh\ngit push\nEOF"],
+        ['quoted heredoc written to a script the same command runs', `cat > "${slash(path.join(REPO, 'x.sh'))}" <<'EOF'\ngit push\nEOF\nbash "${slash(path.join(REPO, 'x.sh'))}"`],
+        ['quoted heredoc written to a script node runs', `cat > "${slash(path.join(REPO, 'x.js'))}" <<'EOF'\nrequire('child_process').execSync('git push')\nEOF\nnode "${slash(path.join(REPO, 'x.js'))}"`],
+        ['unquoted heredoc whose substitution pushes', `cat > "${slash(path.join(REPO, 'n.md'))}" <<EOF\n$(git push)\nEOF`],
+        ['quoted heredoc that never closes', `cat > "${slash(path.join(REPO, 'n.md'))}" <<'EOF'\ngit push`],
+        ['a here-string whose word reads as a delimiter', "cat <<<'true'\ngit push\ntrue"],
+        ['an unquoted heredoc before a quoted one on the line', `cat > "${slash(path.join(REPO, 'n.md'))}" <<B <<'A'\n$(git push)\nB\nx\nA`],
+        ['quoted heredoc inside an unclosed bash -c string', `true; bash -c "cat > n.md <<'EOF'\ngit push\n"\nEOF`],
     ]) expectDeny('local_push', label, B, bash(cmd));
 
     // ------------------------------------------------------------ undeclared_secret
@@ -288,6 +298,15 @@ function main() {
     expectAllow('builder npm test piped to tail', B, bash('npm test 2>&1 | tail -5'));
     expectAllow('builder reads PATH and HOME and its own loop variable', B, bash('for f in a b; do echo "$f $HOME"; done; echo $PATH'));
     expectAllow('builder heredoc into a repo file whose prose has quotes', B, bash(`cat > "${slash(path.join(REPO, 'n.md'))}" <<'EOF'\nIt's fine, don't worry.\nEOF\n`));
+    // [measured 2026-10-29] three reports were denied for words in their own body. A report names
+    // the commands a person must run, so its body has to be able to say them.
+    const reportBody = '# Report\nRelease window: `gh repo archive o/r`, then `doppler secrets set X`, then `git push origin b`.\nCost $5, see $HOME and `decision-policy.md`.\nRESULT rb31 stopped: needs Andy';
+    expectAllow('builder report heredoc whose body names gh, doppler, git push and $VARs', B,
+        bash(`cat > "${slash(path.join(REPORTS, 'REPORT.md'))}" <<'EOF'\n${reportBody}\nEOF`));
+    expectAllow('builder report heredoc after an assignment and a mkdir', B,
+        bash(`D="${slash(path.join(REPORTS, 'ask'))}"; mkdir -p "$D"\ncat > "$D/ask.json" <<'REPORT_EOF'\n{"question":"gh repo archive or park?"}\nREPORT_EOF\n`));
+    expectAllow('builder tee heredoc with a stripped-tab delimiter', B,
+        bash(`tee "${slash(path.join(REPORTS, 'n.md'))}" <<-"EOF"\n\tdoppler is the Brain's step\n\tEOF`));
     expectAllow('builder Read of an ordinary file', B, tool('Read', { file_path: path.join(REPO, 'AGENTS.md') }));
     expectAllow('builder Read of .env.example', B, tool('Read', { file_path: path.join(REPO, '.env.example') }));
     expectAllow('review git log and grep', R, bash('git log --oneline -5 | grep fix'));
