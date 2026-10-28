@@ -82,9 +82,23 @@ try {
     check('an interval under 60 minutes is CONFIG-INVALID and runs nothing', t.code === 0 && /^observers: CONFIG-INVALID fast: everyMin must be at least 60$/.test(t.line || '') && lines(okLedger).length === n0, t.out);
     t = tick('2026-11-04T00:05:00Z');
     check('the same bad config is one observer.config-invalid event, not one per pass', events('observer.config-invalid').length === 1, JSON.stringify(events('observer.config-invalid')));
-    w(cfg, { observers: [{ id: 'rel', script: 'relative.js', everyMin: 60 }] });
-    t = tick('2026-11-04T00:10:00Z');
-    check('a relative script path is refused', /CONFIG-INVALID rel: script must be an absolute \.js path/.test(t.line || ''), t.out);
+    // A relative path with a directory in it is refused, the same as before bare names existed.
+    for (const [i, rel] of ['sub/relative.js', '../relative.js', './relative.js'].entries()) {
+        w(cfg, { observers: [{ id: 'rel', script: rel, everyMin: 60 }] });
+        t = tick(`2026-11-04T00:1${i}:00Z`);
+        check(`a relative script path ${rel} is refused`, /CONFIG-INVALID rel: script must be an absolute \.js path or a bare name/.test(t.line || ''), t.out);
+    }
+
+    // A bare name resolves beside the clock: an unshipped one names the clock's own directory, and
+    // a shipped one runs from there, so observers.json survives a version bump.
+    const clockDir = path.dirname(SUBJECT);
+    w(cfg, { observers: [{ id: 'ghost', script: 'no-such-observer.js', everyMin: 60 }] });
+    t = tick('2026-11-04T00:20:00Z');
+    check('an unshipped bare name is CONFIG-INVALID and names the path beside the clock',
+        (t.line || '').startsWith(`observers: CONFIG-INVALID ghost: ${path.join(clockDir, 'no-such-observer.js')} does not exist`), t.out);
+    w(cfg, { observers: [{ id: 'shipped', script: 'prd-states.js', everyMin: 60 }] });
+    t = tick('2026-11-04T00:25:00Z');
+    check('a shipped bare name runs from beside the clock', /^observers: 1 configured, ran shipped exit 0 in \d+ ms$/.test(t.line || ''), t.out);
 } catch (e) {
     failed++;
     console.log(`FAIL the suite crashed: ${e.stack || e}`);
