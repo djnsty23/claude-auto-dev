@@ -369,6 +369,31 @@ try {
         evidence: [{ index: 1, of: 1, step: 'tooling/test-x.js', status: 'fail', exit: 1, signal: null, ms: 900, tail: null }] } });
     const ftr = probe('gate-window', th, REPO.repo);
     check('gate-window: a failed touched suite with no tail is a violation', ftr.status === 1 && new RegExp(`^violation ${BAD}T12:00:00.000Z fast ${BAD}-2: tooling/test-x\\.js failed with no output tail$`, 'm').test(ftr.out), ftr.out);
+    // A6: a sibling profile must start a fresh session every day until it is retired by a dated
+    // marker with a reason. A marker it outlives (a fresh session on or after retiredAt) is void.
+    const sibling = (h, days, marker) => {
+        const b = `${h}-b`;
+        write(b, 'logs/instruction-envelope.jsonl', jsonl(days.map((d) => ({ at: `${d}T10:00:00Z`, sessionId: `b-${d}`, source: 'startup',
+            inside: true, rulesTotal: 30000, budget: 32000, envelopeTotal: 38000, missing: 0, conflicts: 0 }))));
+        if (marker) write(b, 'logs/instruction-envelope.retired.json', JSON.stringify(marker));
+    };
+    const retireCase = (days, marker) => { const h = home(); FIX['instruction-window'](h, {}); sibling(h, days, marker); return probe('instruction-window', h, REPO.repo); };
+    const bDays = DAYS.slice(0, 3);
+    const unretired = retireCase(bDays);
+    check('instruction-window: a sibling profile that stops starting sessions leaves its days a gap',
+        unretired.status === 1 && new RegExp(`^gap ${DAYS[3]}$`, 'm').test(unretired.out), unretired.out);
+    const retired = retireCase(bDays, { retiredAt: DAYS[3], reason: 'login expired' });
+    check('instruction-window: a sibling retired from the day after its last session is not required from then',
+        retired.status === 0 && expectOf('instruction-window').test(retired.out) && !/^gap /m.test(retired.out), retired.out);
+    const lateRetire = retireCase(bDays, { retiredAt: DAYS[5], reason: 'login expired' });
+    check('instruction-window: days before retiredAt are still required of the sibling',
+        lateRetire.status === 1 && new RegExp(`^gap ${DAYS[3]}$`, 'm').test(lateRetire.out) && !new RegExp(`^gap ${DAYS[5]}$`, 'm').test(lateRetire.out), lateRetire.out);
+    const outlived = retireCase([...bDays, DAYS[8]], { retiredAt: DAYS[3], reason: 'login expired' });
+    check('instruction-window: a marker the sibling outlives is void, so its missing days stay gaps',
+        outlived.status === 1 && new RegExp(`^gap ${DAYS[3]}$`, 'm').test(outlived.out), outlived.out);
+    const noReason = retireCase(bDays, { retiredAt: DAYS[3] });
+    check('instruction-window: a marker with no reason is ignored',
+        noReason.status === 1 && new RegExp(`^gap ${DAYS[3]}$`, 'm').test(noReason.out), noReason.out);
     // A12: the inventory matches a grep of the plugins, and a writer never seen is a short total.
     const plugins = path.join(ROOT, 'plugins');
     const requirers = [];
