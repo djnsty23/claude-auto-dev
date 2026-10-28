@@ -83,6 +83,15 @@ at the base, so a candidate cannot loosen its own bar. Merge-lock classifies
 GitHub's diff again under the lock. An ineligible verdict means the full gate,
 not a retry.
 
+A product with a preview-only surface (an unlisted, noindex page under one
+route folder) can add `"previewPaths": ["app/(preview)/offer/**"]` and an
+optional `"previewTest": "<script>"` to the same key at the base. A diff of any
+size whose every path matches a glob, with no sensitive path, is then eligible
+as profile "preview": it runs typecheck, build and the previewTest script, and
+the receipt says `"profile": "preview"`. Merge-lock refuses that receipt when
+GitHub's diff has a path outside previewPaths. A previewPaths added only in the
+candidate does nothing: the base decides.
+
 ## Launch an owned candidate
 
 For UI work, use the host's available supervised preview/browser capability.

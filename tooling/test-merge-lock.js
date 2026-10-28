@@ -491,6 +491,62 @@ async function main() {
         const broken = runFast(receipt({}), 'fl-cfgbad', { basePkg: '{ not json' });
         check('F7. an unreadable base package.json refuses the fast lane rather than reading as no config',
             broken.exit === 1 && merges('fl-cfgbad') === 0 && /config at main .* is unreadable/.test(broken.err), detail(broken));
+
+        // The preview profile. The receipt, the base config and GitHub's file
+        // list are literals, written apart from fast-lane.js.
+        const previewReceipt = {
+            ...green, profile: 'preview',
+            classifier: { eligible: true, profile: 'preview', changedLines: 400, maxLines: 100, files: 2, reasons: [] },
+            steps: [
+                { step: 'typecheck', script: 'typecheck', command: 'npm run typecheck', exit: 0, ms: 5 },
+                { step: 'build', script: 'build', command: 'npm run build', exit: 0, ms: 5 },
+                { step: 'test', script: 'test:preview', command: 'npm run test:preview', exit: 0, ms: 5 },
+            ],
+        };
+        const pReceipt = (over = {}) => receipt({ ...previewReceipt, ...over });
+        const previewPkg = JSON.stringify({ autodevFastLane: { previewPaths: ['app/(preview)/offer/**'], previewTest: 'test:preview' } });
+        const insideFiles = [
+            { filename: 'app/(preview)/offer/page.tsx', status: 'added', additions: 300, deletions: 0, changes: 300, patch: '@@' },
+            { filename: 'app/(preview)/offer/sections/Hero.tsx', status: 'added', additions: 100, deletions: 0, changes: 100, patch: '@@' },
+        ];
+        const pOk = runFast(pReceipt(), 'pv-green', { files: insideFiles, basePkg: previewPkg });
+        check('F8. a green preview receipt merges when GitHub\'s 400-line diff is wholly inside previewPaths at the base',
+            pOk.exit === 0 && merges('pv-green') === 1 && /preview profile: 400 changed lines in 2 file\(s\)/.test(pOk.out)
+            && /matches the proved tree/.test(pOk.out) && lockGone(), detail(pOk));
+
+        const extra = { filename: 'src/lib/format.ts', status: 'modified', additions: 1, deletions: 0, changes: 1, patch: '@@' };
+        const pExtra = runFast(pReceipt(), 'pv-extra', { files: [...insideFiles, extra], basePkg: previewPkg });
+        check('F9 (e). a preview receipt is refused under the lock when GitHub\'s diff has an extra path outside previewPaths',
+            pExtra.exit === 1 && merges('pv-extra') === 0
+            && /not eligible for the preview profile: src\/lib\/format\.ts is outside autodevFastLane\.previewPaths/.test(pExtra.err) && lockGone(), detail(pExtra));
+
+        const sens = { filename: 'app/(preview)/offer/checkout/page.tsx', status: 'added', additions: 3, deletions: 0, changes: 3, patch: '@@' };
+        const pRefused = [
+            ['no previewPaths at the base', { files: insideFiles }, pReceipt(), /the base has no autodevFastLane\.previewPaths/],
+            ['previewPaths only in a base config that lacks it', { files: insideFiles, basePkg: JSON.stringify({ autodevFastLane: { maxLines: 100 } }) }, pReceipt(), /the base has no autodevFastLane\.previewPaths/],
+            ['a sensitive path inside previewPaths', { files: [...insideFiles, sens], basePkg: previewPkg }, pReceipt(), /checkout\/page\.tsx matches the sensitive pattern checkout/],
+            ['no previewTest step though the base sets one', { files: insideFiles, basePkg: previewPkg }, pReceipt({ steps: previewReceipt.steps.slice(0, 2) }), /previewTest "test:preview", and the receipt has no green test step/],
+            ['a malformed previewPaths at the base', { files: insideFiles, basePkg: JSON.stringify({ autodevFastLane: { previewPaths: ['**'] } }) }, pReceipt(), /config at main .* is unreadable .*previewPaths/],
+            ['a fast receipt on a diff only the preview rule accepts', { files: insideFiles, basePkg: previewPkg }, receipt({}), /not eligible for the fast lane: 400 changed lines, over the 100-line limit/],
+        ];
+        const pOut = pRefused.map(([label, state, file, re], i) => {
+            const r = runFast(file, `pv-no${i}`, state);
+            return { label, ok: r.exit === 1 && merges(`pv-no${i}`) === 0 && re.test(r.err) && lockGone(), r };
+        });
+        check('F10. a preview receipt is refused with no or a malformed previewPaths at the base, a sensitive path, or no previewTest step; a fast receipt still needs the fast rule',
+            pOut.every((x) => x.ok), pOut.filter((x) => !x.ok).map((x) => `${x.label}: ${detail(x.r)}`).join(' | '));
+
+        const pPre = [
+            ['no build step', pReceipt({ steps: previewReceipt.steps.filter((s) => s.step !== 'build') }), /has no build step/],
+            ['a classifier that chose fast', pReceipt({ classifier: { ...previewReceipt.classifier, profile: 'fast' } }), /is a preview receipt, but its classifier chose fast/],
+            ['an unknown profile', pReceipt({ profile: 'turbo' }), /names profile "turbo"/],
+        ];
+        const pPreOut = pPre.map(([label, file, re], i) => {
+            const r = runFast(file, `pv-pre${i}`, { files: insideFiles, basePkg: previewPkg });
+            return { label, ok: r.exit === 1 && calls(`pv-pre${i}`).length === 0 && re.test(r.err) && lockGone(), r };
+        });
+        check('F11. a preview receipt with no build step, a classifier that chose another profile or an unknown profile is refused before gh or the lock',
+            pPreOut.every((x) => x.ok), pPreOut.filter((x) => !x.ok).map((x) => `${x.label}: ${detail(x.r)}`).join(' | '));
     }
 
     // -----------------------------------------------------------------------

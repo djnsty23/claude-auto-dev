@@ -3,6 +3,30 @@
 Non-obvious choices, and where the work that implements them actually landed.
 One entry per decision, newest first.
 
+## 2026-10-29: a preview-only surface merges on a "preview" fast-lane profile, scoped at the base
+
+Product owners asked for a lane for preview-only surfaces, such as an unlisted,
+noindex landing page under one route folder, where a large diff should not need
+the full gate. The fast lane refused any diff over its line limit.
+
+`fast-lane.js` now has a second profile. A product opts in with
+`autodevFastLane.previewPaths`, globs in package.json read at the BASE, and an
+optional `autodevFastLane.previewTest` script. A diff the fast profile refuses
+is "preview" when every changed path, old and new, matches a glob, no path
+matches the unchanged sensitive patterns, package.json is unchanged and the
+diff is not empty. Size is not limited and a binary file is allowed. It runs
+typecheck and build, then previewTest when set. The receipt records `profile`.
+A receipt from before profiles has none and reads as "fast". merge-lock.js
+holds each receipt to its own profile's rule on GitHub's diff with the base's
+config, so a fast receipt meets exactly the old rule.
+
+Fail-closed choices: a diff both profiles accept takes "fast", the stricter
+bar. A glob's first folder must be literal, so `**` or `*/page.tsx` cannot open
+the whole repo. A malformed previewPaths or previewTest throws like every other
+config key, which closes the whole lane rather than only the preview profile.
+Globs match case-sensitively, and every character but `*` and `?` is literal,
+so Next.js `(group)` and `[slug]` folders match as written.
+
 ## 2026-10-25: the Brain pushes a closed worker's branch, and the builder never pushes
 
 `[measured 2026-10-25]` No product task queued with `unattended-worker.js
