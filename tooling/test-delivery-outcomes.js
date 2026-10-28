@@ -64,7 +64,7 @@ try {
         return { status: r.status, stdout: r.stdout, json };
     };
     const syncArgs = ['sync', '--ledger', path.join(copy, 'unattended-workers.json'), '--headless-ledger', path.join(copy, 'headless-workers.json'),
-        '--judge-dir', copy, '--store', store, '--pr-facts', path.join(copy, 'prs.json'), '--now', expected.now, '--json'];
+        '--judge-dir', copy, '--sessions-dir', path.join(copy, 'no-sessions'), '--store', store, '--pr-facts', path.join(copy, 'prs.json'), '--now', expected.now, '--json'];
     const s1 = cli(...syncArgs);
     check(s1.status === 0 && s1.json && s1.json.summary === expected.summary, `sync 1: exit ${s1.status}, ${s1.stdout.trim().slice(0, 300)}`);
     if (s1.json) { compareTasks('sync 1', s1.json.outcomes); check(s1.json.appended === 15, `sync 1 appended ${s1.json.appended}, expected 15 (9 attempts + 6 outcomes)`); }
@@ -115,6 +115,125 @@ try {
     check(D.ghPrFacts('https://github.com/example-org/widget/pull/104', { run: gh(1, doc) }) === null, 'gh nonzero exit must read as null');
     check(D.ghPrFacts('https://github.com/example-org/widget/pull/104', { run: gh(null, {}, new Error('ETIMEDOUT')) }) === null, 'gh timeout must read as null');
     check(D.ghPrFacts('not a pr url', { run: gh(0, doc) }) === null, 'a non-PR url must read as null');
+
+    // 5. Desktop side sessions, labelled by hand before the reader was written.
+    //    [measured 2026-10-28] since 10-15 the work runs in side sessions, which
+    //    no worker ledger records. The app's MERGED and CLOSED were never seen
+    //    stale, every stale state was OPEN, so only OPEN asks the PR facts.
+    const pr = (n) => `https://github.com/example-org/widget/pull/${n}`;
+    const day = (iso) => Date.parse(iso);
+    const sideDir = path.join(scratch, 'sessions');
+    const org = path.join(sideDir, 'acct', 'org');
+    fs.mkdirSync(org, { recursive: true });
+    const spawned = { sessionId: 'local_parent', taskId: 'task_x', title: 'a brief' };
+    const sess = (id, created, prs, from = spawned) => fs.writeFileSync(path.join(org, `local_${id}.json`),
+        JSON.stringify({ sessionId: `local_${id}`, createdAt: day(created), ...(from ? { spawnedFrom: from } : {}), prs: prs.map(([n, state]) => ({ url: pr(n), state })) }));
+    sess('a1', '2026-09-20T10:00:00Z', [[201, 'MERGED']]);
+    sess('a2', '2026-09-30T10:00:00Z', [[202, 'MERGED']]);
+    sess('a3', '2026-09-28T10:00:00Z', [[203, 'CLOSED'], [204, 'CLOSED']]);
+    sess('a4', '2026-09-21T10:00:00Z', [[205, 'OPEN']]);
+    sess('a5', '2026-09-20T10:00:00Z', [[206, 'MERGED']], null);
+    sess('a6', '2026-09-20T10:00:00Z', []);
+    sess('a7', '2026-09-22T10:00:00Z', [[207, 'CLOSED'], [208, 'MERGED']]);
+    sess('a8', '2026-10-12T10:00:00Z', [[209, 'OPEN']]);
+    fs.writeFileSync(path.join(org, 'local_deadbeef.json'), '{ not json');
+    fs.writeFileSync(path.join(org, 'deleted_a9'), '{}');
+    const sideFacts = {
+        [pr(201)]: { state: 'MERGED', mergedAt: '2026-09-21T10:00:00Z' },
+        [pr(202)]: { state: 'MERGED', mergedAt: '2026-10-01T10:00:00Z', revertedAt: '2026-10-03T10:00:00Z' },
+        [pr(205)]: { state: 'MERGED', mergedAt: '2026-09-23T10:00:00Z' },
+        [pr(208)]: { state: 'MERGED', mergedAt: '2026-09-24T10:00:00Z' },
+        [pr(209)]: { state: 'OPEN', mergedAt: null },
+    };
+    const sideReader = (url) => sideFacts[url] || facts(url);
+    const want = {
+        'side:local_a1': { accepted: true, firstAttemptAccepted: true, standingDay7: true, status: 'standing' },
+        'side:local_a2': { accepted: true, firstAttemptAccepted: true, standingDay7: false, status: 'not-standing' },
+        'side:local_a3': { accepted: false, firstAttemptAccepted: false, standingDay7: false, status: 'abandoned' },
+        'side:local_a4': { accepted: true, firstAttemptAccepted: true, standingDay7: true, status: 'standing' },
+        'side:local_a7': { accepted: true, firstAttemptAccepted: true, standingDay7: true, status: 'standing' },
+        'side:local_a8': { accepted: null, firstAttemptAccepted: null, standingDay7: null, status: 'unknown' },
+    };
+    const sideSrc = D.readSources({ ...paths(FIXTURE, null), sessionsDir: sideDir });
+    check(sideSrc.sessions.state === 'read' && sideSrc.sessions.records.length === 8 && sideSrc.sessions.bad === 1,
+        `side: ${sideSrc.sessions.records.length} record(s), ${sideSrc.sessions.bad} unreadable, expected 8 and 1`);
+    const built = D.buildAttempts(sideSrc, new Map(), { prFacts: sideReader });
+    check(built.side.spawned === 7 && built.side.tasks === 6 && built.side.noPr === 1, `side population ${JSON.stringify(built.side)}, expected 7 spawned, 6 tasks, 1 with no PR`);
+    const sideOut = D.computeAll(built.byTask, { now: NOW, prFacts: sideReader });
+    const sideIds = sideOut.filter((o) => o.taskId.startsWith('side:')).map((o) => o.taskId);
+    check(sideIds.join() === Object.keys(want).join(), `side tasks ${sideIds.join()}, expected ${Object.keys(want).join()}`);
+    for (const [id, w] of Object.entries(want)) {
+        const got = sideOut.find((o) => o.taskId === id) || {};
+        for (const [f, v] of Object.entries(w)) check(got[f] === v, `side ${id}.${f} = ${JSON.stringify(got[f])}, expected ${JSON.stringify(v)} (${got.reason})`);
+        check(got.attempts === 1 && got.costUsd === null, `side ${id}: ${got.attempts} attempt(s), cost ${got.costUsd}, expected 1 and null`);
+    }
+    check(JSON.stringify((sideOut.find((o) => o.taskId === 'side:local_a7') || {}).prs) === JSON.stringify([pr(208)]),
+        'a session that closed one PR and merged another stands on the merged one only');
+    compareTasks('with side sessions', sideOut.filter((o) => !o.taskId.startsWith('side:')));
+    const noFacts = D.computeAll(D.buildAttempts(sideSrc).byTask, { now: NOW, prFacts: () => null }).find((o) => o.taskId === 'side:local_a4');
+    check(noFacts.accepted === null, `an OPEN PR with no PR facts leaves the task unknown, got ${noFacts.accepted}`);
+    check(D.readSessions(path.join(scratch, 'none')).state === 'absent' && D.readSessions(undefined).state === 'not asked',
+        'an absent sessions dir reads as absent, an unset one as not asked');
+    check(D.desktopSessionsDir({ APPDATA: 'R' }, 'win32') === path.join('R', 'Claude', 'claude-code-sessions')
+        && D.desktopSessionsDir({ HOME: 'H' }, 'darwin') === path.join('H', 'Library', 'Application Support', 'Claude', 'claude-code-sessions')
+        && D.desktopSessionsDir({ HOME: 'H' }, 'linux') === path.join('H', '.config', 'Claude', 'claude-code-sessions'), 'desktop sessions dir per platform');
+    fs.writeFileSync(path.join(scratch, 'side-prs.json'), JSON.stringify({ ...JSON.parse(fs.readFileSync(path.join(FIXTURE, 'prs.json'), 'utf8')), ...sideFacts }));
+    const sideCli = cli('sync', '--ledger', path.join(copy, 'unattended-workers.json'), '--headless-ledger', path.join(copy, 'headless-workers.json'),
+        '--judge-dir', copy, '--sessions-dir', sideDir, '--store', path.join(scratch, 'side.jsonl'), '--pr-facts', path.join(scratch, 'side-prs.json'),
+        '--now', expected.now);
+    check(sideCli.status === 0 && sideCli.stdout.includes('side sessions read: 8 record(s), 1 unreadable, 7 spawned, 6 with a PR, 1 with none')
+        && sideCli.stdout.includes('tasks=12 '), `side sync CLI: exit ${sideCli.status}, ${sideCli.stdout.trim().slice(0, 600)}`);
+
+    // 6. The observer kills sync at 90 s, so PR facts stop after a budget. A fake clock moves
+    //    one second per read: a 3.5 s budget answers three, the rest stay unread and not final,
+    //    and the oldest task is the one asked. The next sync with no budget finishes the work.
+    let tick = 0; const asked = [];
+    const slow = (url) => { asked.push(url); return sideReader(url); };
+    const cut = D.sync({ paths: { ...paths(FIXTURE, null), sessionsDir: sideDir, store: path.join(scratch, 'budget.jsonl') },
+        now: NOW, prFacts: slow, budgetMs: 3500, clock: () => (tick += 1000) - 1000 });
+    check(asked.length === 3 && /PR facts: 0 settled from budget\.pr-facts\.json, 3 asked, \d+ left unread after the 3\.5 s budget/.test(cut.population),
+        `budget: ${asked.length} asked, population ${cut.population.split('; ').slice(-2).join('; ')}`);
+    // The two OPEN side PRs are asked while attempts are built, then the oldest task with a merged PR.
+    const order = [...D.buildAttempts(sideSrc, new Map(), { prFacts: sideReader }).byTask.entries()]
+        .filter(([, l]) => l.some((a) => a.decision === 'accept' && a.prs && a.prs.length))
+        .sort(([, a], [, b]) => (a[0].startedAt < b[0].startedAt ? -1 : 1));
+    const oldestPrs = order[0][1].flatMap((a) => a.prs || []);
+    check(asked[0] === pr(205) && asked[1] === pr(209) && oldestPrs.includes(asked[2]),
+        `budget order: asked ${asked.join(' ')}, oldest task ${order[0][0]} holds ${oldestPrs.join(' ')}`);
+    const cutUnread = cut.outcomes.filter((o) => o.accepted === true && o.standingDay7 === null).length;
+    check(cutUnread >= 3, `budget: ${cutUnread} accepted task(s) left with day 7 unread, expected at least 3`);
+    const full = D.sync({ paths: { ...paths(FIXTURE, null), sessionsDir: sideDir, store: path.join(scratch, 'budget.jsonl') }, now: NOW, prFacts: sideReader });
+    check(!/left unread/.test(full.population) && full.summary === sideCli.stdout.split('\n').find((l) => l.startsWith('tasks=')),
+        `after the cut, a full sync matches the uncut one: ${full.summary}`);
+    // Settled answers persist beside the store: a merge older than the window and a closed PR.
+    const cacheFile = path.join(scratch, 'budget.pr-facts.json');
+    const cached = JSON.parse(fs.readFileSync(cacheFile, 'utf8'));
+    check(cached[pr(201)] && cached[pr(205)] && !cached[pr(209)], `settled cache holds ${Object.keys(cached).length} PR(s), 201 and 205 but not the open 209`);
+    // A fresh store beside that cache has no final outcome to reuse, so only the cache saves the asks.
+    fs.copyFileSync(cacheFile, path.join(scratch, 'warm.pr-facts.json'));
+    const warm = [];
+    const warmRun = D.sync({ paths: { ...paths(FIXTURE, null), sessionsDir: sideDir, store: path.join(scratch, 'warm.jsonl') }, now: NOW,
+        prFacts: (url) => { warm.push(url); return sideReader(url); } });
+    check(!warm.some((u) => cached[u]) && warm.includes(pr(209)) && /PR facts: [1-9]\d* settled from/.test(warmRun.population),
+        `a settled PR is never asked twice: asked ${warm.join(' ')}`);
+    // A task inside its window, re-synced with the budget spent: the stored row stands, no churn.
+    const young = path.join(scratch, 'young', 'acct', 'org');
+    fs.mkdirSync(young, { recursive: true });
+    fs.writeFileSync(path.join(young, 'local_b1.json'), JSON.stringify({ sessionId: 'local_b1', createdAt: day('2026-10-10T10:00:00Z'),
+        spawnedFrom: spawned, prs: [{ url: pr(210), state: 'MERGED' }] }));
+    const youngFacts = (url) => (url === pr(210) ? { state: 'MERGED', mergedAt: '2026-10-11T10:00:00Z' } : facts(url));
+    const youngPaths = { ...paths(FIXTURE, null), sessionsDir: path.join(scratch, 'young'), store: path.join(scratch, 'young.jsonl') };
+    const y1 = D.sync({ paths: youngPaths, now: NOW, prFacts: youngFacts });
+    const y2 = D.sync({ paths: youngPaths, now: NOW, prFacts: youngFacts, budgetMs: 0 });
+    const yo = y2.outcomes.find((o) => o.taskId === 'side:local_b1') || {};
+    check(y1.appended > 0 && y2.appended === 0 && yo.status === 'accepted-day7-unknown' && !/unreadable/.test(yo.reason),
+        `a budget-skipped read keeps the stored outcome: appended ${y2.appended}, ${yo.status}, ${yo.reason}`);
+    fs.unlinkSync(cacheFile);
+    const again = [];
+    D.sync({ paths: { ...paths(FIXTURE, null), sessionsDir: sideDir, store: path.join(scratch, 'budget.jsonl') }, now: NOW,
+        prFacts: (url) => { again.push(url); return sideReader(url); } });
+    check(!again.includes(pr(205)) && again.includes(pr(209)),
+        `an OPEN PR stored as merged is not asked again, a still-open one is: asked ${again.join(' ')}`);
 } catch (e) {
     failures.push(`threw: ${e.stack || e.message}`);
 } finally {
