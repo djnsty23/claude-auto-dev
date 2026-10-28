@@ -165,7 +165,9 @@ const EFFORT_LEVELS = ['low', 'medium', 'high', 'xhigh', 'max'];
 
 const HEADLESS_NOTE = 'HEADLESS: this process exits the moment the turn ends, so run every gate and long '
     + 'command in the FOREGROUND with the Bash timeout at its maximum, background nothing, and do not end '
-    + 'the turn until the report file is complete and carries its RESULT line.';
+    + 'the turn until the report file is complete and carries its RESULT line. Pushing, opening a pull request and '
+    + 'merging are refused here and are the coordinator\'s steps even when the brief asks for them: stop at a gated '
+    + 'commit and put its head SHA and gate receipt in the report.';
 
 // `[measured 2026-09-23]` in one fleet's worker transcripts the auto-mode
 // permission classifier refused four action classes: Production Deploy (19),
