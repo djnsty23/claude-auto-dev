@@ -908,11 +908,20 @@ function observeStalls(now) {
 const OBSERVER_TIMEOUT_MS = 90 * 1000;
 const OBSERVER_MIN_EVERY = 60;
 function observersConfig() { return process.env.BRAIN_CLOCK_OBSERVERS || path.join(STATE_DIR, "observers.json"); }
+// A bare name ("capacity.js") is a script shipped beside this clock, so the entry follows the
+// installed version instead of pinning a cache directory that the next release leaves behind.
+function observerScript(o) {
+  const s = typeof o.script === "string" ? o.script : "";
+  if (!/\.js$/.test(s)) return null;
+  if (path.isAbsolute(s)) return s;
+  return /^[a-z0-9][a-z0-9-]*\.js$/.test(s) ? path.join(__dirname, s) : null;
+}
 function observerFault(o) {
   if (!o || typeof o !== "object") return "an entry is not an object";
   if (!/^[a-z0-9][a-z0-9-]{0,40}$/.test(String(o.id || ""))) return `id ${JSON.stringify(o.id)} is not a short slug`;
-  if (typeof o.script !== "string" || !path.isAbsolute(o.script) || !/\.js$/.test(o.script)) return `${o.id}: script must be an absolute .js path`;
-  if (!fs.existsSync(o.script)) return `${o.id}: ${o.script} does not exist`;
+  const script = observerScript(o);
+  if (!script) return `${o.id}: script must be an absolute .js path or a bare name shipped beside the clock`;
+  if (!fs.existsSync(script)) return `${o.id}: ${script} does not exist`;
   if (o.args !== undefined && !(Array.isArray(o.args) && o.args.every((x) => typeof x === "string"))) return `${o.id}: args must be strings`;
   if (!(Number.isFinite(o.everyMin) && o.everyMin >= OBSERVER_MIN_EVERY)) return `${o.id}: everyMin must be at least ${OBSERVER_MIN_EVERY}`;
   if (o.cwd !== undefined && !(typeof o.cwd === "string" && fs.existsSync(o.cwd))) return `${o.id}: cwd does not exist`;
@@ -942,7 +951,8 @@ function observeScheduled(now) {
   if (!due.length) { out.line = `observers: ${list.length} configured, none due`; return out; }
   const o = due[0];
   const t0 = Date.now();
-  const r = spawnSync(process.execPath, [o.script, ...(o.args || [])], { cwd: o.cwd || path.dirname(o.script), encoding: "utf8", timeout: OBSERVER_TIMEOUT_MS, windowsHide: true });
+  const script = observerScript(o);
+  const r = spawnSync(process.execPath, [script, ...(o.args || [])], { cwd: o.cwd || path.dirname(script), encoding: "utf8", timeout: OBSERVER_TIMEOUT_MS, windowsHide: true });
   const ms = Date.now() - t0;
   const exit = r.error ? null : r.status;
   const error = r.error ? (r.error.code === "ETIMEDOUT" ? "timeout" : `spawn-${r.error.code || r.error.message}`) : null;
