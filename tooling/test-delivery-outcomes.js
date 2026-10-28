@@ -234,6 +234,61 @@ try {
         prFacts: (url) => { again.push(url); return sideReader(url); } });
     check(!again.includes(pr(205)) && again.includes(pr(209)),
         `an OPEN PR stored as merged is not asked again, a still-open one is: asked ${again.join(' ')}`);
+
+    // 7. Session cost, labelled by hand at Haiku 4.5 list price ($1 in, $5 out per million).
+    //    m1 has two rows and only its last counts ($1 + $1), m2 is $5, the subagent's s1 is $2:
+    //    $9.00. Summing every row gives $9.50, dropping the subagent gives $7.00.
+    const ID = 'aaaaaaaa-0000-4000-8000-000000000001';
+    const projects = path.join(scratch, 'projects');
+    const slug = path.join(projects, 'C--work-repo');
+    fs.mkdirSync(path.join(slug, ID, 'subagents'), { recursive: true });
+    const row = (id, usage) => JSON.stringify({ requestId: `req-${id}`, timestamp: '2026-10-10T10:00:00Z',
+        message: { id, model: 'claude-haiku-4-5', usage: { output_tokens: 0, input_tokens: 0, ...usage } } });
+    const mainFile = path.join(slug, `${ID}.jsonl`);
+    fs.writeFileSync(mainFile, [row('m1', { input_tokens: 500000 }), row('m1', { input_tokens: 1000000, output_tokens: 200000 }),
+        '{"type":"user","message":{"content":"no usage here"}}', row('m2', { output_tokens: 1000000 })].join('\n') + '\n');
+    fs.writeFileSync(path.join(slug, ID, 'subagents', 'agent-1.jsonl'), row('s1', { input_tokens: 2000000 }) + '\n');
+    const pricedDir = path.join(scratch, 'priced', 'acct', 'org');
+    fs.mkdirSync(pricedDir, { recursive: true });
+    fs.writeFileSync(path.join(pricedDir, 'local_c1.json'), JSON.stringify({ sessionId: 'local_c1', cliSessionId: ID,
+        createdAt: day('2026-10-10T10:00:00Z'), spawnedFrom: spawned, prs: [{ url: pr(211), state: 'MERGED' }] }));
+    fs.writeFileSync(path.join(pricedDir, 'local_c2.json'), JSON.stringify({ sessionId: 'local_c2', cliSessionId: 'bbbbbbbb-0000-4000-8000-000000000002',
+        createdAt: day('2026-10-10T11:00:00Z'), spawnedFrom: spawned, prs: [{ url: pr(212), state: 'MERGED' }] }));
+    const pricedFacts = (url) => (url === pr(211) || url === pr(212) ? { state: 'MERGED', mergedAt: '2026-10-11T10:00:00Z' } : facts(url));
+    const pricedPaths = { ...paths(FIXTURE, null), sessionsDir: path.join(scratch, 'priced'), projectsDir: projects, store: path.join(scratch, 'priced.jsonl') };
+    const costOfTask = (res, id) => (res.outcomes.find((o) => o.taskId === id) || {}).costUsd;
+    const p1 = D.sync({ paths: pricedPaths, now: NOW, prFacts: pricedFacts });
+    check(costOfTask(p1, 'side:local_c1') === 9, `session cost: side:local_c1 = ${costOfTask(p1, 'side:local_c1')}, expected 9 (last row per response, subagents included)`);
+    check(costOfTask(p1, 'side:local_c2') === null, `a session with no transcript costs null, never 0: got ${costOfTask(p1, 'side:local_c2')}`);
+    check(/session cost: 1 priced, 0 reused from priced\.session-cost\.json, 1 with no transcript/.test(p1.population), `session cost population: ${p1.population}`);
+    // Unchanged files are reused with no read, even with the budget spent.
+    const p2 = D.sync({ paths: pricedPaths, now: NOW, prFacts: pricedFacts, costBudgetMs: 0 });
+    check(costOfTask(p2, 'side:local_c1') === 9 && /session cost: 0 priced, 1 reused/.test(p2.population) && p2.appended === 0,
+        `an unchanged transcript is reused: ${costOfTask(p2, 'side:local_c1')}, appended ${p2.appended}, ${p2.population}`);
+    // A session that kept working is priced again: m3 adds $1.
+    fs.appendFileSync(mainFile, row('m3', { input_tokens: 1000000 }) + '\n');
+    const p3 = D.sync({ paths: pricedPaths, now: NOW, prFacts: pricedFacts });
+    check(costOfTask(p3, 'side:local_c1') === 10, `a grown transcript is priced again: ${costOfTask(p3, 'side:local_c1')}, expected 10`);
+    // Past the budget an unpriced attempt keeps the cost already stored rather than turning null.
+    // The first read always runs, so a new session local_c0 (read first, $1) spends the budget.
+    const ID0 = 'cccccccc-0000-4000-8000-000000000000';
+    fs.writeFileSync(path.join(slug, `${ID0}.jsonl`), row('z1', { input_tokens: 1000000 }) + '\n');
+    fs.writeFileSync(path.join(pricedDir, 'local_c0.json'), JSON.stringify({ sessionId: 'local_c0', cliSessionId: ID0,
+        createdAt: day('2026-10-10T09:00:00Z'), spawnedFrom: spawned, prs: [{ url: pr(211), state: 'MERGED' }] }));
+    fs.appendFileSync(mainFile, row('m4', { input_tokens: 1000000 }) + '\n');
+    let t = 0;
+    const p4 = D.sync({ paths: pricedPaths, now: NOW, prFacts: pricedFacts, costBudgetMs: 500, clock: () => (t += 1000) });
+    check(costOfTask(p4, 'side:local_c0') === 1 && costOfTask(p4, 'side:local_c1') === 10 && /1 left unpriced after the 0\.5 s budget/.test(p4.population),
+        `a budget-skipped price keeps the stored cost: c0 ${costOfTask(p4, 'side:local_c0')}, c1 ${costOfTask(p4, 'side:local_c1')} (expected 1 and 10), ${p4.population}`);
+    // A desktop-channel worker whose record names a session is priced from that session.
+    const ledgerCopy = path.join(scratch, 'priced-ledger.json');
+    const led = JSON.parse(fs.readFileSync(path.join(FIXTURE, 'unattended-workers.json'), 'utf8'));
+    led.records.push({ taskId: 'desk-1', slug: 'desk-1', sessionId: 'local_c1', startedAt: '2026-10-10T10:00:00Z', runStatus: 'succeeded' });
+    fs.writeFileSync(ledgerCopy, JSON.stringify(led));
+    const deskSrc = D.readSources({ ...pricedPaths, ledger: ledgerCopy });
+    const desk = D.buildAttempts(deskSrc, new Map(), { prFacts: pricedFacts, costOf: D.sessionCoster(projects, {}).costOf });
+    const deskCost = ((desk.byTask.get('desk-1') || [])[0] || {}).costUsd;
+    check(deskCost === 11, `a desktop-channel worker is priced from its session: ${deskCost}, expected 11`);
 } catch (e) {
     failures.push(`threw: ${e.stack || e.message}`);
 } finally {
