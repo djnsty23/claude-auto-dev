@@ -196,9 +196,17 @@ async function probeAdmission(root, row) {
         const opts = { staleMs: 600000, log: () => {} };
         {
             const lockPaths = lanes();
+            const p = live();
+            await sleep(200);
+            const r = q.takeTurn({ lockPath: lockPaths[1], lockPaths, pid: p, what: 'product probe', cls: q.PRODUCT, runId: 'run-ev-adm-c', ...opts });
+            row('admission control: a product gate takes the free lane beside a harness holder', r.acquired === true && fs.existsSync(lockPaths[1]), r);
+        }
+        {
+            const lockPaths = lanes();
             await sleep(200);
             const r = q.takeTurn({ lockPath: lockPaths[1], lockPaths, pid: process.pid, what: 'harness probe', cls: q.HARNESS, runId: 'run-ev-adm-a', ...opts });
-            row('admission control: with no product waiting a harness gate borrows the free lane', r.acquired === true && fs.existsSync(lockPaths[1]), r);
+            row('admission: with no product waiting a harness gate is still refused the second of two lanes',
+                r.acquired === false && Boolean(r.reserved) && !fs.existsSync(lockPaths[1]), r);
         }
         {
             const lockPaths = lanes();

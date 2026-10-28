@@ -24,11 +24,12 @@
  *   M6  leave removes no ticket                                -> a stopped waiter keeps its place
  *   M7  serving order ignores the class                        -> an older harness ticket beats a product
  *   M8  no harness cap                                         -> harness gates take the last lane while a product waits
- *   M9  retired: on one lane a waiting product always outranks harness, so the cap
- *       applies only with nobody waiting, where a harness gate now borrows the lane
+ *   M9  retired: on one lane a waiting product always outranks harness, so a cap
+ *       planted as "refuse while a product waits" never fires there
  *   M10 no hand-over to a classless ticket at the front        -> an older version and a harness gate wait on each other
  *   M11 a signal-0 hit is proof for any pid on Windows         -> a dead holder at F + 1 is never reclaimed
- *   M12 harness never borrows an idle lane                     -> a free lane sits idle with nobody waiting for it
+ *   M12 harness borrows the reserved lane when no product waits -> two harness gates hold both of two lanes
+ *   M13 the cap is lanes - 1 even on one lane                  -> a one-lane machine never runs a harness gate
  */
 'use strict';
 
@@ -468,10 +469,10 @@ function scenarioOlderVersion(subject) {
 }
 
 /**
- * Two lanes, then three. With no product ticket waiting, a harness gate
- * borrows a free lane: nothing waits for the lane the cap would keep. While a
- * product ticket waits, harness gates hold at most lanes - 1, and nothing is
- * ever preempted.
+ * Two lanes, then three. Harness gates hold at most lanes - 1 lanes whether
+ * or not a product ticket waits, because nothing is ever preempted: a lane
+ * lent to harness while nobody waits is gone for the product that arrives
+ * next. `[measured 2026-10-28]` two harness gates held both lanes for hours.
  */
 function scenarioReserve(subject) {
     const rows = [];
@@ -483,15 +484,32 @@ function scenarioReserve(subject) {
         fs.writeFileSync(fx.lock, `${h}\nharness gate on lane 1\nclass harness\n`);
         plantEverywhere(fx, a, 90000, 'harness', 2);
         const ra = take(subject, fx, a);
-        rows.push(['2 lanes, harness H holds lane 1, no product waits: harness A borrows the free lane 2 (exit 0)',
-            ra.code === 0 && pidIn(lane2) === a, `${ra.out}\nlane 2: ${linesOf(lane2).join(' | ')}`]);
+        rows.push(['2 lanes, harness H holds lane 1, NO product waits: harness A is refused the free lane 2 (exit 3, no lane 2 lock)',
+            ra.code === 3 && !fs.existsSync(lane2), `${ra.out}\nlane 2: ${linesOf(lane2).join(' | ')}`]);
+        rows.push(['with no product waiting, A is still told the lane is kept for product gates',
+            /kept for product gates: harness gates already hold 1 of 2 lane\(s\)/.test(ra.out), ra.out]);
         const rp = take(subject, fx, p);
-        rows.push(['product P, arriving while harness holds both lanes, waits (exit 3) and preempts nothing',
-            rp.code === 3 && lockPid(fx) === h && pidIn(lane2) === a, rp.out]);
+        rows.push(['product P, arriving later, takes the lane the cap kept open (exit 0) and preempts nothing',
+            rp.code === 0 && pidIn(lane2) === p && lockPid(fx) === h, rp.out]);
         plantEverywhere(fx, b, 60000, 'harness', 2);
         const relH = release(subject, fx, h);
-        rows.push(['harness H releases lane 1: it is handed to product P, not to the older harness B',
-            relH.code === 0 && lockPid(fx) === p, `${relH.out}\nlane 1: ${lockPid(fx)}`]);
+        rows.push(['harness H releases lane 1 while product P holds lane 2: it is handed to the older harness A, not B',
+            relH.code === 0 && lockPid(fx) === a, `${relH.out}\nlane 1: ${lockPid(fx)}`]);
+    }
+    {
+        const fx = fixture();
+        fs.writeFileSync(path.join(fx.dir, 'full-gate.lanes'), '2\n');
+        const lane2 = path.join(fx.dir, 'full-gate-2.lock');
+        const queue2 = path.join(fx.dir, 'full-gate-2.queue');
+        const [h, q, b] = [sleeper(), sleeper(), sleeper()];
+        // Harness on both lanes, as the borrow an earlier version allowed leaves them.
+        fs.writeFileSync(fx.lock, `${h}\nharness gate on lane 1\nclass harness\n`);
+        fs.writeFileSync(lane2, `${q}\nharness gate on lane 2\nclass harness\n`);
+        plantEverywhere(fx, b, 60000, 'harness', 2);
+        const relQ = release(subject, fx, q);
+        rows.push(['harness on both lanes, NO product waits: Q releases lane 2, not handed to harness B, renamed aside',
+            relQ.code === 0 && !fs.existsSync(lane2) && /not handed to harness pid/.test(relQ.out), relQ.out]);
+        rows.push(['B stays queued for lane 2 behind the cap', ticketLine(queue2, b, 1) === String(b), fs.existsSync(queue2) ? fs.readdirSync(queue2).join(', ') : '']);
     }
     {
         const fx = fixture();
@@ -527,19 +545,19 @@ function scenarioReserve(subject) {
         const ra = take(subject, fx, a);
         rows.push(['3 lanes, harness on lane 1: a second harness gate A takes lane 2 (exit 0)', ra.code === 0 && pidIn(lane2) === a, ra.out]);
         const rb = take(subject, fx, b);
-        rows.push(['harness on 2 of 3 lanes, no product waits: a third harness gate B borrows lane 3 (exit 0)',
-            rb.code === 0 && pidIn(lane3) === b, rb.out]);
+        rows.push(['harness on 2 of 3 lanes, NO product waits: a third harness gate B is refused lane 3 (exit 3, no lane 3 lock)',
+            rb.code === 3 && !fs.existsSync(lane3), `${rb.out}\nlane 3: ${linesOf(lane3).join(' | ')}`]);
     }
     return rows;
 }
 
-/** One lane: with nobody else waiting, a harness gate takes it. */
+/** One lane: the cap is that lane, so with nobody else waiting a harness gate takes it. */
 function scenarioOneLane(subject) {
     const fx = fixture();
     const a = sleeper();
     plantTicket(fx, a, 30000, 0, { cls: 'harness' });
     const ra = take(subject, fx, a);
-    return [['one lane, free, a lone harness ticket: it takes the lock (exit 0) and line 3 says "class harness"',
+    return [['one lane, free, NO product waits, a lone harness ticket: it takes the lock (exit 0) and line 3 says "class harness"',
         ra.code === 0 && lockPid(fx) === a && linesOf(fx.lock)[2] === 'class harness', `${ra.out}\nlock: ${linesOf(fx.lock).join(' | ')}`]];
 }
 
@@ -917,8 +935,13 @@ async function main() {
     }
     const m8 = mutant('M8', 'return held + 1 > cap ? { held, cap, lanes: lockPaths.length } : null;', 'return null;');
     if (m8) expectRed('M8', 'no harness cap', scenarioReserve(m8));
-    const m12 = mutant('M12', '    if (!productWaiting(lockPaths, staleMs, log)) return null;\n', '');
-    if (m12) expectRed('M12', 'harness never borrows an idle lane', scenarioReserve(m12));
+    // M12 restores the removed borrow: no cap unless a product ticket waits.
+    const m12 = mutant('M12', 'function harnessReserve(lockPaths, lockPath) {\n',
+        'function harnessReserve(lockPaths, lockPath) {\n'
+        + '    if (!lockPaths.some((lp) => liveQueue(queueDirFor(lp), 600000, () => {}, lockPaths[0]).some((t) => t.cls === PRODUCT))) return null;\n');
+    if (m12) expectRed('M12', 'harness borrows the reserved lane when no product waits', scenarioReserve(m12));
+    const m13 = mutant('M13', 'return Math.max(1, laneCount - 1);', 'return laneCount - 1;');
+    if (m13) expectRed('M13', 'the cap is lanes - 1 even on one lane', scenarioOneLane(m13));
     const m10 = mutant('M10', 'if (front.classed || front === oldest) return false;', 'return false;');
     if (m10) expectRed('M10', 'no hand-over to a classless front', scenarioOlderVersion(m10));
 

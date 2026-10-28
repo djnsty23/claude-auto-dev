@@ -37,15 +37,15 @@
  * product repos, and product gates waited 65 to 83 min behind two of them.
  *   - The front of a lane's queue is its oldest live product ticket. A harness
  *     ticket reaches the front only when no live product ticket waits there.
- *   - While a live product ticket waits in any lane's queue, harness gates hold
- *     at most lanes - 1 lanes, so one lane stays open to product gates. On a
+ *   - Harness gates hold at most lanes - 1 lanes at all times, so on two or
+ *     more lanes one is always open to a product gate that arrives. On a
  *     one-lane machine the cap is that one lane, which a harness ticket takes
- *     only when no product ticket waits.
- *   - With no product ticket waiting, a harness gate borrows any free lane:
- *     nothing waits for the lane the cap would keep, and a three-hour harness
- *     gate behind an idle lane is pure loss. The cost is that a product gate
- *     arriving while harness gates hold every lane waits for the next release.
+ *     only when no product ticket waits in front of it.
  *   - Nothing is preempted: a running holder keeps its lane, whatever its class.
+ *     So the cap holds even when no product ticket waits: a lane lent to a
+ *     harness gate while nobody waits stays lent until that gate finishes.
+ *     `[measured 2026-10-28]` two harness gates took both lanes from 13:50Z
+ *     and product gates that arrived later waited hours behind them.
  * The class is a `class <name>` line after line 2, in the ticket and in the
  * lock. A ticket or lock without one (written by an older version, or by hand)
  * is a product. An older version takes a free lock only as the OLDEST ticket,
@@ -257,22 +257,16 @@ function harnessCap(laneCount) {
     return Math.max(1, laneCount - 1);
 }
 
-/** True when a live product ticket waits in any lane's queue. */
-function productWaiting(lockPaths, staleMs, log) {
-    return lockPaths.some((lp) => liveQueue(queueDirFor(lp), staleMs, log, lockPaths[0]).some((t) => t.cls === PRODUCT));
-}
-
 /**
  * Null when a harness gate may take `lockPath`, else { held, cap, lanes }:
- * taking it would put harness gates on more than `cap` lanes while a product
- * ticket waits. With no product ticket in any lane's queue the lane is
- * borrowed: nothing is waiting for the lane the cap would keep. A lane counts
- * when its holder says `class harness` and is not known to be dead, so a
- * holder no probe could judge counts. `lockPath` itself never counts: whoever
- * takes it replaces its holder.
+ * taking it would put harness gates on more than `cap` lanes. The cap holds
+ * whether or not a product ticket waits, because a holder is never preempted:
+ * a lane lent while nobody waits is gone for a product that arrives a minute
+ * later. A lane counts when its holder says `class harness` and is not known
+ * to be dead, so a holder no probe could judge counts. `lockPath` itself never
+ * counts: whoever takes it replaces its holder.
  */
-function harnessReserve(lockPaths, lockPath, staleMs, log) {
-    if (!productWaiting(lockPaths, staleMs, log)) return null;
+function harnessReserve(lockPaths, lockPath) {
     const held = lockPaths.filter((lp) => {
         if (lp === lockPath) return false;
         const h = readLock(lp);
@@ -808,7 +802,7 @@ function takeTurn({ lockPath, lockPaths = [lockPath], pid, what, cls = PRODUCT, 
         }
         if (mine !== 0) return queued(held);
         if (!open()) return queued(held);
-        const reserved = live[0].cls === HARNESS ? harnessReserve(lockPaths, lockPath, staleMs, log) : null;
+        const reserved = live[0].cls === HARNESS ? harnessReserve(lockPaths, lockPath) : null;
         if (reserved) return queued(held, { reserved });
         const c = admitCapacity(capacity, pid, lockPaths, capMemo);
         if (!c.admitted) return queued(held, { capacity: c });
@@ -851,7 +845,7 @@ function releaseLock({ lockPath, lockPaths = [lockPath], pid, staleMs, log, runI
         const live = servingOrder(liveQueue(queueDir, staleMs, log, lockPaths[0]).filter((t) => t.pid !== pid));
         const aside = asideName(lockPath, 'released');
         const next = live[0];
-        const reserved = next && next.cls === HARNESS ? harnessReserve(lockPaths, lockPath, staleMs, log) : null;
+        const reserved = next && next.cls === HARNESS ? harnessReserve(lockPaths, lockPath) : null;
         testPause();
         const c = next && !reserved ? admitCapacity(next.meta && next.meta.capacity, next.pid, lockPaths) : { admitted: true, id: null };
         if (!next || reserved || !c.admitted) {
@@ -985,10 +979,10 @@ function help() {
 A ticket queue in front of the machine-wide full-gate lock. Product gates go
 first, harness gates after them, first come within each class. Only the
 ticket at the front may take a lane's lock, and a release hands the lock
-straight to it, so a newcomer cannot jump its class. While a product gate
-waits, harness gates hold at most lanes - 1 lanes (the one lane, on a one-lane
-machine), so one lane stays open to it. With none waiting, a harness gate
-borrows any free lane. A running holder is never preempted.
+straight to it, so a newcomer cannot jump its class. Harness gates hold at
+most lanes - 1 lanes (the one lane, on a one-lane machine) at all times, so
+one lane stays open to product gates even before one arrives. A running
+holder is never preempted.
 
   take     one attempt. Exit 0: --pid holds a lane. Exit 3: queued, place printed.
   wait     take until a lane is held. Exit 0, or 3 when --timeout-ms runs out,
@@ -1093,7 +1087,7 @@ function printLane(s, k, count) {
 function printStatus(s, json) {
     if (json) { console.log(JSON.stringify(s, null, 2)); return; }
     console.log(`lanes:  ${s.laneCount} (from ${s.laneSource})`);
-    console.log(`order:  product gates first, then harness, first come within each. Harness gates hold at most ${s.harnessCap} of ${s.laneCount} lane(s) while a product gate waits`);
+    console.log(`order:  product gates first, then harness, first come within each. Harness gates hold at most ${s.harnessCap} of ${s.laneCount} lane(s)`);
     for (const n of s.notes) console.log(`note:   ${n}`);
     s.lanes.forEach((lane, i) => printLane(lane, i + 1, s.laneCount));
 }
