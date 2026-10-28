@@ -11,8 +11,9 @@
 // NOTHING, not only to have exited 1. The planted ineligible candidates are
 // written here by hand: an auth path, 101 lines, a migration. Every expected
 // reason is a literal, so narrowing the subject's pattern list cannot narrow
-// these fixtures with it. Merge-lock's side of the receipt is in
-// tooling/test-merge-lock.js (F1 to F7).
+// these fixtures with it. Section D covers the preview profile, read from
+// previewPaths at the base. Merge-lock's side of the receipt is in
+// tooling/test-merge-lock.js (F1 to F7, and F8 onward for the preview profile).
 
 'use strict';
 
@@ -250,6 +251,118 @@ function main() {
     const notAnc = cli(['classify', '--repo-dir', REPO, '--head', orphanBase]);
     check('B13. a head that does not contain origin/main is ineligible, naming the rebase',
         notAnc.exit === 1 && /is not an ancestor of .*: rebase onto it first/.test(notAnc.out), detail(notAnc));
+
+    // -----------------------------------------------------------------------
+    // D. The preview profile. Globs, paths and reasons are literals here, so
+    //    a change to the subject's matcher cannot move these fixtures with it.
+    // -----------------------------------------------------------------------
+    const g = fl.globToRegExp('app/(preview)/offer/**');
+    const gSlug = fl.globToRegExp('app/[slug]/*.tsx');
+    const gDeep = fl.globToRegExp('docs/**/README.md');
+    const globCases = [
+        [g, 'app/(preview)/offer/page.tsx', true], [g, 'app/(preview)/offer/a/b/c.tsx', true],
+        [g, 'app/(preview)/offerx/page.tsx', false], [g, 'app/other/page.tsx', false], [g, 'App/(preview)/offer/page.tsx', false],
+        [g, 'app/preview/offer/page.tsx', false], [gSlug, 'app/[slug]/page.tsx', true], [gSlug, 'app/s/page.tsx', false],
+        [gSlug, 'app/[slug]/x/page.tsx', false], [gDeep, 'docs/README.md', true], [gDeep, 'docs/a/b/README.md', true], [gDeep, 'docs/a/READMExmd', false],
+    ];
+    const globWrong = globCases.filter(([re, p, want]) => re.test(p) !== want);
+    check(`D1. previewPaths globs: ** spans folders, * stays in one, (group) and [slug] are literal, case counts (${globCases.length} hand-written paths)`,
+        globWrong.length === 0, globWrong.map(([re, p]) => `${re} ${p}`).join(' | '));
+
+    const badPreview = [
+        { previewPaths: [] }, { previewPaths: 'app/**' }, { previewPaths: ['**'] }, { previewPaths: ['*/page.tsx'] },
+        { previewPaths: ['../app/**'] }, { previewPaths: ['/app/**'] }, { previewPaths: ['app\\x/**'] }, { previewPaths: [''] },
+        { previewPaths: [3] }, { previewTest: 'test:preview' }, { previewPaths: ['app/x/**'], previewTest: 'a && b' },
+    ];
+    const badThrew = badPreview.filter((c) => { try { fl.parseConfig(JSON.stringify({ autodevFastLane: c })); return false; } catch { return true; } });
+    check(`D2. a malformed previewPaths or previewTest throws in each of its ${badPreview.length} shapes, so the whole lane closes`,
+        badThrew.length === badPreview.length, `${badThrew.length} of ${badPreview.length} threw`);
+
+    const pf = (p, n) => f(p, n);
+    const absent = fl.classify([f('src/a.ts', 60, 41)]);
+    const bigInside = [pf('app/(preview)/offer/page.tsx', 300), pf('app/(preview)/offer/hero.tsx', 100)];
+    const pcfg = fl.parseConfig(JSON.stringify({ autodevFastLane: { previewPaths: ['app/(preview)/offer/**'] } }));
+    const binInside = fl.classify([...bigInside, f('app/(preview)/offer/hero.png', null, null)], pcfg);
+    const smallInside = fl.classify([pf('app/(preview)/offer/page.tsx', 5)], pcfg);
+    check('D3. with no previewPaths the verdict is today\'s plus profile and a null previewReasons; inside previewPaths a binary file is allowed and a small diff still takes "fast"',
+        absent.profile === null && absent.previewReasons === null && absent.reasons.join() === '101 changed lines, over the 100-line limit'
+        && fl.classify([f('a.ts', 1)]).profile === 'fast' && binInside.profile === 'preview' && smallInside.profile === 'fast',
+        `${JSON.stringify(absent)} | bin ${binInside.profile} | small ${smallInside.profile}`);
+
+    const PREVIEW_SCRIPTS = { ...STEP_SCRIPTS, 'test:preview': 'node mark.js test:preview' };
+    const PREVIEW_CFG = { previewPaths: ['app/(preview)/offer/**'], previewTest: 'test:preview' };
+    makeBase(pkg(PREVIEW_SCRIPTS, PREVIEW_CFG));
+    // (a) 400 lines, every path inside previewPaths.
+    const inside = { 'app/(preview)/offer/page.tsx': lines(300), 'app/(preview)/offer/sections/Hero.tsx': lines(100) };
+    const aHead = makeCandidate(inside);
+    const aR = runLane(aHead);
+    const aCls = cli(['classify', '--repo-dir', REPO, '--head', aHead]);
+    const aSteps = aR.receipt ? aR.receipt.steps.map((s) => `${s.step}:${s.script}:${s.exit}`).join() : '';
+    check('D4 (a). a 400-line candidate wholly inside previewPaths is "preview": runs typecheck, build and previewTest only, records the profile, and merge-lock\'s receipt check accepts it',
+        aR.exit === 0 && aR.ran.join() === 'typecheck,build,test:preview' && aR.receipt.profile === 'preview'
+        && aR.receipt.classifier.profile === 'preview' && aR.receipt.classifier.changedLines === 400
+        && aSteps === 'typecheck:typecheck:0,build:build:0,test:test:preview:0' && !fl.receiptProblem(aR.out, aHead).problem
+        && aCls.exit === 0 && /ELIGIBLE for the preview profile: 400 changed lines in 2 file/.test(aCls.out), `${detail(aR)}; ${aSteps}`);
+
+    // (b) the same plus one path outside: not preview, the normal size rule applies.
+    const bHead = makeCandidate({ ...inside, 'src/app.js': lines(21) });
+    const bR = runLane(bHead);
+    check('D5 (b). the same diff plus one path outside previewPaths is refused on the normal size rule and names the outside path, running nothing',
+        bR.exit === 1 && bR.ran.length === 0 && bR.receipt.profile === null && has(bR, /^401 changed lines, over the 100-line limit$/)
+        && has(bR, /^preview profile: src\/app\.js is outside autodevFastLane\.previewPaths$/), detail(bR));
+
+    // (c) inside previewPaths, but one path is sensitive.
+    const cHead = makeCandidate({ ...inside, 'app/(preview)/offer/checkout/page.tsx': 'x\n' });
+    const cR = runLane(cHead);
+    check('D6 (c). a diff inside previewPaths touching a sensitive path is not preview, naming the pattern, and runs nothing',
+        cR.exit === 1 && cR.ran.length === 0 && cR.receipt.profile === null
+        && has(cR, /^app\/\(preview\)\/offer\/checkout\/page\.tsx matches the sensitive pattern checkout$/), detail(cR));
+
+    // (d) previewPaths only in the PR head. Two shapes: the base has none, and
+    // the head widens the base's globs. Each asserts the BASE config was read,
+    // not only that the verdict is closed: a changed package.json closes it
+    // anyway, so "not preview" alone would pass with the head read instead.
+    makeBase(pkg(PREVIEW_SCRIPTS));
+    const dHead = makeCandidate({ ...inside, 'package.json': pkg(PREVIEW_SCRIPTS, PREVIEW_CFG) });
+    const dR = runLane(dHead);
+    const dCls = JSON.parse(cli(['classify', '--repo-dir', REPO, '--head', dHead, '--json']).out || '{}');
+    makeBase(pkg(PREVIEW_SCRIPTS, PREVIEW_CFG));
+    const d2Head = makeCandidate({ 'app/other/page.tsx': lines(400), 'package.json': pkg(PREVIEW_SCRIPTS, { previewPaths: ['app/**'] }) });
+    const d2R = runLane(d2Head);
+    check('D7 (d). previewPaths added only in the PR head is not preview: with none at the base the preview rule is not consulted (previewReasons null), and a head that widens the base\'s globs is judged by the base\'s',
+        dR.exit === 1 && dR.ran.length === 0 && dR.receipt.profile === null && dR.receipt.classifier.previewReasons === null
+        && dCls.profile === null && dCls.previewReasons === null
+        && d2R.exit === 1 && d2R.ran.length === 0 && has(d2R, /^preview profile: app\/other\/page\.tsx is outside autodevFastLane\.previewPaths$/),
+        `${detail(dR)}; previewReasons ${JSON.stringify(dR.receipt && dR.receipt.classifier.previewReasons)}; d2 ${JSON.stringify(d2R.receipt && d2R.receipt.classifier.reasons)}`);
+
+    // previewTest named at the base but missing at the head is red, not skipped.
+    const ptMissing = fl.planSteps(fl.parseConfig(pkg(PREVIEW_SCRIPTS, PREVIEW_CFG)), STEP_SCRIPTS, 'preview');
+    const noTest = fl.planSteps(fl.parseConfig(pkg(STEP_SCRIPTS, { previewPaths: ['app/x/**'] })), STEP_SCRIPTS, 'preview');
+    check('D8. the preview plan is typecheck, build, then previewTest; a previewTest the head lacks is missing (red), and no previewTest means no test step',
+        ptMissing.map((s) => s.step).join() === 'typecheck,build,test' && ptMissing[2].missing === true && ptMissing[2].script === 'test:preview'
+        && noTest.map((s) => s.step).join() === 'typecheck,build', JSON.stringify(ptMissing));
+
+    const rcpt = (over) => {
+        const file = path.join(root, `hand-${++outNo}.json`);
+        const base = JSON.parse(fs.readFileSync(aR.out, 'utf8'));
+        fs.writeFileSync(file, JSON.stringify({ ...base, ...over }));
+        return file;
+    };
+    const legacy = JSON.parse(fs.readFileSync(green.out, 'utf8'));
+    delete legacy.profile;
+    delete legacy.classifier.profile;
+    const legacyFile = path.join(root, 'legacy.json');
+    fs.writeFileSync(legacyFile, JSON.stringify(legacy));
+    const legacyOk = fl.receiptProblem(legacyFile, small);
+    const previewRefusals = [
+        [rcpt({ profile: 'turbo' }), /names profile "turbo"/],
+        [rcpt({ classifier: { ...JSON.parse(fs.readFileSync(aR.out, 'utf8')).classifier, profile: 'fast' } }), /is a preview receipt, but its classifier chose fast/],
+        [rcpt({ steps: JSON.parse(fs.readFileSync(aR.out, 'utf8')).steps.filter((s) => s.step !== 'build') }), /has no build step/],
+        [rcpt({ steps: JSON.parse(fs.readFileSync(aR.out, 'utf8')).steps.map((s) => (s.step === 'test' ? { ...s, exit: 1 } : s)) }), /test exited 1/],
+    ].filter(([file, re]) => !re.test(fl.receiptProblem(file, aHead).problem || ''));
+    check('D9. a receipt with no profile (written before profiles) reads as "fast"; an unknown profile, a profile its classifier did not choose, a missing build and a red previewTest are refused',
+        legacyOk.receipt && legacyOk.receipt.profile === 'fast' && !legacyOk.problem && previewRefusals.length === 0,
+        `${JSON.stringify(legacyOk.problem || '')} | ${previewRefusals.map(([file]) => file).join(', ')}`);
 
     // -----------------------------------------------------------------------
     // C. The CLI surface.

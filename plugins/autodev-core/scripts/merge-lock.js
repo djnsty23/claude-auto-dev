@@ -76,7 +76,13 @@
  * must also name the tree GitHub holds for --head, and the classifier runs
  * again on GitHub's own base...head file list, with the autodevFastLane
  * config read from package.json at the base. Either disagreeing refuses: the
- * candidate takes the full gate.
+ * candidate takes the full gate. The receipt's `profile` picks the rule: a
+ * "fast" receipt (or one with no profile, written before profiles) meets the
+ * size and sensitive-path rule exactly as before. A "preview" receipt, which
+ * records typecheck and build, meets the preview rule: every path in GitHub's
+ * diff matches autodevFastLane.previewPaths at the base, none is sensitive,
+ * and, when the base sets autodevFastLane.previewTest, a green test step ran
+ * that script. A base with no or a malformed previewPaths refuses it.
  *
  * EXIT. 0 merged and the merged tree matches the proved tree. 1 refused (bad
  * arguments, receipt, PR state, head or base mismatch, GitHub refused the
@@ -394,9 +400,14 @@ function checkFastLane({ repo, baseRef, base, head, cmp, provedTree, receipt, en
     try { config = fastLane.parseConfig(text); } catch (e) {
         throw refuse(`the autodevFastLane config at ${baseRef} ${base.sha} is unreadable (${e.message}); run the full gate`);
     }
-    const v = fastLane.classify(fastLane.filesFromCompare(cmp), config);
-    if (!v.eligible) {
-        throw refuse(`${baseRef}...${head} is not eligible for the fast lane on GitHub's diff: ${v.reasons.join('; ')}. Run the full gate`);
+    const { verdict: v, problem } = fastLane.profileProblem(receipt, fastLane.filesFromCompare(cmp), config);
+    if (problem) {
+        throw refuse(`${baseRef}...${head} on GitHub's diff, with the config at ${baseRef} ${base.sha.slice(0, 12)}: ${problem}. Run the full gate`);
+    }
+    if (receipt.profile === 'preview') {
+        log(`${TAG} preview profile: ${v.changedLines} changed lines in ${v.files} file(s) against ${baseRef}, every path inside autodevFastLane.previewPaths; `
+            + `steps green on tree ${provedTree.slice(0, 12)}`);
+        return;
     }
     log(`${TAG} fast lane: ${v.changedLines} changed lines in ${v.files} file(s) against ${baseRef}, limit ${v.maxLines}; `
         + `steps green on tree ${provedTree.slice(0, 12)}`);
@@ -498,7 +509,10 @@ function help() {
     console.log(`  pwsh: ${WRAPPER_PWSH}`);
     console.log('A small candidate can pass --fast-lane-receipt instead, the JSON that fast-lane.js run writes. It');
     console.log('must name --head and its tree on GitHub, record lint, typecheck, test and build at exit 0, and');
-    console.log('GitHub\'s own diff must classify eligible too.');
+    console.log('GitHub\'s own diff must classify eligible too. A receipt with profile "preview" records typecheck');
+    console.log('and build (and test, when the base sets autodevFastLane.previewTest) and needs every path of');
+    console.log('GitHub\'s diff inside autodevFastLane.previewPaths, read from package.json at the base, with no');
+    console.log('sensitive path. No previewPaths at the base refuses it.');
     console.log('Exit 0 merged with the proved tree, 1 refused or a different tree, 2 indeterminate.');
     console.log('env: AUTODEV_GH_BIN (default gh), AUTODEV_MERGE_LOCK_POLL_MS, AUTODEV_MERGE_LOCK_READBACK_MS');
 }

@@ -37,18 +37,40 @@
  * `sensitive` adds to the defaults and never removes one. `steps` renames the
  * script a step runs, and null declares the product has no such step.
  *
+ * THE PREVIEW PROFILE. A product with a preview-only surface (an unlisted,
+ * noindex landing page under one route folder) opts in at the BASE:
+ *   "autodevFastLane": {
+ *     "previewPaths": ["app/(preview)/spring-offer/**"],  // globs, see below
+ *     "previewTest": "test:preview"                       // optional npm script
+ *   }
+ * A candidate the default profile ("fast") refuses is eligible for profile
+ * "preview" when EVERY changed path, old and new, matches a previewPaths glob,
+ * no path is sensitive (the same patterns as above, unchanged), package.json
+ * is unchanged and the diff is not empty. Size is not limited, and a binary
+ * file is allowed. The profile runs typecheck and build, then test with the
+ * previewTest script when one is set. A candidate both profiles accept takes
+ * "fast", the stricter bar. A glob is matched case-sensitively against the
+ * whole path: `**` spans folders, `*` and `?` stay inside one, and every other
+ * character is literal, so Next.js `(group)` and `[slug]` folders need no
+ * escaping. Its first folder must be literal, with no `..`, empty or absolute
+ * part. A malformed previewPaths or previewTest throws like any other config
+ * key, so the whole lane closes: no preview profile and no fast one either.
+ * Absent previewPaths, nothing changes.
+ *
  * `run` refuses unless DIR's HEAD is --head, the tree is clean, and --base
  * (default origin/main) is an ancestor of --head. It classifies, then runs
  * `npm run <script>` for lint, typecheck, test and build in that order, each
  * read from the head's package.json scripts, and stops at the first red. It
  * then writes FILE, JSON:
- *   { kind, version, head, tree, base, classifier, steps: [{ step, script,
- *     command, exit, ms }], exit, finishedAt }
+ *   { kind, version, profile, head, tree, base, classifier, steps: [{ step,
+ *     script, command, exit, ms }], exit, finishedAt }
+ * `profile` is "fast" or "preview". A receipt written before profiles existed
+ * has none and reads as "fast".
  * A step whose script is missing is red (exit null): name it in `steps` or
  * declare it null. FILE is written for a red run too, so the red is on record,
  * and merge-lock.js refuses it.
  *
- * EXIT. classify: 0 eligible, 1 ineligible. run: 0 eligible and every step
+ * EXIT. classify: 0 eligible (either profile), 1 ineligible. run: 0 eligible and every step
  * exited 0, 1 ineligible or a red step, 2 the run could not be judged (HEAD
  * moved during the steps, git missing). Bad arguments exit 1.
  */
@@ -66,6 +88,9 @@ const SCRIPT_RE = /^[A-Za-z0-9_:.-]+$/;
 const DEFAULT_MAX_LINES = 100;
 const STEPS = ['lint', 'typecheck', 'test', 'build'];
 const CONFIG_KEY = 'autodevFastLane';
+/** The steps each profile runs, in order. Preview adds test only with a previewTest script. */
+const PROFILE_STEPS = { fast: STEPS, preview: ['typecheck', 'build', 'test'] };
+const PROFILES = Object.keys(PROFILE_STEPS);
 
 /** The default sensitive patterns, each with the reason an ineligible verdict prints. */
 const DEFAULT_SENSITIVE = [
@@ -97,7 +122,7 @@ const DEFAULT_SENSITIVE = [
  * a config that is present but malformed, so a typo fails closed.
  */
 function parseConfig(pkgText) {
-    const out = { maxLines: DEFAULT_MAX_LINES, sensitive: [], steps: {} };
+    const out = { maxLines: DEFAULT_MAX_LINES, sensitive: [], steps: {}, previewPaths: null, previewTest: null };
     if (pkgText === null || pkgText === undefined) return out;
     const pkg = JSON.parse(pkgText);
     const c = pkg && pkg[CONFIG_KEY];
@@ -121,40 +146,92 @@ function parseConfig(pkgText) {
             out.steps[k] = v;
         }
     }
+    if (c.previewPaths !== undefined) {
+        if (!Array.isArray(c.previewPaths) || !c.previewPaths.length) throw new Error(`${CONFIG_KEY}.previewPaths must be a non-empty array of globs`);
+        out.previewPaths = c.previewPaths.map((g) => [g, globToRegExp(g)]);
+    }
+    if (c.previewTest !== undefined) {
+        if (!(typeof c.previewTest === 'string' && SCRIPT_RE.test(c.previewTest))) throw new Error(`${CONFIG_KEY}.previewTest must be a script name`);
+        if (!out.previewPaths) throw new Error(`${CONFIG_KEY}.previewTest needs ${CONFIG_KEY}.previewPaths`);
+        out.previewTest = c.previewTest;
+    }
     return out;
+}
+
+/**
+ * A previewPaths glob as an anchored, case-sensitive RegExp. `**` spans
+ * folders, `*` and `?` stay in one, everything else is literal. Throws on a
+ * glob that is not a plain relative path under a literal first folder, so a
+ * typo or a bare `**` cannot open the whole repo.
+ */
+function globToRegExp(glob) {
+    const bad = (why) => new Error(`${CONFIG_KEY}.previewPaths entry ${JSON.stringify(glob)} ${why}`);
+    if (typeof glob !== 'string' || !glob) throw bad('must be a non-empty string');
+    if (glob.includes('\\')) throw bad('must use forward slashes');
+    const parts = glob.split('/');
+    if (parts.some((p) => p === '' || p === '.' || p === '..')) throw bad('must be a relative path with no empty, . or .. part');
+    if (/[*?]/.test(parts[0])) throw bad('must start with a literal folder, not a wildcard');
+    let re = '';
+    for (let i = 0; i < glob.length; i++) {
+        const ch = glob[i];
+        if (ch === '*' && glob[i + 1] === '*') {
+            if (glob[i + 2] === '/') { re += '(?:[^/]+/)*'; i += 2; } else { re += '.*'; i += 1; }
+        } else if (ch === '*') re += '[^/]*';
+        else if (ch === '?') re += '[^/]';
+        else re += ch.replace(/[.+^${}()|[\]\\]/g, '\\$&');
+    }
+    return new RegExp(`^${re}$`);
 }
 
 /**
  * The verdict for a diff. `files` is [{ path, oldPath?, added, deleted }],
  * where added or deleted is null when the diff gives no line count.
- * Returns { eligible, changedLines, maxLines, files, reasons }.
+ * Returns { eligible, profile, changedLines, maxLines, files, reasons,
+ * previewReasons }. `profile` is "fast", "preview" or null. `previewReasons`
+ * is null when the config has no previewPaths, else the preview rule's own
+ * reasons (empty when the diff qualifies), so a caller can hold a preview
+ * receipt to the preview rule alone. With no previewPaths the verdict is the
+ * one this function gave before profiles, plus profile "fast" or null.
  */
 function classify(files, config = parseConfig(null)) {
-    const reasons = [];
+    const preview = Array.isArray(config.previewPaths) && config.previewPaths.length ? config.previewPaths : null;
     if (!Array.isArray(files)) {
-        return { eligible: false, changedLines: null, maxLines: config.maxLines, files: 0, reasons: ['the diff could not be read'] };
+        const why = 'the diff could not be read';
+        return { eligible: false, profile: null, changedLines: null, maxLines: config.maxLines, files: 0, reasons: [why], previewReasons: preview ? [why] : null };
     }
-    if (!files.length) reasons.push('the diff is empty, so there is nothing to merge');
+    // `shared` blocks both profiles, `sizeOnly` only the fast one, `outside` only the preview one.
+    const shared = [];
+    const sizeOnly = [];
+    const outside = [];
+    if (!files.length) shared.push('the diff is empty, so there is nothing to merge');
     const patterns = [...DEFAULT_SENSITIVE, ...config.sensitive];
     let changed = 0;
     for (const f of files) {
         if (!Number.isInteger(f.added) || !Number.isInteger(f.deleted)) {
-            reasons.push(`${f.path} has no line count (a binary file or an unreadable entry)`);
+            sizeOnly.push(`${f.path} has no line count (a binary file or an unreadable entry)`);
         } else {
             changed += f.added + f.deleted;
         }
         for (const p of new Set([f.path, f.oldPath].filter(Boolean))) {
-            const lower = p.replace(/\\/g, '/').toLowerCase();
+            const slashed = p.replace(/\\/g, '/');
+            const lower = slashed.toLowerCase();
             for (const [why, re] of patterns) {
-                if (re.test(lower)) reasons.push(`${p} matches the sensitive pattern ${why}`);
+                if (re.test(lower)) shared.push(`${p} matches the sensitive pattern ${why}`);
             }
             if (lower === 'package.json' || lower.endsWith('/package.json')) {
-                reasons.push(`${p} changes, and package.json names the commands the fast lane runs`);
+                shared.push(`${p} changes, and package.json names the commands the fast lane runs`);
             }
+            if (preview && !preview.some(([, re]) => re.test(slashed))) outside.push(`${p} is outside ${CONFIG_KEY}.previewPaths`);
         }
     }
-    if (changed > config.maxLines) reasons.push(`${changed} changed lines, over the ${config.maxLines}-line limit`);
-    return { eligible: reasons.length === 0, changedLines: changed, maxLines: config.maxLines, files: files.length, reasons };
+    if (changed > config.maxLines) sizeOnly.push(`${changed} changed lines, over the ${config.maxLines}-line limit`);
+    const fastReasons = [...shared, ...sizeOnly];
+    const previewReasons = preview ? [...outside, ...shared] : null;
+    let profile = null;
+    if (!fastReasons.length) profile = 'fast';
+    else if (previewReasons && !previewReasons.length) profile = 'preview';
+    const reasons = profile ? [] : [...fastReasons, ...outside.map((r) => `preview profile: ${r}`)];
+    return { eligible: profile !== null, profile, changedLines: changed, maxLines: config.maxLines, files: files.length, reasons, previewReasons };
 }
 
 // ---------------------------------------------------------------------------
@@ -198,7 +275,7 @@ function resolve(dir, rev) {
 
 /** The full local verdict: { eligible, ..., base, baseSha, config } or a closed one. */
 function classifyRepo(dir, head, baseRef = 'origin/main') {
-    const closed = (why) => ({ eligible: false, changedLines: null, maxLines: DEFAULT_MAX_LINES, files: 0, reasons: [why], base: baseRef, baseSha: null });
+    const closed = (why) => ({ eligible: false, profile: null, changedLines: null, maxLines: DEFAULT_MAX_LINES, files: 0, reasons: [why], previewReasons: null, base: baseRef, baseSha: null });
     const baseSha = resolve(dir, baseRef);
     if (!baseSha) return closed(`cannot resolve ${baseRef} in ${dir}`);
     if (!resolve(dir, head)) return closed(`cannot resolve ${head} in ${dir}`);
@@ -217,8 +294,18 @@ function classifyRepo(dir, head, baseRef = 'origin/main') {
 // The run.
 // ---------------------------------------------------------------------------
 
-/** The script each step runs, from the base config and the head's scripts. */
-function planSteps(config, scripts) {
+/**
+ * The script each step runs, from the base config and the head's scripts. The
+ * preview profile runs typecheck and build as the fast one would, then test
+ * with the previewTest script, only when the base sets one.
+ */
+function planSteps(config, scripts, profile = 'fast') {
+    if (profile === 'preview') {
+        const fast = planSteps(config, scripts);
+        return PROFILE_STEPS.preview.filter((step) => step !== 'test' || config.previewTest).map((step) => (step === 'test'
+            ? { step, script: config.previewTest, missing: !Object.prototype.hasOwnProperty.call(scripts, config.previewTest) }
+            : fast.find((s) => s.step === step)));
+    }
     return STEPS.map((step) => {
         if (Object.prototype.hasOwnProperty.call(config.steps, step)) {
             const named = config.steps[step];
@@ -252,7 +339,7 @@ function run({ dir, head, baseRef, out, log = console.log, err = console.error, 
     const tree = git(dir, ['rev-parse', `${head}^{tree}`]).stdout.trim().toLowerCase();
     const verdict = classifyRepo(dir, head, baseRef);
     const { config, ...classifier } = verdict;
-    const receipt = { kind: KIND, version: VERSION, head, tree, base: { ref: baseRef, sha: verdict.baseSha }, classifier, steps: [], exit: 1, finishedAt: null };
+    const receipt = { kind: KIND, version: VERSION, profile: verdict.profile, head, tree, base: { ref: baseRef, sha: verdict.baseSha }, classifier, steps: [], exit: 1, finishedAt: null };
     const write = () => {
         receipt.finishedAt = new Date().toISOString();
         fs.writeFileSync(out, `${JSON.stringify(receipt, null, 2)}\n`);
@@ -269,9 +356,13 @@ function run({ dir, head, baseRef, out, log = console.log, err = console.error, 
         err(`${TAG} REFUSED: package.json at ${head} is unreadable (${e.message})`);
         return 1;
     }
-    log(`${TAG} eligible: ${verdict.changedLines} changed lines in ${verdict.files} file(s), limit ${verdict.maxLines}`);
+    if (verdict.profile === 'preview') {
+        log(`${TAG} eligible for the preview profile: ${verdict.changedLines} changed lines in ${verdict.files} file(s), every path inside ${CONFIG_KEY}.previewPaths`);
+    } else {
+        log(`${TAG} eligible: ${verdict.changedLines} changed lines in ${verdict.files} file(s), limit ${verdict.maxLines}`);
+    }
     let red = false;
-    for (const s of planSteps(config, scripts)) {
+    for (const s of planSteps(config, scripts, verdict.profile)) {
         if (s.declaredAbsent) {
             receipt.steps.push({ step: s.step, script: null, command: null, exit: 0, ms: 0, declaredAbsent: true });
             log(`${TAG} ${s.step}: declared absent in the base config`);
@@ -323,14 +414,51 @@ function receiptProblem(file, head) {
         const why = r.classifier && Array.isArray(r.classifier.reasons) ? r.classifier.reasons.join('; ') : 'no verdict';
         return { problem: `${file}: the classifier said ineligible (${why})` };
     }
+    // A receipt written before profiles has none, and its lane was "fast".
+    const profile = r.profile === undefined ? 'fast' : r.profile;
+    if (!PROFILES.includes(profile)) return { problem: `${file} names profile ${JSON.stringify(r.profile)}, not one of ${PROFILES.join(', ')}` };
+    const chose = r.classifier.profile === undefined ? 'fast' : r.classifier.profile;
+    if (chose !== profile) return { problem: `${file} is a ${profile} receipt, but its classifier chose ${chose}` };
     const steps = Array.isArray(r.steps) ? r.steps : [];
-    for (const step of STEPS) {
+    const required = profile === 'preview' ? ['typecheck', 'build'] : STEPS;
+    for (const step of required) {
         const s = steps.find((x) => x && x.step === step);
         if (!s) return { problem: `${file} has no ${step} step` };
         if (s.exit !== 0) return { problem: `${file}: ${step} exited ${s.exit}` };
     }
+    const red = steps.find((x) => !x || x.exit !== 0);
+    if (red) return { problem: `${file}: ${red && red.step} exited ${red && red.exit}` };
     if (r.exit !== 0) return { problem: `${file}: the run exited ${r.exit}` };
-    return { receipt: r };
+    return { receipt: { ...r, profile } };
+}
+
+/**
+ * A checked receipt held to ITS profile's rule on a fresh diff and the base's
+ * config, as merge-lock judges GitHub's file list. Returns { verdict,
+ * problem }, problem null when the rule holds. A fast receipt meets the
+ * classifier with previewPaths taken out, the rule from before profiles. A
+ * preview receipt meets the preview rule, which needs previewPaths at the
+ * base, and a green test step running previewTest when the base sets one.
+ */
+function profileProblem(receipt, files, config) {
+    if (receipt.profile !== 'preview') {
+        const verdict = classify(files, { ...config, previewPaths: null, previewTest: null });
+        return { verdict, problem: verdict.eligible ? null : `not eligible for the fast lane: ${verdict.reasons.join('; ')}` };
+    }
+    const verdict = classify(files, config);
+    if (!Array.isArray(verdict.previewReasons)) {
+        return { verdict, problem: `not eligible for the preview profile: the base has no ${CONFIG_KEY}.previewPaths` };
+    }
+    if (verdict.previewReasons.length) {
+        return { verdict, problem: `not eligible for the preview profile: ${verdict.previewReasons.join('; ')}` };
+    }
+    if (config.previewTest) {
+        const t = (Array.isArray(receipt.steps) ? receipt.steps : []).find((s) => s && s.step === 'test');
+        if (!t || t.script !== config.previewTest || t.exit !== 0) {
+            return { verdict, problem: `the base sets ${CONFIG_KEY}.previewTest "${config.previewTest}", and the receipt has no green test step running it` };
+        }
+    }
+    return { verdict, problem: null };
 }
 
 /**
@@ -388,7 +516,13 @@ function help() {
     console.log('checkout, RLS, migrations, SQL and more). An unreadable diff is ineligible. run then executes');
     console.log('npm run lint, typecheck, test and build on the clean head and writes the receipt that');
     console.log('merge-lock.js merge --fast-lane-receipt FILE accepts. --base defaults to origin/main.');
-    console.log('Exit: classify 0 eligible, 1 ineligible. run 0 green, 1 ineligible or red, 2 indeterminate.');
+    console.log('');
+    console.log(`Preview profile: with "${CONFIG_KEY}.previewPaths" (globs) in package.json at the base, a`);
+    console.log('candidate of any size whose every path matches a glob, with no sensitive path and package.json');
+    console.log(`unchanged, is eligible as "preview". It runs typecheck and build, then the "${CONFIG_KEY}.previewTest"`);
+    console.log('script when the base sets one. A candidate both profiles accept takes "fast". The receipt records');
+    console.log('its profile. A malformed previewPaths or previewTest closes the whole lane.');
+    console.log('Exit: classify 0 eligible (either profile), 1 ineligible. run 0 green, 1 ineligible or red, 2 indeterminate.');
 }
 
 function main() {
@@ -404,6 +538,7 @@ function main() {
     if (a.cmd === 'classify') {
         const { config, ...v } = classifyRepo(dir, head, a.base);
         if (a.json) console.log(JSON.stringify(v, null, 2));
+        else if (v.profile === 'preview') console.log(`${TAG} ELIGIBLE for the preview profile: ${v.changedLines} changed lines in ${v.files} file(s), every path inside ${CONFIG_KEY}.previewPaths`);
         else if (v.eligible) console.log(`${TAG} ELIGIBLE: ${v.changedLines} changed lines in ${v.files} file(s), limit ${v.maxLines}`);
         else {
             console.log(`${TAG} INELIGIBLE:`);
@@ -417,8 +552,8 @@ function main() {
 }
 
 module.exports = {
-    classify, parseConfig, readDiff, classifyRepo, planSteps, run, receiptProblem, filesFromCompare, parseArgs,
-    DEFAULT_MAX_LINES, KIND, STEPS,
+    classify, parseConfig, globToRegExp, readDiff, classifyRepo, planSteps, run, receiptProblem, profileProblem,
+    filesFromCompare, parseArgs, DEFAULT_MAX_LINES, KIND, STEPS, PROFILE_STEPS,
 };
 
 if (require.main === module) main();
