@@ -805,7 +805,8 @@ function supervise(opts) {
         if (!run.launched) { budget.cancel(o.attemptId, reason, { ledger: o.budgetLedger }); return; }
         const m = run.watchdog ? run.watchdog.measure() : { outputBytes: null };
         budget.settle(o.attemptId, { usage: budget.usageFromLog(readText(o.log)), stop: run.stop, exit,
-            outputBytes: m.outputBytes, wallMs: Date.now() - run.launchedAt, ledger: o.budgetLedger });
+            outputBytes: m.outputBytes, wallMs: Date.now() - run.launchedAt,
+            launchedAt: new Date(run.launchedAt).toISOString(), ledger: o.budgetLedger });
     };
     const finish = (lines, exitCode, budgetExit = null) => {
         if (finished) return;

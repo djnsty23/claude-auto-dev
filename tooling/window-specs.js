@@ -250,8 +250,12 @@ const workerWindow = {
         if (!json) throw new Error('execution-budget.json cannot be read');
         const limit = 2 * CLOCK_MS;
         const recs = records(json).filter((a) => a && a.reservedAt).map((a) => {
-            const started = Date.parse(a.startedAt || a.reservedAt);
+            // launchedAt is after the capacity wait. Rows before it was recorded fall back to
+            // startedAt, which counts queue time as settle lag.
+            const started = Date.parse(a.launchedAt || a.startedAt || a.reservedAt);
             if (a.state === 'settled' || a.state === 'cancelled') {
+                // A cancel never launched (cancel() settles exactly that), so it has no exit to time.
+                if (a.state === 'cancelled' && !a.launchedAt && a.wallMs == null && a.exit == null) return { at: a.reservedAt, ok: true, why: null };
                 if (!Number.isFinite(a.wallMs)) return { at: a.reservedAt, ok: false, why: `${a.attemptId}: settled with no wall time, so its exit time is unknown` };
                 const lag = Date.parse(a.settledAt) - (started + a.wallMs);
                 return { at: a.reservedAt, ok: lag <= limit, why: lag <= limit ? null : `${a.attemptId}: settled ${Math.round(lag / 60000)} min after it exited, over two clock intervals` };

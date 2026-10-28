@@ -251,7 +251,9 @@ function begin(attemptId, { pid = null, env = process.env, ledger: file = ledger
  * null when it reported none: then the reservation stays the charge. Idempotent:
  * a settled attempt comes back unchanged with already true.
  */
-function settle(attemptId, { usage = null, stop = null, exit = null, outputBytes = null, wallMs = null, cancelled = false, reason = null, env = process.env, ledger: file = ledgerPath(env) } = {}) {
+// launchedAt is when the child started, after any capacity wait: startedAt is stamped before
+// that wait, so startedAt + wallMs is not the exit time of a run that queued.
+function settle(attemptId, { usage = null, stop = null, exit = null, outputBytes = null, wallMs = null, launchedAt = null, cancelled = false, reason = null, env = process.env, ledger: file = ledgerPath(env) } = {}) {
     const r = transact(file, (ledger, nowMs) => {
         const a = ledger.attempts[attemptId];
         if (!a) return { value: { ok: false, code: 'unknown-attempt', why: `attempt ${attemptId} is not in the budget ledger` } };
@@ -264,7 +266,7 @@ function settle(attemptId, { usage = null, stop = null, exit = null, outputBytes
             state: cancelled ? 'cancelled' : 'settled', settledAt: new Date(nowMs).toISOString(), charged,
             usageMissing: !cancelled && !measured,
             notionalUsd: measured && a.billing !== 'api' ? usage.costUsd : 0,
-            stop, exit, outputBytes, wallMs, reason,
+            stop, exit, outputBytes, wallMs, launchedAt, reason,
         });
         return { write: true, value: { ok: true, attempt: a } };
     });
