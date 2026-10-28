@@ -119,6 +119,15 @@ const GUARDING = [
         const src = fs.readFileSync(path.join(HOOKS, f), 'utf8');
         check(`${f} reads no plugin option (a guard the model could switch off is no guard)`, !src.includes(OPTION));
     }
+
+    for (const group of cfg.hooks.PreToolUse || []) {
+        for (const hook of group.hooks || []) {
+            const arg = (hook.args || []).find((x) => /\/hooks\/[^/]+\.js$/.test(x));
+            const file = arg && path.basename(arg);
+            check(`${file || group.matcher}: guarding PreToolUse hook fails closed when its command cannot run`,
+                !!file && GUARDING.includes(file) && hook.type === 'command' && hook.onFailure === 'block', hook);
+        }
+    }
 }
 
 // The guard must sit where a `'use strict'` directive still counts: a
