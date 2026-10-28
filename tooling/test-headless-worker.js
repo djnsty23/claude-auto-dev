@@ -283,6 +283,9 @@ try {
         check('2. afterwards no log, no ledger, no report and no directory exist', !fs.existsSync(dir) && !fs.existsSync(ledger) && !fs.existsSync(DEFAULT_LEDGER), dir);
         check('3. the HEADLESS_NOTE sentence is appended to the prompt argument',
             promptArg.endsWith(HEADLESS_NOTE + '\n') && /FOREGROUND/.test(HEADLESS_NOTE), promptArg.slice(-80));
+        // `[measured 2026-10-29]` five briefs asked headless workers for a push and a pull request the sandbox refuses.
+        check('3b. the HEADLESS_NOTE hands push, pull request and merge to the coordinator, even when the brief asks',
+            /coordinator's steps even when the brief asks/.test(HEADLESS_NOTE) && /gated commit and put its head SHA and gate receipt in the report/.test(HEADLESS_NOTE));
         const noModel = hw(['start', '--code', 'DRY', '--prompt-file', PROMPT, '--log', log, '--claude-bin', FAKE, '--ledger', ledger, '--dry-run']);
         check('2. --model unset means no --model flag at all', noModel.json && !noModel.json.value.argv.includes('--model'));
         check('2. --plugin-dir unset means no --plugin-dir flag at all', noModel.json && !noModel.json.value.argv.includes('--plugin-dir'));
