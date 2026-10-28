@@ -501,6 +501,9 @@ try {
         check('16. the refused start spawned nothing: its log does not exist and stays absent for 2 s',
             absent16.absent, absent16.absent ? '' : `the log appeared ${absent16.afterMs} ms after the refusal, so a worker runs untracked`);
         if (first.pid) waitForEnd(first.log, first.pid);
+        // A mkdir under ~/.claude is refused in the worker's mode, so the supervisor makes its scratch dir.
+        check('16. the supervisor created the scratch dir <report dir>/<code> for the worker',
+            fs.existsSync(path.join(path.dirname(first.report), 'T16')) && fs.statSync(path.join(path.dirname(first.report), 'T16')).isDirectory());
     }
 
     // 17. ten rapid starts: tmp+rename, never a truncating write.
@@ -799,6 +802,16 @@ try {
         check('23. the prompt names that scratch dir, in forward slashes', promptArg.includes(scratch.replace(/\\/g, '/')), promptArg.slice(-400));
         check('23. the placement note precedes the headless note, which still ends the prompt',
             promptArg.indexOf('PLACEMENT:') > 0 && promptArg.indexOf('PLACEMENT:') < promptArg.indexOf(HEADLESS_NOTE) && promptArg.endsWith(HEADLESS_NOTE + '\n'));
+        // [measured 2026-10-29] four reports were refused. The note's own recipe, filled with a body
+        // that names the steps a person must run, has to pass the guard the run launches under.
+        const recipe = /`(cat > "[^"]+" <<'REPORT_EOF')`/.exec(promptArg);
+        check('23. the prompt prescribes one quoted-heredoc call for the report, at the report path',
+            !!recipe && recipe[1].includes(report.replace(/\\/g, '/')), promptArg.slice(-900));
+        const wa = require(path.join(path.dirname(SCRIPT), 'worker-authority.js'));
+        const auth = require(SCRIPT).runAuthority({ prompt: promptArg, profile: 'builder', cwd: path.join(ROOT, 'T23 repo'), report });
+        const body = 'Release window: `gh repo archive o/r`, then `doppler secrets set X`, then git push origin b. Cost $5.\nRESULT T23 stopped: needs a person';
+        const d = recipe ? wa.decide({ tool_name: 'Bash', tool_input: { command: `${recipe[1]}\n${body}\nREPORT_EOF` }, cwd: path.join(ROOT, 'T23 repo') }, auth) : null;
+        check('23. that call passes the builder guard although its body names gh, doppler and git push', !!d && d.decision === 'allow', JSON.stringify(d));
     }
     // ------------------------------------------------------------ 24. settle --lost
     // `[measured 2026-09-22]` four records on one machine could never settle:
