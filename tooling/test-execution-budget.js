@@ -199,10 +199,11 @@ function main() {
         const kept = /^FAKE-BEGIN pid=\d+$/m.test(end.text) && stopLine && /^CLAUDE_(EXIT|SIGNAL)=/m.test(after)
             && (field !== 'output' || /^FLOOD x+$/m.test(end.text)) && (field !== 'turns' || /"id":"msg_5"/.test(end.text));
         const recorded = a && a.log === run.log && typeof a.outputBytes === 'number' && a.outputBytes > 0 && a.usageMissing === true
-            && a.charged && a.charged.turns === a.reserved.turns && typeof a.wallMs === 'number';
+            && a.charged && a.charged.turns === a.reserved.turns && typeof a.wallMs === 'number'
+            && typeof a.launchedAt === 'string' && Date.parse(a.launchedAt) >= Date.parse(a.startedAt);
         if (!check(`evidence ${field}: the log keeps the child's output, the stop line and the exit line after it`, kept, JSON.stringify(end.text.slice(0, 120) + ' ... ' + end.text.slice(-200)))) lost.push(field);
-        if (!check(`evidence ${field}: the ledger keeps the log path, bytes, wall time and the whole reservation as the charge`, recorded,
-            JSON.stringify(a && { log: a.log, outputBytes: a.outputBytes, usageMissing: a.usageMissing, charged: a.charged, reserved: a.reserved }))) lost.push(field);
+        if (!check(`evidence ${field}: the ledger keeps the log path, bytes, wall time, launch time and the whole reservation as the charge`, recorded,
+            JSON.stringify(a && { log: a.log, launchedAt: a.launchedAt, startedAt: a.startedAt, outputBytes: a.outputBytes, usageMissing: a.usageMissing, charged: a.charged, reserved: a.reserved }))) lost.push(field);
     }
     if (notStopped.length) fields.runaway = `RUNNING(${notStopped.join(',')})`;
     fields.descendants = alive;

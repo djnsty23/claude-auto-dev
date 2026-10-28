@@ -498,6 +498,23 @@ try {
     const u = spawnSync(process.execPath, [PROBE, 'release-window', '--home', empty, '--now', NOW], { encoding: 'utf8', windowsHide: true });
     const u2 = spawnSync(process.execPath, [PROBE, 'worker-window', '--home', empty, '--now', NOW], { encoding: 'utf8', windowsHide: true });
     check('a missing source exits 2 COULD NOT READ', u.status === 2 && /COULD NOT READ/.test(u.stdout) && u2.status === 2, `${u.status} ${u.stdout} ${u2.status}`);
+    // worker-window times an exit from launchedAt, after the capacity wait, and a cancel that never
+    // launched has no exit to time. A late settle measured from launchedAt is still a violation.
+    const wq = home();
+    clock(wq);
+    const wqAttempt = (id, extra) => [id, { attemptId: id, kind: 'worker', reservedAt: `${DAYS[4]}T08:00:00.000Z`,
+        startedAt: `${DAYS[4]}T08:00:00.000Z`, ceilings: { wallMs: 21600000 }, ...extra }];
+    write(wq, 'autodev/execution-budget.json', JSON.stringify({ schema: 1, attempts: Object.fromEntries([
+        wqAttempt('queued', { state: 'settled', launchedAt: `${DAYS[4]}T08:20:00.000Z`, wallMs: 60000, exit: 0, settledAt: `${DAYS[4]}T08:21:00.000Z` }),
+        wqAttempt('unlaunched', { state: 'cancelled', wallMs: null, exit: null, settledAt: `${DAYS[4]}T08:30:00.000Z`, reason: 'CAPACITY_DEFERRED' }),
+        wqAttempt('late', { state: 'settled', launchedAt: `${DAYS[4]}T08:20:00.000Z`, wallMs: 60000, exit: 0, settledAt: `${DAYS[4]}T08:50:00.000Z` }),
+        wqAttempt('crashed', { state: 'settled', wallMs: null, exit: 1, settledAt: `${DAYS[4]}T08:30:00.000Z` }),
+    ]) }));
+    const wqr = probe('worker-window', wq);
+    check('worker-window: a capacity-queued launch and an unlaunched cancel are not violations',
+        !/^violation .*(queued|unlaunched):/m.test(wqr.out), wqr.out);
+    check('worker-window: a settle late from launchedAt and a settle with no wall time still are',
+        /^violation .*late: settled 29 min after it exited/m.test(wqr.out) && /^violation .*crashed: settled with no wall time/m.test(wqr.out), wqr.out);
     // cost-window grades each task once, on its newest outcome row, on the day of its last attempt.
     const cw = home();
     FIX['cost-window'](cw, {});
