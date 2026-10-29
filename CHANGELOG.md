@@ -54,6 +54,15 @@
   separate lenses and keeps a UI iteration only when the majority prefers it
   (#470).
 
+### Skills
+
+- `setup-project` Create mode looks for the operator's module kit
+  (`AUTODEV_MODULE_KIT`, then the destination's siblings) and scaffolds a new
+  site from it instead of rebuilding sign-in, rate limits, crons and webhooks
+  by hand. Onboard mode recommends `install-module` where a module covers a
+  hand-built part, and the new-app chain records where the kit was looked for
+  (#471).
+
 ### Scorecard and cost
 
 - Every scorecard window now has a writer. New brain-clock observers:
