@@ -525,6 +525,29 @@ check('--repo adds a repo no session named', /"--repo","acme\/other"/.test(argvL
     check('kinds: the summary says the records dir is absent',
         ra.status === 0 && /^desktop session records: 0 read, the dir is absent, so no session reads as routine$/m.test(rah.stdout), rah.stdout);
 
+    // A partial read: one account folder cannot be listed, its sibling can. The child is the
+    // real script; a preload makes the one folder throw EACCES, as a denied ACL does.
+    const PART = path.join(ROOT, 'sessions-partial');
+    fs.mkdirSync(path.join(PART, 'acct', 'org'), { recursive: true });
+    fs.mkdirSync(path.join(PART, 'denied-acct'), { recursive: true });
+    fs.writeFileSync(path.join(PART, 'acct', 'org', 'local_0001.json'),
+        JSON.stringify({ sessionId: 'local_0001', cliSessionId: 'R1', scheduledTaskId: 'board-tick' }), 'utf8');
+    const DENY = path.join(ROOT, 'deny-readdir.js');
+    fs.writeFileSync(DENY, [
+        "const fs = require('fs'); const path = require('path');",
+        'const deny = path.resolve(process.env.WORK_COST_TEST_DENY); const real = fs.readdirSync;',
+        "fs.readdirSync = function (p, ...a) { if (path.resolve(String(p)) === deny) throw Object.assign(new Error('denied'), { code: 'EACCES' }); return real.call(this, p, ...a); };",
+    ].join('\n'), 'utf8');
+    const denyEnv = { NODE_OPTIONS: `--require "${DENY.split(path.sep).join('/')}"`, WORK_COST_TEST_DENY: path.join(PART, 'denied-acct') };
+    const { j: jp } = run(KCFG, ['--json', '--sessions-dir', PART], denyEnv);
+    check('kinds: a partly listable records dir reads as partial, its readable records kept',
+        JSON.stringify(jp?.population?.sessionRecords) === JSON.stringify({ state: 'partial', read: 1, unreadable: 1, routines: 1 }),
+        JSON.stringify(jp?.population?.sessionRecords));
+    const { r: rp } = run(KCFG, ['--sessions-dir', PART], denyEnv);
+    check('kinds: the summary prints a partial read\'s records and its unreadable count, never "0 read"',
+        rp.status === 0 && /^desktop session records: 1 read, 1 unreadable \(some folders could not be listed\), 1 name a scheduled task$/m.test(rp.stdout),
+        rp.stdout.split('\n').filter((l) => l.startsWith('desktop session records')).join(' | ') || rp.stderr);
+
     // With no flag the app's own dir is read, found from the platform's config base.
     const HOME = path.join(ROOT, 'home');
     const env = { USERPROFILE: HOME, HOME, APPDATA: path.join(HOME, 'AppData', 'Roaming'), XDG_CONFIG_HOME: path.join(HOME, '.config') };

@@ -481,8 +481,10 @@ function printHuman(r, top) {
     ];
     p.reposUnreadable.forEach((u, i) => lines.push(`  unreadable repo ${i + 1} of ${p.reposUnreadable.length}: ${u}`));
     const sr = p.sessionRecords;
-    lines.push(sr.state === 'read'
-        ? `desktop session records: ${sr.read} read, ${sr.unreadable} unreadable, ${sr.routines} name a scheduled task`
+    // A partial read kept the records it could list: they count, and so do the folders it could not.
+    lines.push(sr.state === 'read' || sr.state === 'partial'
+        ? `desktop session records: ${sr.read} read, ${sr.unreadable} unreadable`
+            + `${sr.state === 'partial' ? ' (some folders could not be listed)' : ''}, ${sr.routines} name a scheduled task`
         : `desktop session records: 0 read, the dir is ${sr.state}, so no session reads as routine`);
     lines.push('unattributed by kind: ' + UNATTRIBUTED.map((k) => {
         const b = r.unattributed.byKind[k];

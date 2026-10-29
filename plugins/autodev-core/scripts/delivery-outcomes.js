@@ -98,6 +98,7 @@ const path = require('path');
 const { spawnSync } = require('child_process');
 const claudePaths = require('./claude-paths.js');
 const { priceUsage, responseKey } = require('./quota-burn.js');
+const { withLedgerLock, writeAtomic } = require('./ledger-lock.js');
 
 const DAY_MS = 24 * 3600 * 1000;
 const STAND_DAYS = 7;
@@ -177,26 +178,32 @@ function desktopSessionsDir(env = process.env, platform = process.platform) {
 
 /**
  * Every `local_<id>.json` session record up to three levels under dir.
- * { records, bad, state } where state is 'read', 'absent' or 'not asked'.
+ * { records, bad, state }; bad includes unreadable directories as well as files.
+ * Partial traversal keeps readable siblings but never claims complete coverage.
  */
 function readSessions(dir) {
     if (!dir) return { records: [], bad: 0, state: 'not asked' };
     const files = [];
+    let bad = 0;
+    let rootError = null;
     const walk = (d, depth) => {
-        let ents; try { ents = fs.readdirSync(d, { withFileTypes: true }); } catch { return false; }
+        let ents; try { ents = fs.readdirSync(d, { withFileTypes: true }); }
+        catch (e) { bad++; if (depth === 0) rootError = e; return false; }
         for (const e of ents) {
             const p = path.join(d, e.name);
             if (e.isDirectory()) { if (depth < 3) walk(p, depth + 1); } else if (/^local_[0-9a-f-]+\.json$/i.test(e.name)) files.push(p);
         }
         return true;
     };
-    if (!walk(dir, 0)) return { records: [], bad: 0, state: 'absent' };
-    const records = []; let bad = 0;
+    if (!walk(dir, 0)) return { records: [], bad: rootError.code === 'ENOENT' ? 0 : bad,
+        state: rootError.code === 'ENOENT' ? 'absent' : 'unreadable' };
+    const incomplete = bad > 0;
+    const records = [];
     for (const file of files.sort()) {
         const j = readJson(file);
         if (j && typeof j === 'object' && typeof j.sessionId === 'string') records.push(j); else bad++;
     }
-    return { records, bad, state: 'read' };
+    return { records, bad, state: incomplete ? 'partial' : 'read' };
 }
 
 const isoOf = (t) => { const n = typeof t === 'number' ? t : ms(t); return n === null || !Number.isFinite(n) ? null : new Date(n).toISOString(); };
@@ -210,7 +217,9 @@ const isoOf = (t) => { const n = typeof t === 'number' ? t : ms(t); return n ===
  */
 function sideAttempts(records, prFacts, stored = new Map(), costOf = () => null) {
     const out = []; let spawned = 0; let noPr = 0;
-    for (const r of records) {
+    const oldest = records.slice().sort((a, b) => (isoOf(a.createdAt) || '').localeCompare(isoOf(b.createdAt) || '')
+        || String(a.sessionId).localeCompare(String(b.sessionId)));
+    for (const r of oldest) {
         if (!r.spawnedFrom || typeof r.spawnedFrom !== 'object') continue;
         const startedAt = isoOf(r.createdAt);
         if (!startedAt) continue;
@@ -412,8 +421,10 @@ function buildAttempts(src, stored = new Map(), { prFacts = null, costOf = () =>
     // its session's transcript when the record names a session the desktop app still holds.
     const sessionById = new Map(((src.sessions && src.sessions.records) || []).map((r) => [r.sessionId, r]));
     for (const rec of started) {
-        if ([...live.values()].some((a) => a.taskId === rec.taskId) || [...stored.values()].some((a) => a.taskId === rec.taskId)) continue;
         const key = attemptKey(codeOf(rec), rec.startedAt);
+        // Its own stored attempt (the same key) is priced again; the stored fill below keeps the
+        // stored cost when this read returns null. A stored attempt under another key is a run.
+        if ([...live.values()].some((a) => a.taskId === rec.taskId) || [...stored.values()].some((a) => a.taskId === rec.taskId && a.key !== key)) continue;
         live.set(key, { key, taskId: rec.taskId, code: codeOf(rec), startedAt: rec.startedAt, runStatus: rec.runStatus || 'running',
             decision: null, decisionBy: null, costUsd: rec.sessionId && sessionById.has(rec.sessionId) ? costOf(sessionById.get(rec.sessionId)) : null,
             judgeCostUsd: 0, prs: prRefs(readText(rec.report)) });
@@ -421,7 +432,9 @@ function buildAttempts(src, stored = new Map(), { prFacts = null, costOf = () =>
     }
     const byTask = new Map();
     for (const a of live.values()) { if (!byTask.has(a.taskId)) byTask.set(a.taskId, []); byTask.get(a.taskId).push(a); }
-    const side = sideAttempts((src.sessions && src.sessions.records) || [], prFacts, stored, costOf);
+    // A session a ledger record names is that worker's task, so it is not a side task as well.
+    const registered = new Set(src.tasks.map((r) => r && r.sessionId).filter((id) => typeof id === 'string'));
+    const side = sideAttempts(((src.sessions && src.sessions.records) || []).filter((r) => !registered.has(r.sessionId)), prFacts, stored, costOf);
     for (const a of side.attempts) { live.set(a.key, a); byTask.set(a.taskId, [a]); }
     // The attempt a `<taskId>@<worker startedAt>` key names: the first one started at or after that launch.
     const attemptFor = (taskId, key) => {
@@ -447,6 +460,8 @@ function buildAttempts(src, stored = new Map(), { prFacts = null, costOf = () =>
     }
     // Stored attempts fill what the live ledgers lost (a pruned run, a removed log, a replaced verdict).
     for (const s of stored.values()) {
+        // A store written before registered sessions were excluded holds them as side tasks too.
+        if (typeof s.taskId === 'string' && s.taskId.startsWith('side:') && registered.has(s.taskId.slice(5))) continue;
         const a = live.get(s.key);
         if (!a) {
             if (!byTask.has(s.taskId)) byTask.set(s.taskId, []);
@@ -672,11 +687,22 @@ function sync(opts) {
     const costFile = p.store.replace(/\.jsonl$/, '') + '.session-cost.json';
     const costCache = readJson(costFile) || {};
     const coster = sessionCoster(p.projectsDir, costCache, { budgetMs: opts.costBudgetMs ?? COST_BUDGET_MS, clock: opts.clock });
-    const { byTask, unmatched, notStarted, side } = buildAttempts(src, before.attempts, { prFacts, costOf: coster.costOf });
+    // Building attempts must not consume the query budget before ordering them.
+    const { byTask, unmatched, notStarted, side } = buildAttempts(src, before.attempts, { costOf: coster.costOf });
+    const sideRecords = new Map(src.sessions.records.map((r) => [`side:${r.sessionId}`, r]));
     // Oldest first, so a budget cut leaves the newest unread and the backlog drains across runs.
     const first = (id) => byTask.get(id)[0].startedAt || '';
     const oldest = [...byTask.keys()].sort((a, b) => (first(a) < first(b) ? -1 : first(a) > first(b) ? 1 : a < b ? -1 : 1));
     const computed = new Map(oldest.map((id) => {
+        const skippedBefore = budget.tally.skipped;
+        const record = sideRecords.get(id);
+        if (record) {
+            const refreshed = sideAttempts([record], prFacts, before.attempts).attempts[0];
+            if (refreshed) {
+                const a = byTask.get(id)[0];
+                for (const k of ['runStatus', 'decision', 'decisionBy', 'prs']) a[k] = refreshed[k];
+            }
+        }
         const prev = before.outcomes.get(id);
         const fresh = computeOutcome(id, byTask.get(id), { now, prFacts: () => null });
         // Reuse a final stored outcome when the attempts are unchanged; otherwise ask the PR facts.
@@ -684,7 +710,6 @@ function sync(opts) {
             const { at, v, type, ...o } = prev;
             return [id, o];
         }
-        const skippedBefore = budget.tally.skipped;
         const o = computeOutcome(id, byTask.get(id), { now, prFacts });
         // A read the budget skipped says nothing new: keep the last stored outcome rather than
         // append a row that only swaps its reason for "unreadable" until the next run.
@@ -712,9 +737,12 @@ function sync(opts) {
         fs.appendFileSync(p.store, rows.map((r) => JSON.stringify(r)).join('\n') + '\n');
     }
     if (kept && !opts.dryRun) {
-        fs.mkdirSync(path.dirname(cacheFile), { recursive: true });
-        fs.writeFileSync(cacheFile + '.tmp', JSON.stringify(cache));
-        fs.renameSync(cacheFile + '.tmp', cacheFile);
+        // Collect remote facts outside the lock; re-read and merge inside it so
+        // another sync's newly settled facts cannot be overwritten by our snapshot.
+        withLedgerLock(cacheFile, () => {
+            const latest = readJson(cacheFile) || {};
+            writeAtomic(cacheFile, JSON.stringify({ ...latest, ...cache }));
+        });
     }
     if (coster.tally.priced && !opts.dryRun) {
         fs.mkdirSync(path.dirname(costFile), { recursive: true });
@@ -725,7 +753,7 @@ function sync(opts) {
     const population = `population: ${c.tasks} task(s) with an attempt from ${p.ledger} (${src.tasks.length} record(s), ${notStarted} not started); `
         + `${src.runs.length} headless run(s), ${src.runs.length - unmatched} matched a task, ${unmatched} matched none; `
         + `${src.judgements.length} judgement(s), ${src.judgeRuns.length} judge run(s); `
-        + `side sessions ${src.files.sessions}${src.sessions.state === 'read'
+        + `side sessions ${src.files.sessions}${['read', 'partial', 'unreadable'].includes(src.sessions.state)
             ? `: ${src.sessions.records.length} record(s), ${src.sessions.bad} unreadable, ${side.spawned} spawned, ${side.tasks} with a PR, ${side.noPr} with none` : ''}; `
         + `PR facts: ${hits} settled from ${path.basename(cacheFile)}, ${budget.tally.asked} asked${budget.tally.skipped ? `, ${budget.tally.skipped} left unread after the ${(opts.budgetMs ?? GH_BUDGET_MS) / 1000} s budget` : ''}; `
         + `session cost: ${coster.tally.priced} priced, ${coster.tally.reused} reused from ${path.basename(costFile)}, ${coster.tally.missing} with no transcript${coster.tally.skipped ? `, ${coster.tally.skipped} left unpriced after the ${(opts.costBudgetMs ?? COST_BUDGET_MS) / 1000} s budget` : ''}; `

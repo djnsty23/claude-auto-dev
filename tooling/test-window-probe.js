@@ -27,7 +27,7 @@ const DAYS = ['2026-11-06', '2026-11-07', '2026-11-08', '2026-11-09', '2026-11-1
     '2026-11-13', '2026-11-14', '2026-11-15', '2026-11-16', '2026-11-17', '2026-11-18', '2026-11-19'];
 // The shipped modules that require ledger-lock.js, by hand. The spec's own list and a grep of
 // the plugins must both equal it.
-const LOCK_INVENTORY = ['hooks~peer-send-ledger.js', 'scripts~ask-queue.js', 'scripts~brain-clock.js', 'scripts~execution-budget.js',
+const LOCK_INVENTORY = ['hooks~peer-send-ledger.js', 'scripts~ask-queue.js', 'scripts~brain-clock.js', 'scripts~delivery-outcomes.js', 'scripts~execution-budget.js',
     'scripts~frontier-evidence.js', 'scripts~production-signals.js', 'scripts~radar-learning.js', 'scripts~watch-panels.js', 'scripts~worker-reconcile.js'];
 const manifest = JSON.parse(fs.readFileSync(path.join(ROOT, 'docs', 'scorecard-criteria.json'), 'utf8'));
 const expectOf = (id) => new RegExp(manifest.aspects.flatMap((a) => a.criteria).find((c) => c.id === id).expect, 'm');
@@ -479,7 +479,7 @@ try {
     write(lw, `autodev/windows/lock-writers/${DAYS[2]}/scripts~radar-learning.js@unknown`, '');
     const lr = probe('locking-window', lw, REPO.repo);
     check('locking-window: a writer seen only with no version is short by name', lr.status === 1
-        && /^short 8 of 9 inventoried writers took a lock on the installed layer, not scripts~radar-learning\.js$/m.test(lr.out)
+        && /^short 9 of 10 inventoried writers took a lock on the installed layer, not scripts~radar-learning\.js$/m.test(lr.out)
         && /^violation 2026-11-08T00:00:00Z scripts~radar-learning\.js@unknown took a lock with no plugin version$/m.test(lr.out), lr.out);
     // A15: the writers' field names, a breach, an unknown probe day, and the trend.
     const ro = realObserve();
