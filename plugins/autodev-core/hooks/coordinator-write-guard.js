@@ -363,11 +363,63 @@ function commandSegments(stripped) {
  * No stripping of a trailing `.git` is needed: if `<repo>` is inside a home,
  * `<repo>/.git` is inside it too, and if it is outside, so is its object store.
  */
+/**
+ * Commands that run the command after them unchanged, with the options that
+ * take a separate value. `env` applies assignments first; the others change
+ * priority, timing, the user or the lookup, never which git subcommand runs.
+ */
+const WRAPPERS = new Map([
+    ['env', new Set(['-u', '--unset', '-C', '--chdir', '-S', '--split-string'])],
+    ['command', new Set()],
+    ['exec', new Set(['-a'])],
+    ['time', new Set(['-f', '--format', '-o', '--output'])],
+    ['nice', new Set(['-n', '--adjustment'])],
+    ['nohup', new Set()],
+    ['sudo', new Set(['-u', '--user', '-g', '--group', '-C', '--close-from', '-D', '--chdir', '-h', '--host',
+        '-p', '--prompt', '-r', '--role', '-t', '--type', '-U', '--other-user', '-T', '--command-timeout'])],
+]);
+const ASSIGNMENT = /^[A-Za-z_][A-Za-z0-9_]*=/;
+// String.match, not RegExp.exec: validate.js reads `.exec(` in a hook as a child_process spawn site.
+const commandName = (tok) => ((tok || '').match(/^(?:.*[/\\])?([^/\\]+?)(?:\.(?:exe|cmd|bat))?$/) || [])[1]?.toLowerCase() || '';
+
+/** The index of the first word that is neither an assignment nor a wrapper or its options. */
+function skipWrappers(toks) {
+    let i = 0;
+    for (;;) {
+        // Leading environment assignments: FOO=bar git commit
+        while (i < toks.length && ASSIGNMENT.test(toks[i])) i++;
+        const valued = WRAPPERS.get(commandName(toks[i]));
+        if (!valued) return i;
+        i++;
+        while (i < toks.length && toks[i].startsWith('-')) {
+            const t = toks[i++];
+            if (t === '--') break;
+            if (valued.has(t)) i++;
+        }
+    }
+}
+
+/** A shell's backslash escape outside quotes: `pu\sh` runs as `push`. */
+const unescapeWord = (tok) => tok.replace(/\\(.)/g, '$1');
+
+/**
+ * The command string a segment hands to `bash -c` (or sh, zsh, dash, ksh), or
+ * null. Quotes are already gone, and separators inside them became spaces, so
+ * the string cannot be split again: the caller judges it as a whole.
+ */
+function shellCommandString(segment) {
+    const toks = segment.split(/\s+/).filter(Boolean);
+    let i = skipWrappers(toks);
+    if (!/^(?:ba|z|da|k)?sh$/.test(commandName(toks[i]))) return null;
+    for (i++; i < toks.length && toks[i].startsWith('-'); i++) {
+        if (/^-[A-Za-z]*c[A-Za-z]*$/.test(toks[i])) return unescapeWord(toks.slice(i + 1).map(unwrap).join(' '));
+    }
+    return null;
+}
+
 function parseGitSegment(segment, cwd) {
     const toks = segment.split(/\s+/).filter(Boolean);
-    let i = 0;
-    // Leading environment assignments: FOO=bar git commit
-    while (i < toks.length && /^[A-Za-z_][A-Za-z0-9_]*=/.test(toks[i])) i++;
+    let i = skipWrappers(toks);
     if (i >= toks.length) return null;
     const envCount = i;
 
@@ -380,6 +432,8 @@ function parseGitSegment(segment, cwd) {
     // Global options other than -C, kept so closedRunPush can refuse any that
     // could send a push somewhere its arguments do not name (-c url.*.insteadOf).
     const globals = [];
+    // The -c values, so an alias defined on the command line can be expanded.
+    const configs = [];
     for (; i < toks.length; i++) {
         const t = toks[i];
         if (t === '-C') { const v = toks[++i]; if (v) dir = resolveArg(dir, v); continue; }
@@ -387,10 +441,11 @@ function parseGitSegment(segment, cwd) {
         if (t === '--work-tree') { globals.push(t); const v = toks[++i]; if (v) dir = resolveArg(dir, v); continue; }
         if (t.startsWith('--git-dir=')) { gitDir = resolveArg(dir, t.slice(10)); continue; }
         if (t === '--git-dir') { const v = toks[++i]; if (v) gitDir = resolveArg(dir, v); continue; }
-        if (t === '-c' || t === '--exec-path' || t === '--namespace') { globals.push(t); i++; continue; }
+        if (t === '-c') { globals.push(t); const v = toks[++i]; if (v) configs.push(unwrap(v)); continue; }
+        if (t === '--exec-path' || t === '--namespace') { globals.push(t); i++; continue; }
         if (t.startsWith('-')) { globals.push(t); continue; }   // any other global flag
         // First non-flag word is the subcommand.
-        return { sub: t.toLowerCase(), dir, gitDir, envCount, globals, args: toks.slice(i + 1).map(unwrap) };
+        return { sub: unescapeWord(t).toLowerCase(), dir, gitDir, envCount, globals, configs, args: toks.slice(i + 1).map(unwrap) };
     }
     return null;
 }
@@ -572,8 +627,7 @@ function rawMergeSegment(segments) {
 // commit is made locally. A refspec's destination decides, after `+` and
 // `refs/heads/`; `HEAD` and a push with no refspec resolve to the current
 // branch, read with one `git symbolic-ref` only on that path. --all, --mirror
-// and --branches push main too. Anything unreadable fails open, like the rest
-// of this file outside the closed-run exemption.
+// and --branches push main too. An unresolved destination fails closed.
 // ===========================================================================
 
 const DEFAULT_BRANCHES = new Set(['main', 'master']);
@@ -593,24 +647,44 @@ function currentBranch(dir) {
 /** What a parsed `git push` sends to a default branch, as a short label, or null. */
 function defaultBranchPush(g) {
     const positional = [];
+    let repoOption = false;
+    let options = true;
     for (let i = 0; i < g.args.length; i++) {
         const a = g.args[i];
+        if (options && a === '--') { options = false; continue; }
+        if (!options) { positional.push(a); continue; }
         if (a === '--all' || a === '--mirror' || a === '--branches') return a;
+        if (a === '--repo' || a.startsWith('--repo=')) {
+            const value = a === '--repo' ? g.args[++i] : a.slice(7);
+            if (!value || value.startsWith('-')) return 'an unknown destination (missing --repo value)';
+            repoOption = true;
+            continue;
+        }
         if (PUSH_VALUE_OPTS.has(a)) { i++; continue; }
         if (/^\d*[<>]/.test(a)) { if (/^\d*[<>]+$/.test(a)) i++; continue; }   // a redirection and its target
         if (a.startsWith('-')) continue;
-        positional.push(a);
+        // A ref name holds no backslash, so one here is a shell escape: `ma\in` is main.
+        positional.push(unescapeWord(a));
     }
-    const refspecs = positional.slice(1);
+    // --repo already supplied the remote: the first positional is a refspec.
+    const refspecs = positional.slice(repoOption ? 0 : 1);
     let cur;
     const branchOf = (name) => (name === 'HEAD' ? (cur === undefined ? (cur = currentBranch(g.dir)) : cur) : name);
     for (const r of refspecs) {
         const dst = branchOf((r.includes(':') ? r.slice(r.indexOf(':') + 1) : r).replace(/^\+/, '').replace(/^refs\/heads\//, ''));
+        if (!dst) return 'an unknown destination (matching refspec or unresolved HEAD)';
+        // A pattern can update any matching default branch. Keep feature-only
+        // patterns and explicitly qualified tags working.
+        if (dst.includes('*')) {
+            const pattern = new RegExp('^' + dst.replace(/[.*+?^${}()|[\]\\]/g, '\\$&').replace(/\\\*/g, '.*') + '$');
+            if ([...DEFAULT_BRANCHES].some((b) => pattern.test(b) || pattern.test(`refs/heads/${b}`))) return `main/master (refspec ${r})`;
+        }
         if (DEFAULT_BRANCHES.has(dst)) return r === dst ? dst : `${dst} (refspec ${r})`;
     }
     if (refspecs.length) return null;
     const head = branchOf('HEAD');
-    return head && DEFAULT_BRANCHES.has(head) ? `${head} (the branch checked out in ${g.dir})` : null;
+    if (!head) return 'an unknown destination (current branch unreadable)';
+    return DEFAULT_BRANCHES.has(head) ? `${head} (the branch checked out in ${g.dir})` : null;
 }
 
 /** The first segment where a subagent pushes a default branch, or null. Tracks `cd` like the role check. */
@@ -619,8 +693,25 @@ function subagentDefaultPush(segments, cwd) {
     for (const seg of segments) {
         const moved = cdTarget(seg, here);
         if (moved) { here = moved; continue; }
-        const g = parseGitSegment(seg, here);
-        if (!g || g.sub !== 'push') continue;
+        // `bash -c "..."` lost its separators with its quotes, so its destination
+        // cannot be read: a push inside one fails closed.
+        const inner = shellCommandString(seg);
+        if (inner !== null) {
+            if (/\bpush\b/.test(inner.replace(/["']/g, ''))) return { target: 'an unknown destination (a push inside a shell -c string)', dir: here };
+            continue;
+        }
+        let g = parseGitSegment(seg, here);
+        if (!g) continue;
+        if (g.sub !== 'push') {
+            // `git -c alias.p=push p ...` runs push. The last definition wins, as in git.
+            const def = g.configs.filter((c) => c.toLowerCase().startsWith(`alias.${g.sub}=`)).pop();
+            if (!def) continue;
+            const body = unescapeWord(def.slice(def.indexOf('=') + 1)).trim();
+            const words = body.split(/\s+/);
+            if (words[0] === 'push') g = { ...g, sub: 'push', args: words.slice(1).concat(g.args) };
+            else if (/\bpush\b/.test(body)) return { target: `an unknown destination (alias ${g.sub} runs ${body})`, dir: g.dir };
+            else continue;
+        }
         const hit = defaultBranchPush(g);
         if (hit) return { target: hit, dir: g.dir };
     }
@@ -689,7 +780,8 @@ try {
     }
 
     // The fourth guard: blocks before the ask, and before the role file, which exempts subagents.
-    if (isSubagent(data) && /\bpush\b/.test(command)) {
+    // Backslashes go too: the shell runs `pu\sh` as push.
+    if (isSubagent(data) && /\bpush\b/.test(unquoted.replace(/\\/g, ''))) {
         const hit = subagentDefaultPush(commandSegments(stripNonCommandText(command)), cwd);
         if (hit) {
             process.stderr.write(`Blocked: this subagent's \`git push\` would update ${hit.target} on the remote `

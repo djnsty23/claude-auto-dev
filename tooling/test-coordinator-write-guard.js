@@ -1153,7 +1153,8 @@ const verdicts = {};
     // tells the coordinator to brief, so it is allowed.
     const subForeign = run({ payload: bash('git commit -m "x"', sub) });
     expectSilentAllow('L. a dispatched subagent committing in a foreign product repo is allowed (it is the briefed owner)', subForeign);
-    const subPush = run({ payload: bash('git push origin HEAD', sub) });
+    // This fixture is not a git repo, so name the feature destination explicitly.
+    const subPush = run({ payload: bash('git push origin HEAD:claude/owner', sub) });
     expectSilentAllow('L. a dispatched subagent pushing from a foreign product repo is allowed', subPush);
     verdicts.subagent_foreign_product = allowed(subForeign) && allowed(subPush) ? 'ALLOW'
         : subForeign.exit === 2 ? 'BLOCK' : 'ERROR';
