@@ -46,7 +46,7 @@
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
-const { execFileSync } = require('child_process');
+const { execFileSync, spawnSync } = require('child_process');
 
 const SUBJECT = path.join(__dirname, '..', 'plugins', 'autodev-core', 'scripts', 'check-doc-staleness.js');
 const { checkDocStaleness, OPEN_STATE, CONDITIONAL, DECIDED, DECIDED_SECTION,
@@ -276,6 +276,33 @@ try {
 }
 
 if (tmp) {
+    // Exercise the real CLI arg reader; the rest of this suite uses the API.
+    const cli = (args) => {
+        const r = spawnSync(process.execPath, [SUBJECT, '--repo', tmp, ...args], { encoding: 'utf8' });
+        let json = null;
+        try { json = JSON.parse(r.stdout); } catch { /* asserted by the caller */ }
+        return { ...r, json };
+    };
+    const bounded = cli(['--json', '--source', 'worktree', '--age', '7', '--max', '1']);
+    const expected = checkDocStaleness(tmp, { source: 'worktree', age: 7, max: 1 });
+    check('CLI arg: explicit options produce JSON with a clean exit',
+        bounded.status === 0 && bounded.stderr === '' && bounded.json !== null, bounded.stdout + bounded.stderr);
+    check('CLI arg: --repo and --source select this working tree',
+        bounded.json && bounded.json.repo === path.basename(tmp) && bounded.json.source === 'worktree', bounded.json);
+    check('CLI arg: --max bounds the findings to the same first claim as the API',
+        bounded.json && expected.findings.length === 1 && bounded.json.findings.length === 1
+        && bounded.json.findings[0].text === expected.findings[0].text, bounded.json);
+    const old = cli(['--json', '--source', 'trunk', '--age', '999999']);
+    check('CLI arg: --age can exclude every dated finding on a populated scan',
+        old.status === 0 && old.json && old.json.population.present > 0
+        && old.json.population.olderThanAgeDays === 0 && old.json.findings.length === 0, old.json);
+    const defaults = cli(['--json']);
+    check('CLI arg: missing optional flags retain the default two-tree scan and findings',
+        defaults.status === 0 && defaults.json && defaults.json.source === 'both' && defaults.json.findings.length > 0, defaults.json);
+    const invalid = cli(['--source', 'unknown']);
+    check('CLI arg: an invalid source is reported before any scan',
+        invalid.status === 0 && invalid.stdout === '' && /unknown --source unknown/.test(invalid.stderr), invalid.stderr);
+
     // Pinned to `trunk` so every assertion below grades the tree it was written
     // for. The two-tree behaviour is graded separately, further down, against a
     // working copy that deliberately differs from the commit.
@@ -808,4 +835,4 @@ check('it is a report, not a gate: the main path always exits 0',
     'a check that reds on uncertainty gets disabled, and uncertainty is the entire output');
 
 console.log('\n' + pass + ' passed, ' + fail + ' failed');
-process.exit(fail ? 1 : 0);
+process.exitCode = fail ? 1 : 0;

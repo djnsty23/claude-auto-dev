@@ -178,5 +178,37 @@ function run(args, projects) {
     check('no arguments: usage, exit 2', none.status === 2 && /Usage:/.test(none.stdout));
 }
 
+// --- 8. default projects resolver: overrides and active profiles --------------
+{
+    const root = tmp();
+    const home = path.join(root, 'home');
+    const profile = path.join(root, 'profile');
+    const override = path.join(root, 'override');
+    check('projectsDir: explicit projects override wins over the active profile',
+        triage.projectsDir({ AUTODEV_CLAUDE_PROJECTS: override, CLAUDE_CONFIG_DIR: profile, HOME: home }) === override);
+    check('projectsDir: active profile gets its own projects directory',
+        triage.projectsDir({ CLAUDE_CONFIG_DIR: profile, HOME: home }) === path.join(profile, 'projects'));
+    check('projectsDir: USERPROFILE is the default home before HOME',
+        triage.projectsDir({ USERPROFILE: home, HOME: profile }) === path.join(home, '.claude', 'projects'));
+    check('projectsDir: empty overrides fall back to HOME',
+        triage.projectsDir({ AUTODEV_CLAUDE_PROJECTS: '', CLAUDE_CONFIG_DIR: '', HOME: home }) === path.join(home, '.claude', 'projects'));
+
+    // Omit --projects: exercise the CLI caller as well as the exported resolver.
+    makeRun(override, { runId: 'wf_4444dddd-044', agents: [
+        { id: 'ab00000000000001', journaled: true, secs: 1, tools: 1 },
+    ] });
+    const r = spawnSync(process.execPath, [SCRIPT, '--all', '--json'], {
+        encoding: 'utf8',
+        env: { ...process.env, AUTODEV_CLAUDE_PROJECTS: override, CLAUDE_CONFIG_DIR: profile, USERPROFILE: home, HOME: home },
+    });
+    let j = null;
+    try { j = JSON.parse(r.stdout); } catch { /* checked below */ }
+    check('projectsDir CLI: the default scan reads the override and exits cleanly',
+        r.status === 0 && r.stderr === '' && j && j.population.projectsDir === override, r.stdout + r.stderr);
+    check('projectsDir CLI: the planted run is actually triaged',
+        j && j.totals.runsOk === 1 && j.totals.journaled === 1 && j.runs[0].id === 'wf_4444dddd-044', r.stdout);
+    fs.rmSync(root, { recursive: true, force: true });
+}
+
 console.log(`\n${pass} passed, ${fail} failed`);
-process.exit(fail ? 1 : 0);
+process.exitCode = fail ? 1 : 0;

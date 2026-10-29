@@ -338,9 +338,74 @@ async function probeEvidence(root, row) {
     }
 }
 
+// State readers can be checked without a live process table. These populated
+// records pin lane discovery and distinguish a reused pid from the same process.
+function probeRecordReaders(root, row) {
+    const records = require(S(root, 'gate-records.js'));
+    const dir = mkTemp('gate-ev-readers-');
+    const base = path.join(dir, 'full-gate.lock');
+    fs.writeFileSync(base, '101\nfirst lane\nclass harness\n');
+    fs.writeFileSync(path.join(dir, 'full-gate.lanes'), '3\n');
+    fs.mkdirSync(path.join(dir, 'full-gate-3.lock')); // present but unreadable as a file
+    const lanes = records.readLaneLocks(base);
+    row('readLaneLocks: discovers all three configured lanes, including the missing one', lanes.length === 3, lanes);
+    row('readLaneLocks: lane numbers stay paired with their exact lock paths',
+        JSON.stringify(lanes.map((l) => [l.lane, l.file])) === JSON.stringify([
+            [1, base], [2, path.join(dir, 'full-gate-2.lock')], [3, path.join(dir, 'full-gate-3.lock')],
+        ]), lanes);
+    row('readLaneLocks: parses the populated first lane instead of reporting all absent',
+        lanes[0]?.lock?.pid === 101 && lanes[0].lock.cls === 'harness' && lanes[0].lock.what === 'first lane', lanes);
+    row('readLaneLocks: an absent lock is null', lanes[1]?.lock === null, lanes);
+    row('readLaneLocks: an unreadable lock remains explicit evidence',
+        typeof lanes[2]?.lock?.unreadable === 'string' && lanes[2].lock.unreadable.length > 0, lanes);
+    row('readLaneLocks: explicit lane count overrides the lanes file', records.readLaneLocks(base, 1).length === 1);
+    fs.writeFileSync(path.join(dir, 'full-gate.lanes'), '9\n');
+    row('readLaneLocks: invalid configured count falls back to one lane', records.readLaneLocks(base).length === 1);
+    const plain = path.join(dir, 'plain');
+    fs.writeFileSync(plain + '-2', '202\nsecond lane\n');
+    const plainLanes = records.readLaneLocks(plain, 2);
+    row('readLaneLocks: extensionless bases still read the second lane',
+        plainLanes.length === 2 && plainLanes[1].file === plain + '-2' && plainLanes[1].lock?.pid === 202, plainLanes);
+
+    const t0 = '2026-01-01T00:00:00.000Z';
+    const t1 = '2026-01-01T00:01:00.000Z';
+    const t2 = '2026-01-01T00:02:00.000Z';
+    const seed = () => [{ pid: 11, ppid: 1, startUtc: t0, firstSeen: t0, lastSeen: t0 }];
+    const fresh = records.mergeDescendants(null, [{ pid: 11, ppid: 1, startUtc: t0 }], t1);
+    row('mergeDescendants: seeds identity and both observation timestamps',
+        JSON.stringify(fresh) === JSON.stringify([{ pid: 11, ppid: 1, startUtc: t0, firstSeen: t1, lastSeen: t1 }]), fresh);
+    const seen = records.mergeDescendants(seed(), [{ pid: 11, ppid: 1, startUtc: t0 }], t1);
+    row('mergeDescendants: repeat observation preserves firstSeen and advances lastSeen without duplication',
+        seen.length === 1 && seen[0].firstSeen === t0 && seen[0].lastSeen === t1, seen);
+    const reused = records.mergeDescendants(seed(), [{ pid: 11, ppid: 2, startUtc: t1 }], t2);
+    row('mergeDescendants: a reused pid is a distinct process with its own parent and lifetime',
+        reused.length === 2 && reused[0].startUtc === t0 && reused[0].lastSeen === t0
+        && reused[1].startUtc === t1 && reused[1].ppid === 2 && reused[1].firstSeen === t2, reused);
+    const capped = records.mergeDescendants(seed(), [
+        { pid: 22, ppid: 1, startUtc: t1 }, { pid: 11, ppid: 1, startUtc: t0 },
+    ], t2, 1);
+    row('mergeDescendants: a full cap blocks new rows but still refreshes known identities',
+        capped.length === 1 && capped[0].pid === 11 && capped[0].lastSeen === t2, capped);
+    const snapshot = (proc) => ({ ok: true, procs: new Map(proc ? [[11, proc]] : []) });
+    row('mergeDescendants: a good snapshot with the pid absent records goneBy now',
+        records.mergeDescendants(seed(), [], t2, 500, snapshot())[0].goneBy === t2);
+    row('mergeDescendants: the same live identity is not marked gone',
+        !records.mergeDescendants(seed(), [], t2, 500, snapshot({ startUtc: t0 }))[0].goneBy);
+    row('mergeDescendants: unreadable creation time cannot prove the process gone',
+        !records.mergeDescendants(seed(), [], t2, 500, snapshot({ startUtc: null }))[0].goneBy);
+    row('mergeDescendants: pid reuse bounds disappearance by the later holder creation time',
+        records.mergeDescendants(seed(), [], t2, 500, snapshot({ startUtc: t1 }))[0].goneBy === t1);
+    row('mergeDescendants: a failed snapshot cannot mark an unobserved process gone',
+        !records.mergeDescendants(seed(), [], t2, 500, { ok: false, procs: new Map() })[0].goneBy);
+    const gone = seed();
+    gone[0].goneBy = t1;
+    row('mergeDescendants: the first proven disappearance bound is retained',
+        records.mergeDescendants(gone, [], t2, 500, snapshot())[0].goneBy === t1);
+}
+
 const PROBES = {
     acceptance: probeAcceptance, locking: probeLocking, authority: probeAuthority, admission: probeAdmission,
-    binding: probeBinding, completeness: probeCompleteness, evidence: probeEvidence,
+    binding: probeBinding, completeness: probeCompleteness, evidence: probeEvidence, readers: probeRecordReaders,
 };
 
 /** Probe mode: run one group (or all) against `root`; print each row and one summary line. */
@@ -578,6 +643,7 @@ function partMutants() {
 }
 
 async function main() {
+    probeRecordReaders(ROOT, check);
     const gs = require('./gate-steps.js');
     const gl = require('./gate-lock.js');
     const records = require(S(ROOT, 'gate-records.js'));
