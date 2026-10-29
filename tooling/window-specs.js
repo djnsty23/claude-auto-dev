@@ -205,9 +205,9 @@ const releaseWindow = {
 
 const authorityWindow = {
     id: 'authority-window',
-    source: 'autodev/headless-workers.json records (headless-worker.js)',
-    // worker-authority landed 2026-10-14 (ebe493b6); every run before it was bypassPermissions.
-    admissibleFrom: '2026-10-15',
+    source: 'autodev/headless-workers.json and autodev/windows/authority-audit.jsonl (authority-audit.js)',
+    // The audit writer starts this window; earlier launch metadata alone cannot prove containment.
+    admissibleFrom: '2026-10-29',
     load(ctx) {
         const json = ctx.readJson(at(ctx.home, 'headless-workers.json'));
         if (!json) throw new Error('headless-workers.json cannot be read');
@@ -215,7 +215,14 @@ const authorityWindow = {
             const ok = r.permissionMode === 'dontAsk' && Boolean(r.profile);
             return { at: r.startedAt, ok, why: ok ? null : `${r.code}: ran ${r.permissionMode || 'with no permission mode'}${r.profile ? '' : ' and no profile'}, outside the boundary` };
         });
-        return { records: recs, totals: [noWriter('a boundary escape (a call the policy should deny that ran); denials reach only free-text worker logs, so zero escapes cannot be shown')] };
+        const runs = records(json).filter((r) => r && r.startedAt && ctx.windowDays.includes(ctx.dayOf(Date.parse(r.startedAt))));
+        const audits = ledger(ctx, 'windows', 'authority-audit.jsonl');
+        const audited = runs.map((r) => audits.find((a) => a.runKey === `${r.code}@${r.startedAt}`));
+        const complete = audited.filter((a) => a && a.complete === true && Number.isInteger(a.callsChecked) && a.callsChecked >= 0
+            && Number.isInteger(a.denials) && a.denials >= 0 && a.denials <= a.callsChecked && Number.isInteger(a.escapes) && a.escapes >= 0 && a.escapes <= a.denials && a.unknown === 0);
+        const escapes = complete.reduce((n, a) => n + a.escapes, 0);
+        return { records: recs, totals: [{ ok: runs.length > 0 && complete.length === runs.length && escapes === 0,
+            why: `${escapes} boundary escapes over ${complete.length} of ${runs.length} audited runs, needs all runs complete and zero escapes` }] };
     },
 };
 
@@ -225,13 +232,21 @@ const authorityWindow = {
 
 const hookWindow = {
     id: 'hook-window',
-    source: 'autodev/windows/hook-wall.jsonl (no writer yet); Claude Code transcripts time Stop hooks only',
-    admissibleFrom: '2026-10-19',
+    source: 'autodev/windows/hook-wall.jsonl (hook-wall.js), installed code with isolated representative inputs',
+    admissibleFrom: '2026-10-29',
     load(ctx) {
         const rows = ledger(ctx, 'windows', 'hook-wall.jsonl');
+        const measured = rows.filter((r) => r && ctx.windowDays.includes(ctx.dayOf(Date.parse(r.at))));
+        const valid = (r) => r.profile && Object.keys(r.profile).length > 0 && ['idle', 'load'].includes(r.load)
+            && r.errors === 0 && Number.isInteger(r.hooks) && r.hooks > 0 && Array.isArray(r.samples) && r.samples.length >= 5
+            && r.samples.every((n) => Number.isFinite(n) && n > 0) && Array.isArray(r.eventInventory) && r.eventInventory.includes(r.event)
+            && r.p95Ms === r.samples.slice().sort((a, b) => a - b)[Math.ceil(r.samples.length * 0.95) - 1];
+        const profileKey = (r) => JSON.stringify(Object.entries(r.profile || {}).sort());
+        const events = [...new Set(measured.flatMap((r) => (r.eventInventory || [r.event]).map((e) => `${profileKey(r)}:${e}`)))];
+        const paired = events.filter((key) => ['idle', 'load'].every((load) => measured.some((r) => `${profileKey(r)}:${r.event}` === key && r.load === load && valid(r))));
         return {
-            records: rows.map((r) => ({ at: r.at, ok: Number.isFinite(r.p95Ms) && Number.isFinite(r.budgetMs) && r.p95Ms <= r.budgetMs, why: `${r.event} p95 ${r.p95Ms} ms, budget ${r.budgetMs} ms` })),
-            totals: [noWriter('installed-profile hook wall time per event with an idle or load tag; transcripts carry Stop-hook timing only, with no profile or load label')],
+            records: rows.map((r) => ({ at: r.at, ok: valid(r) && Number.isFinite(r.p95Ms) && Number.isFinite(r.budgetMs) && r.p95Ms > 0 && r.budgetMs > 0 && r.p95Ms <= r.budgetMs, why: `${r.event} p95 ${r.p95Ms} ms, budget ${r.budgetMs} ms` })),
+            totals: [{ ok: events.length > 0 && paired.length === events.length, why: `${paired.length} of ${events.length} hook events sampled idle and load with installed profiles, needs every event` }],
         };
     },
 };
@@ -441,16 +456,22 @@ const acceptanceWindow = {
 
 const queueWindow = {
     id: 'queue-window',
-    source: 'autodev/worker-reconcile/events.jsonl (worker-reconcile.js) for lost tasks, brain-clock passes',
-    // worker-reconcile.js landed 2026-10-14 (90da59d9); its first event is 10-15T08:18Z.
-    admissibleFrom: '2026-10-15',
+    source: 'autodev/worker-reconcile/events.jsonl, brain-clock passes and windows/account-switch-drills.jsonl (account-switch-drill.js)',
+    // The account-switch drill writer starts this window.
+    admissibleFrom: '2026-10-29',
     load(ctx) {
         const rows = ledger(ctx, 'worker-reconcile', 'events.jsonl');
         const recs = rows.filter((r) => r && r.at).map((r) => {
             const lost = r.outcome === 'UNKNOWN' || r.outcome === 'REJECT';
             return { at: r.at, ok: !lost, why: lost ? `${r.taskId}: ${r.outcome} (${r.why || ''})` : null };
         });
-        return { records: recs, coveredDays: clockDays(ctx), totals: [noWriter('an account switch drill')] };
+        const drills = ledger(ctx, 'windows', 'account-switch-drills.jsonl').filter((r) => r && ctx.windowDays.includes(ctx.dayOf(Date.parse(r.at))));
+        const valid = (r) => r.ok === true && r.kind === 'account-switch' && r.mode === 'synthetic-shared-queue'
+            && Number.isInteger(r.queued) && r.queued >= 2 && r.kept === r.queued && r.configSwitched === true
+            && r.launched === 1 && r.reconciled === 1 && Number.isFinite(r.durationMs) && r.durationMs > 0 && r.durationMs < 90000;
+        const passing = drills.filter(valid);
+        return { records: recs.concat(drills.map((r) => ({ at: r.at, ok: valid(r), why: `account switch drill failed: ${r.why || 'incomplete evidence'}` }))),
+            coveredDays: clockDays(ctx), totals: [{ ok: passing.length > 0, why: `${passing.length} passing account switch drill(s) in the window, needs 1` }] };
     },
 };
 
