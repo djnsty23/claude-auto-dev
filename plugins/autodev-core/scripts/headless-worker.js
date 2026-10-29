@@ -169,6 +169,13 @@ const HEADLESS_NOTE = 'HEADLESS: this process exits the moment the turn ends, so
     + 'merging are refused here and are the coordinator\'s steps even when the brief asks for them: stop at a gated '
     + 'commit and put its head SHA and gate receipt in the report.';
 
+// `[measured 2026-10-29]` 72 worker runs in a week left no line saying what slowed them,
+// so the only blocker evidence was mined from free text. blocker-report.js ranks this
+// line across every run, and the coordinator removes the top cause.
+const BLOCKER_NOTE = 'BLOCKER: just above the RESULT line, write one line `BLOCKER: <what cost this run the most time, '
+    + 'or stopped it, and what would have removed it>`, or `BLOCKER: none`. Name the concrete cause (a refused command, '
+    + 'a gate wait, a flaky suite, a missing credential, an unclear brief), not a summary of the work.';
+
 // `[measured 2026-09-23]` in one fleet's worker transcripts the auto-mode
 // permission classifier refused four action classes: Production Deploy (19),
 // Secret-Store Writes (9), Production Reads (8) and Modify Shared Resources (3).
@@ -383,7 +390,7 @@ function isUnsettled(rec) { return rec.state !== 'settled'; }
 function composePrompt(text, scratchDir, { code = null, report = null } = {}) {
     const notes = [];
     if (scratchDir) notes.push(placementNote(scratchDir), askNote(scratchDir, code || path.basename(scratchDir)));
-    if (code && report) notes.push(resultNote(code, report));
+    if (code && report) notes.push(resultNote(code, report), BLOCKER_NOTE);
     if (report && scratchDir) notes.push(reportWriteNote(report, scratchDir));
     notes.push(DENIED_NOTE, HEADLESS_NOTE);
     return text.replace(/\s+$/, '') + '\n\n' + notes.join('\n\n') + '\n';
@@ -1398,7 +1405,7 @@ if (require.main === module) {
 }
 
 module.exports = {
-    HEADLESS_NOTE, DENIED_NOTE, PROMPT_MAX, CODE_RE, placementNote, resultNote, scriptPlacement, otherResultCode, SCRUBBED_ENV, RETENTION_MS, SETTLED_RESULTS,
+    HEADLESS_NOTE, DENIED_NOTE, BLOCKER_NOTE, PROMPT_MAX, CODE_RE, placementNote, resultNote, scriptPlacement, otherResultCode, SCRUBBED_ENV, RETENTION_MS, SETTLED_RESULTS,
     AUTH_REFUSAL_PATTERNS, matchAuthRefusal, authRefusal, resolveConfigDir,
     askFiles, askNote, askState, scratchDirFor, priorRunFiles, moveAside, readLedger, settle, start,
     HEAVY_TOOLS, droppedTools, namedTools, parseKeepTools, toolProfile, attemptIdFor, supervise,
