@@ -81,6 +81,13 @@ never complete. Diagnose dependency faults once, preserve the blocker and work
 elsewhere; retry only after a relevant condition changes. Do not reactivate
 deferred work to manufacture a fresh queue.
 
+Ask what slows the workers before adding more of them. Run
+`scripts/blocker-report.js --print` (daily as a brain-clock observer, which
+writes `blockers/latest.json`). A cause in three or more runs of the window is
+the next harness item, ahead of new product work: remove it, then check that
+its count falls in the following window. Each worker report ends with a
+`BLOCKER:` line, so an absent one is a prompt fault, not a clean run.
+
 ## 3. Start bounded workers with one owner per unit
 
 Load `isolate` and `rule-agent-concurrency`. Before dispatch, record story,
