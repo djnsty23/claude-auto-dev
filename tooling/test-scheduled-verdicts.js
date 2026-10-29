@@ -26,9 +26,10 @@ const SCRIPT = path.resolve(
 );
 const { inspectHandler, classify } = require(SCRIPT);
 
+let passed = 0;
 let failures = 0;
 function check(name, cond) {
-    if (cond) { console.log('  ok   ' + name); return; }
+    if (cond) { passed++; console.log('  ok   ' + name); return; }
     console.log('  FAIL ' + name);
     failures += 1;
 }
@@ -72,6 +73,31 @@ const indirect = inspectHandler([
 check('a payload built into a named const is seen', indirect.writes.length === 1);
 check('the gating field is named, not just counted',
     indirect.writes[0] && /enabled|severity/.test(indirect.writes[0].field));
+
+// The declaration must be OUTSIDE the 30-line backward window. Nearby payloads
+// above never enter declarationBody; they pass even if identifier lookup breaks.
+const remotePayload = [
+    'const decision = {',
+    '  details: { version: "v1" },',
+    '  enabled: nextEnabled,',
+    '};',
+    ...Array(45).fill(''),
+    'await db.from("settings").upsert({ value: decision });',
+];
+const resolved = inspectHandler(remotePayload.join('\n'));
+check('declarationBody: resolves a distant named payload and its exact write line',
+    JSON.stringify(resolved.writes) === JSON.stringify([{ line: 50, field: 'enabled' }]));
+check('declarationBody: the distant write is still UNBOUNDED without expiry evidence',
+    classify({ handler: 'cron.js', handlerHint: 'cron.js', ...resolved }) === 'UNBOUNDED');
+const wrongIdentifier = remotePayload.slice();
+wrongIdentifier[49] = 'await db.from("settings").upsert({ value: anotherDecision });';
+check('declarationBody: an unrelated distant declaration cannot supply the payload field',
+    inspectHandler(wrongIdentifier.join('\n')).writes.length === 0);
+const afterClose = remotePayload.slice();
+afterClose[2] = '  version: nextVersion,';
+afterClose.splice(4, 0, 'const unrelated = { enabled: false };');
+check('declarationBody: stops at the payload closing brace instead of borrowing a later field',
+    inspectHandler(afterClose.join('\n')).writes.length === 0);
 
 // --- a payload assembled ABOVE the write, inline ---
 const above = inspectHandler([
@@ -174,5 +200,5 @@ check('an unresolvable handler classifies UNRESOLVED, not skipped',
 
 try { fs.rmSync(empty, { recursive: true, force: true }); } catch { /* tmp */ }
 
-console.log(failures ? '\nFAILED: ' + failures : '\nall passed');
-process.exit(failures ? 1 : 0);
+console.log(`\n${passed} passed, ${failures} failed`);
+process.exitCode = failures ? 1 : 0;
