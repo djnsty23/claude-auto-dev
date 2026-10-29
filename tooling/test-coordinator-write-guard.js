@@ -1220,6 +1220,8 @@ const verdicts = {};
 
     expectPushBlock('M. subagent `git push origin main` blocks', subPush('git push origin main'));
     expectPushBlock('M. subagent `HEAD:main` blocks', subPush('git push origin HEAD:main'));
+    expectPushBlock('M1. heads/main destination blocks', subPush('git push origin HEAD:heads/main'));
+    expectPushBlock('M1. forced heads/master destination blocks', subPush('git push origin +HEAD:heads/master'));
     expectPushBlock('M. subagent `+main` (a force refspec) blocks', subPush('git push origin +main'));
     expectPushBlock('M. subagent `refs/heads/master` blocks', subPush('git push origin feature:refs/heads/master'));
     expectPushBlock('M. subagent delete `:main` blocks', subPush('git push origin :main'));
@@ -1245,9 +1247,11 @@ const verdicts = {};
     if (init.status === 0) {
         expectPushBlock('M. subagent bare `git push` on main blocks (current branch read)', subPush('git push', { cwd: bare }));
         expectPushBlock('M. subagent `git push origin HEAD` on main blocks', subPush('git push origin HEAD', { cwd: bare }));
+        expectPushBlock('M1. @ on main blocks', subPush('git push origin @', { cwd: bare }));
         runBudgeted('git', ['-C', bare, 'checkout', '-q', '-b', 'claude/w'], { encoding: 'utf8', timeout: 60000 });
         expectSilentAllow('M. CONTROL: the same bare push on claude/w is allowed', subPush('git push', { cwd: bare }));
         expectSilentAllow('M. CONTROL: `origin HEAD` on claude/w is allowed', subPush('git push origin HEAD', { cwd: bare }));
+        expectSilentAllow('M1. @ on a feature branch stays silent', subPush('git push origin @', { cwd: bare }));
     } else {
         check('M. git init available for the bare-push cases', false, init.stderr.slice(0, 80));
     }

@@ -106,6 +106,10 @@ const ALLOWED = [
     [`git push origin ${BRANCH}:${BRANCH}`, { cwd: path.join(WT, 'src') }],
     // The Brain's handoff form, in every path spelling it uses.
     [`git -C '${WT}' push -u origin ${BRANCH}`, {}],
+    [`git -C '${WT}' push -u origin refs/heads/${BRANCH}:refs/heads/${BRANCH}`, {}],
+    ...[' 2>&1', ' 2>&1 | tail -5', ' >file', ' 2>/dev/null', ' > file'].map((redirect) =>
+        [`git -C '${WT}' push -u origin ${BRANCH}${redirect}`, {}]),
+    [`git -C '${WT}' push -u origin refs/heads/${BRANCH}:refs/heads/${BRANCH} 2>&1`, {}],
     [`git -C "${WT}" push -u origin ${BRANCH}`, {}],
     [`git -C '${WT.split(path.sep).join('/')}' push -u origin ${BRANCH}`, {}],
     ...(process.platform === 'win32' ? [[`git -C "${WT.split('/').join('\\')}" push -u origin ${BRANCH}`, {}]] : []),
