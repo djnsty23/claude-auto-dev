@@ -461,11 +461,21 @@ async function main() {
         await sleep(500);
         check('harness cap: with no product waiting, the wrapper does not take the free lane 2 and says it is kept for product gates',
             told && !fs.existsSync(lane2) && saw(fx) === null, run.out);
+        const releasedMs = Date.now();
         fs.renameSync(fx.lockPath, fx.lockPath + '.released-peer');
         const r = await finished(run);
         killTree(peer.pid);
-        check('harness cap: once the harness peer releases lane 1, the wrapper takes lane 1, never lane 2, and exits 0',
-            r.code === 0 && /lock taken: .*full-gate\.lock \(pid \d+\)/.test(r.out) && !fs.existsSync(lane2), `exit=${r.code}\n${r.out}`);
+        // The cap is a count, not a lane: takeAnyLane tries lane 1 then lane 2 in one poll, so a release
+        // landing between the two lets lane 2 go to the wrapper with 0 harness holders, which the cap allows.
+        // What must hold is that the wrapper was admitted only after the peer let go, on either lane.
+        const admitted = (fs.existsSync(fx.lockDir) ? fs.readdirSync(fx.lockDir) : [])
+            .filter((f) => /^full-gate(-2)?\.lock\.released-\d{4}/.test(f))
+            .map((f) => /^meta (.*)$/m.exec(fs.readFileSync(path.join(fx.lockDir, f), 'utf8')))
+            .map((m) => { try { return Date.parse(JSON.parse(m[1]).admittedUtc); } catch { return NaN; } });
+        check('harness cap: once the harness peer releases lane 1, the wrapper takes a free lane only then, holding at most 1, and exits 0',
+            r.code === 0 && /lock taken: .*full-gate(-2)?\.lock \(pid \d+\)/.test(r.out)
+                && admitted.length === 1 && admitted[0] >= releasedMs,
+            `exit=${r.code} admitted=${JSON.stringify(admitted)} releasedMs=${releasedMs}\n${r.out}`);
     }
 }
 
