@@ -102,6 +102,14 @@ Run this skill as written, with three additions:
    `02-modules.md`: one row per capability in the core loop, naming either a registry module and version,
    or `build` with the story id. A capability two projects already built by hand is a promotion candidate.
    Name it there and do not build it a third time.
+   - **Find the kit before deciding there is none.** A module kit is a directory holding
+     `modules/registry.json`, `scripts/new-site.mjs` and `scripts/install-module.mjs`. Look at
+     `$AUTODEV_MODULE_KIT`, then every sibling of the project directory (`ls ../*/modules/registry.json`).
+     Record the path found, or the two places looked, in `02-modules.md`. "No registry" written without
+     that look is a guess.
+   - Read every registry entry's `id`, `version`, `provides` and `default`, and its `candidates`. Map
+     sign-in, email, rate limits, cron, webhooks, exports, uploads, billing, LLM calls and the blog to a
+     module whenever one provides it. A `default` module installs without being named.
 3. **Write phase 2 now, as sprint 2.** See below. Sprint 1 is the fast, fully working prototype: the core
    loop end to end on real data, signed in, deployed.
 
@@ -112,7 +120,11 @@ Run this skill as written, with three additions:
   uses its version defaults and says so in `03-setup.md`.
 - The module scaffolder, when present, installs every `02-modules.md` module before `auto` starts. A
   module that cannot install, for example because it needs SMTP the free tier lacks, becomes a story and
-  a ledger row.
+  a ledger row. With a kit, a web site is scaffolded BY the kit, not by `create-next-app`:
+  `node <kit>/scripts/new-site.mjs <name> --into <parent> --with <ids from 02-modules.md>`. It writes
+  the template, installs the modules, and leaves `AGENTS.md` listing what is installed and what is not,
+  which every later session in the site reads. A module added later goes through
+  `node <kit>/scripts/install-module.mjs <id> --site .`, which refreshes that list.
 - Provisioning runs from the External services list. A provisioning script's exit code is the verdict:
   done, waiting on a person, or failed. Waiting on a person is not failure. The setup stories it could
   not finish stay `needs-setup` with the script's guided step as their `blockedReason`. `05-provision.md`
