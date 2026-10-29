@@ -202,7 +202,8 @@ function main() {
     ]) expectDeny('local_push', label, B, bash(cmd));
     // `#` opens a comment only where a word starts. Glued to `)` or a backtick it is part of the word, so
     // bash runs everything after the `;`. A lexer that reads it as a comment hides the next command.
-    const evil = 'C:/Windows/evil.txt';
+    // Absolute on the host that runs the suite: on Linux `C:/Windows/...` is a relative path inside the root.
+    const evil = process.platform === 'win32' ? 'C:/Windows/evil.txt' : '/etc/evil.txt';
     for (const [label, cmd] of [
         ['$(true)# then a push', 'echo $(true)#; git push origin main'],
         ['backtick true backtick # then a push', 'echo `true`#; git push origin main'],
