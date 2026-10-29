@@ -104,6 +104,11 @@ const ALLOWED = [
     [`cd "${WT}" && git push -u origin ${BRANCH}`, {}],
     [`git push --set-upstream origin refs/heads/${BRANCH}`, { cwd: WT }],
     [`git push origin ${BRANCH}:${BRANCH}`, { cwd: path.join(WT, 'src') }],
+    // The Brain's handoff form, in every path spelling it uses.
+    [`git -C '${WT}' push -u origin ${BRANCH}`, {}],
+    [`git -C "${WT}" push -u origin ${BRANCH}`, {}],
+    [`git -C '${WT.split(path.sep).join('/')}' push -u origin ${BRANCH}`, {}],
+    ...(process.platform === 'win32' ? [[`git -C "${WT.split('/').join('\\')}" push -u origin ${BRANCH}`, {}]] : []),
 ];
 for (const [cmd, opts] of ALLOWED) expectAllow(`A. allowed: ${cmd.replace(fixture, '<fx>')}`, run(cmd, opts));
 // gh and merge-lock are the rest of the handoff. The rail parses git, so they
