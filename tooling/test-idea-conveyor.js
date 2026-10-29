@@ -55,8 +55,8 @@ const config = { returnTo: 'local_00000000-0000-4000-8000-000000000000', hub: { 
 const CONFIG = path.join(scratch, 'config.json');
 fs.writeFileSync(CONFIG, JSON.stringify(config));
 
-function cli(args) {
-    const r = spawnSync(process.execPath, [SUBJECT, ...args], { encoding: 'utf8', env, stdio: ['ignore', 'pipe', 'pipe'] });
+function cli(args, nodeArgs = []) {
+    const r = spawnSync(process.execPath, [...nodeArgs, SUBJECT, ...args], { encoding: 'utf8', env, stdio: ['ignore', 'pipe', 'pipe'] });
     let json = null;
     try { json = JSON.parse(r.stdout); } catch { /* help text or a crash */ }
     return { status: r.status, stdout: r.stdout, stderr: r.stderr, json, value: json && json.value, code: json && json.error ? json.error.code : null };
@@ -241,6 +241,69 @@ check('intake: population line reads all four', counts.read === 4 && counts.feat
     t = cli(withState(['tick', '--ledger', LEDGER, '--decisions', decisions])).value;
     const picked = t.events.find((e) => e.code === c6.value.decision.code);
     check("person: a person's pick wins over silence and is flagged as overturned", picked && picked.event === 'picked' && picked.pick === 'a' && picked.overturned === true, JSON.stringify(t.events));
+
+    const posted = rp('C2').value.decision;
+    const hubId = 'dddddddd-0000-4000-8000-000000000001';
+    cli(withState(['outbox-done', '--id', posted.outbox, '--result-id', hubId]));
+    check('posted silence: confirmation sets posted state', state().decisions[posted.code].state === 'posted');
+    editLedger((rec) => { if (rec.taskId === posted.approvesAt) rec.state = 'started'; });
+    // A posted decision is on the Hub, where a person may already have answered it. A tick that
+    // did not read the Hub's picks cannot know, so it must not approve it by silence.
+    t = cli(withState(['tick', '--ledger', LEDGER])).value;
+    check('posted silence: a tick without --decisions leaves an expired posted decision posted', state().decisions[posted.code].state === 'posted', JSON.stringify(t.events));
+    const noPicks = writeIdeas('decisions-none.json', []);
+    t = cli(withState(['tick', '--ledger', LEDGER, '--decisions', noPicks])).value;
+    check('posted silence: a tick that read the Hub with no pick approves the confirmed decision', state().decisions[posted.code].state === 'silence-approved', JSON.stringify(t.events));
+    const picks = () => cli(withState(['outbox'])).value.writes.filter((w) => w.decision === posted.code && w.tool === 'mcp__nvision-hub__hub_decisions_pick');
+    check('posted silence: queues one ready Hub pick with the confirmed id', picks().length === 1 && picks()[0].args.id === hubId && !picks()[0].blocked);
+    cli(withState(['tick', '--ledger', LEDGER, '--decisions', noPicks]));
+    check('posted silence: repeated ticks do not duplicate the pick', picks().length === 1);
+}
+
+// A real C1 enqueue succeeds before the injected C2 ledger contention.
+{
+    const partialState = path.join(scratch, 'partial', 'state.json');
+    const partialLedger = path.join(scratch, 'partial-ledger.json');
+    const input = writeIdeas('partial.json', [vistekRow('v-partial', ELIGIBLE_TEXT)]);
+    const preload = path.join(scratch, 'refuse-c2.js');
+    fs.writeFileSync(preload, `const cp = require('child_process');
+const original = cp.spawnSync;
+cp.spawnSync = function (file, args, opts) {
+    if (args && args[1] === 'enqueue' && args.some((x) => /-c2$/.test(x))) {
+        return { status: 1, stdout: JSON.stringify({ ok: false, error: { code: 'ledger-locked', message: 'temporary writer contention' } }), stderr: '' };
+    }
+    return original.call(this, file, args, opts);
+};\n`);
+    const args = ['intake', '--source', 'vistek', '--ideas', input, '--config', CONFIG, '--state', partialState, '--ledger', partialLedger];
+    const first = cli(args, ['--require', preload]);
+    check('partial enqueue: C2 contention is reported after C1 succeeds', first.code === 'enqueue-refused' && /C2.*ledger-locked/.test(first.stdout));
+    const records = () => JSON.parse(fs.readFileSync(partialLedger, 'utf8')).records;
+    check('partial enqueue: control has exactly one queued C1', records().length === 1 && records()[0].slug.endsWith('-c1'));
+    const saved = fs.existsSync(partialState) ? JSON.parse(fs.readFileSync(partialState, 'utf8')) : null;
+    check('partial enqueue: successful C1 is durably checkpointed', saved && saved.ideas['vistek:v-partial'].chain.length === 1);
+    const retry = cli(args);
+    check('partial enqueue: retry completes the chain without duplicating C1', retry.status === 0 && records().length === 6 && new Set(records().map((r) => r.taskId)).size === 6, retry.stdout);
+    const again = cli(args);
+    check('partial enqueue: completed retry is unchanged on the next intake', again.value && again.value.counts.unchanged === 1 && records().length === 6);
+
+    // An idea whose input changed mid-enqueue is held alone. The other ideas in the same intake still convey.
+    const heldState = path.join(scratch, 'held', 'state.json');
+    const heldLedger = path.join(scratch, 'held-ledger.json');
+    const heldArgs = (file) => ['intake', '--source', 'vistek', '--ideas', file, '--config', CONFIG, '--state', heldState, '--ledger', heldLedger];
+    const half = cli(heldArgs(writeIdeas('held-1.json', [vistekRow('v-held', ELIGIBLE_TEXT)])), ['--require', preload]);
+    check('held: setup leaves v-held part-enqueued', half.code === 'enqueue-refused', half.stdout);
+    const changed = writeIdeas('held-2.json', [vistekRow('v-held', `${ELIGIBLE_TEXT} (3) add a footer link.`), vistekRow('v-other', ELIGIBLE_TEXT)]);
+    const mixed = cli(heldArgs(changed));
+    const hs = fs.existsSync(heldState) ? JSON.parse(fs.readFileSync(heldState, 'utf8')) : { ideas: {} };
+    const heldRecs = JSON.parse(fs.readFileSync(heldLedger, 'utf8')).records;
+    const other = hs.ideas['vistek:v-other'];
+    check('held: a changed fingerprint mid-enqueue does not abort the intake', mixed.status === 0 && mixed.code === null, mixed.stdout);
+    check('held: the other idea still enqueues its whole chain', other && other.chain && other.chain.length === 6 && !other.enqueuing
+        && heldRecs.filter((r) => r.slug.startsWith(`cv-${other.short}-`)).length === 6, JSON.stringify(other));
+    const h = hs.ideas['vistek:v-held'];
+    const hr = mixed.value && mixed.value.results.find((r) => r.key === 'vistek:v-held');
+    check('held: the changed idea keeps its one stage, stays enqueuing and records why', h && h.enqueuing === true && h.chain.length === 1
+        && h.held && /input changed/.test(h.held.reason) && hr && hr.held === 'input-changed' && mixed.value.counts.held === 1, JSON.stringify({ h, hr }));
 }
 
 // --- the full website: grill and spec only, then one blocking start decision, then nothing.

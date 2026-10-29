@@ -52,17 +52,33 @@ if (process.env.CLAUDE_PLUGIN_OPTION_TYPECHECK === 'false') process.exit(0);
 // THE PROJECT IS THE PAYLOAD'S CWD, NOT OURS. A worker launched in a product's
 // main checkout edits a worktree of it; the hook process still starts in the
 // main checkout. Recording there made the Stop half typecheck a tree with no
-// node_modules. The root is the nearest ancestor of the payload cwd holding a
-// `.git` entry (a worktree's is a file), which is `git rev-parse
-// --show-toplevel` without a subprocess on every edit. stop-typecheck.js
-// resolves the same root, so both halves agree on where the list lives.
-function projectRoot(cwd) {
-    const start = path.resolve(typeof cwd === 'string' && cwd ? cwd : process.cwd());
+// node_modules. projectRoot below resolves from the payload cwd, and
+// stop-typecheck.js carries the same resolver, so both halves agree on where the
+// list lives.
+// <project-root>
+// Kept as the same text in post-tool-typecheck.js and stop-typecheck.js;
+// tooling/test-stop-typecheck.js compares the two copies.
+/** The nearest ancestor of `start`, itself included, with a `.git` entry (a worktree's is a file). Null when none. */
+function gitBoundary(start) {
     for (let dir = start; ; dir = path.dirname(dir)) {
         if (fs.existsSync(path.join(dir, '.git'))) return dir;
-        if (path.dirname(dir) === dir) return start;
+        if (path.dirname(dir) === dir) return null;
     }
 }
+/**
+ * The nearest package.json from the cwd up to the `.git` boundary, else the boundary. A
+ * monorepo package keeps its own check, and no walk crosses into another checkout. With no
+ * `.git` at all the cwd itself: an ancestor package.json there says nothing about this project.
+ */
+function projectRoot(cwd) {
+    const start = path.resolve(typeof cwd === 'string' && cwd ? cwd : process.cwd());
+    const boundary = gitBoundary(start);
+    if (!boundary) return start;
+    for (let dir = start; ; dir = path.dirname(dir)) {
+        if (dir === boundary || fs.existsSync(path.join(dir, 'package.json'))) return dir;
+    }
+}
+// </project-root>
 
 try {
     const toolInput = (data && data.tool_input) || {};

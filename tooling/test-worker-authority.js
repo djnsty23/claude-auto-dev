@@ -188,6 +188,8 @@ function main() {
         ['gh pr merge', 'gh pr merge 12 --squash'], ['gh pr create', 'gh pr create --fill'], ['gh release create', 'gh release create v1.0.0'],
         ['gh api POST', 'gh api -X POST repos/o/r/issues -f title=x'], ['gh api with a field', 'gh api repos/o/r/issues -f title=x'],
         // A heredoc body is data only when cat or tee copies it into a file and nothing in the command runs it.
+        ['commented heredoc cannot hide a push', "true # <<'EOF'\ngit push origin main\nEOF"],
+        ['quoted marker cannot hide a push', "echo \"<<'EOF'\"\ngit push origin main\nEOF"],
         ['quoted heredoc fed to bash', "bash <<'EOF'\ngit push\nEOF"],
         ['quoted heredoc from cat piped into sh', "cat <<'EOF' | sh\ngit push\nEOF"],
         ['quoted heredoc written to a script the same command runs', `cat > "${slash(path.join(REPO, 'x.sh'))}" <<'EOF'\ngit push\nEOF\nbash "${slash(path.join(REPO, 'x.sh'))}"`],
@@ -197,6 +199,18 @@ function main() {
         ['a here-string whose word reads as a delimiter', "cat <<<'true'\ngit push\ntrue"],
         ['an unquoted heredoc before a quoted one on the line', `cat > "${slash(path.join(REPO, 'n.md'))}" <<B <<'A'\n$(git push)\nB\nx\nA`],
         ['quoted heredoc inside an unclosed bash -c string', `true; bash -c "cat > n.md <<'EOF'\ngit push\n"\nEOF`],
+    ]) expectDeny('local_push', label, B, bash(cmd));
+    // `#` opens a comment only where a word starts. Glued to `)` or a backtick it is part of the word, so
+    // bash runs everything after the `;`. A lexer that reads it as a comment hides the next command.
+    const evil = 'C:/Windows/evil.txt';
+    for (const [label, cmd] of [
+        ['$(true)# then a push', 'echo $(true)#; git push origin main'],
+        ['backtick true backtick # then a push', 'echo `true`#; git push origin main'],
+        ['$(true)# then a rm outside the roots', `echo $(true)#; rm -f ${evil}`],
+        ['backtick true backtick # then a rm outside the roots', `echo \`true\`#; rm -f ${evil}`],
+        ['$(true)# then source', 'echo $(true)#; source ./x.sh'],
+        ['$(true)# then a redirect outside the roots', `echo $(true)#; echo x > ${evil}`],
+        ['an unclosed quote after $(true)#', "echo $(true)#; echo 'never closed"],
     ]) expectDeny('local_push', label, B, bash(cmd));
 
     // ------------------------------------------------------------ undeclared_secret

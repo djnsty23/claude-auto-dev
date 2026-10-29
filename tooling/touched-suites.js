@@ -134,7 +134,8 @@ function reachOf(root, suite, idx) {
 
 /** Suites (repo paths) whose reach holds a touched file, each with the files that selected it. */
 function selectSuites(root, tracked, touched) {
-    const idx = indexTree(tracked);
+    // Deleted inputs still belong to dependency reach; only extant suites run.
+    const idx = indexTree([...new Set([...tracked, ...touched])]);
     const suites = tracked.filter((f) => /^tooling\/test-[^/]+\.js$/.test(f)).sort();
     const hit = [];
     const touchedSet = new Set(touched);
@@ -169,8 +170,7 @@ function plan(root, base = 'origin/main') {
     if (!t) return { error: `cannot read the diff against the merge base with ${base}` };
     const tracked = trackedFiles(root);
     if (!tracked) return { error: 'cannot list the tracked files' };
-    const present = new Set(tracked);
-    const sel = selectSuites(root, tracked, t.files.filter((f) => present.has(f)));
+    const sel = selectSuites(root, tracked, t.files);
     return { base: t.base, touched: t.files, suites: sel.suites, selected: sel.selected };
 }
 

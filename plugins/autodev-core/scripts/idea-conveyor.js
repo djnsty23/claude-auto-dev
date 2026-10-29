@@ -210,7 +210,7 @@ function mutateState(opts, fn) {
     const file = path.resolve(opts.state || defaultState());
     return withLock(file, () => {
         const s = readState(file);
-        const value = fn(s);
+        const value = fn(s, () => writeState(file, s));
         writeState(file, s);
         return { state: file, ...value };
     });
@@ -370,16 +370,26 @@ function intake(opts) {
     const counts = { read: rows.length, unreadable, unchanged: 0, skipped: 0, parked: 0, feature: 0, 'full-website': 0, held: 0 };
     const results = [];
     let started = 0;
-    const run = (s) => {
+    const run = (s, checkpoint = () => {}) => {
         s.config = { hub: config.hub };
         for (const idea of ideas.filter(Boolean)) {
             const fp = fingerprint(idea);
             const prior = s.ideas[idea.key];
+            const resuming = prior && prior.enqueuing === true;
+            // Input that changed mid-enqueue holds this idea alone: its stored chain was briefed from the old
+            // text, so neither resuming nor restarting is safe. The other ideas in the intake still convey.
+            if (resuming && prior.fingerprint !== fp) {
+                const reason = `input changed during partial enqueue: ${prior.chain.length} of ${(CHAINS[prior.class] || []).length} stages queued from the earlier text`;
+                results.push({ key: idea.key, class: prior.class, held: 'input-changed', reason });
+                counts.held++;
+                if (!opts['dry-run']) prior.held = { reason, fingerprint: fp, at: new Date().toISOString() };
+                continue;
+            }
             // A conveyed idea is never conveyed twice. Skipped and parked are judged again on change.
-            if (prior && (prior.fingerprint === fp || ['feature', 'full-website'].includes(prior.class))) { counts.unchanged++; continue; }
+            if (prior && !resuming && (prior.fingerprint === fp || ['feature', 'full-website'].includes(prior.class))) { counts.unchanged++; continue; }
             const verdict = classify(idea, config);
             counts[verdict.class]++;
-            const entry = { key: idea.key, source: idea.source, id: idea.id, title: idea.title, short: shortOf(idea.key), fingerprint: fp,
+            const entry = resuming ? prior : { key: idea.key, source: idea.source, id: idea.id, title: idea.title, short: shortOf(idea.key), fingerprint: fp,
                 class: verdict.class, reasons: verdict.reasons, product: verdict.product || null, classifiedAt: new Date().toISOString(),
                 ...(prior && prior.mirrorId ? { mirrorId: prior.mirrorId } : {}), ...(prior && prior.mirrorOutbox ? { mirrorOutbox: prior.mirrorOutbox } : {}) };
             const result = { key: idea.key, class: verdict.class, reasons: verdict.reasons };
@@ -403,14 +413,16 @@ function intake(opts) {
             const briefDir = path.join(path.dirname(path.resolve(opts.state || defaultState())), 'briefs');
             fs.mkdirSync(briefDir, { recursive: true });
             const chain = CHAINS[verdict.class];
-            entry.chain = [];
-            let prev = null;
-            for (let n = 0; n < chain.length; n++) {
+            if (!resuming) entry.chain = [];
+            entry.enqueuing = true;
+            let prev = entry.chain[entry.chain.length - 1] || null;
+            for (let n = entry.chain.length; n < chain.length; n++) {
                 const code = chain[n];
                 const briefFile = path.join(briefDir, `cv-${entry.short}-${code.toLowerCase()}.md`);
                 fs.writeFileSync(briefFile, composeBrief(entry, idea, code, chain[n + 1] ? `${chain[n + 1]} ${STAGES[chain[n + 1]].name}` : null));
                 const stage = enqueueStage({ entry, code, repo: verdict.repo, base: prev ? `origin/${prev.branch}` : 'origin/main', after: prev ? prev.taskId : null, briefFile, config, ledger: opts.ledger });
                 entry.chain.push(stage);
+                checkpoint();
                 prev = stage;
             }
             result.tasks = entry.chain.map((c) => c.taskId);
@@ -422,6 +434,8 @@ function intake(opts) {
                 entry.startDecision = code;
             }
             queueNote(s, entry, `Conveyor: ${verdict.class}. Enqueued ${entry.chain.map((c) => `${c.code} ${STAGES[c.code].name}`).join(', ')}${verdict.class === 'full-website' ? ', then a start decision' : ''}.`);
+            delete entry.enqueuing;
+            delete entry.held;
         }
         return { counts, results };
     };
@@ -519,7 +533,10 @@ function tick(opts) {
                 events.push({ code: d.code, event: 'posted', blocking: true });
                 continue;
             }
-            if (d.state !== 'open' || d.blocking || !d.approvesAt) continue;
+            // A posted decision is on the Hub, where a person may have picked. Without --decisions this
+            // tick never read that pick, so silence cannot approve it: the queued Hub pick would overwrite theirs.
+            if (d.state === 'posted' && !opts.decisions) continue;
+            if (!['open', 'posted'].includes(d.state) || d.blocking || !d.approvesAt) continue;
             const next = byId.get(d.approvesAt);
             if (!next || NOT_STARTED.includes(next.state)) continue;
             Object.assign(d, { state: 'silence-approved', pick: d.recommended, pickedBy: 'silence', pickedAt: new Date().toISOString() });

@@ -61,6 +61,103 @@ const blocked = (r) => r.status === 0 && r.json && r.json.decision === 'block' &
 const FAILING = 'node -e "console.log(\'TYPE_ERROR_MARKER\'); process.exit(1)"';
 const PASSING = 'node -e "process.exit(0)"';
 
+// Both halves must select the package, even from a nested cwd in a worktree.
+{
+    const root = project({ scripts: {} });
+    fs.writeFileSync(path.join(root, '.git'), 'gitdir: fixture\n');
+    const pkg = path.join(root, 'packages', 'web');
+    const sub = path.join(pkg, 'src');
+    fs.mkdirSync(sub, { recursive: true });
+    fs.mkdirSync(path.join(pkg, 'node_modules'));
+    fs.writeFileSync(path.join(pkg, 'package.json'), JSON.stringify({ name: 'web', scripts: { typecheck: FAILING } }));
+    const post = path.join(path.dirname(HOOK), 'post-tool-typecheck.js');
+    const r = spawnSync(process.execPath, [post], { cwd: root, encoding: 'utf8', input: JSON.stringify({
+        cwd: sub, tool_input: { file_path: path.join(sub, 'app.ts') },
+    }) });
+    check('monorepo: PostToolUse records the edit in the nearest package', r.status === 0 &&
+        fs.existsSync(path.join(pkg, '.claude', '.typecheck-pending')) && consumed(root));
+    // Plant independently so Stop is tested even if the producer is broken.
+    fs.mkdirSync(path.join(pkg, '.claude'), { recursive: true });
+    fs.writeFileSync(path.join(pkg, '.claude', '.typecheck-pending'), path.join(sub, 'app.ts') + '\n');
+    const stop = run(sub);
+    check('monorepo: Stop blocks on the package type error', blocked(stop) && /TYPE_ERROR_MARKER/.test(stop.json.reason));
+    check('monorepo: Stop consumes the package pending list', consumed(pkg));
+}
+
+// ---------------------------------------------------------------- one root for both halves
+// The two hooks share no module, so each carries a copy of the root resolver between
+// `// <project-root>` sentinels. The copies must be the same text and must agree on every
+// layout: a root that differs means Post records a list that Stop never reads.
+const POST_HOOK = path.join(path.dirname(HOOK), 'post-tool-typecheck.js');
+function resolverOf(file) {
+    const m = /\/\/ <project-root>\r?\n([\s\S]*?)\r?\n\/\/ <\/project-root>/.exec(fs.readFileSync(file, 'utf8'));
+    if (!m) return null;
+    return { text: m[1], fns: new Function('fs', 'path', `${m[1]}\nreturn { projectRoot, gitBoundary };`)(fs, path) };
+}
+{
+    const L = path.join(TMP, 'layouts');
+    const mk = (rel, file, body) => { fs.mkdirSync(path.join(L, rel), { recursive: true }); if (file) fs.writeFileSync(path.join(L, rel, file), body); };
+    mk('mono', 'package.json', '{"name":"mono","private":true}');
+    mk('mono/.git');
+    mk('mono/packages/web', 'package.json', '{"name":"web"}');
+    mk('mono/packages/web/src');
+    mk('outer', 'package.json', '{"name":"outer"}');
+    mk('outer/wt', '.git', 'gitdir: fixture\n');
+    mk('outer/wt', 'package.json', '{"name":"wt"}');
+    mk('outer/wt/src');
+    mk('loose', 'package.json', '{"name":"unrelated-ancestor"}');
+    mk('loose/sub/dir');
+    const layouts = [
+        ['monorepo root cwd', 'mono', 'mono'],
+        ['package cwd inside a monorepo', 'mono/packages/web/src', 'mono/packages/web'],
+        ['worktree with a .git FILE', 'outer/wt/src', 'outer/wt'],
+        ['no .git, unrelated ancestor package.json', 'loose/sub/dir', 'loose/sub/dir'],
+    ];
+    const post = resolverOf(POST_HOOK);
+    const stop = resolverOf(HOOK);
+    check('root parity: both hooks carry the <project-root> resolver', !!post && !!stop);
+    check('root parity: the two copies are the same text', !!post && !!stop && post.text === stop.text);
+    for (const [label, cwd, want] of layouts) {
+        const a = post && post.fns.projectRoot(path.join(L, cwd));
+        const b = stop && stop.fns.projectRoot(path.join(L, cwd));
+        check(`root parity: ${label}: both resolve ${want}`, a === path.join(L, want) && b === a);
+    }
+    // The same no-.git case through the real hooks: Post records nothing, Stop reads only the cwd's list.
+    const loose = path.join(L, 'loose', 'sub', 'dir');
+    const pr = spawnSync(process.execPath, [POST_HOOK], { cwd: loose, encoding: 'utf8', input: JSON.stringify({
+        cwd: loose, tool_input: { file_path: path.join(loose, 'app.ts') } }) });
+    check('no .git: Post is silent and records nothing in an unrelated ancestor package',
+        pr.status === 0 && !pr.stdout && !pr.stderr && !fs.existsSync(path.join(L, 'loose', '.claude', '.typecheck-pending')));
+}
+
+// ---------------------------------------------------------------- a hoisted workspace
+// npm, pnpm and yarn workspaces install into the repo root. The package has no node_modules
+// and no lockfile of its own, so both are looked for up to the `.git` boundary.
+{
+    const repo = path.join(TMP, 'hoisted');
+    const web = path.join(repo, 'packages', 'web');
+    fs.mkdirSync(path.join(repo, '.git'), { recursive: true });
+    fs.mkdirSync(path.join(repo, 'node_modules'));
+    fs.mkdirSync(path.join(web, 'src'), { recursive: true });
+    fs.writeFileSync(path.join(repo, 'package.json'), JSON.stringify({ name: 'repo', private: true, workspaces: ['packages/*'] }));
+    fs.writeFileSync(path.join(repo, 'pnpm-lock.yaml'), 'lockfileVersion: 9.0\n');
+    fs.writeFileSync(path.join(web, 'package.json'), JSON.stringify({ name: 'web', scripts: { typecheck: FAILING } }));
+    // A pnpm shim on PATH that names itself, so the block proves the root lockfile chose the manager.
+    const bin = path.join(TMP, 'shim-bin');
+    fs.mkdirSync(bin, { recursive: true });
+    fs.writeFileSync(path.join(bin, 'pnpm.cmd'), '@echo PNPM_SHIM %*\r\n@exit /b 1\r\n');
+    fs.writeFileSync(path.join(bin, 'pnpm'), '#!/bin/sh\necho PNPM_SHIM "$@"\nexit 1\n', { mode: 0o755 });
+    const pathKey = Object.keys(process.env).find((k) => k.toUpperCase() === 'PATH') || 'PATH';
+    const post = spawnSync(process.execPath, [POST_HOOK], { cwd: web, encoding: 'utf8', input: JSON.stringify({
+        cwd: web, tool_input: { file_path: path.join(web, 'src', 'app.ts') } }) });
+    check('hoisted: Post records the edit in the package', post.status === 0 && fs.existsSync(path.join(web, '.claude', '.typecheck-pending')));
+    const stop = run(web, { env: { [pathKey]: bin + path.delimiter + process.env[pathKey] } });
+    check('hoisted: Stop is not silent when node_modules sits at the repo root', !silent(stop));
+    check('hoisted: Stop blocks, running the package script with the root lockfile manager',
+        blocked(stop) && /PNPM_SHIM run typecheck/.test(stop.json.reason));
+    check('hoisted: Stop consumes the package pending list', consumed(web));
+}
+
 // ---------------------------------------------------------------- silence
 
 {

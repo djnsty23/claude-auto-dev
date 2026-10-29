@@ -100,13 +100,30 @@ function runQuiet(cmd, cwd) {
 // in a product's main checkout and editing a worktree of it starts this hook in
 // the main checkout, and running the check there reported "Cannot find module"
 // on every turn, because only the worktree has node_modules.
-function projectRoot(cwd) {
-    const start = path.resolve(typeof cwd === 'string' && cwd ? cwd : process.cwd());
+// <project-root>
+// Kept as the same text in post-tool-typecheck.js and stop-typecheck.js;
+// tooling/test-stop-typecheck.js compares the two copies.
+/** The nearest ancestor of `start`, itself included, with a `.git` entry (a worktree's is a file). Null when none. */
+function gitBoundary(start) {
     for (let dir = start; ; dir = path.dirname(dir)) {
         if (fs.existsSync(path.join(dir, '.git'))) return dir;
-        if (path.dirname(dir) === dir) return start;
+        if (path.dirname(dir) === dir) return null;
     }
 }
+/**
+ * The nearest package.json from the cwd up to the `.git` boundary, else the boundary. A
+ * monorepo package keeps its own check, and no walk crosses into another checkout. With no
+ * `.git` at all the cwd itself: an ancestor package.json there says nothing about this project.
+ */
+function projectRoot(cwd) {
+    const start = path.resolve(typeof cwd === 'string' && cwd ? cwd : process.cwd());
+    const boundary = gitBoundary(start);
+    if (!boundary) return start;
+    for (let dir = start; ; dir = path.dirname(dir)) {
+        if (dir === boundary || fs.existsSync(path.join(dir, 'package.json'))) return dir;
+    }
+}
+// </project-root>
 
 try {
     let data = {};
@@ -140,16 +157,29 @@ try {
     const files = [...new Set(raw.split('\n').map((s) => s.trim()).filter(Boolean))];
     if (files.length === 0) process.exit(0);
     if (!fs.existsSync(at('package.json'))) process.exit(0);
+    // Workspaces hoist node_modules and the lockfile to the repo root, so both are
+    // looked for from the package up to the `.git` boundary. With no boundary only
+    // the root itself counts.
+    const boundary = gitBoundary(root);
+    const ups = [];
+    for (let dir = root; ; dir = path.dirname(dir)) {
+        ups.push(dir);
+        if (!boundary || dir === boundary || path.dirname(dir) === dir) break;
+    }
     // No node_modules: every module import fails, so the output would be noise
     // about the install, not about the edit. Nothing a type check can say here.
-    if (!fs.existsSync(at('node_modules'))) process.exit(0);
+    if (!ups.some((d) => fs.existsSync(path.join(d, 'node_modules')))) process.exit(0);
 
     let pkg = {};
     try { pkg = JSON.parse(fs.readFileSync(at('package.json'), 'utf8')) || {}; } catch { pkg = {}; }
     const scripts = pkg.scripts || {};
-    const pm = fs.existsSync(at('pnpm-lock.yaml')) ? 'pnpm' :
-               fs.existsSync(at('yarn.lock')) ? 'yarn' :
-               fs.existsSync(at('bun.lockb')) ? 'bun' : 'npm';
+    // The nearest directory holding a lockfile names the manager.
+    const LOCKS = [['pnpm-lock.yaml', 'pnpm'], ['yarn.lock', 'yarn'], ['bun.lockb', 'bun'], ['package-lock.json', 'npm']];
+    let pm = 'npm';
+    for (const d of ups) {
+        const hit = LOCKS.find(([f]) => fs.existsSync(path.join(d, f)));
+        if (hit) { pm = hit[1]; break; }
+    }
 
     const findings = [];
     // A check that ran out of budget is INCONCLUSIVE, not passing and not
