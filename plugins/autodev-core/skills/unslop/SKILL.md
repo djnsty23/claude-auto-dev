@@ -109,9 +109,20 @@ Use the product's own worktree, never its live main tree.
    **A fix counts only when its target count dropped AND no other count rose anywhere**: no
    other rule, no axe violation, on no other route. Verdicts: `COUNTS`, `NO-DROP`,
    `REGRESSED-ELSEWHERE`. Exit 1 unless it counts.
-8. **Blind judge.** `unslop-sweep.js pairs <before> <after> --pairs <dir>` writes shuffled pairs
-   and keeps the key apart. Spawn an `Agent` with only `pairs.json` and the images, then
-   `unslop-sweep.js pair-score <dir> --verdicts <json>` reports the after side's win rate.
+8. **Blind judge panel.** `unslop-sweep.js pairs <before> <after> --pairs <dir>` writes shuffled
+   pairs and keeps the key apart. Then:
+   ```bash
+   node "${CLAUDE_PLUGIN_ROOT}/scripts/judge-panel.js" run <dir> [--reference <approved shots>] [--owner <picks.json>]
+   ```
+   Three tool-less judges with different lenses answer alone; the majority per pair is scored
+   against the key. Exit 0 KEEP, 1 REVERT (no net win, or a regressed capture over
+   `--max-loss-share`), 2 could not judge, which is never a pass. Report the win rate, the
+   agreement and, when the owner has picked the same pairs, the owner agreement. The panel is a
+   ratchet against regressions; until owner agreement is known it is not a measure of taste.
+9. **Hill-climb.** For polish beyond the stories, iterate: one change, re-sweep (step 7),
+   panel (step 8). Keep the iteration only when compare does not regress and the panel exits 0,
+   then make that sweep the new baseline. Otherwise revert it. Stop after two rounds in a row
+   with no kept change, and report each round's verdicts.
 
 ## Before publish: generic template tells
 
@@ -149,8 +160,8 @@ null and prints n/a, never 0.
 Routes swept of planned, unsampled patterns, widths, signed-in status, findings by rule
 **with the number of captures each rule judged**, the top 10 ranked findings with their
 measured values and thresholds, the impeccable probe's exit and findings by rule (or "not
-run" with its reason), stories added, the compare table and verdict, the blind-judge
-win rate, and the advisory vision list kept apart.
+run" with its reason), stories added, the compare table and verdict, the judge
+panel's decision, win rate and agreement, and the advisory vision list kept apart.
 
 ## Where it is wired
 
