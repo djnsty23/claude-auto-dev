@@ -48,6 +48,11 @@
   content, analysis, ad and publishing work as ASK, keeps the idea title out of
   the brief heading, holds only the affected idea on a partial enqueue, and
   never approves a posted decision by silence (#456, #457, #459, #467).
+- `blocker-report.js` ranks what slows the workers from data already on disk,
+  as a brain-clock observer, and every headless worker states a `BLOCKER:`
+  line. `judge-panel.js` sends unslop's blind pairs to three judges with
+  separate lenses and keeps a UI iteration only when the majority prefers it
+  (#470).
 
 ### Scorecard and cost
 
