@@ -42,6 +42,20 @@ If the user said "build a SaaS with Supabase and Stripe" — infer all three, do
 
 ### Step 2: Scaffold
 
+**A module kit comes first.** Look for one at `$AUTODEV_MODULE_KIT`, then in every sibling of the
+destination (`ls ../*/modules/registry.json`). A kit holds `modules/registry.json`,
+`scripts/new-site.mjs` and `scripts/install-module.mjs`. When one exists and the project is a web site
+or app in the kit's stack, scaffold with it, naming the modules `docs/new-app/02-modules.md` maps (or,
+without that file, every registry module whose `provides` covers a Step 1 requirement):
+
+```bash
+node <kit>/scripts/new-site.mjs <name> --into <parent> --with <id,id>
+```
+
+Keep the `AGENTS.md` and `CLAUDE.md` it writes: they tell later sessions which modules are installed and
+which to install before building a common part. Report the kit path and the modules installed in
+`03-setup.md`. Without a kit, say where you looked, then continue below.
+
 For a new Next.js app with pnpm selected, first verify the scaffold CLI version
 and flags from current official documentation, then run its equivalent of:
 
@@ -86,7 +100,8 @@ Read real project state with Read and Glob tools (not `node -e` one-liners). Inc
 - Environment variables (from .env.example)
 - Test runner (whatever is installed)
 
-If CLAUDE.md already exists, merge new info — don't overwrite.
+If CLAUDE.md already exists, merge new info — don't overwrite. Keep an `@AGENTS.md` import a module
+kit wrote: the module list lives there.
 
 ### Step 6: Environment Setup
 
@@ -190,6 +205,10 @@ actual name. A package dependency does not prove the integration is available.
 | playwright/cypress | prove |
 | @sentry/nextjs | production-radar or the installed observability capability |
 | Any auth | security |
+
+**Modules.** When a module kit is found (Create mode Step 2 says where to look), compare the project's
+hand-built parts with each registry module's `provides`. Recommend `install-module.mjs <id> --site .`
+for each one a module covers, with the file it would replace. Install only when the request authorizes it.
 
 ### Step 4: Check for Gaps
 
