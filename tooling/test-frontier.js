@@ -178,9 +178,9 @@ function run(args, extra = {}, timeout = 120000) {
     try { json = JSON.parse((r.stdout || '').trim().split('\n').pop()); } catch { json = null; }
     return { exit: r.status, json, stdout: r.stdout, stderr: r.stderr };
 }
-function startAndFinish(task, variant, mode, extra = {}, waitSec = 60) {
+function startAndFinish(task, variant, mode, extra = {}, waitSec = 60, routingArm = null) {
     const started = performance.now();
-    const s = run(['run', '--task', task, '--variant', variant, '--account', 'testacct'], Object.assign({ AUTODEV_FAKE_MODE: mode }, extra));
+    const s = run(['run', '--task', task, ...(routingArm ? ['--routing-arm', routingArm] : ['--variant', variant]), '--account', 'testacct'], Object.assign({ AUTODEV_FAKE_MODE: mode }, extra));
     if (!s.json || !s.json.ok) return { start: s, row: null };
     const f = run(['finish', '--run', s.json.value.run, '--wait-sec', String(waitSec)], extra, (waitSec + 60) * 1000);
     if (f.json && f.json.ok) runMeasurements.push(performance.now() - started);
@@ -379,6 +379,8 @@ function cliCases(shas) {
 
     const prep = run(['prepare', '--task', 'TX', '--variant', 'V1']);
     const m = prep.json && prep.json.value;
+    check('routing metadata records a seeded split and the executed variant', m && /^[a-f0-9]{64}$/.test(m.splitId)
+        && /^[a-f0-9]{64}$/.test(m.taskIdHash) && ['held-out', 'training'].includes(m.split) && m.route === 'V1', m);
     const repoCommits = m ? git(['rev-list', '--count', 'HEAD'], m.repo) : null;
     check('28. prepare builds a one-commit repo at the parent, without the held-out test', m && repoCommits === '1' && !fs.existsSync(path.join(m.repo, 'tooling', 'test-add.js'))
         && /a - b/.test(fs.readFileSync(path.join(m.repo, 'lib', 'add.js'), 'utf8')), { repoCommits, m });
@@ -405,8 +407,12 @@ function cliCases(shas) {
     fs.unlinkSync(path.join(HOME, 'rules', 'lesson.md'));
     run(['snapshot']);
 
-    const fixed = startAndFinish('TX', 'V0', 'fix');
+    const fixed = startAndFinish('TX', 'V0', 'fix', {}, 60, 'baseline');
     const row = fixed.row;
+    check('finished baseline run retains split, actual route and pre-start content seal', row && row.routingArm === 'baseline'
+        && row.route === 'V0' && row.variant === 'V0' && row.taskIdHash === m.taskIdHash && row.splitId === m.splitId
+        && /^[a-f0-9]{64}$/.test(row.heldOutHash) && typeof row.sealed === 'boolean'
+        && row.seal.currentHash === row.heldOutHash && row.seal.checkedAt <= row.startedAt, row);
     check('36. a worker that fixes the bug passes, graded by the held-out test and the neighbour', row && row.verdict === 'pass' && row.grade.checks[0].exit === 0 && row.grade.passToPass[0].exit === 0, row || fixed.start.json);
     check('37. the row carries tokens by class and the notional cost from the result event', row && row.tokens.total === 370 && row.tokens.cacheRead === 300 && row.tokens.thinking === 5 && row.costUsd === 0.5 && row.turns === 3, row && row.tokens);
     check('38. the fingerprint names the model, the pin, the loaded plugins and apiKeySource none',
@@ -422,7 +428,9 @@ function cliCases(shas) {
     const again = run(['finish', '--run', row ? row.run : 'x']);
     check('43. finish is idempotent: the same row back and one row in the file', again.json && row && again.json.value.finishedAt === row.finishedAt && rows().filter((r) => r.run === row.run).length === 1);
 
-    const noop = startAndFinish('TX', 'V1', 'noop');
+    const noop = startAndFinish('TX', 'V1', 'noop', {}, 60, 'routed');
+    check('routed arm selects and executes the configured model', noop.row && noop.row.routingArm === 'routed'
+        && noop.row.route === 'V1' && noop.row.fingerprint.model === 'claude-sonnet-5-5', noop.row);
     check('44. a worker that does nothing fails on the held-out test', noop.row && noop.row.verdict === 'fail' && noop.row.grade.checks[0].exit === 1, noop.row || noop.start.json);
     const cheat = startAndFinish('TX', 'V1', 'cheat');
     check('45. a worker that rewrites the test instead of the code fails: the held-out file wins', cheat.row && cheat.row.verdict === 'fail', cheat.row || cheat.start.json);

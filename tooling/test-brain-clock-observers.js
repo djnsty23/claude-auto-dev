@@ -99,6 +99,9 @@ try {
     w(cfg, { observers: [{ id: 'shipped', script: 'prd-states.js', everyMin: 60 }] });
     t = tick('2026-11-04T00:25:00Z');
     check('a shipped bare name runs from beside the clock', /^observers: 1 configured, ran shipped exit 0 in \d+ ms$/.test(t.line || ''), t.out);
+    w(cfg, { observers: [{ id: 'frontier', script: 'frontier-evidence.js', args: ['observe', '--data', path.join(root, 'frontier')], everyMin: 60 }] });
+    t = tick('2026-11-04T00:30:00Z');
+    check('the frontier-evidence observer runs beside the clock over an empty root', /ran frontier exit 0/.test(t.line || '') && events('observer.ran').some((e) => e.key === 'frontier'), t.out);
 } catch (e) {
     failed++;
     console.log(`FAIL the suite crashed: ${e.stack || e}`);

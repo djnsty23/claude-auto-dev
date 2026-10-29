@@ -30,12 +30,14 @@ const os = require('os');
 const path = require('path');
 const crypto = require('crypto');
 const { spawnSync, spawn } = require('child_process');
+const evidence = require('../../plugins/autodev-core/scripts/frontier-evidence.js');
 
 const USAGE = [
     'Usage: node tooling/frontier/run.js <command> [options]',
     '  snapshot                        freeze the harness config (CLAUDE.md, rules, agents, output styles, settings)',
     '  plant [--task T1,T3]            unfixed red, fixed green, neighbours green, contamination fires; no model tokens',
     '  prepare --task T --variant V    build the repo, config dir and pin, run the contamination check, start nothing',
+    '  prepare|run ... --routing-arm baseline|routed   fixed seeded routing experiment; selects the variant by lane',
     '  run --task T --variant V --account <name> [--repeat n]   prepare and start one worker, return at once',
     '  prepare|run ... --plan <file> --arm <id>   run one arm of a preregistered plan: its variant (--variant may be left',
     '                                  out) and its plugin pin (current, previous or none), recorded on the row as arm',
@@ -542,10 +544,26 @@ function plantOk(c, task) {
     return rec;
 }
 
+function learningSeal(c, taskId, cfg, pluginDir) {
+    // These are the frozen instructions plus the frontier learning corpus.
+    // Capture them before start, never by reading mutable files at finish.
+    return evidence.seal(c.data, c.tasks, taskId, [
+        { path: cfg }, ...(pluginDir ? [{ path: pluginDir }] : []),
+        ...['lessons', 'prompts', 'learning'].map((name) => ({ path: path.join(c.data, name), optional: true })),
+    ]);
+}
+
 // ---------------------------------------------------------------- prepare and start
-function prepare(c, taskId, variantId, repeat = 1, { account = null, arm = null } = {}) {
+function prepare(c, taskId, variantId, repeat = 1, { account = null, arm = null, routingArm = null } = {}) {
     if (arm && arm.variant !== variantId) fault('arm-variant', `arm ${arm.id} runs variant ${arm.variant}, not ${variantId}`);
     const task = loadTask(c, taskId);
+    const split = evidence.assignment(c.data, c.tasks, taskId);
+    if (routingArm) {
+        if (arm) fault('usage', 'routing-arm cannot be combined with a plan arm');
+        const chosen = evidence.route(task, routingArm);
+        if (variantId && variantId !== chosen) fault('usage', 'variant does not match the fixed route');
+        variantId = chosen;
+    }
     const variant = loadVariant(variantId);
     if (variant.lanes && !variant.lanes.includes(task.lane)) fault('lane-mismatch', `variant ${variant.id} runs only ${variant.lanes.join(',')} and ${task.id} is ${task.lane}`);
     const plant = plantOk(c, task);
@@ -561,6 +579,7 @@ function prepare(c, taskId, variantId, repeat = 1, { account = null, arm = null 
     const brief = fs.readFileSync(path.join(c.tasks, task.brief), 'utf8');
     fs.writeFileSync(p.prompt, composePrompt(task, brief, p.repo));
     const meta = {
+        ...split, ...learningSeal(c, taskId, p.cfg, pin.pluginDir), route: variant.id, routingArm,
         run, task: task.id, taskHash: task.hash, lane: task.lane, variant: variant.id, arm: arm ? arm.id : null, pluginPin: arm ? arm.pluginPin : null,
         model: variant.model, effort: variant.effort || null,
         account, repeat, createdAt: new Date().toISOString(), timeoutMin: Number(task.timeoutMin || 30),
@@ -576,6 +595,7 @@ function prepare(c, taskId, variantId, repeat = 1, { account = null, arm = null 
 
 function start(c, meta, env) {
     const p = runPaths(c, meta.run);
+    Object.assign(meta, learningSeal(c, meta.task, p.cfg, meta.pin.dir));
     const argv = [c.hw, 'start', '--code', meta.run, '--prompt-file', p.prompt, '--log', p.log, '--report', p.report,
         '--config-dir', p.cfg, '--model', meta.model, ...(meta.pin.dir ? ['--plugin-dir', meta.pin.dir] : []), '--permission-mode', 'dontAsk',
         '--cwd', p.repo, '--ledger', path.join(c.data, 'ledger.json'), '--dev'];
@@ -591,9 +611,9 @@ function start(c, meta, env) {
     return meta;
 }
 
-function runOne(c, taskId, variantId, account, repeat, env, extra = {}, arm = null) {
+function runOne(c, taskId, variantId, account, repeat, env, extra = {}, arm = null, routingArm = null) {
     const wenv = workerEnv(env, account);
-    const meta = Object.assign(prepare(c, taskId, variantId, repeat, { account, arm }), extra);
+    const meta = Object.assign(prepare(c, taskId, variantId, repeat, { account, arm, routingArm }), extra);
     if (meta.state === 'contaminated') {
         appendRow(c, rowFor(c, meta, { verdict: 'contaminated', pass: null }));
         fault('contaminated', `${meta.run}: ${meta.contamination.hits.map((h) => `${h.token} in ${h.file}`).join('; ')}`);
@@ -754,6 +774,9 @@ function appendRow(c, row) {
 function rowFor(c, meta, extra) {
     return Object.assign({
         v: 1, run: meta.run, task: meta.task, lane: meta.lane, variant: meta.variant, arm: meta.arm || null, pluginPin: meta.pluginPin || null,
+        splitId: meta.splitId || null, splitAt: meta.splitAt || null, split: meta.split || null,
+        taskIdHash: meta.taskIdHash || null, route: meta.route || null, routingArm: meta.routingArm || null,
+        heldOutHash: meta.heldOutHash || null, sealed: meta.sealed === true, seal: meta.seal || null,
         account: meta.account, repeat: meta.repeat,
         taskHash: meta.taskHash, startedAt: meta.startedAt || null,
         fingerprint: { requestedModel: meta.model, effort: meta.effort, pin: meta.pin.tag, pinHash: meta.pin.hash, plugins: meta.pin.plugins,
@@ -1144,14 +1167,14 @@ function main(argv) {
         case 'plant': value = plant(c, opts.task ? list(opts.task) : allTaskIds(c)); break;
         case 'prepare': {
             const arm = armOpt(opts);
-            if (!opts.task || !(opts.variant || arm)) fault('usage', 'prepare needs --task and --variant (or --plan and --arm)');
-            value = prepare(c, opts.task, arm ? arm.variant : opts.variant, Number(opts.repeat || 1), { arm });
+            if (!opts.task || !(opts.variant || arm || opts['routing-arm'])) fault('usage', 'prepare needs --task and --variant (or an arm)');
+            value = prepare(c, opts.task, arm ? arm.variant : opts.variant, Number(opts.repeat || 1), { arm, routingArm: opts['routing-arm'] || null });
             break;
         }
         case 'run': {
             const arm = armOpt(opts);
-            if (!opts.task || !(opts.variant || arm) || !opts.account) fault('usage', 'run needs --task, --variant (or --plan and --arm) and --account');
-            value = runOne(c, opts.task, arm ? arm.variant : opts.variant, opts.account, Number(opts.repeat || 1), process.env, {}, arm);
+            if (!opts.task || !(opts.variant || arm || opts['routing-arm']) || !opts.account) fault('usage', 'run needs --task, a variant or arm, and --account');
+            value = runOne(c, opts.task, arm ? arm.variant : opts.variant, opts.account, Number(opts.repeat || 1), process.env, {}, arm, opts['routing-arm'] || null);
             break;
         }
         case 'finish': {

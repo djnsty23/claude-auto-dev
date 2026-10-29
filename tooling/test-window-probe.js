@@ -11,7 +11,7 @@
 // the wiring in docs/scorecard-criteria.json is graded too.
 //
 // Prints one summary line:
-//   specs=17 gap_planted=FAIL bad_record=FAIL clean_pass=9 no_writer=8 unreadable=EXIT2
+//   specs=17 gap_planted=FAIL bad_record=FAIL clean_pass=11 no_writer=6 unreadable=EXIT2
 // and sets a nonzero exitCode when any case fails.
 
 const fs = require('fs');
@@ -28,7 +28,7 @@ const DAYS = ['2026-11-06', '2026-11-07', '2026-11-08', '2026-11-09', '2026-11-1
 // The shipped modules that require ledger-lock.js, by hand. The spec's own list and a grep of
 // the plugins must both equal it.
 const LOCK_INVENTORY = ['hooks~peer-send-ledger.js', 'scripts~ask-queue.js', 'scripts~brain-clock.js', 'scripts~execution-budget.js',
-    'scripts~production-signals.js', 'scripts~radar-learning.js', 'scripts~watch-panels.js', 'scripts~worker-reconcile.js'];
+    'scripts~frontier-evidence.js', 'scripts~production-signals.js', 'scripts~radar-learning.js', 'scripts~watch-panels.js', 'scripts~worker-reconcile.js'];
 const manifest = JSON.parse(fs.readFileSync(path.join(ROOT, 'docs', 'scorecard-criteria.json'), 'utf8'));
 const expectOf = (id) => new RegExp(manifest.aspects.flatMap((a) => a.criteria).find((c) => c.id === id).expect, 'm');
 
@@ -195,8 +195,13 @@ const FIX = {
     'instruction-window': (h, o) => write(h, 'logs/instruction-envelope.jsonl', jsonl(DAYS.map((d) => ({
         at: `${d}T09:00:00Z`, sessionId: `s-${d}`, source: d === o.gap ? 'resume' : 'startup', inside: d !== o.bad,
         rulesTotal: d === o.bad ? 33000 : 30000, budget: 32000, envelopeTotal: 38000, missing: 0, conflicts: 0 })))),
-    'skill-window': (h, o) => write(h, 'autodev/frontier/runs.jsonl', jsonl(DAYS.filter((d) => d !== o.gap).map((d) => ({
-        run: `r-${d}`, startedAt: `${d}T09:00:00Z`, finishedAt: `${d}T09:10:00Z`, routedTo: 'audit', pass: d !== o.bad })))),
+    'skill-window': (h, o) => {
+        write(h, 'autodev/frontier/runs.jsonl', jsonl(DAYS.filter((d) => d !== o.gap).map((d) => ({
+            run: `r-${d}`, startedAt: `${d}T09:00:00Z`, finishedAt: `${d}T09:10:00Z`, routedTo: 'audit', pass: d !== o.bad }))));
+        write(h, 'autodev/frontier/routing-comparisons.jsonl', jsonl([{ type: 'routing-comparison', splitId: 'frozen',
+            at: `${DAYS[13]}T10:00:00Z`, evidenceAt: `${DAYS[13]}T09:10:00Z`, complete: true, expected: 6, paired: 6,
+            margin: 0.05, delta: 0, nonInferior: true, method: 'paired finite-task pass-rate difference' }]));
+    },
     // The real row shape: sync stamps `at` the next morning, the task's day is its last attempt.
     'cost-window': (h, o) => write(h, 'autodev/delivery/outcomes.jsonl', jsonl(DAYS.filter((d) => d !== o.gap).flatMap((d) => [
         { type: 'attempt', at: `${d}T23:30:00Z`, key: `t-${d}@1`, taskId: `t-${d}`, costUsd: null },
@@ -227,7 +232,10 @@ const FIX = {
     'learning-window': (h, o) => {
         clock(h, o.gap ? [o.gap] : []);
         write(h, 'autodev/frontier/runs.jsonl', jsonl(DAYS.flatMap((d) => Array.from({ length: 8 }, (_, i) => ({
-            run: `r-${d}-${i}`, startedAt: `${d}T0${i}:00:00Z`, arm: 'A', exit: d === o.bad && i === 0 ? 1 : 0 })))));
+            run: `r-${d}-${i}`, startedAt: `${d}T0${i}:00:00Z`, arm: 'A', exit: d === o.bad && i === 0 ? 1 : 0,
+            split: 'held-out', splitId: 'a'.repeat(64), taskIdHash: 'b'.repeat(64), heldOutHash: 'c'.repeat(64), sealed: true,
+            splitAt: '2026-11-01T00:00:00Z', seal: { checkedAt: `${d}T00:00:00Z`, contentMatches: true,
+                currentHash: 'c'.repeat(64), visibleToLearning: false, hits: [], errors: [] } })))));
     },
     'delivery-window': (h, o) => {
         clock(h, o.gap ? [o.gap] : []);
@@ -264,9 +272,9 @@ const FIX = {
 // The specs that can pass on records the harness writes today, and those that must fail
 // by name until a writer exists. Written by hand, so narrowing a spec moves a case red.
 const PASSABLE = ['gate-window', 'release-window', 'worker-window', 'instruction-window', 'visibility-window', 'locking-window', 'delivery-window',
-    'capacity-window', 'recovery-window'];
-const NO_WRITER = ['authority-window', 'hook-window', 'skill-window', 'cost-window', 'acceptance-window',
-    'queue-window', 'learning-window', 'owner-window'];
+    'capacity-window', 'recovery-window', 'skill-window', 'learning-window'];
+const NO_WRITER = ['authority-window', 'hook-window', 'cost-window', 'acceptance-window',
+    'queue-window', 'owner-window'];
 // The records a planted bad day must produce, by the line that names it.
 const BAD_LINE = {
     'gate-window': /^violation 2026-11-09T11:00:00.000Z .*failed step 4 \(step 4\) has no output tail$/m,
@@ -412,7 +420,7 @@ try {
     write(lw, `autodev/windows/lock-writers/${DAYS[2]}/scripts~radar-learning.js@unknown`, '');
     const lr = probe('locking-window', lw, REPO.repo);
     check('locking-window: a writer seen only with no version is short by name', lr.status === 1
-        && /^short 7 of 8 inventoried writers took a lock on the installed layer, not scripts~radar-learning\.js$/m.test(lr.out)
+        && /^short 8 of 9 inventoried writers took a lock on the installed layer, not scripts~radar-learning\.js$/m.test(lr.out)
         && /^violation 2026-11-08T00:00:00Z scripts~radar-learning\.js@unknown took a lock with no plugin version$/m.test(lr.out), lr.out);
     // A15: the writers' field names, a breach, an unknown probe day, and the trend.
     const ro = realObserve();
@@ -534,6 +542,37 @@ try {
     const costTotR = probe('cost-window', costTot, REPO.repo);
     check('cost-window: an accepted task from before the window does not meet the accepted-cost total',
         /^short 0 accepted tasks carry a cost$/m.test(costTotR.out), costTotR.out);
+
+    for (const kind of ['missing', 'inferior', 'stale', 'incomplete', 'superseded', 'margin']) {
+        const h = home(); FIX['skill-window'](h, {});
+        const f = path.join(h, 'autodev/frontier/routing-comparisons.jsonl');
+        const row = JSON.parse(fs.readFileSync(f, 'utf8').trim());
+        if (kind === 'missing') fs.unlinkSync(f);
+        else {
+            const changed = { ...row, at: `${DAYS[13]}T11:00:00Z` };
+            if (kind === 'inferior' || kind === 'superseded') Object.assign(changed, { nonInferior: false, delta: -0.2 });
+            if (kind === 'stale') changed.evidenceAt = '2000-01-01T00:00:00Z';
+            if (kind === 'incomplete') changed.complete = false;
+            if (kind === 'margin') changed.margin = 1;
+            write(h, 'autodev/frontier/routing-comparisons.jsonl', jsonl(kind === 'superseded' ? [row, changed] : [changed]));
+        }
+        const r = probe('skill-window', h, REPO.repo);
+        check(`skill-window: ${kind} comparison fails the total`, r.status === 1 && /^short 0 of \d+ held-out routing comparisons/m.test(r.out), r.out);
+    }
+    for (const kind of ['unsealed', 'missing-hash', 'visible', 'late', 'changed', 'empty', 'old']) {
+        const h = home(); FIX['learning-window'](h, {});
+        const file = path.join(h, 'autodev/frontier/runs.jsonl');
+        const rows = fs.readFileSync(file, 'utf8').trim().split('\n').map(JSON.parse);
+        if (kind === 'empty' || kind === 'old') rows.forEach((r) => { r.split = kind === 'empty' ? 'training' : 'held-out'; if (kind === 'old') r.startedAt = '2026-10-19T00:00:00Z'; });
+        if (kind === 'unsealed') rows[0].sealed = false;
+        if (kind === 'missing-hash') delete rows[0].heldOutHash;
+        if (kind === 'visible') rows[0].seal.visibleToLearning = true;
+        if (kind === 'late') rows[0].seal.checkedAt = '2099-01-01T00:00:00Z';
+        if (kind === 'changed') rows[0].seal.currentHash = 'd'.repeat(64);
+        write(h, 'autodev/frontier/runs.jsonl', jsonl(rows));
+        const r = probe('learning-window', h, REPO.repo);
+        check(`learning-window: ${kind} fails the sealed total`, r.status === 1 && /^short \d+ of \d+ held-out runs were sealed before execution/m.test(r.out), r.out);
+    }
 
     // A git read that fails says why. --repo is a directory outside any work tree, confirmed first.
     const noRepo = path.join(tmpRoot, 'not-a-repo');

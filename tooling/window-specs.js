@@ -336,13 +336,23 @@ const instructionWindow = {
 
 const skillWindow = {
     id: 'skill-window',
-    source: 'autodev/frontier/runs.jsonl rows with a route (tooling/frontier/run.js)',
+    source: 'autodev/frontier/runs.jsonl and routing-comparisons.jsonl (frontier-evidence.js observer)',
     admissibleFrom: '2026-10-19',
     load(ctx) {
         const rows = ledger(ctx, 'frontier', 'runs.jsonl').filter((r) => r && (r.route || r.routedTo));
+        const comparisons = new Map();
+        for (const r of ledger(ctx, 'frontier', 'routing-comparisons.jsonl')) {
+            if (r?.type !== 'routing-comparison' || !r.splitId || !Number.isFinite(Date.parse(r.at))) continue;
+            if (!comparisons.has(r.splitId) || r.at >= comparisons.get(r.splitId).at) comparisons.set(r.splitId, r);
+        }
+        const current = [...comparisons.values()].filter((r) => Number.isFinite(Date.parse(r.evidenceAt)) && ctx.windowDays.includes(ctx.dayOf(Date.parse(r.evidenceAt))));
+        const good = current.filter((r) => r.complete === true && r.nonInferior === true && r.expected > 0 && r.paired === r.expected
+            && r.margin === 0.05 && Number.isFinite(r.delta) && r.delta >= -r.margin
+            && r.method === 'paired finite-task pass-rate difference');
         return {
             records: rows.map((r) => ({ at: r.finishedAt || r.startedAt, ok: r.pass === true, why: `${r.run}: routed ${r.routedTo || r.route}, pass ${r.pass}` })),
-            totals: [noWriter('a production routing outcome on a held-out split with a non-inferiority comparison')],
+            totals: [{ ok: current.length > 0 && good.length === current.length,
+                why: `${good.length} of ${current.length} held-out routing comparisons meet the fixed non-inferiority margin` }],
         };
     },
 };
@@ -491,7 +501,7 @@ const ownerWindow = {
 // Every shipped module that requires ledger-lock.js, as `<dir>~<file>`. test-window-probe.js
 // greps the plugins for those requires and fails when the grep and this list disagree.
 const LOCK_WRITERS = ['hooks~peer-send-ledger.js', 'scripts~ask-queue.js', 'scripts~brain-clock.js', 'scripts~execution-budget.js',
-    'scripts~production-signals.js', 'scripts~radar-learning.js', 'scripts~watch-panels.js', 'scripts~worker-reconcile.js'];
+    'scripts~frontier-evidence.js', 'scripts~production-signals.js', 'scripts~radar-learning.js', 'scripts~watch-panels.js', 'scripts~worker-reconcile.js'];
 
 const lockingWindow = {
     id: 'locking-window',
@@ -532,12 +542,20 @@ const learningWindow = {
     load(ctx) {
         const rows = ledger(ctx, 'frontier', 'runs.jsonl').filter((r) => r && r.startedAt);
         const counted = rows.filter((r) => r.arm && r.startedAt >= '2026-10-18');
+        const heldOut = rows.filter((r) => r.split === 'held-out' && Number.isFinite(Date.parse(r.startedAt))
+            && ctx.windowDays.includes(ctx.dayOf(Date.parse(r.startedAt))));
+        const sealed = heldOut.filter((r) => r.sealed === true && /^[a-f0-9]{64}$/.test(r.heldOutHash || '')
+            && /^[a-f0-9]{64}$/.test(r.splitId || '') && /^[a-f0-9]{64}$/.test(r.taskIdHash || '')
+            && r.seal?.contentMatches === true && r.seal.currentHash === r.heldOutHash && r.seal.visibleToLearning === false
+            && Array.isArray(r.seal.errors) && r.seal.errors.length === 0 && Array.isArray(r.seal.hits) && r.seal.hits.length === 0
+            && Date.parse(r.splitAt) <= Date.parse(r.seal.checkedAt) && Date.parse(r.seal.checkedAt) <= Date.parse(r.startedAt));
         return {
             records: counted.map((r) => ({ at: r.startedAt, ok: Number.isFinite(r.exit) && r.exit === 0, why: `${r.run}: exit ${r.exit}` })),
             coveredDays: clockDays(ctx),
             totals: [
                 { ok: counted.length >= 108, why: `${counted.length} of 108 bounded calibration runs with a plan arm` },
-                noWriter('that a run\'s held-out task was sealed'),
+                { ok: heldOut.length > 0 && sealed.length === heldOut.length,
+                    why: `${sealed.length} of ${heldOut.length} held-out runs were sealed before execution` },
             ],
         };
     },
