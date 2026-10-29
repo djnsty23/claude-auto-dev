@@ -11,7 +11,7 @@
 // the wiring in docs/scorecard-criteria.json is graded too.
 //
 // Prints one summary line:
-//   specs=17 gap_planted=FAIL bad_record=FAIL clean_pass=11 no_writer=6 unreadable=EXIT2
+//   specs=17 gap_planted=FAIL bad_record=FAIL clean_pass=14 no_writer=3 unreadable=EXIT2
 // and sets a nonzero exitCode when any case fails.
 
 const fs = require('fs');
@@ -181,10 +181,15 @@ const FIX = {
     'release-window': (h, o) => write(h, 'autodev/windows/release-protection.jsonl', jsonl(DAYS.filter((d) => d !== o.gap).map((d) => ({
         at: `${d}T06:00:00Z`, repo: 'owner/name', error: null,
         fields: { direct_write: d === o.bad ? 'ALLOWED' : 'DENIED', tag_replace: 'DENIED', tag_delete: 'DENIED', authorized_publish: 'PASS' } })))),
-    'authority-window': (h, o) => write(h, 'autodev/headless-workers.json', JSON.stringify({ version: 1, records: DAYS.filter((d) => d !== o.gap).map((d) => ({
-        code: `w-${d}`, startedAt: `${d}T09:00:00Z`, permissionMode: d === o.bad ? 'bypassPermissions' : 'dontAsk', profile: 'builder' })) })),
-    'hook-window': (h, o) => write(h, 'autodev/windows/hook-wall.jsonl', jsonl(DAYS.filter((d) => d !== o.gap).map((d) => ({
-        at: `${d}T09:00:00Z`, event: 'PreToolUse', p95Ms: d === o.bad ? 400 : 40, budgetMs: 100 })))),
+    'authority-window': (h, o) => {
+        write(h, 'autodev/headless-workers.json', JSON.stringify({ version: 1, records: DAYS.filter((d) => d !== o.gap).map((d) => ({
+            code: `w-${d}`, startedAt: `${d}T09:00:00Z`, permissionMode: d === o.bad ? 'bypassPermissions' : 'dontAsk', profile: 'builder' })) }));
+        write(h, 'autodev/windows/authority-audit.jsonl', jsonl(DAYS.filter((d) => d !== o.gap).map((d) => ({ at: `${d}T09:00:00Z`,
+            runKey: `w-${d}@${d}T09:00:00Z`, complete: true, callsChecked: 3, denials: 1, escapes: 0, unknown: 0 }))));
+    },
+    'hook-window': (h, o) => write(h, 'autodev/windows/hook-wall.jsonl', jsonl(DAYS.filter((d) => d !== o.gap).flatMap((d) => ['idle', 'load'].map((load) => ({
+        at: `${d}T09:00:00Z`, event: 'PreToolUse', p95Ms: d === o.bad ? 400 : 40, budgetMs: 100,
+        profile: { core: '1' }, eventInventory: ['PreToolUse'], load, hooks: 1, samples: [40, 40, 40, 40, d === o.bad ? 400 : 40], errors: 0 }))))),
     'worker-window': (h, o) => {
         clock(h, o.gap ? [o.gap] : []);
         write(h, 'autodev/execution-budget.json', JSON.stringify({ schema: 1, attempts: Object.fromEntries(DAYS.filter((d) => d !== o.gap).map((d) => [d, {
@@ -214,6 +219,8 @@ const FIX = {
     'queue-window': (h, o) => {
         clock(h, o.gap ? [o.gap] : []);
         write(h, 'autodev/worker-reconcile/events.jsonl', jsonl(DAYS.map((d) => ({ at: `${d}T09:00:00Z`, taskId: `t-${d}`, outcome: d === o.bad ? 'UNKNOWN' : 'SETTLED' }))));
+        write(h, 'autodev/windows/account-switch-drills.jsonl', jsonl([{ at: `${DAYS[0]}T12:00:00Z`, kind: 'account-switch', mode: 'synthetic-shared-queue',
+            ok: true, queued: 2, kept: 2, launched: 1, reconciled: 1, configSwitched: true, durationMs: 3000 }]));
     },
     'visibility-window': (h, o) => {
         clock(h, o.gap ? [o.gap] : []);
@@ -272,9 +279,8 @@ const FIX = {
 // The specs that can pass on records the harness writes today, and those that must fail
 // by name until a writer exists. Written by hand, so narrowing a spec moves a case red.
 const PASSABLE = ['gate-window', 'release-window', 'worker-window', 'instruction-window', 'visibility-window', 'locking-window', 'delivery-window',
-    'capacity-window', 'recovery-window', 'skill-window', 'learning-window'];
-const NO_WRITER = ['authority-window', 'hook-window', 'cost-window', 'acceptance-window',
-    'queue-window', 'owner-window'];
+    'capacity-window', 'recovery-window', 'skill-window', 'learning-window', 'authority-window', 'hook-window', 'queue-window'];
+const NO_WRITER = ['cost-window', 'acceptance-window', 'owner-window'];
 // The records a planted bad day must produce, by the line that names it.
 const BAD_LINE = {
     'gate-window': /^violation 2026-11-09T11:00:00.000Z .*failed step 4 \(step 4\) has no output tail$/m,
@@ -299,6 +305,45 @@ const BAD = '2026-11-09';
 const counts = { gap: 0, bad: 0, clean: 0, noWriter: 0 };
 try {
     REPO = gitRepo();
+    for (const mutation of ['missing', 'stale', 'lost', 'config', 'reconcile']) {
+        const h = home();
+        FIX['queue-window'](h, {});
+        const file = path.join(h, 'autodev/windows/account-switch-drills.jsonl');
+        const row = JSON.parse(fs.readFileSync(file, 'utf8').trim());
+        if (mutation === 'stale') row.at = '2026-10-01T00:00:00Z';
+        if (mutation === 'lost') row.kept = 1;
+        if (mutation === 'config') row.configSwitched = false;
+        if (mutation === 'reconcile') row.reconciled = 0;
+        fs.writeFileSync(file, mutation === 'missing' ? '' : jsonl([row]));
+        const r = probe('queue-window', h);
+        check(`account switch ${mutation} fails the total`, r.status === 1 && /^short 0 passing account switch/m.test(r.out), r.out);
+    }
+    for (const mutation of ['load', 'profile', 'errors', 'inventory', 'version']) {
+        const h = home();
+        FIX['hook-window'](h, {});
+        const file = path.join(h, 'autodev/windows/hook-wall.jsonl');
+        let rows = fs.readFileSync(file, 'utf8').trim().split('\n').map(JSON.parse);
+        if (mutation === 'load') rows = rows.filter((r) => r.load === 'idle');
+        if (mutation === 'profile') rows.forEach((r) => { delete r.profile; });
+        if (mutation === 'errors') rows.forEach((r) => { r.errors = 1; });
+        if (mutation === 'inventory') rows.forEach((r) => { r.eventInventory.push('Stop'); });
+        if (mutation === 'version') rows.filter((r) => r.load === 'load').forEach((r) => { r.profile.core = '2'; });
+        fs.writeFileSync(file, jsonl(rows));
+        const r = probe('hook-window', h);
+        check(`hook ${mutation} gap fails the total`, r.status === 1 && /^short .*hook events sampled/m.test(r.out), r.out);
+    }
+    for (const mutation of ['missing', 'escape', 'incomplete']) {
+        const h = home();
+        FIX['authority-window'](h, {});
+        const file = path.join(h, 'autodev/windows/authority-audit.jsonl');
+        const rows = fs.readFileSync(file, 'utf8').trim().split('\n').map(JSON.parse);
+        if (mutation === 'missing') rows.pop();
+        if (mutation === 'escape') rows[0].escapes = 1;
+        if (mutation === 'incomplete') rows[0].complete = false;
+        fs.writeFileSync(file, jsonl(rows));
+        const r = probe('authority-window', h);
+        check(`authority audit ${mutation} fails the total`, r.status === 1 && /^short .*boundary escapes/m.test(r.out), r.out);
+    }
     const specs = require('./window-specs.js').SPECS.map((s) => s.id);
     check('every manifest window criterion has a spec and a fixture',
         manifest.aspects.flatMap((a) => a.criteria).filter((c) => c.kind === 'operational').every((c) => specs.includes(c.id) && FIX[c.id]),
