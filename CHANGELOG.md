@@ -1,5 +1,78 @@
 # Changelog
 
+## [8.198.0]
+
+### Hooks
+
+- `coordinator-write-guard` refuses a subagent push that lands on `main` or
+  `master`: plain, `HEAD:`, `+`, `refs/heads/`, a delete, `--all`, `--mirror`,
+  or a bare push from a repo on the default branch. 0 of 80 real subagent pushes
+  from 30 days were blocked, and 78 of 78 twins retargeted at main were (#459).
+- The same guard sees through wrappers (`env`, `exec`, `nice`, `sudo`,
+  `timeout`, `stdbuf`), shell escapes, aliases, wildcard and matching refspecs,
+  `bash -c`, pipes, heredocs, `xargs` and `eval` feeds, and fails closed on
+  `--git-dir`, `-c remote.*` or a `GIT_*` assignment. An 83-case red-team run
+  went from 45 mismatches to 8. The Brain's recorded-branch push still passes.
+  `pushd`, subshell cwd and persisted git config remain open: server-side branch
+  protection is the control (#467).
+- `panel-recommendation` holds every ask channel under an active AWAY: wrap_up
+  questions with buttons or `blocked`, start_session offers, and every session
+  start that waits on a click. A held ask in a session that is not the Brain
+  names the Brain's session id (#464).
+- `worker-authority` reads a quoted heredoc body as data when every command in
+  the call is inert (`cat`, `tee`, `mkdir`, `echo` and similar), so a headless
+  worker's report naming a privileged step is no longer denied as that step. A
+  body fed to a shell or interpreter stays scanned. A `#` starts a comment only
+  where bash says it does (#465, #467).
+- The post-tool and Stop typecheck hooks share one project-root resolver, so a
+  package inside a monorepo is checked again (#467).
+
+### Brain and workers
+
+- `brain-clock` resolves a bare observer script name, such as `capacity.js`,
+  beside itself, so an observer follows the clock's own version instead of a
+  pinned cache path. Other relative paths stay refused (#465).
+- Headless workers get a single report-writing recipe that the guard allows, and
+  the supervisor creates their scratch dir. The judge treats push, PR and merge
+  as the coordinator's steps on channel headless (#465).
+- `worker-window` times a worker's exit from its launch, after the capacity
+  wait, and passes a cancel that never launched (#465).
+- `full-gate-queue` caps harness gates at lanes - 1 even when no product gate
+  is waiting, so a product gate that arrives later never waits behind two
+  harness gates (#462).
+- `fast-lane` gains a "preview" profile: a product opts in with
+  `autodevFastLane.previewPaths` and an optional `previewTest`, read from the
+  base commit. A diff wholly inside those paths skips the size limit, and
+  merge-lock holds each receipt to its own profile's rule (#463).
+- `idea-conveyor` starts one code change per pass (`--limit`, default 1), parks
+  content, analysis, ad and publishing work as ASK, keeps the idea title out of
+  the brief heading, holds only the affected idea on a partial enqueue, and
+  never approves a posted decision by silence (#456, #457, #459, #467).
+
+### Scorecard and cost
+
+- Every scorecard window now has a writer. New brain-clock observers:
+  `frontier-evidence` (held-out routing comparison and learning seal),
+  `authority-audit`, `hook-wall`, `account-switch-drill`, `acceptance-audit`,
+  `cost-repeats` and `owner-time-baseline`. window-probe expects 17 passable
+  specs (#466).
+- `delivery-outcomes` reads desktop side sessions as tasks and prices them from
+  their transcripts at list price, cached by size and mtime. Each session is
+  priced once, and a cost unknown at first sync is priced again later (#460,
+  #465, #467).
+- `instruction-window` lets a retired config profile stop counting from its
+  `retiredAt` day, unless the profile still writes records (#465).
+- `work-cost` breaks unattributed spend into routine, branch, scratch, outside
+  repo, repo trunk and no cwd (#461).
+- `touched-suites` still selects the suites that read a deleted input (#467).
+
+### Docs and tests
+
+- docs/evals records the harness2 adoption A/B (188 trials, nothing adopted)
+  and the as-built adoption with 30 days of autodev outcomes (#458, #459).
+- Suites now drive five functions the coverage scan listed as never entered
+  (#468).
+
 ## [8.197.0]
 
 ### Hooks
