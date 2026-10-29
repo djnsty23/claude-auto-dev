@@ -374,7 +374,7 @@ const skillWindow = {
 
 const costWindow = {
     id: 'cost-window',
-    source: 'autodev/delivery/outcomes.jsonl outcome rows (delivery-outcomes.js sync, a brain-clock observer)',
+    source: 'autodev/delivery/outcomes.jsonl (delivery-outcomes.js) and cost-comparisons.jsonl (cost-repeats.js)',
     // `sync` first ran in production at 2026-10-24T22:59Z and runs from the clock after it, so
     // 10-25 is the first day whose tasks were synced by a live writer.
     admissibleFrom: '2026-10-25',
@@ -392,11 +392,30 @@ const costWindow = {
         const tasks = [...latest.values()].filter((r) => Number.isFinite(Date.parse(r.lastAttemptAt)));
         const days = new Set(ctx.windowDays.filter((d) => d >= costWindow.admissibleFrom));
         const accepted = tasks.filter((r) => r.accepted === true && Number.isFinite(r.costUsd) && days.has(ctx.dayOf(Date.parse(r.lastAttemptAt))));
+        const pairs = new Map();
+        for (const r of ledger(ctx, 'delivery', 'cost-comparisons.jsonl')) {
+            if (!r || r.type !== 'cost-comparison' || !r.baseline?.taskId || !r.candidate?.taskId || !Number.isFinite(Date.parse(r.at))) continue;
+            const key = JSON.stringify([r.baseline.taskId, r.candidate.taskId]);
+            if (!pairs.has(key) || Date.parse(r.at) >= Date.parse(pairs.get(key).at)) pairs.set(key, r);
+        }
+        const comparisons = [...pairs.values()].filter((r) => days.has(ctx.dayOf(Date.parse(r.comparedAt)))
+            && r.baseline.taskId !== r.candidate.taskId && typeof r.match === 'string' && /^(slug|brief):.+/.test(r.match)
+            && [r.baseline, r.candidate].every((s) => {
+                const o = latest.get(s.taskId);
+                return o && Number.isFinite(s.costUsd) && s.costUsd >= 0 && s.costUsd === o.costUsd && s.accepted === o.accepted
+                    && s.lastAttemptAt === o.lastAttemptAt && s.standingDay7 === (o.standingDay7 ?? null)
+                    && ['accept', 'follow-up', 'escalate', 'reject'].includes(s.judgeOutcome)
+                    && (s.judgeOutcome === 'accept') === s.accepted && Date.parse(s.judgedAt) >= Date.parse(s.lastAttemptAt);
+            }));
+        const quality = comparisons.filter((r) => r.baseline.accepted && r.candidate.accepted
+            && r.baseline.costPerAcceptedTask === r.baseline.costUsd && r.candidate.costPerAcceptedTask === r.candidate.costUsd
+            && r.qualityNonInferior === true && (r.baseline.standingDay7 !== true || r.candidate.standingDay7 === true));
         return {
             records: tasks.map((r) => ({ at: r.lastAttemptAt, ok: Number.isFinite(r.costUsd), why: `${r.taskId}: no cost` })),
             totals: [
                 { ok: accepted.length > 0, why: `${accepted.length} accepted tasks carry a cost` },
-                noWriter('matched repeats with a quality comparison for cost per accepted task'),
+                { ok: quality.length > 0 && quality.length === comparisons.length,
+                    why: `${quality.length} of ${comparisons.length} matched repeats have cost per accepted task and non-inferior quality` },
             ],
         };
     },
@@ -416,7 +435,7 @@ function hostUpMs(ctx, day) {
 
 const acceptanceWindow = {
     id: 'acceptance-window',
-    source: 'autodev/brain-judge/judgements.jsonl (brain-judge.js) and brain-clock passes',
+    source: 'autodev/brain-judge judgements.jsonl (brain-judge.js), acceptance-audits.jsonl (acceptance-audit.js), and brain-clock passes',
     // An accept needs a verified acceptance receipt from 2026-10-14 (0493392b).
     admissibleFrom: '2026-10-15',
     load(ctx) {
@@ -437,13 +456,18 @@ const acceptanceWindow = {
         const expected = Math.round(up.reduce((a, u) => a + (u === null ? DAY_MS : u), 0) / CLOCK_MS);
         const share = expected ? n / expected : 0;
         const passing = drillRows(ctx).filter((r) => r.ok === true && days.includes(ctx.dayOf(Date.parse(r.at))));
+        const audits = ledger(ctx, 'brain-judge', 'acceptance-audits.jsonl').filter((r) => r && r.type === 'acceptance-audit'
+            && days.includes(ctx.dayOf(Date.parse(r.at))) && Date.parse(r.at) > Date.parse(r.acceptedAt));
+        const accepts = rows.filter((r) => r.decision === 'accept' && r.applied === true && days.includes(ctx.dayOf(Date.parse(r.at))));
+        const checked = accepts.filter((r) => audits.some((a) => a.taskId === r.taskId && a.acceptedAt === r.at && typeof a.foundWrong === 'boolean'));
+        const wrong = audits.filter((r) => r.foundWrong === true);
         return {
             records: recs,
             coveredDays: clockDays(ctx),
             totals: [
                 { ok: expected > 0 && share >= 0.995, why: `host ticks ${n} of ${expected} (${(share * 100).toFixed(1)}%), needs 99.5%, host up time known for ${known} of ${days.length} days` },
-                // Each task has one live verdict, so no row can show an accept found wrong later.
-                noWriter('an accept later found wrong, the unsafe accept the needs counts'),
+                { ok: checked.length > 0 && checked.length === accepts.length && wrong.length === 0,
+                    why: `${checked.length} of ${accepts.length} accepts later audited; ${wrong.length} found wrong` },
                 drillTotal(passing),
             ],
         };
@@ -500,16 +524,30 @@ const visibilityWindow = {
 
 const ownerWindow = {
     id: 'owner-window',
-    source: 'autodev/owner-asks/ledger.jsonl owner-time rows (owner-asks.js)',
+    source: 'autodev/owner-asks/ledger.jsonl owner-time rows (owner-asks.js and owner-time-baseline.js)',
     admissibleFrom: '2026-10-15',
     load(ctx) {
         const rows = ledger(ctx, 'owner-asks', 'ledger.jsonl').filter((r) => r && r.at && /^owner-time-/.test(r.type || ''));
+        const latest = new Map();
+        for (const r of rows) if (r.type === 'owner-time-baseline' && Number.isFinite(Date.parse(r.at)) && /^\d{4}-\d{2}-\d{2}$/.test(r.weekStart || '')) {
+            if (!latest.has(r.weekStart) || Date.parse(r.at) >= Date.parse(latest.get(r.weekStart).at)) latest.set(r.weekStart, r);
+        }
+        const weeks = [...latest.values()].sort((a, b) => a.weekStart.localeCompare(b.weekStart));
+        const valid = (r) => r.measured === true && r.source === 'active-owner-time' && r.openTimer === false
+            && Number.isFinite(r.ownerMinutes) && r.ownerMinutes >= 0 && Number.isInteger(r.acceptedTasks) && r.acceptedTasks > 0
+            && r.deliveredAsks > 0 && r.timingRecords > 0 && Number.isFinite(r.minutesPerAcceptedTask)
+            && Math.abs(r.minutesPerAcceptedTask - r.ownerMinutes / r.acceptedTasks) < 1e-9
+            && Date.parse(r.weekEnd) - Date.parse(r.weekStart) === 7 * DAY_MS && Date.parse(r.at) >= Date.parse(r.weekEnd);
+        const baseline = weeks.find((r) => valid(r) && r.weekEnd <= ctx.windowDays[0] && r.minutesPerAcceptedTask > 0);
+        const current = weeks.filter((r) => ctx.windowDays.includes(ctx.dayOf(Date.parse(r.weekEnd) - 1)));
+        const reduced = current.filter((r) => valid(r) && baseline && r.minutesPerAcceptedTask <= 0.8 * baseline.minutesPerAcceptedTask);
         return {
             records: rows.map((r) => ({ at: r.at, ok: true, why: null })),
             coveredDays: clockDays(ctx),
             totals: [
                 { ok: rows.length > 0, why: `${rows.length} owner-time rows in the ledger` },
-                noWriter('a baseline of owner minutes per accepted task'),
+                { ok: !!baseline && current.length > 0 && reduced.length === current.length,
+                    why: `${reduced.length} of ${current.length} measured weeks at most 0.8 of ${baseline ? baseline.minutesPerAcceptedTask : 'unknown'} baseline owner minutes per accepted task` },
             ],
         };
     },

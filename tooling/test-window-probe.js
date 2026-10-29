@@ -11,7 +11,7 @@
 // the wiring in docs/scorecard-criteria.json is graded too.
 //
 // Prints one summary line:
-//   specs=17 gap_planted=FAIL bad_record=FAIL clean_pass=14 no_writer=3 unreadable=EXIT2
+//   specs=17 gap_planted=FAIL bad_record=FAIL clean_pass=17 no_writer=0 unreadable=EXIT2
 // and sets a nonzero exitCode when any case fails.
 
 const fs = require('fs');
@@ -208,13 +208,21 @@ const FIX = {
             margin: 0.05, delta: 0, nonInferior: true, method: 'paired finite-task pass-rate difference' }]));
     },
     // The real row shape: sync stamps `at` the next morning, the task's day is its last attempt.
-    'cost-window': (h, o) => write(h, 'autodev/delivery/outcomes.jsonl', jsonl(DAYS.filter((d) => d !== o.gap).flatMap((d) => [
+    'cost-window': (h, o) => {
+        write(h, 'autodev/delivery/outcomes.jsonl', jsonl(DAYS.filter((d) => d !== o.gap).flatMap((d) => [
         { type: 'attempt', at: `${d}T23:30:00Z`, key: `t-${d}@1`, taskId: `t-${d}`, costUsd: null },
-        { type: 'outcome', at: `${d}T23:30:00Z`, taskId: `t-${d}`, lastAttemptAt: `${d}T09:00:00Z`, accepted: true, costUsd: d === o.bad ? null : 4.5 },
-    ]))),
+        { type: 'outcome', at: `${d}T23:30:00Z`, taskId: `t-${d}`, lastAttemptAt: `${d}T09:00:00Z`, accepted: true, standingDay7: true, costUsd: d === o.bad ? null : 4.5 },
+        ])));
+        const side = (d) => ({ taskId: `t-${d}`, lastAttemptAt: `${d}T09:00:00Z`, judgedAt: `${d}T10:00:00Z`, accepted: true,
+            costUsd: 4.5, costPerAcceptedTask: 4.5, judgeOutcome: 'accept', standingDay7: true });
+        write(h, 'autodev/delivery/cost-comparisons.jsonl', jsonl([{ type: 'cost-comparison', at: `${DAYS[2]}T23:00:00Z`,
+            comparedAt: `${DAYS[2]}T09:00:00Z`, match: 'slug:repeat', baseline: side(DAYS[0]), candidate: side(DAYS[2]), qualityNonInferior: true }]));
+    },
     'acceptance-window': (h, o) => {
         clock(h, o.gap ? [o.gap] : []);
         write(h, 'autodev/brain-judge/judgements.jsonl', jsonl(DAYS.map((d) => ({ at: `${d}T09:00:00Z`, taskId: `t-${d}`, mode: 'live', decision: 'accept', applied: d !== o.bad }))));
+        write(h, 'autodev/brain-judge/acceptance-audits.jsonl', jsonl(DAYS.map((d) => ({ type: 'acceptance-audit', at: `${d}T10:00:00Z`, taskId: `t-${d}`, acceptedAt: `${d}T09:00:00Z`, foundWrong: false }))));
+        if (!o.noDrill) write(h, 'autodev/windows/restore-drills.jsonl', jsonl([{ ...realDrill(), at: `${DAYS[3]}T03:00:00.000Z` }]));
     },
     'queue-window': (h, o) => {
         clock(h, o.gap ? [o.gap] : []);
@@ -265,7 +273,12 @@ const FIX = {
     },
     'owner-window': (h, o) => {
         clock(h, o.gap ? [o.gap] : []);
-        write(h, 'autodev/owner-asks/ledger.jsonl', jsonl(DAYS.map((d) => ({ at: `${d}T09:00:00Z`, type: 'owner-time-start' }))));
+        write(h, 'autodev/owner-asks/ledger.jsonl', jsonl([
+            ...DAYS.map((d) => ({ at: `${d}T09:00:00Z`, type: 'owner-time-start' })),
+            ...[['2026-10-26', '2026-11-02', 20], ['2026-11-02', '2026-11-09', 16], ['2026-11-09', '2026-11-16', 12]].map(([weekStart, weekEnd, minutes]) => ({
+                type: 'owner-time-baseline', at: `${weekEnd}T12:00:00Z`, weekStart, weekEnd, ownerMinutes: minutes * 2, acceptedTasks: 2,
+                deliveredAsks: 1, timingRecords: 1, openTimer: false, measured: true, source: 'active-owner-time', minutesPerAcceptedTask: minutes })),
+        ]));
     },
     'recovery-window': (h, o) => {
         clock(h, o.gap ? [o.gap] : []);
@@ -279,8 +292,9 @@ const FIX = {
 // The specs that can pass on records the harness writes today, and those that must fail
 // by name until a writer exists. Written by hand, so narrowing a spec moves a case red.
 const PASSABLE = ['gate-window', 'release-window', 'worker-window', 'instruction-window', 'visibility-window', 'locking-window', 'delivery-window',
-    'capacity-window', 'recovery-window', 'skill-window', 'learning-window', 'authority-window', 'hook-window', 'queue-window'];
-const NO_WRITER = ['cost-window', 'acceptance-window', 'owner-window'];
+    'capacity-window', 'recovery-window', 'skill-window', 'learning-window', 'authority-window', 'hook-window', 'queue-window',
+    'acceptance-window', 'cost-window', 'owner-window'];
+const NO_WRITER = [];
 // The records a planted bad day must produce, by the line that names it.
 const BAD_LINE = {
     'gate-window': /^violation 2026-11-09T11:00:00.000Z .*failed step 4 \(step 4\) has no output tail$/m,
@@ -522,7 +536,7 @@ try {
     hostUp(hu, (d) => (d === GAP ? 0 : 86400000));
     const hur = probe('acceptance-window', hu, REPO.repo);
     check('acceptance-window: a day the event log shows the host off leaves the denominator, so the share holds', hur.status === 1 && !/^short host ticks/m.test(hur.out)
-        && /^short no writer records an accept later found wrong/m.test(hur.out), hur.out);
+        && !/accepts later audited/m.test(hur.out), hur.out);
     const hl = home();
     FIX['acceptance-window'](hl, { gap: GAP });
     hostUp(hl, () => 86400000);
@@ -532,12 +546,23 @@ try {
         /^short host ticks 3744 of 4032 \(92\.9%\), needs 99\.5%, host up time known for 13 of 14 days$/m.test(hlr.out), hlr.out);
     // A9: the recovery drill total reads restore-drill.js rows, the same rows as A17.
     const ad = home();
-    FIX['acceptance-window'](ad, {});
+    FIX['acceptance-window'](ad, { noDrill: true });
     const adr = probe('acceptance-window', ad, REPO.repo);
     check('acceptance-window: no drill in the window is a short total', /^short 0 passing restore drill\(s\) in the window, needs 1$/m.test(adr.out), adr.out);
     write(ad, 'autodev/windows/restore-drills.jsonl', jsonl([{ ...realDrill(), at: `${DAYS[3]}T03:00:00.000Z` }]));
     const adr2 = probe('acceptance-window', ad, REPO.repo);
-    check('acceptance-window: one passing drill meets the drill total', !/restore drill/m.test(adr2.out) && /^short no writer records an accept later found wrong/m.test(adr2.out), adr2.out);
+    check('acceptance-window: one passing drill meets the drill total', !/restore drill/m.test(adr2.out) && adr2.status === 0, adr2.out);
+    for (const [label, replacement, pattern] of [
+        ['missing audits', [], /short 0 of 14 accepts later audited; 0 found wrong/],
+        ['wrong accept', [{ type: 'acceptance-audit', at: `${DAYS[0]}T10:00:00Z`, acceptedAt: `${DAYS[0]}T09:00:00Z`, taskId: `t-${DAYS[0]}`, foundWrong: true }], /1 found wrong/],
+        ['unknown audit', [{ type: 'acceptance-audit', at: `${DAYS[0]}T10:00:00Z`, acceptedAt: `${DAYS[0]}T09:00:00Z`, taskId: `t-${DAYS[0]}`, foundWrong: null }], /short 0 of 14 accepts later audited/],
+        ['stale audit', [{ type: 'acceptance-audit', at: '2026-10-01T10:00:00Z', acceptedAt: '2026-10-01T09:00:00Z', taskId: `t-${DAYS[0]}`, foundWrong: false }], /short 0 of 14 accepts later audited/],
+    ]) {
+        const h = home(); FIX['acceptance-window'](h, {});
+        write(h, 'autodev/brain-judge/acceptance-audits.jsonl', jsonl(replacement));
+        const r = probe('acceptance-window', h, REPO.repo);
+        check(`acceptance-window: ${label} fails the later-check total`, r.status === 1 && pattern.test(r.out), r.out);
+    }
     // A record before admissibleFrom never counts: the same clean release fixture moved before 10-19.
     const early = home();
     write(early, 'autodev/windows/release-protection.jsonl', jsonl(['2026-10-10', '2026-10-11'].map((d) => ({ at: `${d}T06:00:00Z`, error: null,
@@ -587,6 +612,20 @@ try {
     const costTotR = probe('cost-window', costTot, REPO.repo);
     check('cost-window: an accepted task from before the window does not meet the accepted-cost total',
         /^short 0 accepted tasks carry a cost$/m.test(costTotR.out), costTotR.out);
+    for (const mode of ['missing', 'old', 'regressed', 'uncosted', 'stale-cost', 'stale-quality', 'same-task']) {
+        const h = home(); FIX['cost-window'](h, {});
+        const file = path.join(h, 'autodev/delivery/cost-comparisons.jsonl');
+        const pair = JSON.parse(fs.readFileSync(file, 'utf8').trim());
+        if (mode === 'old') pair.comparedAt = '2026-10-01T00:00:00Z';
+        if (mode === 'regressed') { pair.candidate.standingDay7 = false; pair.qualityNonInferior = false; }
+        if (mode === 'uncosted') pair.candidate.costPerAcceptedTask = null;
+        if (mode === 'stale-cost') pair.candidate.costUsd = 999;
+        if (mode === 'stale-quality') pair.candidate.standingDay7 = null;
+        if (mode === 'same-task') pair.candidate = pair.baseline;
+        fs.writeFileSync(file, jsonl(mode === 'missing' ? [] : [pair]));
+        const r = probe('cost-window', h, REPO.repo);
+        check(`cost-window: ${mode} comparison cannot meet the total`, r.status === 1 && /short 0 of \d+ matched repeats/.test(r.out), r.out);
+    }
 
     for (const kind of ['missing', 'inferior', 'stale', 'incomplete', 'superseded', 'margin']) {
         const h = home(); FIX['skill-window'](h, {});
@@ -620,6 +659,22 @@ try {
     }
 
     // A git read that fails says why. --repo is a directory outside any work tree, confirmed first.
+    for (const mode of ['missing', 'no-baseline', 'too-high', 'unknown', 'zero-accepted', 'stale', 'revised']) {
+        const h = home(); FIX['owner-window'](h, {});
+        const file = path.join(h, 'autodev/owner-asks/ledger.jsonl');
+        let rows = fs.readFileSync(file, 'utf8').trim().split('\n').map(JSON.parse);
+        if (mode === 'missing') rows = rows.filter((r) => r.type !== 'owner-time-baseline');
+        if (mode === 'no-baseline') rows = rows.filter((r) => r.weekStart !== '2026-10-26');
+        if (mode === 'stale') rows = rows.filter((r) => !r.weekStart || r.weekStart === '2026-10-26');
+        const latest = rows.find((r) => r.weekStart === '2026-11-09');
+        if (mode === 'too-high') { latest.ownerMinutes = 40; latest.minutesPerAcceptedTask = 20; }
+        if (mode === 'unknown') latest.minutesPerAcceptedTask = null;
+        if (mode === 'zero-accepted') latest.acceptedTasks = 0;
+        if (mode === 'revised') rows.push({ ...latest, at: '2026-11-19T12:00:00Z', minutesPerAcceptedTask: null, measured: false });
+        fs.writeFileSync(file, jsonl(rows)); const r = probe('owner-window', h, REPO.repo);
+        check(`owner-window: ${mode} cannot meet the baseline total`, r.status === 1 && /short .*measured weeks at most 0.8/.test(r.out), r.out);
+    }
+
     const noRepo = path.join(tmpRoot, 'not-a-repo');
     fs.mkdirSync(noRepo);
     const top = spawnSync('git', ['rev-parse', '--show-toplevel'], { cwd: noRepo, encoding: 'utf8', windowsHide: true });

@@ -1,0 +1,80 @@
+#!/usr/bin/env node
+'use strict';
+const fs = require('fs');
+const os = require('os');
+const path = require('path');
+const { spawnSync } = require('child_process');
+const scripts = path.resolve(__dirname, '../plugins/autodev-core/scripts');
+const subject = process.env.ACCEPTANCE_AUDIT_SUBJECT || path.join(scripts, 'acceptance-audit.js');
+const root = fs.mkdtempSync(path.join(os.tmpdir(), 'acceptance-audit-'));
+const home = path.join(root, 'profile');
+const base = path.join(home, 'autodev');
+const env = { ...process.env, HOME: root, USERPROFILE: root, CLAUDE_CONFIG_DIR: home, GIT_CONFIG_GLOBAL: path.join(root, 'gitconfig'), GIT_CONFIG_NOSYSTEM: '1' };
+let total = 0; let failed = 0;
+function check(name, ok, detail = '') { total++; if (!ok) failed++; console.log(`${ok ? 'ok' : 'FAIL'} ${name}${ok ? '' : `: ${detail}`}`); }
+function write(file, data) { fs.mkdirSync(path.dirname(file), { recursive: true }); fs.writeFileSync(file, data); }
+const json = (file, value) => write(file, JSON.stringify(value));
+const jsonl = (file, values) => write(file, values.map((v) => JSON.stringify(v)).join('\n') + '\n');
+const output = path.join(base, 'brain-judge/acceptance-audits.jsonl');
+const read = () => fs.existsSync(output) ? fs.readFileSync(output, 'utf8').trim().split('\n').map(JSON.parse) : [];
+const facts = path.join(root, 'facts.json');
+const run = (now = '2026-11-08T12:00:00Z', extra = []) => spawnSync(process.execPath, [subject, '--now', now, '--pr-facts', facts, ...extra], { env, encoding: 'utf8' });
+try {
+    json(facts, {});
+    let r = run(); check('empty observer is silent', r.status === 0 && r.stdout === '' && r.stderr === '', r.stderr);
+    const repo = path.join(root, 'repo'); fs.mkdirSync(repo);
+    const git = (args) => { const g = spawnSync('git', args, { cwd: repo, env, encoding: 'utf8' }); if (g.status) throw new Error(g.stderr); return g.stdout.trim(); };
+    git(['init', '-q']); git(['config', 'user.name', 'fixture']);
+    git(['config', 'user.email', ['fixture', 'example.invalid'].join('@')]); git(['config', 'commit.gpgsign', 'false']);
+    write(path.join(repo, 'work'), 'first'); git(['add', 'work']);
+    const message = path.join(root, 'message'); write(message, 'feat: fixture\n'); git(['commit', '-q', '-F', message]);
+    const sha = git(['rev-parse', 'HEAD']); git(['update-ref', 'refs/remotes/origin/main', sha]);
+    const tasks = ['good', 'prbad', 'reopen', 'unknown', 'dry', 'unapplied'].map((taskId) => ({ taskId, slug: taskId, repo, report: path.join(root, `${taskId}.md`) }));
+    for (const t of tasks) write(t.report, `commit: ${sha}\n`);
+    write(tasks[1].report, 'https://github.com/fixture/repo/pull/12\n');
+    write(tasks[3].report, 'Nothing verifiable\n');
+    tasks.push({ taskId: 'follow', repo, reopensTaskId: 'reopen', composedAt: '2026-11-07T11:00:00Z' });
+    json(path.join(base, 'unattended-workers.json'), { records: tasks });
+    const accepts = tasks.slice(0, 6).map((t) => ({ taskId: t.taskId, slug: t.slug, key: `${t.taskId}@1`, at: '2026-11-06T09:00:00Z', decision: 'accept', mode: t.taskId === 'dry' ? 'dry' : 'live', applied: t.taskId !== 'unapplied' }));
+    jsonl(path.join(base, 'brain-judge/judgements.jsonl'), accepts);
+    json(facts, { 'https://github.com/fixture/repo/pull/12': { state: 'MERGED', mergedAt: '2026-11-06T10:00:00Z', revertedAt: '2026-11-07T10:00:00Z' } });
+    r = run(); const first = read();
+    check('writes four eligible audits', r.status === 0 && first.length === 4, r.stdout + r.stderr);
+    check('merged commit clean control', first.find((a) => a.taskId === 'good')?.foundWrong === false);
+    check('reverted PR is wrong', first.find((a) => a.taskId === 'prbad')?.foundWrong === true);
+    check('later reopening is wrong', first.find((a) => a.taskId === 'reopen')?.foundWrong === true);
+    check('missing reference stays unknown', first.find((a) => a.taskId === 'unknown')?.foundWrong === null);
+    run(); check('same-day retry does not repeat completed audits', read().filter((a) => a.taskId === 'good').length === 1);
+    git(['revert', '--no-edit', sha]); const reverted = git(['rev-parse', 'HEAD']); git(['update-ref', 'refs/remotes/origin/main', reverted]);
+    run('2026-11-09T12:00:00Z');
+    const revertedAudit = read().filter((a) => a.taskId === 'good').at(-1);
+    check('standard git revert is wrong', revertedAudit?.reason === 'commit reverted' && revertedAudit.foundWrong === true);
+    // A separate accept records ancestry before a rewritten base drops that commit.
+    write(path.join(repo, 'new'), 'new'); git(['add', 'new']); git(['commit', '-q', '-F', message]);
+    const second = git(['rev-parse', 'HEAD']); git(['update-ref', 'refs/remotes/origin/main', second]);
+    tasks[0].taskId = 'lost'; write(tasks[0].report, `head: ${second}\n`);
+    json(path.join(base, 'unattended-workers.json'), { records: tasks });
+    jsonl(path.join(base, 'brain-judge/judgements.jsonl'), [{ ...accepts[0], taskId: 'lost', key: 'lost@1' }]);
+    run('2026-11-10T12:00:00Z'); git(['update-ref', 'refs/remotes/origin/main', sha]); run('2026-11-11T12:00:00Z');
+    check('previously merged commit missing from base is wrong', read().filter((a) => a.taskId === 'lost').at(-1)?.foundWrong === true);
+    const prTask = { taskId: 'pr', repo, report: path.join(root, 'pr.md') };
+    write(prTask.report, 'https://github.com/fixture/repo/pull/13');
+    json(path.join(base, 'unattended-workers.json'), { records: [prTask] });
+    jsonl(path.join(base, 'brain-judge/judgements.jsonl'), [{ ...accepts[0], taskId: 'pr', key: 'pr@1' }]);
+    const pr = 'https://github.com/fixture/repo/pull/13';
+    json(facts, {}); run('2026-11-12T12:00:00Z');
+    check('unavailable PR facts stay unknown', read().at(-1).foundWrong === null);
+    const count = read().length; r = run('2026-11-12T12:00:00Z');
+    check('unchanged unknown retry is silent', r.stdout === '' && read().length === count);
+    json(facts, { [pr]: { state: 'MERGED', mergedAt: '2026-11-07T10:00:00Z' } }); run('2026-11-12T13:00:00Z');
+    check('readable merged PR is a clean control', read().at(-1).foundWrong === false);
+    json(facts, { [pr]: { state: 'MERGED', mergedAt: '2026-11-07T10:00:00Z', reopenedAt: '2026-11-12T14:00:00Z' } }); run('2026-11-13T12:00:00Z');
+    check('later reopened PR issue is wrong', read().at(-1).foundWrong === true);
+    const terminalCount = read().length; r = run('2026-11-14T12:00:00Z');
+    check('confirmed reversal is dated once rather than renewed forever', r.status === 0 && r.stdout === '' && read().length === terminalCount);
+    r = run('invalid'); check('invalid time fails without success', r.status === 2);
+    // The clock's bare-name resolution is graded in test-brain-clock-observers.js; this only checks the name qualifies.
+    check('the script ships beside the clock under a bare observer name', fs.existsSync(path.join(scripts, 'brain-clock.js')) && /^[a-z0-9][a-z0-9-]*\.js$/.test('acceptance-audit.js'));
+} finally { fs.rmSync(root, { recursive: true, force: true }); }
+console.log(`acceptance-audit: ${total} checks, ${failed} failed`);
+process.exitCode = failed ? 1 : 0;
