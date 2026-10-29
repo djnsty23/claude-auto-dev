@@ -226,6 +226,9 @@ function lex(src) {
     while (i < src.length) {
         const c = src[i];
         if (c === ' ' || c === '\t' || c === '\r') { i++; continue; }
+        // A comment starts only where a word starts. `)` and a backtick are left out on purpose: after
+        // `$(true)` or a closing backtick the `#` continues the word in bash, and the rest still runs.
+        if (c === '#' && (i === 0 || ' \t\r\n;|&('.includes(src[i - 1]))) { const nl = src.indexOf('\n', i); i = nl < 0 ? src.length : nl; continue; }
         if (c === '\n') {
             endSeg(); i++;
             while (heredocs.length) {
@@ -286,6 +289,9 @@ function stripDataHeredocs(src) {
         const m = /<<(-?)\s*(['"])([A-Za-z_][A-Za-z0-9_]*)\2/.exec(line);
         // One heredoc on the line, and never a here-string (<<<), which has no body to skip.
         if (!m || /<<</.test(line) || (line.match(/<</g) || []).length !== 1) continue;
+        // The marker must be a shell redirection, not text in a quote or comment.
+        const header = lex(line);
+        if (!header || !header.some((s) => s.redirects.some((r) => r.op === `<<${m[1]}` && r.target === m[3]))) continue;
         const end = (l) => (m[1] === '-' ? l.replace(/\r$/, '').replace(/^\t+/, '') : l.replace(/\r$/, '')) === m[3];
         let j = i + 1;
         while (j < lines.length && !end(lines[j])) j++;

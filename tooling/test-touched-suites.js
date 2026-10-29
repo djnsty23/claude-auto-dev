@@ -107,6 +107,14 @@ try {
     touching('tooling/test-delta.js', (x) => check('a suite that names nothing is selected only by its own edit', JSON.stringify(x.names) === '["tooling/test-delta.js"]', x.out));
     touching('lib/other.js', (x) => check('a file no suite reaches selects nothing', x.names && x.names.length === 0, x.out));
 
+    // A staged deletion is absent from ls-files, like a committed deletion.
+    g('rm', 'tooling/fixtures/gamma-fix/m.json');
+    r = select();
+    check('a deleted fixture still selects its dependent suite', JSON.stringify(r.names) === '["tooling/test-gamma.js"]', r.out);
+    const missing = spawnSync(process.execPath, ['tooling/test-gamma.js'], { cwd: repo, encoding: 'utf8' });
+    check('the selected suite exposes the missing fixture', missing.status === 1 && /MODULE_NOT_FOUND/.test(missing.stderr), missing.stderr);
+    g('reset', '--hard', 'HEAD');
+
     // A new untracked file counts as touched.
     put('lib/new.js', 'module.exports = 5;\n');
     put('tooling/test-epsilon.js', "require('../lib/new.js');\n");
