@@ -559,7 +559,7 @@ const ownerWindow = {
 
 // Every shipped module that requires ledger-lock.js, as `<dir>~<file>`. test-window-probe.js
 // greps the plugins for those requires and fails when the grep and this list disagree.
-const LOCK_WRITERS = ['hooks~peer-send-ledger.js', 'scripts~ask-queue.js', 'scripts~brain-clock.js', 'scripts~execution-budget.js',
+const LOCK_WRITERS = ['hooks~peer-send-ledger.js', 'scripts~ask-queue.js', 'scripts~brain-clock.js', 'scripts~delivery-outcomes.js', 'scripts~execution-budget.js',
     'scripts~frontier-evidence.js', 'scripts~production-signals.js', 'scripts~radar-learning.js', 'scripts~watch-panels.js', 'scripts~worker-reconcile.js'];
 
 const lockingWindow = {

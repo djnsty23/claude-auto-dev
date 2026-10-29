@@ -193,13 +193,10 @@ try {
         now: NOW, prFacts: slow, budgetMs: 3500, clock: () => (tick += 1000) - 1000 });
     check(asked.length === 3 && /PR facts: 0 settled from budget\.pr-facts\.json, 3 asked, \d+ left unread after the 3\.5 s budget/.test(cut.population),
         `budget: ${asked.length} asked, population ${cut.population.split('; ').slice(-2).join('; ')}`);
-    // The two OPEN side PRs are asked while attempts are built, then the oldest task with a merged PR.
-    const order = [...D.buildAttempts(sideSrc, new Map(), { prFacts: sideReader }).byTask.entries()]
-        .filter(([, l]) => l.some((a) => a.decision === 'accept' && a.prs && a.prs.length))
-        .sort(([, a], [, b]) => (a[0].startedAt < b[0].startedAt ? -1 : 1));
-    const oldestPrs = order[0][1].flatMap((a) => a.prs || []);
-    check(asked[0] === pr(205) && asked[1] === pr(209) && oldestPrs.includes(asked[2]),
-        `budget order: asked ${asked.join(' ')}, oldest task ${order[0][0]} holds ${oldestPrs.join(' ')}`);
+    // The frozen fixture's alpha, bravo and charlie predate every side session.
+    // OPEN side PR refreshes must not jump ahead of those older tasks.
+    check(JSON.stringify(asked) === JSON.stringify([pr(101), pr(102), pr(103)]),
+        `budget order: asked ${asked.join(' ')}, expected oldest tasks' PRs 101, 102, 103`);
     const cutUnread = cut.outcomes.filter((o) => o.accepted === true && o.standingDay7 === null).length;
     check(cutUnread >= 3, `budget: ${cutUnread} accepted task(s) left with day 7 unread, expected at least 3`);
     const full = D.sync({ paths: { ...paths(FIXTURE, null), sessionsDir: sideDir, store: path.join(scratch, 'budget.jsonl') }, now: NOW, prFacts: sideReader });
@@ -289,6 +286,25 @@ try {
     const desk = D.buildAttempts(deskSrc, new Map(), { prFacts: pricedFacts, costOf: D.sessionCoster(projects, {}).costOf });
     const deskCost = ((desk.byTask.get('desk-1') || [])[0] || {}).costUsd;
     check(deskCost === 11, `a desktop-channel worker is priced from its session: ${deskCost}, expected 11`);
+    // A registered worker's session is that task only, never also side:<session> with the same cost again.
+    const sessionTasks = (built) => [...built.byTask.keys()].filter((k) => k === 'desk-1' || k === 'side:local_c1');
+    check(JSON.stringify(sessionTasks(desk)) === '["desk-1"]', `a registered session is one task: ${sessionTasks(desk).join(', ')}, expected desk-1 only`);
+    // A store written before that held side:local_c1 too: the stored copy does not bring it back.
+    const asStore = (built) => new Map([...built.byTask.values()].flat().map((a) => [a.key, { ...a }]));
+    const legacy = asStore(desk);
+    legacy.set('side:local_c1@2026-10-10T10:00:00.000Z', { key: 'side:local_c1@2026-10-10T10:00:00.000Z', taskId: 'side:local_c1', code: 'side',
+        startedAt: '2026-10-10T10:00:00.000Z', runStatus: 'succeeded', decision: 'accept', decisionBy: 'merged', costUsd: 11, judgeCostUsd: 0, prs: [pr(211)] });
+    const reread = D.buildAttempts(deskSrc, legacy, { costOf: () => null });
+    check(JSON.stringify(sessionTasks(reread)) === '["desk-1"]', `a stored side copy of a registered session is dropped: ${sessionTasks(reread).join(', ')}`);
+    // A stored desktop attempt is priced again: unknown first, the transcript arrives, then it grows.
+    const deskCostOf = (built) => ((built.byTask.get('desk-1') || [])[0] || {}).costUsd;
+    const unpriced = D.buildAttempts(deskSrc, new Map(), { costOf: () => null });
+    const priced = D.buildAttempts(deskSrc, asStore(unpriced), { costOf: () => 9 });
+    const grown = D.buildAttempts(deskSrc, asStore(priced), { costOf: () => 12 });
+    const skipped = D.buildAttempts(deskSrc, asStore(grown), { costOf: () => null });
+    check([deskCostOf(unpriced), deskCostOf(priced), deskCostOf(grown), deskCostOf(skipped)].join(',') === ',9,12,12',
+        `a stored desktop cost refreshes: ${[deskCostOf(unpriced), deskCostOf(priced), deskCostOf(grown), deskCostOf(skipped)].map(String).join(' -> ')}, `
+        + 'expected null -> 9 -> 12 -> 12 (a skipped price keeps the stored one)');
 } catch (e) {
     failures.push(`threw: ${e.stack || e.message}`);
 } finally {
