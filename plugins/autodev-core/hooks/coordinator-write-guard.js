@@ -37,8 +37,8 @@
 //     so this hook has no opinion about anyone's directory layout and ships
 //     safely to a machine whose paths it has never seen.
 //
-// FAILS OPEN, EVERYWHERE. Unlike pre-tool-filter.js, whose parse guard fails
-// closed, every error path here exits 0. This ships INSTALLED and runs inside
+// ERRORS FAIL OPEN except a recognised subagent payload containing push: an
+// uncheckable subagent push exits 2. This ships INSTALLED and runs inside
 // other people's sessions on every Bash call: a throw kills their turn, and a
 // defect survives until they reinstall. A rail that occasionally misses is
 // recoverable; one that bricks a stranger's Bash tool is not. The backstop for
@@ -338,6 +338,9 @@ const resolveArg = (base, raw) => path.resolve(base, nativePath(unwrap(raw)));
 function commandSegments(stripped) {
     return String(stripped)
         .replace(/\$\{([A-Za-z_][A-Za-z0-9_]*)\}/g, '$$$1')
+        // Keep brace expansion in its argument, marked as dynamic. Splitting
+        // it as a command group would hide the unknown subcommand/refspec.
+        .replace(/\{[^{}\s]*(?:,|\.\.)[^{}\s]*\}/g, () => '$')
         .split(/(?:\$\(|[;\n&|()`{}])+/)
         .map((seg) => seg.trim())
         .filter(Boolean);
@@ -419,12 +422,11 @@ function shellCommandString(segment) {
 
 function parseGitSegment(segment, cwd) {
     const toks = segment.split(/\s+/).filter(Boolean);
-    let i = skipWrappers(toks);
-    if (i >= toks.length) return null;
+    // Wrappers and shell control words are open-ended. Quoted argument spaces
+    // remain opaque, so an echo of a quoted command is still one argument.
+    let i = toks.findIndex((t) => commandName(t) === 'git' || commandName(unescapeWord(t)) === 'git');
+    if (i < 0) return null;
     const envCount = i;
-
-    const exe = path.basename(toks[i]).toLowerCase().replace(/\.(exe|cmd|bat)$/, '');
-    if (exe !== 'git') return null;
     i++;
 
     let dir = cwd;
@@ -442,10 +444,12 @@ function parseGitSegment(segment, cwd) {
         if (t.startsWith('--git-dir=')) { gitDir = resolveArg(dir, t.slice(10)); continue; }
         if (t === '--git-dir') { const v = toks[++i]; if (v) gitDir = resolveArg(dir, v); continue; }
         if (t === '-c') { globals.push(t); const v = toks[++i]; if (v) configs.push(unwrap(v)); continue; }
+        if (t === '--config-env') { globals.push(t); const v = toks[++i]; if (v) globals.push(unwrap(v)); continue; }
         if (t === '--exec-path' || t === '--namespace') { globals.push(t); i++; continue; }
         if (t.startsWith('-')) { globals.push(t); continue; }   // any other global flag
         // First non-flag word is the subcommand.
-        return { sub: unescapeWord(t).toLowerCase(), dir, gitDir, envCount, globals, configs, args: toks.slice(i + 1).map(unwrap) };
+        return { sub: unescapeWord(t).toLowerCase(), dir, gitDir, envCount, globals, configs,
+            env: toks.slice(0, envCount).map(unwrap), args: toks.slice(i + 1).map(unwrap) };
     }
     return null;
 }
@@ -487,7 +491,9 @@ function closedRunPush(g) {
     try {
         if (g.sub !== 'push' || g.gitDir || g.envCount || g.globals.length) return null;
         const positional = [];
-        for (const a of g.args) {
+        for (let i = 0; i < g.args.length; i++) {
+            const a = g.args[i];
+            if (/^\d*[<>]/.test(a)) { if (/^\d*[<>]+$/.test(a)) i++; continue; }
             if (a.startsWith('-')) { if (!PUSH_FLAGS_OK.has(a)) return null; continue; }
             positional.push(a);
         }
@@ -649,11 +655,13 @@ function defaultBranchPush(g) {
     const positional = [];
     let repoOption = false;
     let options = true;
+    let tags = false;
     for (let i = 0; i < g.args.length; i++) {
         const a = g.args[i];
         if (options && a === '--') { options = false; continue; }
         if (!options) { positional.push(a); continue; }
         if (a === '--all' || a === '--mirror' || a === '--branches') return a;
+        if (a === '--tags') { tags = true; continue; }
         if (a === '--repo' || a.startsWith('--repo=')) {
             const value = a === '--repo' ? g.args[++i] : a.slice(7);
             if (!value || value.startsWith('-')) return 'an unknown destination (missing --repo value)';
@@ -669,9 +677,9 @@ function defaultBranchPush(g) {
     // --repo already supplied the remote: the first positional is a refspec.
     const refspecs = positional.slice(repoOption ? 0 : 1);
     let cur;
-    const branchOf = (name) => (name === 'HEAD' ? (cur === undefined ? (cur = currentBranch(g.dir)) : cur) : name);
+    const branchOf = (name) => (name === 'HEAD' || name === '@' ? (cur === undefined ? (cur = currentBranch(g.dir)) : cur) : name);
     for (const r of refspecs) {
-        const dst = branchOf((r.includes(':') ? r.slice(r.indexOf(':') + 1) : r).replace(/^\+/, '').replace(/^refs\/heads\//, ''));
+        const dst = branchOf((r.includes(':') ? r.slice(r.indexOf(':') + 1) : r).replace(/^\+/, '').replace(/^(?:refs\/)?heads\//, ''));
         if (!dst) return 'an unknown destination (matching refspec or unresolved HEAD)';
         // A pattern can update any matching default branch. Keep feature-only
         // patterns and explicitly qualified tags working.
@@ -682,14 +690,17 @@ function defaultBranchPush(g) {
         if (DEFAULT_BRANCHES.has(dst)) return r === dst ? dst : `${dst} (refspec ${r})`;
     }
     if (refspecs.length) return null;
+    if (tags) return null; // --tags alone does not send the current branch.
     const head = branchOf('HEAD');
     if (!head) return 'an unknown destination (current branch unreadable)';
     return DEFAULT_BRANCHES.has(head) ? `${head} (the branch checked out in ${g.dir})` : null;
 }
 
 /** The first segment where a subagent pushes a default branch, or null. Tracks `cd` like the role check. */
-function subagentDefaultPush(segments, cwd) {
+function subagentDefaultPush(segments, cwd, command) {
     let here = cwd;
+    const mentionsPush = /\bpush\b/.test(unescapeWord(command).replace(/["']/g, ''))
+        || command.includes("$'") || /\{[^{}\s]*(?:,|\.\.)[^{}\s]*\}/.test(command);
     for (const seg of segments) {
         const moved = cdTarget(seg, here);
         if (moved) { here = moved; continue; }
@@ -701,7 +712,42 @@ function subagentDefaultPush(segments, cwd) {
             continue;
         }
         let g = parseGitSegment(seg, here);
-        if (!g) continue;
+        if (!g) {
+            const toks = seg.split(/\s+/).filter(Boolean);
+            const shell = /^(?:(?:ba|z|da|k)?sh|pwsh|powershell|cmd)$/.test(commandName(toks[skipWrappers(toks)]));
+            const indirect = shell || /^(?:eval|xargs)$/.test(commandName(toks[skipWrappers(toks)]))
+                || (commandName(toks[0]) === 'env' && toks.some((t) => /^(?:-S|--split-string)(?:=|$)/.test(t)));
+            if (indirect && (/\bpush\b/.test(unescapeWord(unwrap(seg)).replace(/["']/g, ''))
+                || (shell && mentionsPush && /<<|\|/.test(command)))) {
+                return { target: 'an unknown destination (a push passed to a shell or indirect command)', dir: here };
+            }
+            continue;
+        }
+        if (mentionsPush && (/[${}`]/.test(g.sub) || (g.sub === 'push' && g.args.some((a) => /[${}`]/.test(a))))) {
+            return { target: 'an unknown destination (shell expansion in a push)', dir: g.dir };
+        }
+        // xargs appends stdin to git's visible arguments. A here-string or
+        // pipeline may therefore add a default-branch refspec to a bare push.
+        if (g.sub === 'push' && g.env.some((a) => commandName(a) === 'xargs')) {
+            return { target: 'an unknown destination (push arguments supplied by xargs)', dir: g.dir };
+        }
+        // These options change the repository or destinations independently of
+        // the visible refspec. Only a plain, non-push alias is safe to retain.
+        const unsafeConfig = g.configs.some((c) => {
+            if (/^(?:remote|push)\./i.test(c)) return true;
+            if (!/^alias\./i.test(c)) return false;
+            const body = c.slice(c.indexOf('=') + 1).trim();
+            return !c.includes('=') || !/^[a-z][\w-]*(?:\s+[^!$`;|&{}]*)?$/i.test(body) || /\bpush\b/.test(body);
+        });
+        const configEnv = g.globals.some((a) => a === '--config-env' || a.startsWith('--config-env='));
+        const gitEnv = g.env.some((a) => /^GIT_(?:DIR|WORK_TREE|CONFIG_[A-Z0-9_]+)=/i.test(a));
+        const aliasInvocation = g.configs.some((c) => c.toLowerCase().startsWith(`alias.${g.sub}=`))
+            || (configEnv && g.globals.some((a) => /alias\./i.test(a)))
+            || (gitEnv && /\bpush\b/.test(seg));
+        if ((g.sub === 'push' || aliasInvocation) && (g.gitDir || g.globals.some((a) => /^--work-tree(?:=|$)/.test(a))
+            || configEnv || gitEnv || unsafeConfig)) {
+            return { target: 'an unknown destination (repository or push configuration override)', dir: g.dir };
+        }
         if (g.sub !== 'push') {
             // `git -c alias.p=push p ...` runs push. The last definition wins, as in git.
             const def = g.configs.filter((c) => c.toLowerCase().startsWith(`alias.${g.sub}=`)).pop();
@@ -739,8 +785,8 @@ function subagentDefaultPush(segments, cwd) {
 // rider is what makes the recommended path the defensible one.
 // ===========================================================================
 
+let data;
 try {
-    let data;
     try {
         data = JSON.parse(fs.readFileSync(0, 'utf8'));
     } catch {
@@ -781,8 +827,8 @@ try {
 
     // The fourth guard: blocks before the ask, and before the role file, which exempts subagents.
     // Backslashes go too: the shell runs `pu\sh` as push.
-    if (isSubagent(data) && /\bpush\b/.test(unquoted.replace(/\\/g, ''))) {
-        const hit = subagentDefaultPush(commandSegments(stripNonCommandText(command)), cwd);
+    if (isSubagent(data)) {
+        const hit = subagentDefaultPush(commandSegments(stripNonCommandText(command)), cwd, command);
         if (hit) {
             process.stderr.write(`Blocked: this subagent's \`git push\` would update ${hit.target} on the remote `
                 + `of ${hit.dir}. A default branch moves only by PR through merge-lock.js, and on a product `
@@ -1018,11 +1064,13 @@ try {
         + `To stand down the role deliberately, remove ${rolePath}.\n`);
     process.exit(2);
 } catch (err) {
-    // Never kill a turn. See the header: this ships installed, and a defect here
-    // reaches a stranger's every Bash call until they reinstall.
+    // Retain the parsed payload across the try: malformed cwd/command types
+    // must not turn an uncheckable subagent push into permission to execute it.
+    const pushFailed = data && isSubagent(data) && String(data.tool_input?.command || '').includes('push');
     try {
-        process.stderr.write(`coordinator-write-guard: skipped (${err && err.message}); `
+        if (pushFailed) process.stderr.write(`Blocked: this subagent's \`git push\` could not be checked (${err && err.message}).\n`);
+        else process.stderr.write(`coordinator-write-guard: skipped (${err && err.message}); `
             + `git writes were NOT guarded on this call\n`);
     } catch { /* stderr itself is gone; there is nothing further to try */ }
-    process.exit(0);
+    process.exitCode = pushFailed ? 2 : 0;
 }

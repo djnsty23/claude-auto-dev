@@ -64,9 +64,87 @@ try {
         allowed('command git push origin HEAD:claude/topic');
         allowed('nice -n 5 git push origin HEAD:claude/topic');
         allowed('git pu\\sh origin HEAD:claude/topic');
-        allowed('git -c alias.p=push p origin HEAD:claude/topic');
+        blocked('git -c alias.p=push p origin HEAD:claude/topic');
         allowed('git -c alias.st=status st');
         allowed('bash -c "git status"');
+    });
+    for (const cmd of [
+        'git --git-dir=elsewhere/.git push origin HEAD:claude/topic',
+        'git --git-dir elsewhere/.git push origin HEAD:claude/topic',
+        'git --work-tree=elsewhere push origin HEAD:claude/topic',
+        'git --work-tree elsewhere push origin HEAD:claude/topic',
+        'git --config-env=push.default=PUSH_MODE push origin HEAD:claude/topic',
+        'git --config-env alias.p=PV p origin HEAD:main',
+        'git --config-env=alias.p=PV p origin HEAD:main',
+        'git -c remote.origin.push=HEAD:main push origin HEAD:claude/topic',
+        'git -c push.default=upstream push origin HEAD:claude/topic',
+        'git -c alias.p=push push origin HEAD:claude/topic',
+        'git -c alias.p=!git\\ push p origin HEAD:main',
+        'GIT_DIR=elsewhere/.git git push origin HEAD:claude/topic',
+        'GIT_WORK_TREE=elsewhere git push origin HEAD:claude/topic',
+        'GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=alias.p GIT_CONFIG_VALUE_0=push git p origin HEAD:main',
+        'env GIT_CONFIG_SYSTEM=elsewhere git push origin HEAD:claude/topic',
+    ]) test(`H2 unsafe push configuration: ${cmd}`, () => blocked(cmd));
+    test('H2 harmless configuration and non-push controls stay silent', () => {
+        for (const cmd of ['git -c alias.st=status st', 'git -c alias.st=status push origin HEAD:claude/topic',
+            'git -c color.ui=false push origin HEAD:claude/topic', 'git --git-dir=elsewhere status',
+            'git --work-tree=elsewhere status', 'git --config-env=color.ui=COLOR status',
+            'GIT_DIR=elsewhere git status', 'git -c remote.origin.url=elsewhere status']) allowed(cmd);
+    });
+    for (const cmd of [
+        'timeout 60 git push origin HEAD:main', 'stdbuf -o0 git push origin HEAD:main',
+        'if true; then git push origin HEAD:main; fi', '! git push origin HEAD:main',
+        '>/dev/null git push origin HEAD:main', 'g\\it push origin HEAD:main',
+        "git $'pu\\x73h' origin HEAD:main", 'p=push; git $p origin HEAD:main',
+        'b=main; git push origin HEAD:$b', 'git push origin HEAD:${b}',
+        "git push origin HEAD:$'ma\\x69n'", 'git push origin HEAD:ma{i,}n',
+        'git {pu,p}sh origin HEAD:main',
+        'env -S "git push origin HEAD:main"', 'env --split-string="git push origin HEAD:main"',
+        'bash -o pipefail -c "git push origin HEAD:main"',
+        'bash <<< "git push origin HEAD:main"', 'echo "git push origin HEAD:main" | bash',
+        'cat <<EOF | sh\ngit push origin HEAD:main\nEOF', 'bash <<EOF\ngit push origin HEAD:main\nEOF',
+        'cmd //c "git push origin HEAD:main"', 'pwsh -c "git push origin HEAD:main"',
+        'eval "git push origin HEAD:main"', 'xargs "git push origin HEAD:main"',
+        'xargs git push origin <<< HEAD:main',
+    ]) test(`H3 indirect push: ${JSON.stringify(cmd)}`, () => blocked(cmd));
+    test('H3 ordinary commands and feature pushes stay silent', () => {
+        for (const cmd of ['git status', 'git log --grep=push', 'git commit -m "push the docs"',
+            'npm run gate', 'node script.js push', 'git stash push',
+            'timeout 60 git push origin HEAD:claude/topic', 'stdbuf -o0 git push origin HEAD:claude/topic',
+            '! git push origin HEAD:claude/topic', '>/dev/null git push origin HEAD:claude/topic',
+            'g\\it push origin HEAD:claude/topic', 'echo "git push origin main"',
+            'printf push | wc -c', 'cat <<EOF\ngit push origin main\nEOF']) allowed(cmd);
+    });
+    test('H3 tags-only push on main stays silent', () => {
+        const dir = path.join(root, 'tags-main');
+        const init = spawnSync('git', ['init', '-q', '-b', 'main', dir], { encoding: 'utf8', windowsHide: true });
+        assert.equal(init.status, 0, init.stderr);
+        allowed('git push --tags origin', dir);
+        blocked('git push --tags origin main', dir);
+        blocked('git push --tags --all origin', dir);
+    });
+    test('H3 xargs here-string on a feature branch fails closed', () => {
+        const dir = path.join(root, 'xargs-feature');
+        const init = spawnSync('git', ['init', '-q', '-b', 'claude/topic', dir], { encoding: 'utf8', windowsHide: true });
+        assert.equal(init.status, 0, init.stderr);
+        allowed('git push origin', dir); // a readable feature branch is the control
+        blocked('xargs git push origin <<< HEAD:main', dir);
+    });
+    test('H5 malformed cwd with a subagent push fails closed', () => blocked('git push origin HEAD:main', 42));
+    test('H5 array command containing a subagent push fails closed', () => blocked(['git', 'push', 'origin', 'main']));
+    test('H5 throws outside subagent pushes retain exit zero', () => {
+        for (const [command, cwd] of [['git status', 42], [123, root]]) {
+            const r = push(command, cwd);
+            assert.equal(r.status, 0);
+            assert.equal(r.stdout, '');
+            assert.match(r.stderr, /coordinator-write-guard: skipped/);
+        }
+        const r = spawnSync(process.execPath, [hook], {
+            input: JSON.stringify({ tool_name: 'Bash', cwd: 42, tool_input: { command: 'git push origin main' } }),
+            encoding: 'utf8', timeout: 30000, windowsHide: true,
+        });
+        assert.equal(r.status, 0); // main-thread errors keep their existing contract
+        assert.equal(r.stdout, '');
     });
     test('F2 repo options and matching refspecs block', () => {
         // A repo on a feature branch: the current branch reads, so a block here is the
