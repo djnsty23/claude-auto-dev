@@ -1356,8 +1356,9 @@ function settleRecord(opts, seen = {}) {
                 + (other ? '' : moved ? `. ${misplacedHint(moved, rec)}` : '. If the worker ended without one, settle --unreported records that it left none'));
         }
         const settledAt = new Date().toISOString();
-        Object.assign(rec, { state: 'settled', result: parsed.state, sentence: parsed.sentence, exit, settledAt });
-        return { code, state: parsed.state, sentence: parsed.sentence, exit, report: rec.report, settledAt };
+        const blocker = reportBlocker(reportText);
+        Object.assign(rec, { state: 'settled', result: parsed.state, sentence: parsed.sentence, exit, settledAt, blocker });
+        return { code, state: parsed.state, sentence: parsed.sentence, exit, report: rec.report, settledAt, blocker };
     });
 }
 
@@ -1380,6 +1381,25 @@ function lostGateStep(rec, env = process.env) {
     } catch { return null; }
 }
 
+/**
+ * The structured blocker a settle persists on the record, so blocker-report.js
+ * ranks a missing statement instead of losing the run: `stated` with its text,
+ * `none`, `not-stated` (a report with no BLOCKER line), `supervisor` (the line
+ * a supervisor wrote when it ended the run before the model started), or
+ * `unknown` (no report to read). Settling never waits on one.
+ */
+function reportBlocker(reportText) {
+    if (reportText === null) return null;
+    const s = require('./blocker-report.js').statedBlocker(reportText);
+    return !s.stated ? { status: 'not-stated' } : s.text ? { status: 'stated', text: s.text } : { status: 'none' };
+}
+
+const SUPERVISOR_END_RE = /^(?:BUDGET_DENIED|CAPACITY_DEFERRED|CLAUDE_SPAWN_ERROR)=.*$/gm;
+function supervisorBlocker(logText) {
+    const lines = String(logText || '').match(SUPERVISOR_END_RE);
+    return lines ? { status: 'supervisor', text: lines[lines.length - 1].trim().slice(0, 300) } : null;
+}
+
 /** `settle --lost` inside the ledger lock. Mutates `rec` only when the record is provably not running. */
 function settleLost(rec, code, exit) {
     if (exit !== null) fault('not-lost', `${rec.log} has CLAUDE_EXIT=${exit}, so the worker ended and was not lost. Settle it without --lost`);
@@ -1397,6 +1417,7 @@ function settleLost(rec, code, exit) {
     Object.assign(rec, {
         state: 'settled', result: 'lost', reason, sentence: parsed ? parsed.sentence : null,
         reportResult: parsed ? parsed.state : null, exit: null, settledAt, gateStep,
+        blocker: (reportText !== null && reportBlocker(reportText)) || { status: 'unknown' },
     });
     return { code, state: 'lost', reason, sentence: rec.sentence, reportResult: rec.reportResult, exit: null, report: rec.report, settledAt, gateStep };
 }
@@ -1457,8 +1478,11 @@ function settleUnreported(rec, code, exit, refusal = null, records = []) {
         ? `exited ${exit} and ${rec.report} does not exist`
         : `exited ${exit} and ${rec.report} has no RESULT ${code} line`;
     const settledAt = new Date().toISOString();
-    Object.assign(rec, { state: 'settled', result: 'unreported', reason, sentence: null, exit, settledAt });
-    return { code, state: 'unreported', reason, sentence: null, exit, report: rec.report, settledAt };
+    // A run the supervisor ended before the model started (BUDGET_DENIED,
+    // CAPACITY_DEFERRED, CLAUDE_SPAWN_ERROR) keeps that line as its blocker.
+    const blocker = supervisorBlocker(readText(rec.log)) || (reportText !== null && !retry && reportBlocker(reportText)) || { status: 'unknown' };
+    Object.assign(rec, { state: 'settled', result: 'unreported', reason, sentence: null, exit, settledAt, blocker });
+    return { code, state: 'unreported', reason, sentence: null, exit, report: rec.report, settledAt, blocker };
 }
 
 /**
@@ -1469,7 +1493,7 @@ function settleUnreported(rec, code, exit, refusal = null, records = []) {
  */
 function settleAuthRefused(rec, code, exit, refusal) {
     const settledAt = new Date().toISOString();
-    Object.assign(rec, { state: 'settled', result: 'auth-refused', reason: refusal.text, authPattern: refusal.id, sentence: null, exit, settledAt });
+    Object.assign(rec, { state: 'settled', result: 'auth-refused', reason: refusal.text, authPattern: refusal.id, sentence: null, exit, settledAt, blocker: { status: 'unknown' } });
     return { code, state: 'auth-refused', reason: refusal.text, pattern: refusal.id, sentence: null, exit, report: rec.report, settledAt };
 }
 
