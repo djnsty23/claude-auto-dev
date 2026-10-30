@@ -60,7 +60,7 @@
  *                                     place of the probes; a value of null, "throw", "timeout" or "nan" is unknown
  *   AUTODEV_CAPACITY_SAMPLE_MS=N      the spacing between healthy samples, over the config
  *   AUTODEV_CAPACITY_TEST_PAUSE_MS=N  a pause inside the mutex, between the ledger read and its write
- * admit() and release() also take { now, probe, isAlive, isAliveFresh } options for in-process suites.
+ * admit() and release() also take { now, probe, isAlive, isAliveFresh, snapshot } options for in-process suites.
  *
  *   node capacity.js status [--json]                 the ledger, read-only apart from reclaiming dead pids
  *   node capacity.js observe                         append one sample of admitted load against the reserves
@@ -306,10 +306,28 @@ function defaultIsAliveFresh(pid) {
  * still sees it, and the class's breaker trips on a healthy run
  * [measured 2026-10-30: a live Git Bash pid tripped the gate breaker].
  */
+function defaultSnapshot() {
+    require(path.join(__dirname, 'full-gate-queue.js')).freshSnapshot();
+}
+
+/**
+ * Each call is one ledger read, and it starts a fresh snapshot of the pid
+ * tables on its first probe: an "alive" cached by an earlier read in the same
+ * process hid that pid's later death for the life of the process
+ * [measured 2026-10-30, Codex probe cached-alive-then-dead]. Within the read a
+ * "dead" is still confirmed on fresh tables. An injected isAlive brings its
+ * own cache, so it is reset only by an injected `snapshot`.
+ */
 function livenessFor(opts) {
     const first = opts.isAlive || defaultIsAlive;
     const fresh = opts.isAliveFresh || defaultIsAliveFresh;
+    const snapshot = opts.snapshot || (opts.isAlive ? null : defaultSnapshot);
+    let started = false;
     return (pid) => {
+        if (!started) {
+            started = true;
+            if (snapshot) snapshot();
+        }
         const alive = first(pid);
         return alive === false ? fresh(pid) : alive;
     };

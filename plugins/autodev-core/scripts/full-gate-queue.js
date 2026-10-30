@@ -408,6 +408,16 @@ function isAliveFresh(pid) {
 }
 
 /**
+ * Forgets every cached liveness answer and the `ps -e` listing, and nothing
+ * else. capacity.js calls it once per ledger read, so an alive answer cached
+ * by one read cannot hide that pid's death from the next.
+ */
+function freshSnapshot() {
+    aliveCache.clear();
+    msysPids = undefined;
+}
+
+/**
  * Every MSYS pid, from one `ps -e` per attempt: a waiter probes the holder and
  * every ticket on each poll, and one listing costs what one `ps -p` does.
  * Null when ps could not run.
@@ -421,8 +431,32 @@ function msysPidSet() {
     if (!ps) return msysPids;
     const p = spawnSync(ps, ['-e'], { encoding: 'utf8', windowsHide: true, timeout: 15000 });
     if (p.error || p.status !== 0) return msysPids;
-    msysPids = new Set((p.stdout || '').split(/\r?\n/).map((l) => l.trim().split(/\s+/)[0]).filter((s) => /^\d+$/.test(s)));
+    msysPids = parsePsTable(p.stdout);
     return msysPids;
+}
+
+/**
+ * The pid set of a `ps -e` listing, or null when it is not one. Exit 0 with
+ * empty or headerless output is not a table: read as "no pids", it reclaimed a
+ * live shell's reservation and tripped the breaker [measured 2026-10-30, an
+ * injected empty reply against a real live MSYS shell].
+ */
+function parsePsTable(stdout) {
+    const lines = String(stdout || '').split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
+    if (!lines.length || !/^PID\b/.test(lines[0])) return null;
+    return new Set(lines.slice(1).map((l) => l.split(/\s+/)[0]).filter((s) => /^\d+$/.test(s)));
+}
+
+/**
+ * tasklist /FI "PID eq <pid>" /NH /FO CSV: true for a row naming the pid, false
+ * for its explicit no-match line, null for anything else (empty, localised or
+ * unexpected output), which is never proof of death.
+ */
+function parseTasklist(stdout, pid) {
+    const text = String(stdout || '');
+    if (new RegExp(`^"[^"]*","${pid}"`, 'm').test(text)) return true;
+    if (/^INFO: No tasks are running which match the specified criteria\.?\s*$/m.test(text)) return false;
+    return null;
 }
 
 function probeAlive(pid) {
@@ -448,11 +482,11 @@ function probeAlive(pid) {
     // only for a pid neither probe above could find.
     const t = spawnSync('tasklist', ['/FI', `PID eq ${pid}`, '/NH', '/FO', 'CSV'],
         { encoding: 'utf8', windowsHide: true, timeout: 15000 });
-    const tasklistRan = !t.error && t.status === 0;
-    if (tasklistRan && new RegExp(`^"[^"]*","${pid}"`, 'm').test(t.stdout || '')) return true;
-    // Dead only when BOTH pid tables were asked. Without ps an MSYS pid cannot
-    // be seen at all, and "cannot see it" is not "it is dead".
-    return tasklistRan && psRan ? false : null;
+    const listed = !t.error && t.status === 0 ? parseTasklist(t.stdout, pid) : null;
+    if (listed === true) return true;
+    // Dead only when BOTH pid tables answered with a table. Without ps an MSYS
+    // pid cannot be seen at all, and "cannot see it" is not "it is dead".
+    return listed === false && psRan ? false : null;
 }
 
 // ---------------------------------------------------------------------------
@@ -1347,7 +1381,7 @@ function leaseFor(base, dir) {
 
 module.exports = {
     takeTurn, takeAnyLane, releaseLock, releaseLanes, leaveQueues, readStatus, readLock, resetProbes,
-    queueDirFor, lanePath, lanePaths, lanesFileFor, laneCount, defaultLockPath, isAlive, isAliveFresh, parseArgs,
+    queueDirFor, lanePath, lanePaths, lanesFileFor, laneCount, defaultLockPath, isAlive, isAliveFresh, freshSnapshot, parsePsTable, parseTasklist, parseArgs,
     reservedLine, HARNESS, PRODUCT, holderAlive, holderWhy, admitted, bootNow, confirmOwnership,
     readLaneLocks, readLaneTickets, leaseFor, readLeases: records.readLeases, withWorktreeMutex: records.withWorktreeMutex,
 };
