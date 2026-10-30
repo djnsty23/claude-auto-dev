@@ -63,7 +63,35 @@ try {
     const hist = fs.readFileSync(path.join(base, 'blockers/history.jsonl'), 'utf8').trim().split('\n');
     check('one history row per day', hist.length === 1 && JSON.parse(hist[0]).day === '2026-11-08', hist.length);
     r = run(['--print', '--no-write']);
-    check('--print lists examples', /e\.g\. the full gate waited 40 min/.test(r.stdout), r.stdout);
+    check('--print lists examples', /the full gate waited 40 min/.test(r.stdout), r.stdout);
+    check('--print quotes each example as worker-written data', /worker text: "the full gate waited 40 min[^"\n]*"/.test(r.stdout) && /worker-written text, quoted as data/.test(r.stdout), r.stdout);
+
+    // A3: a report with no BLOCKER line, a done run with no report, and a
+    // pre-worker failure the supervisor recorded each rank as their own cause.
+    const a3 = path.join(root, 'a3');
+    json(path.join(a3, 'unattended-workers.json'), { version: 1, records: [] });
+    json(path.join(a3, 'headless-workers.json'), { version: 1, records: [
+        { code: 'n1', startedAt: '2026-11-07T09:00:00Z', state: 'settled', settledAt: at, result: 'done', report: rep('n1', 'Work.\nRESULT n1 done: x\n') },
+        { code: 'n2', startedAt: '2026-11-07T09:01:00Z', state: 'settled', settledAt: at, result: 'done', report: path.join(root, 'absent-n2.md') },
+        { code: 'n3', startedAt: '2026-11-07T09:02:00Z', state: 'settled', settledAt: at, result: 'unreported', reason: 'exited -1 and REPORT.md does not exist',
+            blocker: { status: 'supervisor', text: 'BUDGET_DENIED=unknown-attempt: no --attempt-id' }, report: path.join(root, 'absent-n3.md') },
+    ] });
+    r = spawnSync(process.execPath, [subject, '--base', a3, '--now', NOW], { encoding: 'utf8' });
+    const a3l = JSON.parse(fs.readFileSync(path.join(a3, 'blockers/latest.json'), 'utf8'));
+    check('A3. a report with no BLOCKER line ranks as blocker not stated', cause(a3l, 'blocker not stated')?.runs === 1, JSON.stringify(a3l.ranked));
+    check('A3. a done run with no report ranks as report missing', cause(a3l, 'report missing')?.runs === 1, JSON.stringify(a3l.ranked));
+    check('A3. a supervisor-recorded pre-worker failure ranks by its reason', cause(a3l, 'pre-worker failure (budget, capacity or spawn)')?.runs === 1, JSON.stringify(a3l.ranked));
+    check('A3. the summary never says none found while evidence is missing', !/top none found/.test(r.stdout), r.stdout);
+
+    // A4: valid JSON in the wrong shape is unreadable, never a clean zero.
+    for (const [label, value] of [['{}', {}], ['{"records":null}', { records: null }], ['[null] records', { records: [null] }]]) {
+        const d = path.join(root, `a4-${label.replace(/\W/g, '')}`);
+        json(path.join(d, 'headless-workers.json'), value);
+        json(path.join(d, 'unattended-workers.json'), { version: 1, records: [] });
+        r = spawnSync(process.execPath, [subject, '--base', d, '--now', NOW], { encoding: 'utf8' });
+        check(`A4. a ${label} ledger exits 2 and publishes nothing`, r.status === 2 && !fs.existsSync(path.join(d, 'blockers/latest.json')) && /invalid/.test(r.stderr),
+            `exit ${r.status} ${r.stdout}${r.stderr}`);
+    }
 
     write(path.join(base, 'unattended-workers.json'), '{not json');
     r = run();
@@ -76,6 +104,10 @@ try {
     check('every reported worker prompt asks for the BLOCKER line', prompt.includes(hw.BLOCKER_NOTE) && /BLOCKER: none/.test(hw.BLOCKER_NOTE));
     const br = require(subject);
     check('the line the prompt asks for parses as stated', br.statedBlocker('x\nBLOCKER: the gate queue waited 20 min\nRESULT W1 done: y').text === 'the gate queue waited 20 min');
+    // A5: only a whole none marker is none.
+    const poisoned = br.statedBlocker('BLOCKER: none of the tests ran because the gate queue waited 40 minutes\nRESULT W5 done: x');
+    check('A5. a sentence starting with "none" is a stated blocker, not none', poisoned.stated && poisoned.text === 'none of the tests ran because the gate queue waited 40 minutes', JSON.stringify(poisoned));
+    check('A5. whole none markers still read as none', ['none', 'None.', 'nothing', 'N/A', 'no blocker', '**none**'].every((t) => br.statedBlocker(`BLOCKER: ${t}`).text === null));
 } finally { fs.rmSync(root, { recursive: true, force: true }); }
 console.log(`blocker-report: ${total} checks, ${failed} failed`);
 process.exitCode = failed ? 1 : 0;
