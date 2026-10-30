@@ -2,7 +2,7 @@
   "_doc": "The preregistered path-to-10 calibration. Fixed before any run: 12 tasks in 12 families, three arms, three repeats, 108 bounded runs, and six families withheld from tuning. Tuning may change only the inputs listed under tuning.inputs, and may read only rows of tuning.tasks. Each run is graded by its task's endpoint oracle (held-out checks or the answer key), never by a reviewer's verdict. Read it with: node tooling/frontier/run.js compare --plan tooling/frontier/path-to-10.json [--fixtures]. The fixture rows are synthetic and exist to exercise the comparison, not to report a result.",
   "preregisteredAt": "2026-10-14",
   "amendedAt": "2026-10-30",
-  "amendment": "Before any plan run (0 live rows named an arm): the previous-release arm became the candidate arm, so the plan measures the commit under review against the current release and the no-plugin baseline. Still three arms and 108 bounded runs. Promotion: run.js compare --plan <file> --promote --candidate <commit>.",
+  "amendment": "Before any plan run (0 live rows named an arm): the previous-release arm became the candidate arm, so the plan measures the commit under review against the current release and the no-plugin baseline. Still three arms and 108 bounded runs. Promotion: run.js compare --plan <file> --promote --candidate <commit>. Second, also before any plan run: tasks T1, T3, T4, T5, T6 and T11 were replaced, because their fixes had shipped in plugins/, so the candidate and current-release pins carried the answer and the contamination check refused them. Each replacement is cut from a fix commit that touched only tooling/, which no plugin ships, and keeps its id, so the training and held-out split is unchanged.",
   "repeats": 3,
   "arms": [
     {
@@ -27,7 +27,7 @@
   "tasks": [
     {
       "id": "T1",
-      "family": "instructions-loaded"
+      "family": "skill-scan"
     },
     {
       "id": "T2",
@@ -35,19 +35,19 @@
     },
     {
       "id": "T3",
-      "family": "git-failure-verdicts"
+      "family": "scorecard-grading"
     },
     {
       "id": "T4",
-      "family": "spawn-budget"
+      "family": "runtime-pre-release"
     },
     {
       "id": "T5",
-      "family": "branch-landed"
+      "family": "release-tags"
     },
     {
       "id": "T6",
-      "family": "worker-settle"
+      "family": "cost-window"
     },
     {
       "id": "T7",
@@ -67,7 +67,7 @@
     },
     {
       "id": "T11",
-      "family": "worktree-lifecycle"
+      "family": "suite-population"
     },
     {
       "id": "T12",
@@ -75,11 +75,11 @@
     }
   ],
   "withheldFamilies": [
-    "git-failure-verdicts",
-    "branch-landed",
-    "worker-settle",
+    "scorecard-grading",
+    "release-tags",
+    "cost-window",
     "hook-silence",
-    "worktree-lifecycle",
+    "suite-population",
     "security-gate"
   ],
   "tuning": {

@@ -2,13 +2,20 @@
   "id": "T11",
   "lane": "fix",
   "size": "S",
-  "source": "95480cbe worktree-reap dates logs/HEAD by its entries",
-  "parent": "e7be7e96b8629c51d9ee805fcf376ee29f6d6048",
-  "fix": "95480cbe9c197546230228ae5973ae6a373c9178",
+  "source": "19e5444a fix(check-suites): sweep the runner's own population, not the pool module",
+  "parent": "49974c575e9fe535337c6cd53dce349e59929e4a",
+  "fix": "19e5444a24b3e9a6af2fbaf72227e58d2caaf4f2",
   "brief": "T11.md",
-  "heldOut": ["tooling/test-worktree-reap.js"],
-  "checks": [["node", "tooling/test-worktree-reap.js"]],
+  "heldOut": [
+    "tooling/test-check-suites-can-fail.js"
+  ],
+  "checks": [
+    [
+      "node",
+      "tooling/test-check-suites-can-fail.js"
+    ]
+  ],
   "passToPass": [],
-  "disclosed": ["reflogMs"],
+  "disclosed": [],
   "timeoutMin": 30
 }

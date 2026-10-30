@@ -2,13 +2,23 @@
   "id": "T3",
   "lane": "fix",
   "size": "S",
-  "source": "a2b8d4c2 (#328) check-queue-freshness",
-  "parent": "b4230de8550f4fbc2b71241526f9a92819087cbe",
-  "fix": "a2b8d4c2f54f5211293a6a6359821f5cc84eafad",
+  "source": "d728cf51 fix(scorecard): grade credential-boundary as owner-held on the N5 decision",
+  "parent": "074f35e3e4b9fb18a5064ca87cc6ec1155fc1394",
+  "fix": "d728cf51814f7dc9a2268aff409dd149f84c6622",
   "brief": "T3.md",
-  "heldOut": ["tooling/test-check-queue-freshness.js"],
-  "checks": [["node", "tooling/test-check-queue-freshness.js"]],
+  "heldOut": [
+    "tooling/test-scorecard.js"
+  ],
+  "checks": [
+    [
+      "node",
+      "tooling/test-scorecard.js"
+    ]
+  ],
   "passToPass": [],
-  "disclosed": ["gitFailure", "status", "stderr", "population.gitFailed", "git grep exited 128", "ENOENT", "git itself failed on N premise(s)", "carried nothing checkable", "UNCHECKABLE"],
+  "disclosed": [
+    "OWNER_HELD",
+    "owner-held"
+  ],
   "timeoutMin": 30
 }

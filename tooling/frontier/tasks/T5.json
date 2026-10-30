@@ -1,14 +1,25 @@
 {
   "id": "T5",
   "lane": "fix",
-  "size": "M",
-  "source": "891bcdb4 (#281) check-branch-landed",
-  "parent": "ada120739cb8c3aab773bee188fc46490d90e8ee",
-  "fix": "891bcdb45eae1147b93ab9cdecf13412c5f9a386",
+  "size": "S",
+  "source": "5d7b9753 fix(release): cut annotated tags, and read a lightweight one as red",
+  "parent": "0ea48353b0f69d390d0bf99ef82e3c918d8f4dca",
+  "fix": "5d7b97532c8c5cc39e024f7b813634afa468c18c",
   "brief": "T5.md",
-  "heldOut": ["tooling/test-check-branch-landed.js"],
-  "checks": [["node", "tooling/test-check-branch-landed.js"]],
+  "heldOut": [
+    "tooling/test-check-release-lag.js"
+  ],
+  "checks": [
+    [
+      "node",
+      "tooling/test-check-release-lag.js"
+    ]
+  ],
   "passToPass": [],
-  "disclosed": ["classify", "evidence.files", "baseBlob", "trunkBlob", "branchBlob", "conflict risk", "conflict", "path(s)", "(+K more)", "+A / -D"],
-  "timeoutMin": 45
+  "disclosed": [
+    "LIGHTWEIGHT",
+    "re-cut"
+  ],
+  "timeoutMin": 30,
+  "contaminationWaiver": "the fix adds only the two output words its held-out check matches, and the brief must name both, so no undisclosed token is left to search for"
 }
