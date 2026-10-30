@@ -56,6 +56,7 @@
  * a prompt over PROMPT_MAX characters is refused before anything is spawned:
  * write a short pointer prompt that names a file to read.
  */
+const crypto = require('node:crypto');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
@@ -104,7 +105,9 @@ const USAGE = [
     '        died with it, gateStep names the step that started and recorded no exit (gate-records.js step records).',
     'settle --unreported: settle a record whose worker exited without a RESULT <CODE> line, as result unreported.',
     '        Refused while the log has no exit line (that is --lost), while the report has a RESULT line, and while',
-    '        <report dir>/<CODE>/<report name> has one (a report written into the scratch dir: move it, then settle).',
+    '        a report away from the ledger path has one: the outbox copy, <report dir>/<CODE>/<report name>, or',
+    '        <cwd>/.claude/worktrees/<CODE>.REPORT.md (move it, then settle). The supervisor copies the outbox and',
+    '        adopts such a report itself at the run\'s end, and logs REPORT_ADOPTED=<path> when it did.',
     '        A RESULT line naming a code started later in the ledger is that retry\'s word, and settles this record.',
     '        An unreported record is its own result, never done, stopped or failed.',
     'settle, auth-refused: an ended run whose LAST stream-json result event is a refused login (Not logged in,',
@@ -230,17 +233,109 @@ function resultNote(code, report) {
         + `with the code exactly ${code}. Any other spelling of it reads as unparseable, and the run cannot be settled.`;
 }
 
-// `[measured 2026-10-29]` four workers finished their work and settled unreported. In this
-// permission mode the Write tool is refused for a report under ~/.claude, and the worker's
-// heredoc fallbacks were denied when they ran a check in the same call. One form gets through
-// both: a quoted heredoc in a call that runs nothing else (worker-authority.js stripDataHeredocs).
+// `[measured 2026-10-30]` 40 of 48 worker logs show the REPORT.md write refused, and the
+// 8.198.0 heredoc form was refused on 9 of 9 runs: in dontAsk mode the CLI refuses Write
+// and Bash writes under ~/.claude, and neither --add-dir nor an allow rule lifts it. The
+// same writes under the temp dir succeed. So a worker writes its report, ask.json and
+// scratch into an outbox there, and its supervisor copies them to the ledger paths.
 function reportWriteNote(report, scratchDir) {
     const slash = (p) => p.replace(/\\/g, '/');
-    return `WRITING THE REPORT: the Write and Edit tools can be refused for ${slash(path.dirname(report))}. `
-        + `Write the report, and ask.json, with one Bash call that does nothing else: \`cat > "${slash(report)}" <<'REPORT_EOF'\`, `
-        + 'the text, then a line that is exactly `REPORT_EOF`. Keep the delimiter quoted, and check the file in a separate call: '
-        + 'a node, a pipe or any command beyond cat, mkdir, ls, head, tail, wc or grep in the same call makes the guard read the text as commands. '
-        + `${slash(scratchDir)} already exists, so the call needs no mkdir.`;
+    return `WRITING THE REPORT: write the report at ${slash(report)}, and ask.json in ${slash(scratchDir)}, with the Write tool. `
+        + 'Both directories already exist. They sit outside ~/.claude on purpose: this permission mode refuses writes there, '
+        + 'and the launcher copies these files to the ledger. A report anywhere else is a report nobody reads.';
+}
+
+/** The outbox root: AUTODEV_WORKER_OUTBOX, else autodev-outbox under the temp dir. */
+function outboxRoot(env = process.env) { return env.AUTODEV_WORKER_OUTBOX || path.join(os.tmpdir(), 'autodev-outbox'); }
+
+/** One run's outbox: named for its code and its ledger report, so two ledgers never share one. */
+function defaultOutbox(code, report, env = process.env) {
+    const tag = crypto.createHash('sha256').update(path.resolve(report)).digest('hex').slice(0, 8);
+    return path.join(outboxRoot(env), `${code}-${tag}`);
+}
+
+/** The report and scratch dir the worker itself is told to write: the ledger layout, rooted in its outbox. */
+function workerPaths(o) {
+    const report = path.join(o.outbox, path.basename(o.report));
+    return { report, scratch: scratchDirFor({ report, code: o.code }) };
+}
+
+/** Each file a worker writes in its outbox, paired with the ledger path it is copied to. */
+function outboxPairs(o) {
+    const w = workerPaths(o);
+    const ledgerScratch = scratchDirFor(o);
+    const name = path.basename(o.report);
+    return [[w.report, o.report], [path.join(w.scratch, name), path.join(ledgerScratch, name)], [askFiles(w.scratch).ask, askFiles(ledgerScratch).ask]];
+}
+
+/** Copy one file when it was written in this run and changed since the last copy. True when it copied. */
+function copyIfChanged(from, to, sinceMs, seen) {
+    if (path.resolve(from) === path.resolve(to)) return false;
+    let st;
+    try { st = fs.statSync(from); } catch { return false; }
+    if (!st.isFile() || st.mtimeMs < sinceMs - 1000) return false;
+    const stamp = `${st.mtimeMs}:${st.size}`;
+    if (seen.get(from) === stamp) return false;
+    try {
+        fs.mkdirSync(path.dirname(to), { recursive: true });
+        fs.copyFileSync(from, to);
+    } catch { return false; }
+    seen.set(from, stamp);
+    return true;
+}
+
+/**
+ * One pass of the outbox copy: the report, a report misplaced into the scratch
+ * dir and ask.json go to the ledger, and answer.json comes back to the worker.
+ * Returns the ledger paths it wrote.
+ */
+function syncOutbox(o, sinceMs, seen = new Map()) {
+    const copied = outboxPairs(o).filter(([from, to]) => copyIfChanged(from, to, sinceMs, seen)).map(([, to]) => to);
+    copyIfChanged(askFiles(scratchDirFor(o)).answer, askFiles(workerPaths(o).scratch).answer, sinceMs, seen);
+    return copied;
+}
+
+// `[measured 2026-10-30]` five workers whose report write was refused wrote
+// `<worktree>.REPORT.md` beside their worktree instead, inside the repo the guard
+// lets them write, and settle never looked there. These are the places a report
+// went when the named path was refused, in the order they are tried.
+/** Where a report for this run may sit when it is not at the ledger path. */
+function reportCandidates(o) {
+    const name = path.basename(o.report);
+    const out = [];
+    if (o.outbox) { const w = workerPaths(o); out.push(w.report, path.join(w.scratch, name)); }
+    out.push(path.join(scratchDirFor(o), name));
+    if (o.cwd && o.code) {
+        const wt = path.join(o.cwd, '.claude', 'worktrees', o.code);
+        out.push(`${wt}.REPORT.md`, path.join(wt, `${o.code}.REPORT.md`));
+    }
+    const seen = new Set([path.resolve(o.report)]);
+    return out.filter((p) => { const k = path.resolve(p); if (seen.has(k)) return false; seen.add(k); return true; });
+}
+
+/** The first candidate that carries this code's RESULT line and was written in this run, or null. */
+function foundReport(o, startedAt) {
+    for (const file of reportCandidates(o)) {
+        const text = readText(file);
+        if (text !== null && !writtenBefore(file, startedAt) && parseResult(text, o.code)) return file;
+    }
+    return null;
+}
+
+/**
+ * At the run's end: when the ledger report carries no RESULT line from this run,
+ * copy in the first candidate that does. Returns the adopted path, or null.
+ */
+function adoptReport(o, startedAt) {
+    const own = readText(o.report);
+    if (own !== null && !writtenBefore(o.report, startedAt) && parseResult(own, o.code)) return null;
+    const file = foundReport(o, startedAt);
+    if (!file) return null;
+    try {
+        fs.mkdirSync(path.dirname(o.report), { recursive: true });
+        fs.copyFileSync(file, o.report);
+    } catch { return null; }
+    return file;
 }
 
 // `[measured 2026-09-23]` after an install, 11 of 12 workers ran this script
@@ -278,7 +373,7 @@ function parseArgs(argv) {
     const out = { _: [] };
     const flags = ['help', 'dry-run', 'json', 'lost', 'unreported', 'dev'];
     const known = ['_', ...flags, 'code', 'started-at', 'prompt-file', 'log', 'report', 'config-dir', 'model', 'effort',
-        'permission-mode', 'cwd', 'claude-bin', 'ledger', 'plugin-dir', 'keep-tools', 'profile', 'attempt-id', 'budget-ledger', 'secret'];
+        'permission-mode', 'cwd', 'claude-bin', 'ledger', 'plugin-dir', 'keep-tools', 'profile', 'attempt-id', 'budget-ledger', 'secret', 'outbox'];
     for (let i = 0; i < argv.length; i++) {
         const a = argv[i];
         if (a === '--help' || a === '-h' || a === 'help') { out.help = true; continue; }
@@ -404,19 +499,15 @@ function scratchDirFor(o) { return path.join(path.dirname(o.report), o.code); }
 // Their prompts named the scratch dir and not the report file. The ledger read
 // the empty path, so both looked like workers that left no report, and settle
 // --unreported would have filed two finished PRs as unreported. So settle looks
-// in that one place, names the file, and never settles past it.
-/** The report file under the record's scratch dir, when it carries this code's RESULT line. */
+// in the places reportCandidates names, names the file, and never settles past it.
+/** A report for this record away from its ledger path, when it carries this code's RESULT line. */
 function misplacedReport(rec) {
     if (!rec.report || !rec.code) return null;
-    const alt = path.join(scratchDirFor(rec), path.basename(rec.report));
-    if (path.resolve(alt) === path.resolve(rec.report)) return null;
-    const text = readText(alt);
-    if (text === null || writtenBefore(alt, rec.startedAt)) return null;
-    return parseResult(text, rec.code) ? alt : null;
+    return foundReport(rec, rec.startedAt);
 }
 
 function misplacedHint(moved, rec) {
-    return `${moved} has a RESULT ${rec.code} line: the worker wrote its report into its scratch dir. `
+    return `${moved} has a RESULT ${rec.code} line: the worker wrote its report away from the ledger path. `
         + `Move that file to ${rec.report}, then settle again`;
 }
 
@@ -467,10 +558,12 @@ function moveAside(files, stamp) {
     return moved;
 }
 
-function readPrompt(file, scratchDir, o = {}) {
+/** The prompt names the worker's outbox paths, never the ledger's: the worker cannot write those. */
+function readPrompt(file, o) {
     if (!file) fault('usage', '--prompt-file is required');
     if (!fs.existsSync(file)) fault('prompt-missing', `${file} does not exist`);
-    const prompt = composePrompt(fs.readFileSync(file, 'utf8'), scratchDir, { code: o.code, report: o.report });
+    const w = workerPaths(o);
+    const prompt = composePrompt(fs.readFileSync(file, 'utf8'), w.scratch, { code: o.code, report: w.report });
     if (prompt.length > PROMPT_MAX) {
         fault('prompt-too-long', `the prompt is ${prompt.length} characters after the placement and headless notes and the cap is ${PROMPT_MAX}: `
             + 'it travels in argv, so write a short pointer prompt that names a file to read');
@@ -632,10 +725,12 @@ function startOptions(opts) {
     // EISDIR read reported under code internal instead of usage.
     if (!opts['prompt-file']) fault('usage', '--prompt-file is required');
     const log = path.resolve(opts.log);
+    const report = path.resolve(opts.report || defaultReport(log));
     return {
         code,
         log,
-        report: path.resolve(opts.report || defaultReport(log)),
+        report,
+        outbox: path.resolve(opts.outbox || defaultOutbox(code, report)),
         promptFile: path.resolve(opts['prompt-file']),
         configDir: opts['config-dir'] ? resolveConfigDir(opts['config-dir']) : null,
         model: opts.model || null,
@@ -662,7 +757,7 @@ function startOptions(opts) {
  * records passed a --report of their own.
  */
 function supervisorFlags(o) {
-    const flags = ['--code', o.code, '--log', o.log, '--report', o.report, '--prompt-file', o.promptFile,
+    const flags = ['--code', o.code, '--log', o.log, '--report', o.report, '--outbox', o.outbox, '--prompt-file', o.promptFile,
         '--permission-mode', o.permissionMode, '--cwd', o.cwd, '--claude-bin', o.claudeBin];
     if (o.model) flags.push('--model', o.model);
     if (o.effort) flags.push('--effort', o.effort);
@@ -701,19 +796,19 @@ function start(opts) {
     }
     if (o.configDir) requireConfigDirExists(o.configDir);
     if (o.pluginDir && !isDir(o.pluginDir)) fault('plugin-dir-missing', `--plugin-dir resolved to ${o.pluginDir}, which is not a directory`);
-    const prompt = readPrompt(o.promptFile, scratchDirFor(o), o);
-    const argv = buildArgv({ claudeBin: o.claudeBin, prompt, model: o.model, effort: o.effort, permissionMode: o.permissionMode, pluginDir: o.pluginDir, keepTools: o.keepTools, profile: o.profile, cwd: o.cwd, report: o.report, secrets: o.secrets });
+    const prompt = readPrompt(o.promptFile, o);
+    const argv = buildArgv({ claudeBin: o.claudeBin, prompt, model: o.model, effort: o.effort, permissionMode: o.permissionMode, pluginDir: o.pluginDir, keepTools: o.keepTools, profile: o.profile, cwd: o.cwd, report: workerPaths(o).report, secrets: o.secrets });
     const plan = buildEnv(process.env, { code: o.code, configDir: o.configDir, kind: o.profile, secrets: o.secrets });
     if (opts['dry-run']) {
         return {
             dryRun: true, code: o.code, argv, command: spawnPlan(argv).command,
             envSet: plan.set, envDeleted: plan.deleted, envScrubList: plan.scrubList, envNames: plan.names, envDropped: plan.dropped, secrets: plan.declared,
-            authority: runAuthority({ prompt, keepTools: o.keepTools, profile: o.profile, cwd: o.cwd, report: o.report, secrets: o.secrets }),
+            authority: runAuthority({ prompt, keepTools: o.keepTools, profile: o.profile, cwd: o.cwd, report: workerPaths(o).report, secrets: o.secrets }),
             configDir: o.configDir, effort: o.effort, pluginDir: o.pluginDir, droppedTools: droppedTools(prompt, o.keepTools),
             profile: o.profile, tools: toolProfile(prompt, o.keepTools, o.profile).allowed,
             budget: { ceilings: budget.ceilingsFor('worker'), billing: budget.billingOf(plan.env), ledger: o.budgetLedger, attemptId: o.attemptId },
             script: placement.script, version: placement.version, installed: placement.installed, dev: o.dev, integrity: integritySummary(integrity),
-            log: o.log, report: o.report, scratchDir: scratchDirFor(o), ledger: o.ledger, cwd: o.cwd, spawned: false,
+            log: o.log, report: o.report, scratchDir: scratchDirFor(o), outbox: o.outbox, workerReport: workerPaths(o).report, ledger: o.ledger, cwd: o.cwd, spawned: false,
             wouldMoveAside: priorRunFiles(o),
         };
     }
@@ -724,7 +819,7 @@ function start(opts) {
     // write left a real worker running that no ledger named.
     const record = {
         code: o.code, pid: null, supervisorImage: path.basename(process.execPath).toLowerCase(), startedAt: new Date().toISOString(),
-        log: o.log, report: o.report, promptFile: o.promptFile,
+        log: o.log, report: o.report, outbox: o.outbox, promptFile: o.promptFile,
         configDir: o.configDir ? path.basename(o.configDir) : null,
         version: placement.version, script: placement.script, dev: !placement.installed, integrity: integritySummary(integrity),
         model: o.model, effort: o.effort, permissionMode: o.permissionMode, cwd: o.cwd, pluginDir: o.pluginDir, droppedTools: droppedTools(prompt, o.keepTools),
@@ -804,13 +899,26 @@ function start(opts) {
  */
 function supervise(opts) {
     const o = startOptions(opts);
-    const prompt = readPrompt(o.promptFile, scratchDirFor(o), o);
-    const argv = buildArgv({ claudeBin: o.claudeBin, prompt, model: o.model, effort: o.effort, permissionMode: o.permissionMode, pluginDir: o.pluginDir, keepTools: o.keepTools, profile: o.profile, cwd: o.cwd, report: o.report, secrets: o.secrets });
+    const prompt = readPrompt(o.promptFile, o);
+    const argv = buildArgv({ claudeBin: o.claudeBin, prompt, model: o.model, effort: o.effort, permissionMode: o.permissionMode, pluginDir: o.pluginDir, keepTools: o.keepTools, profile: o.profile, cwd: o.cwd, report: workerPaths(o).report, secrets: o.secrets });
     const { env } = buildEnv(process.env, { code: o.code, configDir: o.configDir, kind: o.profile, secrets: o.secrets });
     const plan = spawnPlan(argv);
     fs.mkdirSync(path.dirname(o.log), { recursive: true });
-    // The worker may not be able to create it: a mkdir under ~/.claude is refused in its mode.
+    // The worker cannot create the ledger side (a mkdir under ~/.claude is refused in
+    // its mode), and the outbox is created for it so the prompt can say it exists.
     fs.mkdirSync(scratchDirFor(o), { recursive: true });
+    const runStart = Date.now();
+    const outboxSeen = new Map();
+    const w = workerPaths(o);
+    // An earlier run's outbox files move aside: the Write tool refuses to overwrite a file it has not read.
+    const stamp = new Date(runStart).toISOString().replace(/[-:.]/g, '');
+    for (const f of [w.report, path.join(w.scratch, path.basename(o.report)), askFiles(w.scratch).ask, askFiles(w.scratch).answer]) {
+        try { if (fs.existsSync(f)) fs.renameSync(f, asideName(f, stamp)); } catch { /* the run's own writes still carry newer mtimes */ }
+    }
+    fs.mkdirSync(w.scratch, { recursive: true });
+    const sync = () => { try { syncOutbox(o, runStart, outboxSeen); } catch { /* the next pass, or the last one in finish, copies it */ } };
+    const syncTimer = setInterval(sync, Number(process.env.AUTODEV_OUTBOX_SYNC_MS) || 5000);
+    syncTimer.unref();
     const fd = fs.openSync(o.log, 'a');
     let finished = false;
     let reservation = null;
@@ -836,12 +944,18 @@ function supervise(opts) {
     const finish = (lines, exitCode, budgetExit = null) => {
         if (finished) return;
         finished = true;
+        clearInterval(syncTimer);
+        sync();
+        // The report lands at the ledger path before the exit line, so a settle that reads the exit line finds it.
+        let adopted = null;
+        try { adopted = adoptReport(o, new Date(runStart).toISOString()); } catch { /* settle names the candidate as misplaced */ }
         settleCapacity();
         // The budget settles before the exit line lands, so a settle that reads the
         // exit line finds this attempt already settled, with its stop recorded.
         if (budgetExit === null) run.launched = false;
         try { settleBudget(budgetExit, lines[0]); } catch { /* the attempt stays open and keeps its whole reservation */ }
-        try { fs.writeSync(fd, '\n' + lines.join('\n') + '\n'); } catch { /* the log is gone; nothing left to say */ }
+        const out = adopted ? [`REPORT_ADOPTED=${adopted}`, ...lines] : lines;
+        try { fs.writeSync(fd, '\n' + out.join('\n') + '\n'); } catch { /* the log is gone; nothing left to say */ }
         try { fs.closeSync(fd); } catch { /* already closed */ }
         process.exitCode = exitCode;
     };
@@ -1134,7 +1248,7 @@ function statusLines(value) {
     for (const r of value.records) {
         lines.push(`${r.code} pid=${r.pid} process=${r.process} exit=${r.exit === null ? '-' : r.exit} `
             + `result=${r.result}${r.resultCodeFound ? ` (RESULT line found for a different code: ${r.resultCodeFound})` : ''}`
-            + `${r.misplacedReport ? ` (report written into the scratch dir: ${r.misplacedReport})` : ''} settled=${r.settled}${NOT_FROM_REPORT.includes(r.settledAs) ? ` settledAs=${r.settledAs} (${r.settleReason})` : ''}`
+            + `${r.misplacedReport ? ` (report found away from the ledger path: ${r.misplacedReport})` : ''} settled=${r.settled}${NOT_FROM_REPORT.includes(r.settledAs) ? ` settledAs=${r.settledAs} (${r.settleReason})` : ''}`
             + `${r.authRefused ? ` authRefused (${r.authRefused})` : ''}`
             + `${r.ask !== 'none' ? ` ask=${r.ask}` : ''}${r.supersededBy ? ` supersededBy=${r.supersededBy}` : ''} version=${r.version || '-'}${r.dev ? '(dev)' : ''}${r.sentence ? ` : ${r.sentence}` : ''}`);
     }
@@ -1408,6 +1522,7 @@ module.exports = {
     HEADLESS_NOTE, DENIED_NOTE, BLOCKER_NOTE, PROMPT_MAX, CODE_RE, placementNote, resultNote, scriptPlacement, otherResultCode, SCRUBBED_ENV, RETENTION_MS, SETTLED_RESULTS,
     AUTH_REFUSAL_PATTERNS, matchAuthRefusal, authRefusal, resolveConfigDir,
     askFiles, askNote, askState, scratchDirFor, priorRunFiles, moveAside, readLedger, settle, start,
+    outboxRoot, defaultOutbox, workerPaths, syncOutbox, reportCandidates, adoptReport, misplacedReport, reportWriteNote,
     HEAVY_TOOLS, droppedTools, namedTools, parseKeepTools, toolProfile, attemptIdFor, supervise,
     parseArgs, composePrompt, buildArgv, buildEnv, runAuthority, parseSecrets, spawnPlan, resolveClaudeBin, exitCodeOf, parseResult,
     livenessFromError, pidLiveness, pidImage, isSupervisorImage, supervisorLiveness, bootAt, pruneSettled, laterRuns, recordStatus, lostReason, lostGateStep, run,

@@ -53,6 +53,8 @@ const FAKE = path.join(ROOT, 'fake claude.js');
 const PROMPT = path.join(ROOT, 'prompt.md');
 const DEFAULT_LEDGER = path.join(HOME, '.claude', 'autodev', 'headless-workers.json');
 const POLL_MS = 20000;
+// Every worker outbox lands under ROOT, never in the machine's shared temp outbox.
+process.env.AUTODEV_WORKER_OUTBOX = path.join(ROOT, 'outbox');
 
 const write = (file, text) => {
     fs.mkdirSync(path.dirname(file), { recursive: true });
@@ -796,25 +798,36 @@ try {
         const dir = path.join(ROOT, 'T23');
         const report = path.join(ROOT, 'T23 reports', 'T23.report.md');
         const r = hw(['start', '--code', 'T23', '--prompt-file', PROMPT, '--log', path.join(dir, 'T23.log'), '--report', report,
-            '--claude-bin', FAKE, '--ledger', path.join(dir, 'ledger.json'), '--dry-run']);
+            '--claude-bin', FAKE, '--ledger', path.join(dir, 'ledger.json'), '--cwd', path.join(ROOT, 'T23 repo'), '--dry-run']);
         const v = r.json && r.json.ok ? r.json.value : null;
         const promptArg = v ? v.argv[v.argv.indexOf('-p') + 1] : '';
         const scratch = path.join(ROOT, 'T23 reports', 'T23');
+        const workerReport = v ? v.workerReport : '';
+        const workerScratch = path.join(path.dirname(workerReport), 'T23');
         check('23. dry-run reports the scratch dir as <report dir>/<code>', !!v && v.scratchDir === scratch, v ? v.scratchDir : r.stdout.slice(0, 200));
+        // [measured 2026-10-30] the CLI refuses a worker's writes under ~/.claude in dontAsk mode, so the
+        // worker is told an outbox and the supervisor copies from it to the ledger paths.
+        check('23. the worker writes into its outbox, <outbox root>/<code>-<tag>/<report name>, not the ledger path',
+            !!v && path.dirname(path.dirname(workerReport)) === process.env.AUTODEV_WORKER_OUTBOX
+            && /^T23-[0-9a-f]{8}$/.test(path.basename(path.dirname(workerReport))) && path.basename(workerReport) === 'T23.report.md', workerReport);
         check('23. the prompt pins a worktree to <repo>/.claude/worktrees/<name>', promptArg.includes('<repo>/.claude/worktrees/<name>'), promptArg.slice(-400));
-        check('23. the prompt names that scratch dir, in forward slashes', promptArg.includes(scratch.replace(/\\/g, '/')), promptArg.slice(-400));
+        check('23. the prompt names the outbox scratch dir, in forward slashes, and never the ledger one',
+            promptArg.includes(workerScratch.replace(/\\/g, '/')) && !promptArg.includes(scratch.replace(/\\/g, '/')), promptArg.slice(-400));
         check('23. the placement note precedes the headless note, which still ends the prompt',
             promptArg.indexOf('PLACEMENT:') > 0 && promptArg.indexOf('PLACEMENT:') < promptArg.indexOf(HEADLESS_NOTE) && promptArg.endsWith(HEADLESS_NOTE + '\n'));
-        // [measured 2026-10-29] four reports were refused. The note's own recipe, filled with a body
-        // that names the steps a person must run, has to pass the guard the run launches under.
-        const recipe = /`(cat > "[^"]+" <<'REPORT_EOF')`/.exec(promptArg);
-        check('23. the prompt prescribes one quoted-heredoc call for the report, at the report path',
-            !!recipe && recipe[1].includes(report.replace(/\\/g, '/')), promptArg.slice(-900));
+        check('23. the prompt says to write the report with the Write tool, at the outbox report path',
+            promptArg.includes(`WRITING THE REPORT: write the report at ${workerReport.replace(/\\/g, '/')}`) && /with the Write tool/.test(promptArg), promptArg.slice(-900));
+        // The run's own guard, as the dry run resolved it, has to let both writes through.
         const wa = require(path.join(path.dirname(SCRIPT), 'worker-authority.js'));
-        const auth = require(SCRIPT).runAuthority({ prompt: promptArg, profile: 'builder', cwd: path.join(ROOT, 'T23 repo'), report });
-        const body = 'Release window: `gh repo archive o/r`, then `doppler secrets set X`, then git push origin b. Cost $5.\nRESULT T23 stopped: needs a person';
-        const d = recipe ? wa.decide({ tool_name: 'Bash', tool_input: { command: `${recipe[1]}\n${body}\nREPORT_EOF` }, cwd: path.join(ROOT, 'T23 repo') }, auth) : null;
-        check('23. that call passes the builder guard although its body names gh, doppler and git push', !!d && d.decision === 'allow', JSON.stringify(d));
+        const repo = path.join(ROOT, 'T23 repo');
+        const auth = v ? v.authority : null;
+        const write = (file) => (auth ? wa.decide({ tool_name: 'Write', tool_input: { file_path: file, content: 'Release window: `gh repo archive o/r`, then git push.\nRESULT T23 stopped: needs a person' }, cwd: repo }, auth) : null);
+        const d = write(workerReport);
+        check('23. the run\'s guard allows the Write to the outbox report although its body names gh and git push', !!d && d.decision === 'allow', JSON.stringify(d));
+        const ask = write(path.join(workerScratch, 'ask.json'));
+        check('23. and the Write to ask.json in the outbox scratch dir', !!ask && ask.decision === 'allow', JSON.stringify(ask));
+        const other = write(path.join(ROOT, 'outbox', 'T23-other', 'T23.report.md'));
+        check('23. control: another run\'s outbox is outside this run\'s write roots', !!other && other.decision !== 'allow', JSON.stringify(other));
     }
     // ------------------------------------------------------------ 24. settle --lost
     // `[measured 2026-09-22]` four records on one machine could never settle:
@@ -1038,8 +1051,8 @@ try {
             !!byCode.EMPTYMAIN && byCode.EMPTYMAIN.result === 'unparseable' && byCode.EMPTYMAIN.misplacedReport === path.join(dir, 'EMPTYMAIN', 'EMPTYMAIN.report.md'), JSON.stringify(byCode.EMPTYMAIN || null).slice(0, 300));
         check('24c. a scratch file with no RESULT line is not a misplaced report', !!byCode.SCRATCHNOISE && byCode.SCRATCHNOISE.misplacedReport === null);
         const human = hw(['status', '--ledger', ledger]).stdout;
-        check('24c. status without --json says the report was written into the scratch dir',
-            /MOVED pid=\d+ process=exited exit=0 result=none \(report written into the scratch dir: [^\n]*MOVED\.report\.md\) settled=false/.test(human), human.slice(0, 500));
+        check('24c. status without --json says the report was found away from the ledger path',
+            /MOVED pid=\d+ process=exited exit=0 result=none \(report found away from the ledger path: [^\n]*MOVED\.report\.md\) settled=false/.test(human), human.slice(0, 500));
 
         const plain = hw(['settle', '--code', 'MOVED', '--ledger', ledger]);
         check('24c. plain settle refuses no-result, names the scratch-dir file and says to move it, and does not offer --unreported',
@@ -1326,8 +1339,10 @@ try {
         const promptArg = v ? v.argv[v.argv.indexOf('-p') + 1] : '';
         const askFile = path.join(dir, 'T25', 'ask.json');
         const answerFile = path.join(dir, 'T25', 'answer.json');
-        check('25. the prompt names ask.json and answer.json in the scratch dir',
-            promptArg.includes(askFile.replace(/\\/g, '/')) && promptArg.includes(answerFile.replace(/\\/g, '/')), promptArg.slice(-900));
+        const workerScratch = v ? path.join(path.dirname(v.workerReport), 'T25') : '';
+        const slash = (p) => p.replace(/\\/g, '/');
+        check('25. the prompt names ask.json and answer.json in the outbox scratch dir',
+            !!v && promptArg.includes(slash(path.join(workerScratch, 'ask.json'))) && promptArg.includes(slash(path.join(workerScratch, 'answer.json'))), promptArg.slice(-900));
         check('25. the prompt forbids exiting to ask and says to keep working', /never exit to ask/.test(promptArg) && /Keep working on everything that does not depend on it/.test(promptArg));
         check('25. the prompt still fits under PROMPT_MAX with every note', promptArg.length < PROMPT_MAX, String(promptArg.length));
 
@@ -1421,7 +1436,8 @@ try {
         const v = r.json && r.json.ok ? r.json.value : null;
         const promptArg = v ? v.argv[v.argv.indexOf('-p') + 1] : '';
         check('27. the prompt names the report and its RESULT line with the exact ledger code',
-            promptArg.includes('RESULT W2-DESIGN done|stopped|failed: <one sentence>') && promptArg.includes(report.replace(/\\/g, '/')), promptArg.slice(-1400));
+            promptArg.includes('RESULT W2-DESIGN done|stopped|failed: <one sentence>') && !!v
+            && promptArg.includes(`RESULT: the last line of ${v.workerReport.replace(/\\/g, '/')}`), promptArg.slice(-1400));
         check('27. no placeholder code is left, and the ask note ends RESULT W2-DESIGN stopped',
             !/<CODE>/.test(promptArg) && promptArg.includes('RESULT W2-DESIGN stopped'));
         const denied = ['Production Deploy', 'Secret-Store Writes', 'Production Reads', 'Modify Shared Resources'];
@@ -1580,6 +1596,87 @@ try {
         let rec = [];
         try { rec = JSON.parse(fs.readFileSync(ledger, 'utf8')).records || []; } catch { /* no ledger written is also no record */ }
         check('32. no worker record is left for the refused start', !rec.some((r) => r.code === 'ASIDE'), JSON.stringify(rec).slice(0, 200));
+    }
+
+    // 33. The outbox. `[measured 2026-10-30]` the CLI refused 40 of 48 workers' report writes under
+    // ~/.claude, and five that wrote <worktree>.REPORT.md instead were never read. A worker now writes
+    // into an outbox its supervisor copies to the ledger, and a report left in a known fallback place
+    // is adopted at the run's end. Each run goes through the real supervisor and the fake binary.
+    {
+        const dir = path.join(ROOT, 'T33');
+        const outboxOf = (code) => path.join(dir, 'outbox', code);
+        const run = (code, { writes = null, text = '', cwd = dir } = {}) => {
+            const report = path.join(dir, 'reports', `${code}.md`);
+            const s = startFake(code, { report: writes, reportText: text, extraArgs: ['--report', report, '--outbox', outboxOf(code), '--cwd', cwd, '--budget-ledger', path.join(dir, 'budget', `${code}.json`)] });
+            const end = s.pid ? waitForEnd(s.log, s.pid) : { ending: 'no-start', text: s.res.stdout };
+            return { ...s, report, end };
+        };
+        const settleOf = (s, code) => hw(['settle', '--code', code, '--ledger', s.ledger]);
+
+        // A: the worker writes its outbox report, and the ledger path holds the same text at the end.
+        const a = run('OBOX', { writes: path.join(outboxOf('OBOX'), 'OBOX.md'), text: 'Did the work.\nRESULT OBOX done: copied from the outbox.\n' });
+        check('33. a report written to the outbox lands at the ledger path before the exit line',
+            a.end.ending === 'exit-line' && read(a.report) === 'Did the work.\nRESULT OBOX done: copied from the outbox.\n', JSON.stringify({ ending: a.end.ending, report: read(a.report) }));
+        check('33. a synced report is a copy, not an adoption', !/REPORT_ADOPTED=/.test(a.end.text), a.end.text.slice(-300));
+        const sa = settleOf(a, 'OBOX');
+        check('33. it settles done with the outbox sentence', sa.json && sa.json.ok && sa.json.value.state === 'done' && sa.json.value.sentence === 'copied from the outbox.', sa.stdout.slice(0, 300));
+
+        // B: the worker wrote <cwd>/.claude/worktrees/<code>.REPORT.md, the place five refused workers chose.
+        const repo = path.join(dir, 'repo B');
+        const sibling = path.join(repo, '.claude', 'worktrees', 'SIBREP.REPORT.md');
+        fs.mkdirSync(path.dirname(sibling), { recursive: true });
+        const b = run('SIBREP', { writes: sibling, text: 'RESULT SIBREP done: written beside the worktree.\n', cwd: repo });
+        check('33. a report beside the worktree is adopted, and the log names it before the exit line',
+            b.end.ending === 'exit-line' && new RegExp(`REPORT_ADOPTED=${sibling.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\s*\\nCLAUDE_EXIT=0`).test(b.end.text), b.end.text.slice(-300));
+        const sb = settleOf(b, 'SIBREP');
+        check('33. the adopted report settles done', sb.json && sb.json.ok && sb.json.value.state === 'done', sb.stdout.slice(0, 300));
+
+        // C: a fallback file whose RESULT line names another code is not this run's report.
+        const repoC = path.join(dir, 'repo C');
+        const wrongCode = path.join(repoC, '.claude', 'worktrees', 'WRONGC.REPORT.md');
+        fs.mkdirSync(path.dirname(wrongCode), { recursive: true });
+        const c = run('WRONGC', { writes: wrongCode, text: 'RESULT OTHER done: another worker.\n', cwd: repoC });
+        check('33. control: a fallback file with another code is not adopted, and the ledger path stays empty',
+            c.end.ending === 'exit-line' && !/REPORT_ADOPTED=/.test(c.end.text) && read(c.report) === null, c.end.text.slice(-200));
+
+        // D: an outbox report left by an earlier run is moved aside, never copied as this run's.
+        const staleFile = path.join(outboxOf('STALEOB'), 'STALEOB.md');
+        write(staleFile, 'RESULT STALEOB done: an earlier run.\n');
+        const past = new Date(Date.now() - 3600 * 1000);
+        fs.utimesSync(staleFile, past, past);
+        const d = run('STALEOB');
+        const aside = fs.existsSync(outboxOf('STALEOB')) ? fs.readdirSync(outboxOf('STALEOB')).filter((n) => /^STALEOB\.prev-.*\.md$/.test(n)) : [];
+        check('33. an earlier run\'s outbox report is moved aside and never reaches the ledger path',
+            d.end.ending === 'exit-line' && read(d.report) === null && !fs.existsSync(staleFile) && aside.length === 1, JSON.stringify({ aside, report: read(d.report) }));
+
+        // E: with no supervisor to adopt it, status still names the fallback report and settle refuses past it.
+        const repoE = path.join(dir, 'repo E');
+        const lostSibling = path.join(repoE, '.claude', 'worktrees', 'NOSUP.REPORT.md');
+        write(lostSibling, 'RESULT NOSUP done: nobody adopted me.\n');
+        const ledgerE = path.join(dir, 'ledger-e.json');
+        const logE = path.join(dir, 'NOSUP.log');
+        write(logE, 'CLAUDE_EXIT=0\n');
+        write(ledgerE, JSON.stringify({ version: 1, records: [{ code: 'NOSUP', pid: 0, startedAt: new Date(Date.now() - 60000).toISOString(), log: logE, report: path.join(dir, 'reports', 'NOSUP.md'), cwd: repoE, state: 'running' }] }));
+        const st = hw(['status', '--ledger', ledgerE, '--json']);
+        const recE = st.json && st.json.ok ? st.json.value.records[0] : {};
+        check('33. status names a report beside the worktree as misplaced', recE.misplacedReport === lostSibling, JSON.stringify(recE).slice(0, 300));
+        const unrep = hw(['settle', '--code', 'NOSUP', '--ledger', ledgerE, '--unreported']);
+        check('33. settle --unreported refuses it with misplaced-report', unrep.json && unrep.json.ok === false && unrep.json.error.code === 'misplaced-report', unrep.stdout.slice(0, 300));
+
+        // F: while a run is live, ask.json travels to the ledger and answer.json back to the worker.
+        const H = require(SCRIPT);
+        const o = { code: 'ASKOB', report: path.join(dir, 'reports', 'ASKOB.md'), outbox: outboxOf('ASKOB') };
+        const w = H.workerPaths(o);
+        const since = Date.now();
+        write(path.join(w.scratch, 'ask.json'), '{"question":"Seeded or production?"}');
+        const seen = new Map();
+        const copied = H.syncOutbox(o, since, seen);
+        check('33. syncOutbox copies ask.json from the outbox to the ledger scratch dir',
+            read(path.join(dir, 'reports', 'ASKOB', 'ask.json')) === '{"question":"Seeded or production?"}' && copied.length === 1, JSON.stringify(copied));
+        check('33. an unchanged file is not copied twice', H.syncOutbox(o, since, seen).length === 0);
+        write(path.join(dir, 'reports', 'ASKOB', 'answer.json'), '{"label":"Seeded"}');
+        H.syncOutbox(o, since, seen);
+        check('33. answer.json travels back to the outbox scratch dir', read(path.join(w.scratch, 'answer.json')) === '{"label":"Seeded"}');
     }
 } finally {
     // Kill by pid, never by pattern; a dead pid is the expected answer here.
