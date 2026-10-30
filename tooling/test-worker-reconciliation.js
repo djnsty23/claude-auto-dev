@@ -241,14 +241,15 @@ try {
         check('exited', 'a later judge accept is applied, not escalated for receipt-missing',
             v.applied === true && !v.decision && w.rec(a.taskId).verdict.decision === 'accept' && w.rec(a.taskId).verdict.by === 'judge', JSON.stringify(v));
 
-        // Control: the same accept with no verify behind it escalates, so the case above is the receipt's doing.
+        // Control: the same accept with no verify behind it is not applied as accept, so the case above is the
+        // receipt's doing. Verify is the coordinator's step, so it is written as follow-up.
         const cw = world('exited-control');
         const cc = `c1-${NONCE}`;
         g(repo, 'branch', `claude/${cc}`, 'main');
         const ca = attempt(cw, cc, { r: { repo, briefFile, briefSha256: sha(brief), state: 'closed', runStatus: 'succeeded' } });
         write(ca.report, `RESULT ${cc} done: x.\n`);
         const cv = bj.writeVerdict({ ledger: cw.ledger }, ca.taskId, 'accept', 'the report reads done');
-        check('exited', 'control: an accept with no verify is escalated for receipt-missing', cv.decision === 'escalate' && /receipt-missing/.test(cv.note || ''), JSON.stringify(cv));
+        check('exited', 'control: an accept with no verify is written as follow-up for receipt-missing', cv.decision === 'follow-up' && /receipt-missing/.test(cv.note || ''), JSON.stringify(cv));
 
         // The CLI's own success event and the supervisor's exit line, with no report: never success.
         const hcode = `e2-${NONCE}`;
