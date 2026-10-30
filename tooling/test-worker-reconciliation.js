@@ -250,6 +250,25 @@ try {
         write(ca.report, `RESULT ${cc} done: x.\n`);
         const cv = bj.writeVerdict({ ledger: cw.ledger }, ca.taskId, 'accept', 'the report reads done');
         check('exited', 'control: an accept with no verify is written as follow-up for receipt-missing', cv.decision === 'follow-up' && /receipt-missing/.test(cv.note || ''), JSON.stringify(cv));
+        const held = cw.rec(ca.taskId).verdict;
+        check('exited', 'that follow-up keeps the accept it deferred', held.deferredAccept && held.deferredAccept.gate === 'receipt-missing' && held.deferredAccept.reason === 'the report reads done', JSON.stringify(held));
+        // A Brain follow-up on an identical run is the coordinator's call, and reconcile never reopens it.
+        const bc = `c2-${NONCE}`;
+        g(repo, 'branch', `claude/${bc}`, 'main');
+        const ba = attempt(cw, bc, { r: { repo, briefFile, briefSha256: sha(brief), state: 'closed', runStatus: 'succeeded' } });
+        write(ba.report, `RESULT ${bc} done: x.\n`);
+        const bv = cli(UW, ['verdict', '--task-id', ba.taskId, '--decision', 'follow-up', '--by', 'brain', '--reason', 'needs a second look', '--ledger', cw.ledger]);
+        check('exited', 'control: a Brain follow-up is recorded', bv.status === 0 && cw.rec(ba.taskId).verdict.by === 'brain', bv.detail);
+        const reopen = cw.tick(['--live', '--wait']);
+        const cr = cw.rec(ca.taskId).verdict;
+        check('exited', 'reconcile verifies the deferred follow-up and writes the judge accept over it',
+            cr.decision === 'accept' && cr.by === 'judge' && cr.receipt && cr.supersedes && cr.supersedes.decision === 'follow-up' && cr.supersedes.gate === 'receipt-missing',
+            JSON.stringify({ verdict: cr, verify: reopen.value && reopen.value.verify }));
+        const crows = fs.existsSync(path.join(cw.state, 'verify.jsonl')) ? fs.readFileSync(path.join(cw.state, 'verify.jsonl'), 'utf8').trim().split('\n').map((l) => JSON.parse(l)) : [];
+        check('exited', 'control: the Brain follow-up is not verified and stands',
+            cw.rec(ba.taskId).verdict.decision === 'follow-up' && cw.rec(ba.taskId).verdict.by === 'brain' && !crows.some((x) => x.taskId === ba.taskId), JSON.stringify(crows));
+        const again = cli(UW, ['verdict', '--task-id', ca.taskId, '--decision', 'escalate', '--by', 'judge', '--reason', 'late', '--ledger', cw.ledger]);
+        check('exited', 'the reopened accept stands against a later judge verdict', again.status === 0 && again.value.verdict.applied === false && cw.rec(ca.taskId).verdict.decision === 'accept', again.detail);
 
         // The CLI's own success event and the supervisor's exit line, with no report: never success.
         const hcode = `e2-${NONCE}`;
