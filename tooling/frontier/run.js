@@ -40,10 +40,11 @@ const USAGE = [
     '  prepare|run ... --routing-arm baseline|routed   fixed seeded routing experiment; selects the variant by lane',
     '  run --task T --variant V --account <name> [--repeat n]   prepare and start one worker, return at once',
     '  prepare|run ... --plan <file> --arm <id>   run one arm of a preregistered plan: its variant (--variant may be left',
-    '                                  out) and its plugin pin (current, previous or none), recorded on the row as arm',
+    '                                  out) and its plugin pin (current, previous, candidate or none), recorded on the row as arm',
+    '                                  --candidate <commit> names the commit a candidate arm loads, tagged or not',
     '  finish --run <id> [--wait-sec n]   grade an exited run and append its row; idempotent',
     '  batch --tasks T1,T2|all --variants V0,V1 --account <name> [--k 1] [--max 2] [--quiet-wait <min>]   start a detached batch loop',
-    '  batch ... --plan <file> --arms CUR,PRV,BAS   the same over plan arms instead of --variants',
+    '  batch ... --plan <file> --arms CAN,CUR,BAS   the same over plan arms instead of --variants',
     '                                  --quiet-wait holds each item until no gate, coverage run or full suite runs on the',
     '                                  machine, at most <min> minutes (10 when given alone), then starts it as a loaded row',
     '  batch-resume --batch <id>       restart the loop of a batch whose loop died',
@@ -51,6 +52,9 @@ const USAGE = [
     '  compare --plan <file> [--fixtures]   read a preregistered plan against its rows: arms, independent oracles,',
     '                                  leakage controls and missing runs. --fixtures reads the plan\'s recorded fixture',
     '                                  rows, otherwise the rows in <data>/runs.jsonl. Launches nothing. Exit 1 on a red field',
+    '  compare ... --promote --candidate <commit>   also decide promotion: exit 0 only on every planned cell filled once,',
+    '                                  candidate rows that loaded that commit, one plugin hash per arm, sealed held-out',
+    '                                  rows, a candidate no worse than the release and better than the baseline, known cost',
     'Options: --src <repo> --tasks-dir <dir> --data <dir> --work <dir> --claude-bin <path> --hw <headless-worker.js>',
     '         --budget-stop 0.70 (seven-day utilisation that stops a batch) --api-sources none (allowed apiKeySource values)',
     'The account token is read from CLAUDE_CODE_OAUTH_TOKEN_<ACCOUNT> and handed to the worker as',
@@ -70,9 +74,12 @@ const SNAPSHOT_DIRS = ['rules', 'agents', 'output-styles'];
 // A variable whose name says it carries a credential never reaches a worker or a check.
 const SCRUB_RE = /^(ANTHROPIC_|CLAUDE_CODE_OAUTH_TOKEN|DOPPLER_)|TOKEN|SECRET|PASSWORD|PASSWD|API_?KEY|PRIVATE_KEY|_PAT$/i;
 const PIN_SKIP = new Set(['autodev-memory']);
-const PIN_MODES = new Set(['current', 'previous', 'none']);
+// current and previous load a release tag. candidate loads the exact commit given
+// with --candidate: current read an untagged commit as the last release before it.
+const PIN_MODES = new Set(['current', 'previous', 'candidate', 'none']);
+const SHA_RE = /^[0-9a-f]{40}$/;
 // An arm pinned to none loads no plugin dir: the config dir is fresh, so nothing else loads.
-const NO_PIN = Object.freeze({ tag: 'none', hash: null, plugins: [], pluginDir: null });
+const NO_PIN = Object.freeze({ tag: 'none', commit: null, hash: null, plugins: [], pluginDir: null });
 
 function fault(code, message) { const e = new Error(message || code); e.publicCode = code; throw e; }
 
@@ -311,24 +318,31 @@ function copyHeldOut(c, task, repo) {
     }
 }
 
-/** The plugins of the last release tag reachable from the task's parent, built once per tag. */
-function pinFor(c, parentSha) {
-    const tag = git(['describe', '--tags', '--abbrev=0', '--match', 'v*', parentSha], { cwd: c.src }).trim();
+/**
+ * The plugins of the last release tag reachable from rev, built once per tag.
+ * exact builds rev itself instead, under candidate-<sha12>: the candidate arm
+ * measures the commit it names, tagged or not.
+ */
+function pinFor(c, rev, exact = false) {
+    if (exact && !SHA_RE.test(rev)) fault('bad-candidate', `a candidate pin needs a full commit sha, not ${rev}`);
+    const tag = exact ? `candidate-${rev.slice(0, 12)}` : git(['describe', '--tags', '--abbrev=0', '--match', 'v*', rev], { cwd: c.src }).trim();
+    const tree = exact ? rev : tag;
     const dir = path.join(c.work, 'pins', tag);
     const marker = path.join(dir, '.complete');
     if (!fs.existsSync(marker)) {
         const tmp = `${dir}.${process.pid}.tmp`;
         fs.rmSync(tmp, { recursive: true, force: true });
-        const names = git(['ls-tree', '--name-only', `${tag}:plugins`], { cwd: c.src }).split('\n').filter((n) => n && !PIN_SKIP.has(n));
+        const names = git(['ls-tree', '--name-only', `${tree}:plugins`], { cwd: c.src }).split('\n').filter((n) => n && !PIN_SKIP.has(n));
         if (!names.length) fault('pin-empty', `${tag} has no plugins under plugins/`);
-        exportTree(c.src, tag, tmp, names.map((n) => `plugins/${n}`));
+        exportTree(c.src, tree, tmp, names.map((n) => `plugins/${n}`));
         fs.rmSync(dir, { recursive: true, force: true });
         fs.mkdirSync(path.dirname(dir), { recursive: true });
         fs.renameSync(tmp, dir);
-        fs.writeFileSync(marker, JSON.stringify({ tag, commit: revParse(c.src, tag), plugins: names }) + '\n');
+        fs.writeFileSync(marker, JSON.stringify({ tag, commit: revParse(c.src, tree), plugins: names }) + '\n');
     }
     const meta = readJson(marker);
-    return { tag, dir, pluginDir: path.join(dir, 'plugins'), plugins: meta.plugins, hash: dirHash(path.join(dir, 'plugins')) };
+    if (exact && meta.commit !== rev) fault('pin-mismatch', `${dir} holds ${meta.commit}, not ${rev}`);
+    return { tag, commit: meta.commit, dir, pluginDir: path.join(dir, 'plugins'), plugins: meta.plugins, hash: dirHash(path.join(dir, 'plugins')) };
 }
 
 // ---------------------------------------------------------------- snapshot
@@ -408,25 +422,29 @@ function loadVariant(id) {
  * be derived from the variant: the runner records it, and loads exactly the
  * pin the arm names, so the label is what ran.
  */
-function loadArm(planFile, armId, variantId = null) {
+function loadArm(planFile, armId, variantId = null, candidate = null) {
     const plan = readJson(planFile);
     const arm = (plan.arms || []).find((a) => a.id === armId);
     if (!arm) fault('no-arm', `${armId} is not an arm of ${path.basename(planFile)} (${(plan.arms || []).map((a) => a.id).join(', ')})`);
-    if (!PIN_MODES.has(arm.pluginPin)) fault('bad-arm', `arm ${armId}: pluginPin ${arm.pluginPin} is not current, previous or none`);
+    if (!PIN_MODES.has(arm.pluginPin)) fault('bad-arm', `arm ${armId}: pluginPin ${arm.pluginPin} is not current, previous, candidate or none`);
     if (variantId && variantId !== arm.variant) fault('arm-variant', `arm ${armId} runs variant ${arm.variant}, not ${variantId}`);
-    return { id: arm.id, variant: arm.variant, pluginPin: arm.pluginPin };
+    if (arm.pluginPin !== 'candidate') return { id: arm.id, variant: arm.variant, pluginPin: arm.pluginPin };
+    if (!SHA_RE.test(candidate || '')) fault('no-candidate', `arm ${armId} pins the candidate: pass --candidate <commit>`);
+    return { id: arm.id, variant: arm.variant, pluginPin: arm.pluginPin, sha: candidate };
 }
 /**
  * The revision whose last release tag is the pin. Without an arm, the task's
  * parent: the plugins of the last release before the fix. current is the
- * source HEAD's release, previous the release before it, none no plugins.
+ * source HEAD's release, previous the release before it, candidate the exact
+ * commit the arm carries, none no plugins.
  */
 function pinRev(c, task, arm) {
     if (!arm) return task.parentSha;
     if (arm.pluginPin === 'none') return null;
     if (arm.pluginPin === 'current') return revParse(c.src, 'HEAD');
     if (arm.pluginPin === 'previous') return `${git(['describe', '--tags', '--abbrev=0', '--match', 'v*', 'HEAD'], { cwd: c.src }).trim()}^`;
-    fault('bad-arm', `arm ${arm.id}: pluginPin ${arm.pluginPin} is not current, previous or none`);
+    if (arm.pluginPin === 'candidate') return SHA_RE.test(arm.sha || '') ? arm.sha : fault('no-candidate', `arm ${arm.id} carries no candidate commit`);
+    fault('bad-arm', `arm ${arm.id}: pluginPin ${arm.pluginPin} is not current, previous, candidate or none`);
 }
 
 // ---------------------------------------------------------------- contamination
@@ -573,7 +591,7 @@ function prepare(c, taskId, variantId, repeat = 1, { account = null, arm = null,
     buildTaskRepo(c, task, p.repo, task.parentSha);
     const snap = buildConfigDir(c, p.cfg);
     const rev = pinRev(c, task, arm);
-    const pin = rev === null ? NO_PIN : pinFor(c, rev);
+    const pin = rev === null ? NO_PIN : pinFor(c, rev, !!arm && arm.pluginPin === 'candidate');
     const tokens = task.lane === 'fix' ? fixTokens(c, task) : [];
     const hits = scanForTokens(tokens, [p.cfg, p.repo, pin.pluginDir].filter(Boolean));
     const brief = fs.readFileSync(path.join(c.tasks, task.brief), 'utf8');
@@ -584,7 +602,7 @@ function prepare(c, taskId, variantId, repeat = 1, { account = null, arm = null,
         model: variant.model, effort: variant.effort || null,
         account, repeat, createdAt: new Date().toISOString(), timeoutMin: Number(task.timeoutMin || 30),
         repo: p.repo, cfg: p.cfg, log: p.log, report: p.report, prompt: p.prompt,
-        pin: { tag: pin.tag, hash: pin.hash, plugins: pin.plugins, dir: pin.pluginDir },
+        pin: { tag: pin.tag, commit: pin.commit, hash: pin.hash, plugins: pin.plugins, dir: pin.pluginDir },
         snapshot: snap.id, harnessCommit: revParse(c.src, 'HEAD'), plantAt: plant.at,
         contamination: { tokens: tokens.length, hits },
         state: hits.length ? 'contaminated' : 'prepared',
@@ -779,7 +797,7 @@ function rowFor(c, meta, extra) {
         heldOutHash: meta.heldOutHash || null, sealed: meta.sealed === true, seal: meta.seal || null,
         account: meta.account, repeat: meta.repeat,
         taskHash: meta.taskHash, startedAt: meta.startedAt || null,
-        fingerprint: { requestedModel: meta.model, effort: meta.effort, pin: meta.pin.tag, pinHash: meta.pin.hash, plugins: meta.pin.plugins,
+        fingerprint: { requestedModel: meta.model, effort: meta.effort, pin: meta.pin.tag, pinCommit: meta.pin.commit || null, pinHash: meta.pin.hash, plugins: meta.pin.plugins,
             snapshot: meta.snapshot, harnessCommit: meta.harnessCommit, workerVersion: meta.workerVersion || null },
         contaminationTokens: meta.contamination.tokens, finishedAt: new Date().toISOString(),
     }, extra);
@@ -1148,11 +1166,17 @@ function status(c) {
 }
 
 // ---------------------------------------------------------------- cli
+/** --candidate <rev> as a full sha in src, or null without it. */
+function candidateOpt(opts, src) {
+    if (opts.candidate === undefined) return null;
+    if (opts.candidate === true) fault('usage', '--candidate needs a commit');
+    return revParse(src, opts.candidate);
+}
 /** --plan <file> --arm <id> as an arm, or null without --arm. --variant, when given too, must be the arm's. */
-function armOpt(opts) {
+function armOpt(opts, src = DEFAULT_SRC) {
     if (opts.arm === undefined) return null;
     if (opts.arm === true || !opts.plan || opts.plan === true) fault('usage', '--arm needs an id and --plan <file>');
-    return loadArm(path.resolve(opts.plan), opts.arm, opts.variant && opts.variant !== true ? opts.variant : null);
+    return loadArm(path.resolve(opts.plan), opts.arm, opts.variant && opts.variant !== true ? opts.variant : null, candidateOpt(opts, src));
 }
 
 function main(argv) {
@@ -1166,13 +1190,13 @@ function main(argv) {
         case 'snapshot': value = snapshot(c); break;
         case 'plant': value = plant(c, opts.task ? list(opts.task) : allTaskIds(c)); break;
         case 'prepare': {
-            const arm = armOpt(opts);
+            const arm = armOpt(opts, c.src);
             if (!opts.task || !(opts.variant || arm || opts['routing-arm'])) fault('usage', 'prepare needs --task and --variant (or an arm)');
             value = prepare(c, opts.task, arm ? arm.variant : opts.variant, Number(opts.repeat || 1), { arm, routingArm: opts['routing-arm'] || null });
             break;
         }
         case 'run': {
-            const arm = armOpt(opts);
+            const arm = armOpt(opts, c.src);
             if (!opts.task || !(opts.variant || arm || opts['routing-arm']) || !opts.account) fault('usage', 'run needs --task, a variant or arm, and --account');
             value = runOne(c, opts.task, arm ? arm.variant : opts.variant, opts.account, Number(opts.repeat || 1), process.env, {}, arm, opts['routing-arm'] || null);
             break;
@@ -1194,7 +1218,8 @@ function main(argv) {
             if (opts.arms && (opts.arms === true || !opts.plan || opts.plan === true)) fault('usage', '--arms needs ids and --plan <file>');
             workerEnv(process.env, opts.account);
             const tasks = opts.tasks === 'all' ? allTaskIds(c) : list(opts.tasks);
-            const arms = opts.arms ? Object.fromEntries(list(opts.arms).map((id) => [id, loadArm(path.resolve(opts.plan), id)])) : null;
+            const candidate = candidateOpt(opts, c.src);
+            const arms = opts.arms ? Object.fromEntries(list(opts.arms).map((id) => [id, loadArm(path.resolve(opts.plan), id, null, candidate)])) : null;
             const variants = arms ? [...new Set(Object.values(arms).map((a) => a.variant))] : list(opts.variants);
             for (const t of tasks) plantOk(c, loadTask(c, t));
             for (const v of variants) loadVariant(v);
@@ -1221,7 +1246,10 @@ function main(argv) {
             const r = C.compare({ planFile: path.resolve(opts.plan), root: c.src, tasksDir: c.tasks, variants: readJson(path.join(HERE, 'variants.json')),
                 rows: opts.fixtures ? null : readRows(c) });
             process.stdout.write(C.render(r));
-            return C.verdictOk(r) ? 0 : 1;
+            if (!opts.promote) return C.verdictOk(r) ? 0 : 1;
+            const p = C.promotion(r, candidateOpt(opts, c.src));
+            process.stdout.write(C.renderPromotion(p));
+            return p.ok ? 0 : 1;
         }
         default: fault('usage', `unknown command ${cmd}; run with --help`);
     }
@@ -1239,5 +1267,5 @@ if (require.main === module) {
 }
 
 module.exports = { parseArgs, fixTokens, scanForTokens, workerEnv, checksEnv, composePrompt, parseStream, tokensOf, leakHits,
-    gradeLocate, gradeReview, gradeDecide, decideAnswer, plantedFindings, readRows, rowFor, loadArm, pinRev, armOpt, prepare, createBatch, RUN_RE, SCRUB_RE, SETTINGS_KEEP, CODEY,
+    gradeLocate, gradeReview, gradeDecide, decideAnswer, plantedFindings, readRows, rowFor, loadArm, pinRev, pinFor, armOpt, prepare, createBatch, RUN_RE, SCRUB_RE, SETTINGS_KEEP, CODEY,
     processList, heavyJobs, noteLoad, loadRecord, quietGate, HEAVY_RE };
