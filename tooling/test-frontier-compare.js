@@ -157,7 +157,8 @@ try {
 
     // promotion: the only reading that may say the candidate improved. The full
     // set fills every cell: CAN copies CUR's outcomes, BAS fails every run.
-    const SHA = spawnSync('git', ['rev-parse', 'HEAD'], { cwd: ROOT, encoding: 'utf8', windowsHide: true }).stdout.trim();
+    // A literal sha, so the suite runs from a copy with no .git: compare takes a full sha as given.
+    const SHA = '0123456789abcdef0123456789abcdef01234567';
     const failed = (r) => Object.assign(r, { verdict: 'fail', pass: false,
         grade: r.lane === 'fix' ? { checks: [{ exit: 1 }], passToPass: [] } : Object.assign({}, r.grade, { pass: false }) });
     const sealed = (r) => (withheldIds.has(r.task) ? Object.assign(r, { split: 'held-out', sealed: true, splitId: 'a'.repeat(64), taskIdHash: 'b'.repeat(64),
