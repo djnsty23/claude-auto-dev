@@ -51,6 +51,8 @@ const ROOT = fs.mkdtempSync(path.join(os.tmpdir(), 'authority test-'));
 const HOME = path.join(ROOT, 'home');
 const REPO = path.join(ROOT, 'repo');
 const REPORTS = path.join(ROOT, 'reports');
+// The worker writes its report here, outside ~/.claude, and the launcher copies it to the ledger path.
+const OUTBOX = path.join(ROOT, 'outbox');
 const OUTSIDE = path.join(ROOT, 'outside');
 const STUB = path.join(ROOT, 'stub claude.js');
 const WOULD = path.join(ROOT, 'would-run.js');
@@ -92,7 +94,7 @@ function launch(kind, { prompt = 'Do the task in the brief.\n', extra = [], code
     write(promptFile, prompt);
     const args = [HW, 'start', '--dev', '--dry-run', '--code', code, '--prompt-file', promptFile, '--log', path.join(REPORTS, `${code}.log`),
         '--report', path.join(REPORTS, `${code}.report.md`), '--cwd', REPO, '--claude-bin', STUB, '--ledger', path.join(ROOT, 'ledger.json'),
-        '--budget-ledger', path.join(ROOT, 'budget.json'), '--profile', kind, ...extra];
+        '--budget-ledger', path.join(ROOT, 'budget.json'), '--outbox', OUTBOX, '--profile', kind, ...extra];
     const r = spawnSync(process.execPath, args, { encoding: 'utf8', env: baseEnv, cwd: ROOT, windowsHide: true, timeout: 60000 });
     let doc = null;
     try { doc = JSON.parse(String(r.stdout).trim().split(/\r?\n/).pop()); } catch { doc = null; }
@@ -305,7 +307,7 @@ function main() {
 
     // ------------------------------------------------------------ authorized_control
     expectAllow('builder Write inside the repo', B, tool('Write', { file_path: path.join(REPO, 'src', 'a.js'), content: 'x' }));
-    expectAllow('builder Edit inside the report dir', B, tool('Edit', { file_path: path.join(REPORTS, 'BUILD.report.md'), old_string: 'a', new_string: 'b' }));
+    expectAllow('builder Edit inside the outbox', B, tool('Edit', { file_path: path.join(OUTBOX, 'BUILD.report.md'), old_string: 'a', new_string: 'b' }));
     expectAllow('builder Bash redirect inside the repo', B, bash(`node tooling/x.js > "${slash(path.join(REPO, 'out.txt'))}" 2>&1`));
     expectAllow('builder git status, add and commit -F', B, bash(`git -C "${slash(REPO)}" add src/a.js && git -C "${slash(REPO)}" commit -F msg.txt`));
     expectAllow('builder git worktree add', B, bash('git worktree add .claude/worktrees/x -b claude/x origin/main'));
@@ -317,11 +319,11 @@ function main() {
     // the commands a person must run, so its body has to be able to say them.
     const reportBody = '# Report\nRelease window: `gh repo archive o/r`, then `doppler secrets set X`, then `git push origin b`.\nCost $5, see $HOME and `decision-policy.md`.\nRESULT rb31 stopped: needs Andy';
     expectAllow('builder report heredoc whose body names gh, doppler, git push and $VARs', B,
-        bash(`cat > "${slash(path.join(REPORTS, 'REPORT.md'))}" <<'EOF'\n${reportBody}\nEOF`));
+        bash(`cat > "${slash(path.join(OUTBOX, 'REPORT.md'))}" <<'EOF'\n${reportBody}\nEOF`));
     expectAllow('builder report heredoc after an assignment and a mkdir', B,
-        bash(`D="${slash(path.join(REPORTS, 'ask'))}"; mkdir -p "$D"\ncat > "$D/ask.json" <<'REPORT_EOF'\n{"question":"gh repo archive or park?"}\nREPORT_EOF\n`));
+        bash(`D="${slash(path.join(OUTBOX, 'ask'))}"; mkdir -p "$D"\ncat > "$D/ask.json" <<'REPORT_EOF'\n{"question":"gh repo archive or park?"}\nREPORT_EOF\n`));
     expectAllow('builder tee heredoc with a stripped-tab delimiter', B,
-        bash(`tee "${slash(path.join(REPORTS, 'n.md'))}" <<-"EOF"\n\tdoppler is the Brain's step\n\tEOF`));
+        bash(`tee "${slash(path.join(OUTBOX, 'n.md'))}" <<-"EOF"\n\tdoppler is the Brain's step\n\tEOF`));
     expectAllow('builder Read of an ordinary file', B, tool('Read', { file_path: path.join(REPO, 'AGENTS.md') }));
     expectAllow('builder Read of .env.example', B, tool('Read', { file_path: path.join(REPO, '.env.example') }));
     expectAllow('review git log and grep', R, bash('git log --oneline -5 | grep fix'));
