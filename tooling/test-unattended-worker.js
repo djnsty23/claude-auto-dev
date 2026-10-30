@@ -25,7 +25,7 @@ const path = require('path');
 const { spawnSync, execFileSync } = require('child_process');
 
 const SUBJECT = path.join(__dirname, '..', 'plugins', 'autodev-core', 'scripts', 'unattended-worker.js');
-const { composePrompt, decideSettle, parseArgs } = require(SUBJECT);
+const { composePrompt, decideSettle, parseArgs, briefContract } = require(SUBJECT);
 
 let pass = 0, fail = 0, unchecked = 0;
 function check(label, ok, detail) {
@@ -64,7 +64,7 @@ g(repo, 'push', '-q', 'origin', 'main');
 g(repo, 'fetch', '-q', 'origin');
 const ledger = path.join(scratch, 'ledger.json');
 const briefFile = path.join(scratch, 'brief.md');
-fs.writeFileSync(briefFile, 'MISSION. Add a guide.\nACCEPTANCE. The guide renders.\n');
+fs.writeFileSync(briefFile, 'MISSION. Add a guide.\n\n## Acceptance criteria\n- AC1: the guide renders\n  check: node -e "process.exit(0)"\n');
 const base = ['--repo', repo, '--brief-file', briefFile, '--return', 'coordinator-a1', '--ledger', ledger];
 
 try {
@@ -277,6 +277,18 @@ try {
     check('decideSettle rejects an unknown run status', (() => { try { decideSettle({ state: 'started' }, 'done', true); return false; } catch (e) { return e.publicCode === 'usage'; } })());
     check('decideSettle refuses a deleted record', decideSettle({ state: 'deleted' }, 'succeeded', true).deleteSafe === false);
     check('parseArgs refuses a repeated flag', (() => { try { parseArgs(['--slug', 'a', '--slug', 'b']); return false; } catch (e) { return e.publicCode === 'usage'; } })());
+
+    // A brief the receipt gate cannot run is refused at the door, not at accept.
+    const contract = (body, waiver) => { try { return { value: briefContract(body, waiver) }; } catch (e) { return { code: e.publicCode, message: e.message }; } };
+    const ac = '## Acceptance criteria\n- AC1: the guide renders\n  check: node -e "process.exit(0)"\n';
+    check('briefContract counts a runnable criterion', contract(`MISSION.\n\n${ac}`).value?.criteria === 1);
+    check('briefContract refuses a brief with no criteria', contract('MISSION. Add a guide.\n').code === 'no-criteria');
+    const prose = contract('MISSION.\n\n## Acceptance\nThe guide renders.\n');
+    check('briefContract names the near-miss "## Acceptance" heading', prose.code === 'no-criteria' && /not "Acceptance criteria"/.test(prose.message), prose.message);
+    check('briefContract refuses a criterion with no check: line', contract('MISSION.\n\n## Acceptance criteria\n- AC1: the guide renders\n').code === 'criterion-without-check');
+    check('briefContract stores a waiver reason when there are no criteria', contract('MISSION.\n', '  dated outputs ').value?.criteriaWaived === 'dated outputs');
+    check('briefContract refuses a waiver beside real criteria', contract(`MISSION.\n\n${ac}`, 'why').code === 'usage');
+    check('briefContract refuses an empty waiver', contract('MISSION.\n', '  ').code === 'usage');
 } finally {
     try { fs.rmSync(scratch, { recursive: true, force: true }); } catch { /* a locked file on Windows; the OS temp cleaner owns it */ }
 }

@@ -72,7 +72,7 @@ g(repo, 'push', '-q', 'origin', 'main');
 g(repo, 'fetch', '-q', 'origin');
 const ledger = path.join(scratch, 'ledger.json');
 const briefFile = path.join(scratch, 'brief.md');
-fs.writeFileSync(briefFile, 'MISSION. Add a guide.\nACCEPTANCE. The guide renders.\n');
+fs.writeFileSync(briefFile, 'MISSION. Add a guide.\n\n## Acceptance criteria\n- AC1: the guide renders\n  check: node -e "process.exit(0)"\n');
 const base = ['--repo', repo, '--brief-file', briefFile, '--return', 'coordinator-a1', '--ledger', ledger];
 const readLedger = () => JSON.parse(fs.readFileSync(ledger, 'utf8')).records;
 const recOf = (id) => readLedger().find((r) => r.taskId === id);
@@ -109,6 +109,20 @@ try {
         briefCopy && fs.readFileSync(briefCopy, 'utf8').includes('MISSION. Add a guide.') && path.dirname(briefCopy) === path.dirname(r1.report));
     check('enqueue writes no worktree and no branch', !fs.existsSync(path.join(repo, '.claude', 'worktrees', 'guide-a'))
         && spawnSync('git', ['-C', repo, 'show-ref', '--verify', '--quiet', 'refs/heads/claude/guide-a']).status !== 0);
+
+    check('enqueue records how many criteria the receipt gate will run', r1 && r1.criteria === 1, JSON.stringify(r1 && r1.criteria));
+    const proseBrief = path.join(scratch, 'brief-prose.md');
+    fs.writeFileSync(proseBrief, 'MISSION. Add a guide.\n\n## Acceptance\nThe guide renders.\n');
+    const proseBase = base.map((a) => (a === briefFile ? proseBrief : a));
+    const qProse = cli(['enqueue', '--slug', 'guide-prose', ...proseBase]);
+    check('enqueue refuses a brief whose acceptance the receipt gate cannot run, and queues nothing',
+        code(qProse) === 'no-criteria' && !readLedger().some((r) => r.slug === 'guide-prose'), qProse.stdout.slice(0, 200));
+    const qWaived = cli(['enqueue', '--slug', 'guide-prose', '--without-criteria', 'dated outputs', ...proseBase]);
+    check('control: the same brief queues with --without-criteria, and the record keeps the reason',
+        qWaived.status === 0 && val(qWaived).record.criteriaWaived === 'dated outputs', qWaived.stdout.slice(0, 200));
+    // Retired, so the readiness checks below see only the tasks they set up.
+    const retired = cli(['retire', '--task-id', 'worker-guide-prose', '--reason', 'suite fixture', '--ledger', ledger]);
+    check('control: the waived fixture task retires', retired.status === 0, retired.stdout.slice(0, 200));
 
     const long = 'a'.repeat(25);
     check('enqueue refuses a 25-character slug: it becomes the headless code, capped at 24', code(cli(['enqueue', '--slug', long, ...base])) === 'bad-slug');

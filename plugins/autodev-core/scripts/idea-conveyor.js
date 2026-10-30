@@ -318,7 +318,9 @@ function composeBrief(entry, idea, code, next) {
 function enqueueStage({ entry, code, repo, base, after, briefFile, config, ledger }) {
     const slug = `cv-${entry.short}-${code.toLowerCase()}`;
     const taskId = `worker-${slug}`;
+    // A stage proves itself through its own receipt command, not acceptance criteria the receipt gate runs.
     const args = [WORKER, 'enqueue', '--repo', repo, '--slug', slug, '--brief-file', briefFile, '--return', config.returnTo, '--task-id', taskId,
+        '--without-criteria', `conveyor stage ${code}: idea-conveyor.js receipt records its gate`,
         '--title', `Conveyor ${code} ${STAGES[code].name}: ${entry.title.slice(0, 60)}`, '--model', OPUS, '--effort', STAGES[code].effort, '--base', base,
         ...(after ? ['--after', after] : []), ...(ledger ? ['--ledger', ledger] : [])];
     const r = spawnSync(process.execPath, args, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], timeout: 60000 });
