@@ -21,6 +21,7 @@ const { spawnSync } = require('child_process');
 
 const ROOT = path.join(__dirname, '..');
 const PROBE = path.join(__dirname, 'window-probe.js');
+const PLAN = JSON.parse(fs.readFileSync(path.join(__dirname, 'frontier', 'path-to-10.json'), 'utf8'));
 const NOW = '2026-11-20T12:00:00Z';
 // The 14 complete days before NOW, written out by hand rather than computed by the engine.
 const DAYS = ['2026-11-06', '2026-11-07', '2026-11-08', '2026-11-09', '2026-11-10', '2026-11-11', '2026-11-12',
@@ -244,10 +245,18 @@ const FIX = {
         for (const d of DAYS) for (const w of LOCK_INVENTORY) write(h, `autodev/windows/lock-writers/${d}/${w}@9.0.0`, '');
         if (o.bad) write(h, `autodev/windows/lock-writers/${o.bad}/scripts~rogue.js@9.0.0`, '');
     },
+    // Eight rows a day fill the plan's 108 task x arm x repeat cells once each, in order.
     'learning-window': (h, o) => {
         clock(h, o.gap ? [o.gap] : []);
-        write(h, 'autodev/frontier/runs.jsonl', jsonl(DAYS.flatMap((d) => Array.from({ length: 8 }, (_, i) => ({
-            run: `r-${d}-${i}`, startedAt: `${d}T0${i}:00:00Z`, arm: 'A', exit: d === o.bad && i === 0 ? 1 : 0,
+        const cell = (k) => {
+            const a = PLAN.arms[k % PLAN.arms.length];
+            const q = Math.floor(k / PLAN.arms.length);
+            return { task: PLAN.tasks[q % PLAN.tasks.length].id, arm: a.id, pluginPin: a.pluginPin, variant: a.variant,
+                repeat: 1 + Math.floor(q / PLAN.tasks.length), verdict: 'pass', pass: true };
+        };
+        const planned = PLAN.tasks.length * PLAN.arms.length * PLAN.repeats;
+        write(h, 'autodev/frontier/runs.jsonl', jsonl(DAYS.flatMap((d, di) => Array.from({ length: 8 }, (_, i) => di * 8 + i).filter((k) => k < planned).map((k) => ({
+            ...cell(k), run: `r-${d}-${k % 8}`, startedAt: `${d}T0${k % 8}:00:00Z`, exit: d === o.bad && k % 8 === 0 ? 1 : 0,
             split: 'held-out', splitId: 'a'.repeat(64), taskIdHash: 'b'.repeat(64), heldOutHash: 'c'.repeat(64), sealed: true,
             splitAt: '2026-11-01T00:00:00Z', seal: { checkedAt: `${d}T00:00:00Z`, contentMatches: true,
                 currentHash: 'c'.repeat(64), visibleToLearning: false, hits: [], errors: [] } })))));
@@ -656,6 +665,23 @@ try {
         write(h, 'autodev/frontier/runs.jsonl', jsonl(rows));
         const r = probe('learning-window', h, REPO.repo);
         check(`learning-window: ${kind} fails the sealed total`, r.status === 1 && /^short \d+ of \d+ held-out runs were sealed before execution/m.test(r.out), r.out);
+    }
+    // The calibration total is the plan's matrix, not a row count: each planted row keeps 108 rows or more.
+    for (const kind of ['missing', 'duplicate', 'wrong-pin', 'contaminated', 'one-arm']) {
+        const h = home(); FIX['learning-window'](h, {});
+        const file = path.join(h, 'autodev/frontier/runs.jsonl');
+        let rows = fs.readFileSync(file, 'utf8').trim().split('\n').map(JSON.parse);
+        if (kind === 'missing') rows[5] = { ...rows[5], arm: null };
+        if (kind === 'duplicate') rows[5] = { ...rows[4], run: rows[5].run, startedAt: rows[5].startedAt };
+        if (kind === 'wrong-pin') rows[5].pluginPin = 'previous';
+        if (kind === 'contaminated') rows[5].verdict = 'contaminated';
+        if (kind === 'one-arm') rows = rows.map((r) => ({ ...r, arm: PLAN.arms[0].id, pluginPin: PLAN.arms[0].pluginPin }));
+        write(h, 'autodev/frontier/runs.jsonl', jsonl(rows));
+        const r = probe('learning-window', h, REPO.repo);
+        const want = kind === 'duplicate' ? /^short 107 of 108 planned calibration cells filled once \(.*\), CONFLICT \w+ T\d+#\d recorded twice$/m
+            : kind === 'one-arm' ? /^short 36 of 108 planned calibration cells filled once \(\w+ 36\/36, \w+ 0\/36, \w+ 0\/36\), CONFLICT/m
+                : /^short 107 of 108 planned calibration cells filled once \(/m;
+        check(`learning-window: a ${kind} cell fails the matrix total`, r.status === 1 && want.test(r.out), r.out.split('\n').filter((l) => /cells/.test(l)).join(' | '));
     }
 
     // A git read that fails says why. --repo is a directory outside any work tree, confirmed first.
