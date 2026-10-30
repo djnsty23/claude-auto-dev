@@ -35,6 +35,12 @@
  * Counted rows are pass, fail and timeout, as frontier.js counts them. A
  * contaminated, billed-api or no-stream row measured the harness, not the arm,
  * so it is missing, not failed.
+ *
+ * Those fields are diagnostic: missing_runs=UNKNOWN keeps the verdict green on
+ * zero rows. promotion is the only reading that may say the candidate improved.
+ * [measured 2026-10-30] verdictOk passed with 0 of 108 runs, and the current
+ * arm loaded the last release tag instead of an untagged candidate, so no
+ * comparison had measured the commit under review.
  */
 const fs = require('fs');
 const path = require('path');
@@ -63,7 +69,7 @@ function validArms(plan, variants, rows = []) {
     for (const a of plan.arms || []) {
         if (!a.id || seen.has(a.id)) problems.push(`arm ${a.id}: missing or duplicate id`);
         seen.add(a.id);
-        if (!['current', 'previous', 'none'].includes(a.pluginPin)) problems.push(`arm ${a.id}: pluginPin ${a.pluginPin} is not current, previous or none`);
+        if (!['current', 'previous', 'candidate', 'none'].includes(a.pluginPin)) problems.push(`arm ${a.id}: pluginPin ${a.pluginPin} is not current, previous, candidate or none`);
         if (!variants[a.variant]) problems.push(`arm ${a.id}: variant ${a.variant} is not in variants.json`);
         const off = rows.filter((r) => r.arm === a.id && COUNTED.has(r.verdict) && !ranArm(r, a));
         if (off.length) problems.push(`arm ${a.id}: ${off.length} counted row(s) ran another arm, first ${off[0].task}#${off[0].repeat} as ${off[0].variant}/${off[0].pluginPin}, the plan says ${a.variant}/${a.pluginPin}`);
@@ -192,7 +198,7 @@ function armRuns(plan, rows) {
         const conflict = unplanned.length > 0;
         const complete = !conflict && expected > 0 && counted.length === expected;
         const rate = (rs) => (rs.length ? Math.round((rs.filter((r) => r.pass === true).length / rs.length) * 1000) / 1000 : null);
-        out[a.id] = { expected, counted: counted.length, missing: expected - counted.length, unplanned,
+        out[a.id] = { expected, counted: counted.length, missing: expected - counted.length, unplanned, filled: counted,
             status: conflict ? 'CONFLICT' : complete ? 'COMPLETE' : 'UNKNOWN',
             passRate: complete ? rate(counted) : null, heldOutPassRate: complete ? rate(counted.filter((r) => withheldIds.has(r.task))) : null };
     }
@@ -251,4 +257,78 @@ function verdictOk(r) {
     return r.arms.problems.length === 0 && r.oracles.verdict === 'PASS' && r.leakage.verdict === 'PASS' && r.missing !== 'FAIL' && r.identity !== 'FAIL';
 }
 
-module.exports = { compare, render, verdictOk, validArms, ranArm, taskOracle, oraclePass, independentOracles, fingerprints, leakageControls, armRuns, missingRuns, runIdentity, planTasks, readRowsFile };
+/** A held-out row whose task content was sealed, unchanged and invisible to learning before it started. */
+function sealedBeforeRun(r) {
+    return r.sealed === true && /^[a-f0-9]{64}$/.test(r.heldOutHash || '')
+        && /^[a-f0-9]{64}$/.test(r.splitId || '') && /^[a-f0-9]{64}$/.test(r.taskIdHash || '')
+        && r.seal?.contentMatches === true && r.seal.currentHash === r.heldOutHash && r.seal.visibleToLearning === false
+        && Array.isArray(r.seal.errors) && r.seal.errors.length === 0 && Array.isArray(r.seal.hits) && r.seal.hits.length === 0
+        && Date.parse(r.splitAt) <= Date.parse(r.seal.checkedAt) && Date.parse(r.seal.checkedAt) <= Date.parse(r.startedAt);
+}
+
+/**
+ * Whether the candidate may be promoted. The plan needs exactly one candidate,
+ * one current-release and one no-plugin arm, and the rows must show:
+ *   every planned cell filled once (missing_runs=NONE, run_identity=PASS) and
+ *     the comparison green, so a contaminated or absent cell blocks;
+ *   every candidate row loaded the named commit, and each pinned arm one
+ *     plugin hash that differs between candidate and release;
+ *   at least one held-out row, every one sealed before it ran;
+ *   a candidate no worse than the release, overall and held out, and better
+ *     than the baseline overall;
+ *   a known cost on every candidate and release row, reported, not judged.
+ */
+function promotion(r, candidate) {
+    const problems = [];
+    const done = (cost = null) => ({ ok: problems.length === 0, problems, cost,
+        line: `promotion=${problems.length ? `BLOCKED(${problems.length})` : 'PASS'}${candidate ? ` candidate=${candidate.slice(0, 12)}` : ''}` });
+    if (!verdictOk(r)) problems.push('the comparison is red');
+    if (r.missing !== 'NONE') problems.push(`missing_runs=${r.missing}: every planned cell needs a counted row`);
+    if (r.identity !== 'PASS') problems.push(`run_identity=${r.identity}`);
+    if (!/^[0-9a-f]{40}$/.test(candidate || '')) problems.push('no candidate commit named (--candidate)');
+    const arms = r.plan.arms || [];
+    const [cand, rel, base] = ['candidate', 'current', 'none'].map((pin) => arms.filter((a) => a.pluginPin === pin));
+    if (cand.length !== 1 || rel.length !== 1 || base.length !== 1) {
+        problems.push(`the plan needs one candidate, one current and one none arm, it has ${cand.length}, ${rel.length} and ${base.length}`);
+        return done();
+    }
+    const runsOf = (a) => r.runs[a.id] || { filled: [], passRate: null, heldOutPassRate: null };
+    const [cr, rr, br] = [cand[0], rel[0], base[0]].map(runsOf);
+    const wrong = cr.filled.filter((x) => !x.fingerprint || x.fingerprint.pinCommit !== candidate);
+    if (wrong.length) problems.push(`${wrong.length} candidate row(s) did not load ${String(candidate).slice(0, 12)}, first ${wrong[0].task}#${wrong[0].repeat} at ${(wrong[0].fingerprint && wrong[0].fingerprint.pinCommit) || 'no commit'}`);
+    const hashOf = (a) => {
+        const h = new Set(runsOf(a).filled.map((x) => (x.fingerprint && x.fingerprint.pinHash) || null));
+        if (h.size !== 1 || h.has(null)) { problems.push(`arm ${a.id}: ${h.has(null) ? 'a row with no plugin hash' : `${h.size} plugin hashes`}, want one`); return null; }
+        return [...h][0];
+    };
+    const hc = hashOf(cand[0]);
+    const hr = hashOf(rel[0]);
+    if (hc && hc === hr) problems.push(`the candidate loaded the release's plugins (hash ${hc.slice(0, 12)})`);
+    const heldOut = [cr, rr, br].flatMap((a) => a.filled).filter((x) => x.split === 'held-out');
+    const unsealed = heldOut.filter((x) => !sealedBeforeRun(x));
+    if (!heldOut.length) problems.push('no held-out row: nothing measures the candidate on tasks it could not tune for');
+    else if (unsealed.length) problems.push(`${unsealed.length} of ${heldOut.length} held-out row(s) were not sealed before they ran, first ${unsealed[0].arm}/${unsealed[0].task}#${unsealed[0].repeat}`);
+    if (cr.passRate !== null && rr.passRate !== null && br.passRate !== null) {
+        if (cr.passRate < rr.passRate) problems.push(`candidate pass rate ${cr.passRate} is below the release's ${rr.passRate}`);
+        if (cr.heldOutPassRate !== null && rr.heldOutPassRate !== null && cr.heldOutPassRate < rr.heldOutPassRate) problems.push(`candidate held-out pass rate ${cr.heldOutPassRate} is below the release's ${rr.heldOutPassRate}`);
+        if (cr.passRate <= br.passRate) problems.push(`candidate pass rate ${cr.passRate} does not beat the no-plugin baseline's ${br.passRate}`);
+    }
+    const costOf = (a) => {
+        const known = a.filled.filter((x) => Number.isFinite(x.costUsd));
+        return { usd: Math.round(known.reduce((n, x) => n + x.costUsd, 0) * 10000) / 10000, known: known.length, rows: a.filled.length };
+    };
+    const cost = { candidate: costOf(cr), release: costOf(rr) };
+    const unknown = cost.candidate.rows - cost.candidate.known + cost.release.rows - cost.release.known;
+    if (unknown) problems.push(`${unknown} candidate or release row(s) carry no cost`);
+    return done(cost);
+}
+
+/** The promotion lines, as printed by run.js compare --promote. */
+function renderPromotion(p) {
+    const out = p.problems.map((x) => `FAIL promotion: ${x}`);
+    if (p.cost) out.push(`cost: candidate $${p.cost.candidate.usd} over ${p.cost.candidate.known} row(s), release $${p.cost.release.usd} over ${p.cost.release.known} row(s)`);
+    out.push(p.line);
+    return `${out.join('\n')}\n`;
+}
+
+module.exports = { compare, render, verdictOk, promotion, renderPromotion, sealedBeforeRun, validArms, ranArm, taskOracle, oraclePass, independentOracles, fingerprints, leakageControls, armRuns, missingRuns, runIdentity, planTasks, readRowsFile };

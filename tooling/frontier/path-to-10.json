@@ -1,18 +1,20 @@
 {
   "_doc": "The preregistered path-to-10 calibration. Fixed before any run: 12 tasks in 12 families, three arms, three repeats, 108 bounded runs, and six families withheld from tuning. Tuning may change only the inputs listed under tuning.inputs, and may read only rows of tuning.tasks. Each run is graded by its task's endpoint oracle (held-out checks or the answer key), never by a reviewer's verdict. Read it with: node tooling/frontier/run.js compare --plan tooling/frontier/path-to-10.json [--fixtures]. The fixture rows are synthetic and exist to exercise the comparison, not to report a result.",
   "preregisteredAt": "2026-10-14",
+  "amendedAt": "2026-10-30",
+  "amendment": "Before any plan run (0 live rows named an arm): the previous-release arm became the candidate arm, so the plan measures the commit under review against the current release and the no-plugin baseline. Still three arms and 108 bounded runs. Promotion: run.js compare --plan <file> --promote --candidate <commit>.",
   "repeats": 3,
   "arms": [
+    {
+      "id": "CAN",
+      "label": "candidate: the exact commit named with --candidate, tagged or not",
+      "pluginPin": "candidate",
+      "variant": "V0"
+    },
     {
       "id": "CUR",
       "label": "current release",
       "pluginPin": "current",
-      "variant": "V0"
-    },
-    {
-      "id": "PRV",
-      "label": "previous release",
-      "pluginPin": "previous",
       "variant": "V0"
     },
     {
