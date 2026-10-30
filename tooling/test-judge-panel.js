@@ -12,7 +12,9 @@ const { makePairs } = require(path.join(scripts, 'unslop-sweep.js'));
 const root = fs.mkdtempSync(path.join(os.tmpdir(), 'judge-panel-'));
 const home = path.join(root, 'profile');
 const budgetLedger = path.join(root, 'state', 'execution-budget.json');
-const env = { ...process.env, HOME: root, USERPROFILE: root, CLAUDE_CONFIG_DIR: home,
+// Capacity off: admission would probe this machine's live memory, so the suite
+// went red whenever commit headroom dipped. test-capacity-admission.js owns it.
+const env = { ...process.env, HOME: root, USERPROFILE: root, CLAUDE_CONFIG_DIR: home, AUTODEV_CAPACITY: 'off',
     AUTODEV_BUDGET_LEDGER: budgetLedger, AUTODEV_GATE_LOCK_PATH: path.join(root, 'state', 'locks', 'full-gate.lock') };
 let total = 0; let failed = 0;
 function check(name, ok, detail = '') { total++; if (!ok) failed++; console.log(`${ok ? 'ok' : 'FAIL'} ${name}${ok ? '' : `: ${detail}`}`); }
