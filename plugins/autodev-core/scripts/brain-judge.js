@@ -678,15 +678,17 @@ function refusedAcceptDecision(code) { return COORDINATOR_REFUSALS.includes(code
  * same pinned-test check a Brain accept does. Never throws: a refusal is the note.
  */
 function writeVerdict(p, taskId, decision, reason) {
-    const write = (d, r) => {
-        const v = uw.run(['verdict', '--task-id', taskId, '--decision', d, '--reason', r, '--by', 'judge', '--ledger', p.ledger]);
+    const write = (d, r, extra = []) => {
+        const v = uw.run(['verdict', '--task-id', taskId, '--decision', d, '--reason', r, '--by', 'judge', ...extra, '--ledger', p.ledger]);
         return { applied: v.verdict.applied, note: v.verdict.applied ? null : v.verdict.reason };
     };
     try { return write(decision, reason); } catch (e) {
         const note = `${e.publicCode || 'internal'}: ${e.message}`;
         if (decision !== 'accept' || !ACCEPT_REFUSALS.includes(e.publicCode)) return { applied: false, note };
         const fallback = refusedAcceptDecision(e.publicCode);
-        try { return { ...write(fallback, `the judge would accept, but ${e.publicCode}: ${e.message}`), decision: fallback, note }; } catch (e2) {
+        // An unrun receipt keeps the accept, so reconcile can write it once the receipt verifies.
+        const extra = fallback === 'follow-up' && uw.DEFERRABLE.includes(e.publicCode) ? ['--deferred-accept', e.publicCode, '--deferred-reason', reason] : [];
+        try { return { ...write(fallback, `the judge would accept, but ${e.publicCode}: ${e.message}`, extra), decision: fallback, note }; } catch (e2) {
             return { applied: false, note: `${note}; ${fallback} also refused: ${e2.publicCode || 'internal'}: ${e2.message}` };
         }
     }

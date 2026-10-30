@@ -207,7 +207,7 @@ function parseArgs(argv) {
     const flags = ['help', 'report-read', 'dry-run', 'dev'];
     const known = ['_', ...flags, 'repo', 'slug', 'brief-file', 'return', 'report', 'base', 'task-id', 'title', 'ledger', 'session', 'run-status', 'reason',
         'after', 'model', 'effort', 'permission-mode', 'config-dir', 'headless-worker', 'claude-bin', 'decision', 'by', 'max-concurrent', 'max-per-hour',
-        'pin', 'allow-pin-change', 'head', 'accept-without-receipt', 'without-criteria'];
+        'pin', 'allow-pin-change', 'head', 'accept-without-receipt', 'without-criteria', 'deferred-accept', 'deferred-reason'];
     for (let i = 0; i < argv.length; i++) {
         const a = argv[i];
         if (a === '--help' || a === '-h' || a === 'help') { out.help = true; continue; }
@@ -829,15 +829,44 @@ function mutate(opts, fn) {
     });
 }
 
-/** Record a verdict. A judge never replaces a standing verdict; the Brain or the operator can. */
-function applyVerdict(rec, { decision, reason, by = 'brain', at = new Date().toISOString(), pins = null }) {
+// A judge accept refused only because nobody had run the receipt yet. Reconcile
+// can run it, so the judge's follow-up keeps the accept it deferred.
+// `[measured 2026-10-30]` reconcile skipped every record with a verdict, so these
+// follow-ups stayed open until a person accepted them by hand.
+const DEFERRABLE = ['receipt-missing', 'receipt-other-attempt'];
+
+/** The accept a judge follow-up deferred for an unrun receipt, or null. */
+function deferredAcceptOf(rec) {
+    const v = rec && rec.verdict;
+    if (!v || v.by !== 'judge' || v.decision !== 'follow-up' || !v.deferredAccept) return null;
+    return DEFERRABLE.includes(v.deferredAccept.gate) ? v.deferredAccept : null;
+}
+
+function deferredOpt(opts, by, decision) {
+    const gate = opts['deferred-accept'];
+    if (gate === undefined && opts['deferred-reason'] === undefined) return null;
+    if (by !== 'judge' || decision !== 'follow-up') fault('usage', '--deferred-accept applies only to --by judge --decision follow-up');
+    if (!DEFERRABLE.includes(gate)) fault('usage', `--deferred-accept must be one of ${DEFERRABLE.join(', ')}`);
+    const reason = String(opts['deferred-reason'] || '').trim();
+    if (!reason) fault('usage', '--deferred-accept needs --deferred-reason, the accept the judge would have written');
+    return { gate, reason: reason.slice(0, 2000) };
+}
+
+/**
+ * Record a verdict. A judge never replaces a standing verdict; the Brain or the
+ * operator can. The one exception is a judge accept over the judge's own deferred
+ * follow-up, which still meets the pin and receipt gates.
+ */
+function applyVerdict(rec, { decision, reason, by = 'brain', at = new Date().toISOString(), pins = null, deferred = null }) {
     if (!DECISIONS.includes(decision)) fault('usage', `--decision must be one of ${DECISIONS.join(', ')}`);
     if (!VERDICT_BY.includes(by)) fault('usage', `--by must be one of ${VERDICT_BY.join(', ')}`);
     if (!reason || !String(reason).trim()) fault('usage', '--reason is required');
     if (!FINISHED.includes(rec.state)) fault('bad-state', `task ${rec.taskId} is ${rec.state}; a verdict needs a finished run`);
-    if (rec.verdict && by === 'judge') return { applied: false, reason: `a ${rec.verdict.by} verdict (${rec.verdict.decision}) stands, and a judge never replaces one` };
+    const reopens = by === 'judge' && decision === 'accept' && deferredAcceptOf(rec);
+    if (rec.verdict && by === 'judge' && !reopens) return { applied: false, reason: `a ${rec.verdict.by} verdict (${rec.verdict.decision}) stands, and a judge never replaces one` };
     const previous = rec.verdict || null;
-    rec.verdict = { decision, reason: String(reason).slice(0, 2000), by, at, ...(pins || {}) };
+    rec.verdict = { decision, reason: String(reason).slice(0, 2000), by, at, ...(pins || {}), ...(deferred ? { deferredAccept: deferred } : {}),
+        ...(reopens ? { supersedes: { decision: previous.decision, at: previous.at, gate: reopens.gate } } : {}) };
     return { applied: true, previous };
 }
 
@@ -854,7 +883,7 @@ const COMMAND_FLAGS = {
     retire: ['task-id', 'reason', 'ledger'],
     hold: ['task-id', 'reason', 'ledger'],
     release: ['task-id', 'reason', 'ledger'],
-    verdict: ['task-id', 'decision', 'reason', 'by', 'head', 'allow-pin-change', 'accept-without-receipt', 'ledger'],
+    verdict: ['task-id', 'decision', 'reason', 'by', 'head', 'allow-pin-change', 'accept-without-receipt', 'deferred-accept', 'deferred-reason', 'ledger'],
     ready: ['max-concurrent', 'max-per-hour', 'ledger'],
     status: ['task-id', 'ledger'],
 };
@@ -942,11 +971,14 @@ function run(argv) {
             if (!opts.reason || !String(opts.reason).trim()) fault('usage', '--reason is required');
             if (!FINISHED.includes(rec.state)) fault('bad-state', `task ${rec.taskId} is ${rec.state}; a verdict needs a finished run`);
             const by = opts.by || 'brain';
-            // A judge never replaces a standing verdict, so there is nothing to gate.
-            if (rec.verdict && by === 'judge') return { verdict: applyVerdict(rec, { decision: opts.decision, reason: opts.reason, by }) };
+            const deferred = deferredOpt(opts, by, opts.decision);
+            // A judge never replaces a standing verdict, except its own deferred accept, so there is nothing to gate.
+            if (rec.verdict && by === 'judge' && !(opts.decision === 'accept' && deferredAcceptOf(rec))) {
+                return { verdict: applyVerdict(rec, { decision: opts.decision, reason: opts.reason, by }) };
+            }
             const pins = gatePins(rec, { decision: opts.decision, allow: opts['allow-pin-change'], head: opts.head });
             const receipt = gateReceipt(rec, { decision: opts.decision, by, allow: opts['accept-without-receipt'], head: opts.head });
-            return { verdict: applyVerdict(rec, { decision: opts.decision, reason: opts.reason, by, pins: { ...(pins || {}), ...(receipt || {}) } }) };
+            return { verdict: applyVerdict(rec, { decision: opts.decision, reason: opts.reason, by, pins: { ...(pins || {}), ...(receipt || {}) }, deferred }) };
         });
     }
     if (cmd === 'ready') {
@@ -981,4 +1013,4 @@ if (require.main === module) {
     }
 }
 
-module.exports = { RUN_STATUSES, ACTIVE, resolvePins, checkPins, gatePins, gateReceipt, briefContract, composePrompt, decideSettle, parseArgs, run, planStarts, dependencyState, applyVerdict, pointerPrompt, headlessArgs, parseHeadless, recoverTimedOutStart, withLock, FINISHED, DECISIONS, TRANSIENT_LAUNCH_CODES };
+module.exports = { RUN_STATUSES, ACTIVE, resolvePins, checkPins, gatePins, gateReceipt, briefContract, composePrompt, decideSettle, parseArgs, run, planStarts, dependencyState, applyVerdict, deferredAcceptOf, DEFERRABLE, pointerPrompt, headlessArgs, parseHeadless, recoverTimedOutStart, withLock, FINISHED, DECISIONS, TRANSIENT_LAUNCH_CODES };

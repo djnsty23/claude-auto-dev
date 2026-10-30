@@ -332,7 +332,7 @@ function releaseHeld(records, ctx) {
     return out;
 }
 
-/** Records that succeeded, have no verdict, and whose receipt gate a verify can answer. */
+/** Records that succeeded, have no verdict or only a judge's deferred accept, and whose receipt gate a verify can answer. */
 function verifyCandidates(records, p, taskId = null) {
     const tries = new Map();
     for (const row of readJsonl(path.join(p.state, 'verify.jsonl'))) {
@@ -342,17 +342,29 @@ function verifyCandidates(records, p, taskId = null) {
     const out = [];
     for (const rec of records) {
         if (taskId && rec.taskId !== taskId) continue;
-        if (rec.channel !== 'headless' || !uw.FINISHED.includes(rec.state) || rec.runStatus !== 'succeeded' || rec.verdict) continue;
+        const deferred = uw.deferredAcceptOf(rec);
+        if (rec.channel !== 'headless' || !uw.FINISHED.includes(rec.state) || rec.runStatus !== 'succeeded' || (rec.verdict && !deferred)) continue;
         const attemptId = acceptance.attemptOf(rec);
         if ((tries.get(`${rec.taskId}\u0000${attemptId}`) || 0) >= VERIFY_TRIES_PER_ATTEMPT) continue;
         let g;
         try { g = acceptance.gate(rec); } catch (e) { g = { ok: false, code: 'gate-error', why: e.message }; }
-        if (!g.ok && VERIFIABLE.includes(g.code)) out.push({ rec, gate: g.code });
+        if (!g.ok && VERIFIABLE.includes(g.code)) out.push({ rec, gate: g.code, ...(deferred ? { deferred } : {}) });
     }
     return out;
 }
 
 function readRecords(p) { return uw.run(['status', '--ledger', p.ledger]).records; }
+
+/** Write the accept a judge deferred for an unrun receipt, through the same pin and receipt gates. Never throws. */
+function acceptDeferred(p, rec, deferred) {
+    try {
+        const v = uw.run(['verdict', '--task-id', rec.taskId, '--decision', 'accept', '--by', 'judge', '--ledger', p.ledger,
+            '--reason', `${deferred.reason} (receipt verified by reconcile after ${deferred.gate})`]);
+        return v.verdict.applied ? { applied: true } : { applied: false, why: v.verdict.reason };
+    } catch (e) {
+        return { applied: false, why: `${e.publicCode || 'internal'}: ${String(e.message).slice(0, 300)}` };
+    }
+}
 
 function tick(opts) {
     refuseInWorker();
@@ -420,6 +432,7 @@ function verifyStep(opts) {
                 const timeoutMs = Math.max(1000, Math.floor((left() - 5000) / n));
                 const r = acceptance.verify(rec, { timeoutMs });
                 Object.assign(row, { ok: true, complete: r.complete, failed: r.failed, receipt: r.receipt, tree: r.tree });
+                if (c.deferred && r.complete) row.accept = acceptDeferred(p, rec, c.deferred);
             } catch (e) {
                 Object.assign(row, { ok: false, error: e.publicCode || 'internal', message: String(e.message).slice(0, 300) });
             } finally {
@@ -453,5 +466,5 @@ if (require.main === module) {
     }
 }
 
-module.exports = { successEvidence, closeDecision, settleHeadless, reconcileStarted, releaseHeld, verifyCandidates, verifyStep, tick, run, parseArgs,
+module.exports = { successEvidence, closeDecision, settleHeadless, reconcileStarted, releaseHeld, verifyCandidates, acceptDeferred, verifyStep, tick, run, parseArgs,
     VERIFIABLE, VERIFY_BUDGET_MS, VERIFY_TRIES_PER_ATTEMPT, SUCCESS_RESULTS };
