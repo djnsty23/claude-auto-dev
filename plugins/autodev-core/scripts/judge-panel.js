@@ -33,9 +33,13 @@
  * --reference <dir>: up to 4 approved reference screenshots shown to every
  * judge as the quality bar. Pass only references the owner approved.
  *
+ * --judges takes 2 to 7, and a decision needs a majority of them and never
+ * fewer than 2 complete judges. A pairs.json marked `blind: false` (made with
+ * `--seed`) is refused: its key can be rebuilt from the seed.
+ *
  * Writes <pairs dir>/panel.json. Exit: 0 KEEP (after preferred, losses within
  * --max-loss-share of judged captures), 1 REVERT, 2 could not judge (fewer
- * than a majority of judges answered every pair, or a bad argument).
+ * than a quorum of judges answered every pair, or a bad argument).
  */
 const fs = require('fs');
 const path = require('path');
@@ -48,6 +52,8 @@ const { scorePairs } = require('./unslop-sweep.js');
 
 const DEFAULT_MODEL = 'claude-opus-5-5';
 const MAX_REFERENCES = 4;
+// The fewest complete judges behind any decision, whatever the panel size.
+const MIN_JUDGES = 2;
 const LENSES = [
     'a senior product designer judging craft: visual hierarchy, alignment, spacing rhythm, typography, contrast and finish',
     'a first-time visitor on a phone deciding in five seconds whether this business is trustworthy and what to do next',
@@ -70,7 +76,8 @@ function parseArgs(argv) {
     for (let i = 0; i < argv.length; i++) {
         const a = argv[i];
         if (a === '--json') o.json = true;
-        else if (a === '--judges') o.judges = num(argv[++i], 'judges', 1, 7);
+        // One judge is one model's preference, not a panel: it could KEEP alone.
+        else if (a === '--judges') o.judges = num(argv[++i], 'judges', MIN_JUDGES, 7);
         else if (a === '--batch') o.batch = num(argv[++i], 'batch', 1, 12);
         else if (a === '--max-loss-share') o.maxLossShare = num(argv[++i], 'max-loss-share', 0, 1);
         else if (a === '--model') o.model = argv[++i];
@@ -190,7 +197,9 @@ function ownerAgreement(panel, picks) {
 function run(o) {
     const dir = path.resolve(o._[1] || '');
     if (!o._[1] || !fs.existsSync(path.join(dir, 'pairs.json'))) throw new Bail(2, 'run needs a pairs dir holding pairs.json (unslop-sweep.js pairs)');
-    const manifest = JSON.parse(fs.readFileSync(path.join(dir, 'pairs.json'), 'utf8')).pairs;
+    const pairsFile = JSON.parse(fs.readFileSync(path.join(dir, 'pairs.json'), 'utf8'));
+    if (pairsFile.blind === false) throw new Bail(2, 'pairs.json is not blind: it was made with --seed, so its key can be rebuilt. Make the pairs again without --seed');
+    const manifest = pairsFile.pairs;
     const key = JSON.parse(fs.readFileSync(path.join(dir, '.key.json'), 'utf8'));
     if (!Array.isArray(manifest) || !manifest.length) throw new Bail(2, 'pairs.json holds no pairs');
     const refs = referenceFiles(o.reference);
@@ -212,7 +221,7 @@ function run(o) {
             score: complete ? (({ per, ...s }) => s)(scorePairs(key, verdicts)) : null });
     }
     const answered = judges.filter((j) => j.complete);
-    const quorum = Math.floor(o.judges / 2) + 1;
+    const quorum = Math.max(MIN_JUDGES, Math.floor(o.judges / 2) + 1);
     const result = { at: new Date().toISOString(), model: o.model, judges: judges.length, answered: answered.length, quorum, references: refs.map((r) => path.basename(r)), perJudge: judges };
     if (answered.length < quorum) {
         result.decision = 'INDETERMINATE';
@@ -251,7 +260,7 @@ function main(argv) {
     return r.decision === 'KEEP' ? 0 : r.decision === 'REVERT' ? 1 : 2;
 }
 
-module.exports = { majority, decide, ownerAgreement, parseRun, buildMessage, LENSES, VERDICT_SCHEMA };
+module.exports = { majority, decide, ownerAgreement, parseRun, buildMessage, LENSES, VERDICT_SCHEMA, MIN_JUDGES };
 
 if (require.main === module) {
     try { process.exitCode = main(process.argv.slice(2)); }
