@@ -852,7 +852,8 @@ function finish(c, run, { allowKill = true } = {}) {
         const tokens = tokensOf(s.result);
         const init = s.init || {};
         const rl = s.rate && s.rate.rate_limit_info && s.rate.rate_limit_info.unifiedWindows;
-        const budget = rl ? { fiveHour: (rl.five_hour || {}).utilization ?? null, sevenDay: (rl.seven_day || {}).utilization ?? null, at: new Date().toISOString() } : null;
+        const budget = rl ? { fiveHour: (rl.five_hour || {}).utilization ?? null, sevenDay: (rl.seven_day || {}).utilization ?? null,
+            sevenDayResetsAt: (rl.seven_day || {}).resetsAt ?? null, at: new Date().toISOString() } : null;
         const leaks = leakHits(s.toolInputs, run);
         const base = {
             exit: exitM ? Number(exitM[1]) : null, wallMs: Math.round(exitMs - startedMs),
@@ -1008,11 +1009,34 @@ function pidAlive(pid) {
     }
     try { process.kill(pid, 0); return true; } catch (e) { return e.code === 'EPERM'; }
 }
-/** The latest seven-day utilisation this account reported: finished rows, then the logs of runs still going. */
-function latestSevenDay(c, account, running) {
+/** The seven-day window of a rate_limit_event, read from a run's log; null when the log has none. */
+function sevenDayWindow(c, run) {
+    let text = '';
+    try { text = fs.readFileSync(runPaths(c, run).log, 'utf8'); } catch { return null; }
+    const s = parseStream(text.slice(-262144));
+    const w = s.rate && s.rate.rate_limit_info && s.rate.rate_limit_info.unifiedWindows;
+    return w && w.seven_day ? w.seven_day : null;
+}
+
+/** A reading whose window has reset says nothing about the window now open. Unknown reset: still current. */
+function windowReset(resetsAt, now) { return typeof resetsAt === 'number' && resetsAt * 1000 <= now; }
+
+/**
+ * The latest seven-day utilisation this account reported: finished rows, then the logs of runs still going.
+ * When the newest row's window has reset there is no current reading, so a batch stopped on budget resumes
+ * one run at a time until a fresh one lands. Older rows are not consulted: their windows reset no later.
+ * A row written before the reset time was recorded takes it from its run's log.
+ */
+function latestSevenDay(c, account, running, now = Date.now()) {
     let best = null;
+    let newest = null;
     for (const r of readRows(c)) {
-        if (r.account === account && r.budget && typeof r.budget.sevenDay === 'number' && (!best || r.finishedAt > best.at)) best = { value: r.budget.sevenDay, at: r.finishedAt };
+        if (r.account === account && r.budget && typeof r.budget.sevenDay === 'number' && (!newest || r.finishedAt > newest.finishedAt)) newest = r;
+    }
+    if (newest) {
+        let resetsAt = newest.budget.sevenDayResetsAt;
+        if (resetsAt === undefined) resetsAt = (sevenDayWindow(c, newest.run) || {}).resetsAt;
+        if (!windowReset(resetsAt, now)) best = { value: newest.budget.sevenDay, at: newest.finishedAt };
     }
     for (const run of running) {
         const log = runPaths(c, run).log;
@@ -1020,7 +1044,7 @@ function latestSevenDay(c, account, running) {
         try { text = fs.readFileSync(log, 'utf8'); } catch { continue; }
         const s = parseStream(text.slice(-262144));
         const w = s.rate && s.rate.rate_limit_info && s.rate.rate_limit_info.unifiedWindows;
-        if (w && w.seven_day && typeof w.seven_day.utilization === 'number') {
+        if (w && w.seven_day && typeof w.seven_day.utilization === 'number' && !windowReset(w.seven_day.resetsAt, now)) {
             const at = fs.statSync(log).mtime.toISOString();
             if (!best || at > best.at) best = { value: w.seven_day.utilization, at };
         }

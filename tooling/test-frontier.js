@@ -150,7 +150,7 @@ if (process.env.AUTODEV_FAKE_OUT) {
         configDir: process.env.CLAUDE_CONFIG_DIR || null, cwd: process.cwd(), argv: argv.filter((a, i) => argv[i - 1] !== '-p'), pid: process.pid }));
 }
 out({ type: 'system', subtype: 'init', model, apiKeySource: process.env.AUTODEV_FAKE_API || 'none', claude_code_version: '9.9.9', permissionMode: val('--permission-mode'), plugins, tools: ['Read', 'Edit'], mcp_servers: [], output_style: 'default' });
-out({ type: 'rate_limit_event', rate_limit_info: { unifiedWindows: { five_hour: { utilization: 0.05 }, seven_day: { utilization: Number(process.env.AUTODEV_FAKE_7D || 0.1) } } } });
+out({ type: 'rate_limit_event', rate_limit_info: { unifiedWindows: { five_hour: { utilization: 0.05 }, seven_day: Object.assign({ utilization: Number(process.env.AUTODEV_FAKE_7D || 0.1) }, process.env.AUTODEV_FAKE_7D_RESETS ? { resetsAt: Number(process.env.AUTODEV_FAKE_7D_RESETS) } : {}) } } });
 if (mode === 'fix') fs.writeFileSync('lib/add.js', 'module.exports = (a, b) => a + b;\\n');
 if (mode === 'cheat') { fs.mkdirSync('tooling', { recursive: true }); fs.writeFileSync('tooling/test-add.js', 'process.exitCode = 0;\\n'); }
 if (mode === 'answer') fs.writeFileSync('frontier-answer.json', process.env.AUTODEV_FAKE_ANSWER || '');
@@ -476,6 +476,16 @@ function cliCases(shas) {
     const bid = b.json && b.json.value && b.json.value.batch;
     const bf = batchDone(bid);
     check('56. a batch over the budget stop starts nothing and says stopped-budget', bf && bf.state === 'stopped-budget' && bf.items.every((i) => i.state === 'queued'), bf || b.json || b.stderr);
+
+    // the window that reading came from resets: a fresh 0.95 whose resetsAt has passed stops nothing, and resume runs it out
+    const reset = startAndFinish('TX', 'V0', 'fix', { AUTODEV_FAKE_7D: '0.95', AUTODEV_FAKE_7D_RESETS: String(Math.floor(Date.now() / 1000) - 60) });
+    check('56b. a reading records when its seven-day window resets', reset.row && reset.row.budget.sevenDay === 0.95 && typeof reset.row.budget.sevenDayResetsAt === 'number', reset.row && reset.row.budget);
+    const rs = run(['batch-resume', '--batch', bid], { AUTODEV_FAKE_MODE: 'fix' });
+    // The resumed loop claims the file by writing its pid, so wait for that pid before reading a verdict.
+    const rpid = rs.json && rs.json.ok ? rs.json.value.loopPid : null;
+    const rf = rpid ? waitForState(() => readJson(path.join(DATA, 'batches', `${bid}.json`)),
+        f => f && f.loopPid === rpid && f.state !== 'running', runMeasurements.map(ms => ms * 2)).value : null;
+    check('56c. a batch stopped on budget resumes once that window has reset, and runs to done', rf && rf.state === 'done' && rf.items.every((i) => i.verdict === 'pass'), rf || rs.json || rs.stderr);
 
     // a batch under budget runs both items, two at a time, and records both rows
     const cool = startAndFinish('TX', 'V0', 'fix', { AUTODEV_FAKE_7D: '0.2' });
