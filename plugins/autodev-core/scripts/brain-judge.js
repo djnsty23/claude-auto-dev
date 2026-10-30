@@ -661,9 +661,17 @@ const countsAgainstRecord = (r) => r.ok === false && !r.login && r.costUsd !== 0
 
 // The pin check and the acceptance-receipt gate refuse an accept with these
 // codes. The judge read only the report, so a changed or unreadable pinned test,
-// or an accept no verified receipt backs, goes to a person as escalate.
+// or a receipt that contradicts the work, goes to a person as escalate.
 const PIN_REFUSALS = ['pin-changed', 'pin-unchecked'];
 const ACCEPT_REFUSALS = [...PIN_REFUSALS, ...acceptance.REFUSALS];
+// `[measured 2026-10-30]` the judge accepted 4 of 62 records, and the gate rewrote
+// all 4 as escalate for no-criteria. All 4 then merged with no person involved. A
+// receipt nobody has run yet, or a brief with no checks to run, is a step the
+// coordinator takes (verify, or accept without a receipt), which is follow-up.
+const COORDINATOR_REFUSALS = ['no-criteria', 'criterion-without-check', 'receipt-missing', 'receipt-other-attempt'];
+
+/** The decision a refused judge accept is written as: follow-up when the coordinator can clear it, else escalate. */
+function refusedAcceptDecision(code) { return COORDINATOR_REFUSALS.includes(code) ? 'follow-up' : 'escalate'; }
 
 /**
  * Write a verdict through unattended-worker verdict, so a judge accept meets the
@@ -677,8 +685,9 @@ function writeVerdict(p, taskId, decision, reason) {
     try { return write(decision, reason); } catch (e) {
         const note = `${e.publicCode || 'internal'}: ${e.message}`;
         if (decision !== 'accept' || !ACCEPT_REFUSALS.includes(e.publicCode)) return { applied: false, note };
-        try { return { ...write('escalate', `the judge would accept, but ${e.publicCode}: ${e.message}`), decision: 'escalate', note }; } catch (e2) {
-            return { applied: false, note: `${note}; escalate also refused: ${e2.publicCode || 'internal'}: ${e2.message}` };
+        const fallback = refusedAcceptDecision(e.publicCode);
+        try { return { ...write(fallback, `the judge would accept, but ${e.publicCode}: ${e.message}`), decision: fallback, note }; } catch (e2) {
+            return { applied: false, note: `${note}; ${fallback} also refused: ${e2.publicCode || 'internal'}: ${e2.message}` };
         }
     }
 }

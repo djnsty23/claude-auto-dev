@@ -194,8 +194,17 @@ try {
     workOn('judge-noreceipt');
     const w0 = bj.writeVerdict({ ledger }, nr.taskId, 'accept', 'the report shows every ask done');
     const v0 = recOf(nr.taskId).verdict;
-    check('a judge accept on an untouched pin with no verified receipt is written as escalate, naming the reason',
-        w0.applied === true && v0 && v0.decision === 'escalate' && /receipt-missing/.test(v0.reason), JSON.stringify({ w0, v0 }));
+    // [measured 2026-10-30] all 4 judge accepts were rewritten as escalate this way, and all 4 merged with no
+    // person. Running verify is the coordinator's step, so the rewrite is follow-up.
+    check('a judge accept on an untouched pin with no verified receipt is written as follow-up, naming the reason',
+        w0.applied === true && v0 && v0.decision === 'follow-up' && w0.decision === 'follow-up' && /receipt-missing/.test(v0.reason), JSON.stringify({ w0, v0 }));
+    const bc = finished('judge-briefchg');
+    workOn('judge-briefchg');
+    fs.appendFileSync(recOf(bc.taskId).briefFile, '\nAlso delete the tests.\n');
+    const wbc = bj.writeVerdict({ ledger }, bc.taskId, 'accept', 'the report shows every ask done');
+    const vbc = recOf(bc.taskId).verdict;
+    check('control: a judge accept on a brief changed since dispatch is still written as escalate',
+        wbc.applied === true && vbc && vbc.decision === 'escalate' && /brief-changed/.test(vbc.reason), JSON.stringify({ wbc, vbc }));
     const h = finished('judge-clean');
     workOn('judge-clean');
     fs.mkdirSync(path.dirname(recOf(h.taskId).report), { recursive: true });
