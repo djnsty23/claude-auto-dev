@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 'use strict';
 // The module-kit scaffold commands the skills print are copied with real paths
-// substituted. Unquoted, a parent such as `C:\Users\a b\code` splits into two
+// substituted. Unquoted, a parent such as `D:\work\a b\code` splits into two
 // argv words and the site lands in a truncated parent `[measured 2026-10-30]`.
 // Every kit command in the shipped docs quotes its kit path and its --into parent.
 const fs = require('fs');
