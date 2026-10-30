@@ -280,9 +280,11 @@ try {
     check('arm: --candidate HEAD resolves to the full sha in the source repo', can.sha === head && can.pluginPin === 'candidate', JSON.stringify(can));
     check('arm: --candidate with no commit is a usage error', refused(() => R.armOpt({ plan: PLAN, arm: 'CAN', candidate: true }, g), 'usage'));
     check('pin: candidate is the exact commit it names', R.pinRev(gc, {}, can) === head);
-    // The acceptance case: an untagged candidate loads different plugins than current.
-    const relPin = R.pinFor(gc, R.pinRev(gc, {}, R.loadArm(PLAN, 'CUR')));
-    const canPin = R.pinFor(gc, R.pinRev(gc, {}, can), true);
+    // The acceptance case: an untagged candidate loads different plugins than current,
+    // through armPin, the call prepare makes.
+    const relPin = R.armPin(gc, {}, R.loadArm(PLAN, 'CUR'));
+    const canPin = R.armPin(gc, {}, can);
+    check('pin: the none arm loads no plugin dir', R.armPin(gc, {}, R.loadArm(PLAN, 'BAS')).pluginDir === null);
     check(`pin: an untagged candidate changes the loaded plugin hash (${canPin.tag} ${String(canPin.hash).slice(0, 12)} vs ${relPin.tag} ${String(relPin.hash).slice(0, 12)})`,
         canPin.hash && relPin.hash && canPin.hash !== relPin.hash && canPin.commit === head && canPin.tag === `candidate-${head.slice(0, 12)}`);
     check('pin: the release pin records the tagged commit', relPin.tag === 'v1.1.0' && relPin.commit === gx('rev-parse', 'v1.1.0^{commit}').stdout.trim());

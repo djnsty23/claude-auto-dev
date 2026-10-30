@@ -446,6 +446,11 @@ function pinRev(c, task, arm) {
     if (arm.pluginPin === 'candidate') return SHA_RE.test(arm.sha || '') ? arm.sha : fault('no-candidate', `arm ${arm.id} carries no candidate commit`);
     fault('bad-arm', `arm ${arm.id}: pluginPin ${arm.pluginPin} is not current, previous, candidate or none`);
 }
+/** The plugins an arm loads for a task: none, a release tag's, or the candidate commit's own. */
+function armPin(c, task, arm) {
+    const rev = pinRev(c, task, arm);
+    return rev === null ? NO_PIN : pinFor(c, rev, !!arm && arm.pluginPin === 'candidate');
+}
 
 // ---------------------------------------------------------------- contamination
 const CODEY = (w) => /[A-Z].*[A-Z_0-9]|[a-z][A-Z]|_|\d|-/.test(w.slice(1)) || /^[A-Z_0-9]{6,}$/.test(w);
@@ -590,8 +595,7 @@ function prepare(c, taskId, variantId, repeat = 1, { account = null, arm = null,
     fs.mkdirSync(p.dir, { recursive: true });
     buildTaskRepo(c, task, p.repo, task.parentSha);
     const snap = buildConfigDir(c, p.cfg);
-    const rev = pinRev(c, task, arm);
-    const pin = rev === null ? NO_PIN : pinFor(c, rev, !!arm && arm.pluginPin === 'candidate');
+    const pin = armPin(c, task, arm);
     const tokens = task.lane === 'fix' ? fixTokens(c, task) : [];
     const hits = scanForTokens(tokens, [p.cfg, p.repo, pin.pluginDir].filter(Boolean));
     const brief = fs.readFileSync(path.join(c.tasks, task.brief), 'utf8');
@@ -1267,5 +1271,5 @@ if (require.main === module) {
 }
 
 module.exports = { parseArgs, fixTokens, scanForTokens, workerEnv, checksEnv, composePrompt, parseStream, tokensOf, leakHits,
-    gradeLocate, gradeReview, gradeDecide, decideAnswer, plantedFindings, readRows, rowFor, loadArm, pinRev, pinFor, armOpt, prepare, createBatch, RUN_RE, SCRUB_RE, SETTINGS_KEEP, CODEY,
+    gradeLocate, gradeReview, gradeDecide, decideAnswer, plantedFindings, readRows, rowFor, loadArm, pinRev, pinFor, armPin, armOpt, prepare, createBatch, RUN_RE, SCRUB_RE, SETTINGS_KEEP, CODEY,
     processList, heavyJobs, noteLoad, loadRecord, quietGate, HEAVY_RE };
