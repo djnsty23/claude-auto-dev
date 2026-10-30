@@ -49,9 +49,9 @@ function drill() {
         fs.writeFileSync(brief, 'Synthetic queue survival drill. No model executes this brief.\n');
         const ledger = path.join(a, 'autodev', 'unattended-workers.json');
         const first = cli('unattended-worker.js', ['enqueue', '--repo', repo, '--slug', 'switch-first', '--task-id', 'switch-first',
-            '--brief-file', brief, '--return', 'fixture', '--config-dir', b, '--ledger', ledger]).record;
+            '--brief-file', brief, '--return', 'fixture', '--without-criteria', 'synthetic drill', '--config-dir', b, '--ledger', ledger]).record;
         const second = cli('unattended-worker.js', ['enqueue', '--repo', repo, '--slug', 'switch-next', '--task-id', 'switch-next',
-            '--brief-file', brief, '--return', 'fixture', '--after', 'switch-first', '--config-dir', b, '--ledger', ledger]).record;
+            '--brief-file', brief, '--return', 'fixture', '--after', 'switch-first', '--without-criteria', 'synthetic drill', '--config-dir', b, '--ledger', ledger]).record;
         row.queued = 2;
         const readQueue = () => JSON.parse(fs.readFileSync(ledger, 'utf8')).records;
         const before = readQueue();

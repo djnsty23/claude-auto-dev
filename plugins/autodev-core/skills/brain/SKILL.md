@@ -113,7 +113,8 @@ for material risks; avoid nested fan-outs and duplicate assignments.
 
 **A queued task must be able to finish whole on its first attempt.** Every brief
 queued with `unattended-worker.js enqueue` names its acceptance test (a command
-and the exact line or exit code that means done), and ends in a gated commit the
+and the exact line or exit code that means done) in an `Acceptance criteria`
+section the receipt gate parses, or enqueue refuses it. It ends in a gated commit the
 worker leaves for you to land through `merge-lock.js`. The landing steps and
 the ASK split are in `references/dispatch-channels.md`. Leave a task out of the
 queue, rather than choosing a smaller one, when it cannot meet both.

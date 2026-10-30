@@ -168,4 +168,4 @@ panel's decision, win rate and agreement, and the advisory vision list kept apar
 - `ship` Step 1d runs it on any change that touches UI, before deploy. Mechanical findings are
   done-bar item 3 evidence; unmet ones become stories.
 - The Brain dispatches it per product on a schedule: `unslop-sweep.js brief --repo <dir> --base <local url> --return <address>`
-  writes the brief, and `unattended-worker.js enqueue` queues it.
+  writes the brief, and `unattended-worker.js enqueue --without-criteria "<reason>"` queues it (its outputs are dated).

@@ -145,7 +145,8 @@ const USAGE = [
     'settle: delete_scheduled_task archives the run session, so it is safe only once the run has ended',
     '       AND its result was read (--report-read).',
     '       node unattended-worker.js enqueue --repo <dir> --slug <topic> --brief-file <md> --return <address> [--after <id>[,<id>]] [--pin <path>[,<path>]]',
-    '            [--base origin/main] [--task-id <id>] [--title <text>] [--model <id>] [--effort <level>] [--permission-mode <mode>] [--config-dir <dir>] [--ledger <file>]',
+    '            [--base origin/main] [--task-id <id>] [--title <text>] [--model <id>] [--effort <level>] [--permission-mode <mode>] [--config-dir <dir>]',
+    '            [--without-criteria <reason>] [--ledger <file>]',
     '       node unattended-worker.js ready [--max-concurrent 2] [--max-per-hour 2] [--ledger <file>]',
     '       node unattended-worker.js launch --task-id <id> [--model <id>] [--effort <level>] [--dry-run] [--headless-worker <file>] [--claude-bin <path>] [--dev] [--ledger <file>]',
     '       node unattended-worker.js verdict --task-id <id> --decision accept|follow-up|escalate --reason <text> [--by judge|brain|operator]',
@@ -165,6 +166,9 @@ const USAGE = [
     '       differs or is gone at the result head (--head, else the branch locally or on origin), and refused',
     '       (pin-unchecked) when no head can be read. --allow-pin-change "<reason>" overrides and stores the reason.',
     '       follow-up and escalate are never refused.',
+    'brief and enqueue refuse a brief with no "Acceptance criteria" section acceptance-receipt.js can parse: each',
+    '       criterion a bullet with an id (- AC1: ...) and an indented check: line, optionally expect:. --without-criteria',
+    '       "<reason>" queues it anyway and stores the reason. Its accept then needs --accept-without-receipt.',
     '--accept-without-receipt "<reason>": accept needs a receipt acceptance-receipt.js verified for this attempt and result tree,',
     '       and is refused with the gate reason otherwise. Brain and operator may override with a stored reason, a judge may not.',
     'The scheduled-task path starts nothing and deletes nothing: the coordinator makes those MCP calls.',
@@ -203,7 +207,7 @@ function parseArgs(argv) {
     const flags = ['help', 'report-read', 'dry-run', 'dev'];
     const known = ['_', ...flags, 'repo', 'slug', 'brief-file', 'return', 'report', 'base', 'task-id', 'title', 'ledger', 'session', 'run-status', 'reason',
         'after', 'model', 'effort', 'permission-mode', 'config-dir', 'headless-worker', 'claude-bin', 'decision', 'by', 'max-concurrent', 'max-per-hour',
-        'pin', 'allow-pin-change', 'head', 'accept-without-receipt'];
+        'pin', 'allow-pin-change', 'head', 'accept-without-receipt', 'without-criteria'];
     for (let i = 0; i < argv.length; i++) {
         const a = argv[i];
         if (a === '--help' || a === '-h' || a === 'help') { out.help = true; continue; }
@@ -374,6 +378,35 @@ function readBrief(file) {
     return body;
 }
 
+// `[measured 2026-10-30]` the judge accepted 4 of 62 results, and the acceptance
+// gate refused all 4 with no-criteria: briefs carried a "## Acceptance" section
+// in prose, which the receipt parser does not read. A brief is now checked where
+// it is written, so a worker never starts on work nothing can verify.
+const CRITERIA_SHAPE = 'a section headed "Acceptance criteria" whose criteria are bullets with an id (- AC1: ...), each with an indented check: line';
+
+/**
+ * The acceptance contract a brief carries: { criteria } when acceptance-receipt.js
+ * parses one, { criteria: 0, criteriaWaived } with --without-criteria, else a refusal.
+ */
+function briefContract(body, waiver) {
+    let parsed;
+    try { parsed = acceptance.parseCriteria(body); } catch (e) { fault(e.publicCode || 'bad-criteria', e.message); }
+    const { criteria } = parsed;
+    const bare = criteria.filter((c) => !c.check);
+    if (bare.length) fault('criterion-without-check', `criterion ${bare.map((c) => c.id).join(', ')} has no check: line; the brief needs ${CRITERIA_SHAPE}`);
+    if (criteria.length) {
+        if (waiver !== undefined) fault('usage', `--without-criteria contradicts the brief's ${criteria.length} acceptance criteria`);
+        return { criteria: criteria.length };
+    }
+    if (waiver === undefined) {
+        const near = /^\s{0,3}#{1,6}\s*acceptance\b/im.test(body) ? ' Its acceptance heading is not "Acceptance criteria", so the parser reads nothing under it.' : '';
+        fault('no-criteria', `the brief names no acceptance criteria the receipt gate can verify. It needs ${CRITERIA_SHAPE}.${near} `
+            + 'Pass --without-criteria "<reason>" to queue it anyway: its accept then needs --accept-without-receipt.');
+    }
+    if (!String(waiver).trim()) fault('usage', '--without-criteria needs a reason');
+    return { criteria: 0, criteriaWaived: String(waiver).trim() };
+}
+
 /**
  * PINNED ACCEPTANCE TESTS. A brief names the test files that decide whether the
  * work is done, and the record keeps each one's blob sha at the base. A worker
@@ -516,6 +549,7 @@ function brief(opts) {
     const repo = resolveRepo(opts.repo);
     if (git(repo, ['rev-parse', '--verify', '--quiet', `${base}^{commit}`]).status !== 0) fault('base-unresolved', `${base} does not resolve in ${repo}; fetch first`);
     const body = readBrief(opts['brief-file']);
+    const contract = briefContract(body, opts['without-criteria']);
     const pinned = resolvePins(opts.pin, repo, base);
 
     const ledgerFile = opts.ledger || defaultLedger();
@@ -533,7 +567,7 @@ function brief(opts) {
         const briefFile = path.join(scratch, 'BRIEF.md');
         fs.writeFileSync(briefFile, body);
         const record = {
-            taskId, repo, slug: opts.slug, branch, worktree, base, returnTo, report, state: 'composed', ...pinned,
+            taskId, repo, slug: opts.slug, branch, worktree, base, returnTo, report, state: 'composed', ...pinned, ...contract,
             briefFile, briefSha256: crypto.createHash('sha256').update(body).digest('hex'),
             composedAt: new Date().toISOString(), ...stamp('composed'),
             promptSha256: crypto.createHash('sha256').update(prompt).digest('hex'),
@@ -565,6 +599,7 @@ function enqueue(opts) {
     const base = checkBase(opts.base || 'origin/main');
     const repo = resolveRepo(opts.repo);
     const body = readBrief(opts['brief-file']);
+    const contract = briefContract(body, opts['without-criteria']);
     // Read now so a bad pin is refused at enqueue, and again at launch against the base the worker starts from.
     const pinned = resolvePins(opts.pin, repo, base);
     const after = opts.after ? opts.after.split(',').map((s) => s.trim()).filter(Boolean) : [];
@@ -589,7 +624,7 @@ function enqueue(opts) {
             taskId, repo, slug: opts.slug, branch: `claude/${opts.slug}`, worktree: path.join(repo, '.claude', 'worktrees', opts.slug), base,
             returnTo: opts.return, report: path.join(scratch, 'REPORT.md'), state: 'queued', channel: 'headless',
             title: opts.title || `Worker: ${opts.slug}`, queuedAt: new Date().toISOString(), after, briefFile,
-            briefSha256: crypto.createHash('sha256').update(body).digest('hex'), launch: launchOpts, ...pinned,
+            briefSha256: crypto.createHash('sha256').update(body).digest('hex'), launch: launchOpts, ...pinned, ...contract,
         };
         ledger.records = ledger.records.filter((r) => r.taskId !== taskId).concat(record);
         writeLedger(ledgerFile, ledger);
@@ -809,8 +844,9 @@ function applyVerdict(rec, { decision, reason, by = 'brain', at = new Date().toI
 // The flags each command reads. `[measured 2026-10-08]` launch accepted --model
 // and dropped it, so a worker the caller had pinned started on the default.
 const COMMAND_FLAGS = {
-    brief: ['repo', 'slug', 'brief-file', 'return', 'report', 'pin', 'base', 'task-id', 'title', 'ledger'],
-    enqueue: ['repo', 'slug', 'brief-file', 'return', 'after', 'pin', 'base', 'task-id', 'title', 'model', 'effort', 'permission-mode', 'config-dir', 'ledger'],
+    brief: ['repo', 'slug', 'brief-file', 'return', 'report', 'pin', 'base', 'task-id', 'title', 'without-criteria', 'ledger'],
+    enqueue: ['repo', 'slug', 'brief-file', 'return', 'after', 'pin', 'base', 'task-id', 'title', 'model', 'effort', 'permission-mode', 'config-dir',
+        'without-criteria', 'ledger'],
     launch: ['task-id', 'model', 'effort', 'dry-run', 'headless-worker', 'claude-bin', 'dev', 'ledger'],
     record: ['task-id', 'session', 'ledger'],
     settle: ['task-id', 'run-status', 'report-read', 'reason', 'ledger'],
@@ -945,4 +981,4 @@ if (require.main === module) {
     }
 }
 
-module.exports = { RUN_STATUSES, ACTIVE, resolvePins, checkPins, gatePins, gateReceipt, composePrompt, decideSettle, parseArgs, run, planStarts, dependencyState, applyVerdict, pointerPrompt, headlessArgs, parseHeadless, recoverTimedOutStart, withLock, FINISHED, DECISIONS, TRANSIENT_LAUNCH_CODES };
+module.exports = { RUN_STATUSES, ACTIVE, resolvePins, checkPins, gatePins, gateReceipt, briefContract, composePrompt, decideSettle, parseArgs, run, planStarts, dependencyState, applyVerdict, pointerPrompt, headlessArgs, parseHeadless, recoverTimedOutStart, withLock, FINISHED, DECISIONS, TRANSIENT_LAUNCH_CODES };

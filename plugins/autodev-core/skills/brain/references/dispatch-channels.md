@@ -38,7 +38,21 @@ work, what an unattended session cannot do, and what a queued brief carries.
   proof that STEP 0 passed: read the session's events.
 - **The Brain clock queue**, for work that starts with no session open:
   `unattended-worker.js enqueue --repo <path> --slug <slug> --brief-file <file>
-  --return <address> [--after <taskId>]`. The clock's `judge` capability runs
+  --return <address> [--after <taskId>]`. Enqueue refuses a brief with no
+  acceptance criteria the receipt gate can run, under a heading that reads
+  `Acceptance criteria` (a bare `## Acceptance` is read as none):
+
+  ```
+  ## Acceptance criteria
+  - AC1: the touched suite passes
+    check: node tooling/test-x.js
+    expect: /0 failed/
+  ```
+
+  `check:` runs through a shell from the worktree, which is cmd.exe on
+  Windows, so use node one-liners or direct suite commands, not `tail` or
+  `$VAR`. `--without-criteria "<reason>"` queues a brief that cannot name a
+  fixed command, and its accept then needs `--accept-without-receipt`. The clock's `judge` capability runs
   `scripts/brain-judge.js tick` every pass. It closes a finished headless run,
   judges it (accept, follow-up or escalate) with a tool-less `claude -p`, and
   starts ready work through `unattended-worker.js launch`: at most 2 running,
@@ -54,7 +68,8 @@ work, what an unattended session cannot do, and what a queued brief carries.
 - **A scheduled unslop sweep** for each product with a user-facing surface
   (weekly, and after a batch of UI merges): write the brief with
   `unslop-sweep.js brief --repo <path> --base http://localhost:<port> --return <address>`
-  to a file, then queue it with `unattended-worker.js enqueue --slug unslop-<product>`.
+  to a file, then queue it with `unattended-worker.js enqueue --slug unslop-<product>
+  --without-criteria "unslop: the compare verdict is in the report"`, since its outputs are dated.
   The worker runs the `unslop` skill locally, writes component stories, fixes
   them through `auto`, and returns the compare verdict and before/after counts.
 
