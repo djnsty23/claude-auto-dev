@@ -305,6 +305,20 @@ try {
     check([deskCostOf(unpriced), deskCostOf(priced), deskCostOf(grown), deskCostOf(skipped)].join(',') === ',9,12,12',
         `a stored desktop cost refreshes: ${[deskCostOf(unpriced), deskCostOf(priced), deskCostOf(grown), deskCostOf(skipped)].map(String).join(' -> ')}, `
         + 'expected null -> 9 -> 12 -> 12 (a skipped price keeps the stored one)');
+
+    // A follow-up whose PR merged delivered the task, and is never read as abandoned.
+    const iso = (d) => new Date(NOW - d * 24 * 3600 * 1000).toISOString();
+    const followUp = (prs) => [{ key: 'fu@1', taskId: 'fu', code: 'fu', startedAt: iso(30), runStatus: 'succeeded', decision: 'follow-up',
+        decisionBy: 'judge', costUsd: 1, judgeCostUsd: 0, prs }];
+    const mergedFacts = { [pr(901)]: { state: 'MERGED', mergedAt: iso(20) }, [pr(902)]: { state: 'CLOSED' } };
+    const factsOf = (url) => mergedFacts[url] || null;
+    const fu = D.computeOutcome('fu', followUp([pr(901)]), { now: NOW, prFacts: factsOf });
+    check(fu.accepted === true && fu.standingDay7 === true && fu.status === 'standing' && fu.firstAttemptAccepted === false,
+        `a merged follow-up is delivered: accepted=${fu.accepted} standing=${fu.standingDay7} status=${fu.status} first=${fu.firstAttemptAccepted} (${fu.reason})`);
+    const closed = D.computeOutcome('fu', followUp([pr(902)]), { now: NOW, prFacts: factsOf });
+    check(closed.status === 'abandoned', `a follow-up whose PR closed unmerged is abandoned: ${closed.status} (${closed.reason})`);
+    const unreadFu = D.computeOutcome('fu', followUp([pr(903)]), { now: NOW, prFacts: factsOf });
+    check(unreadFu.accepted === null && unreadFu.status === 'unknown', `an unreadable PR is unknown, never abandoned: ${unreadFu.status} (${unreadFu.reason})`);
 } catch (e) {
     failures.push(`threw: ${e.stack || e.message}`);
 } finally {
