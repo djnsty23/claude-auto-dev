@@ -599,20 +599,25 @@ const learningWindow = {
     // The plan arm is recorded from 2026-10-18 (8e06ed7a); the plan was preregistered 10-14.
     admissibleFrom: '2026-10-18',
     load(ctx) {
+        const C = require('./frontier/compare.js');
         const rows = ledger(ctx, 'frontier', 'runs.jsonl').filter((r) => r && r.startedAt);
         const counted = rows.filter((r) => r.arm && r.startedAt >= '2026-10-18');
+        // The plan's task x arm x repeat matrix, not a row count: [measured 2026-10-30]
+        // 108 rows of one arm, or one cell run 108 times, passed ">= 108" with most cells empty.
+        const plan = JSON.parse(fs.readFileSync(path.join(__dirname, 'frontier', 'path-to-10.json'), 'utf8'));
+        const arms = Object.entries(C.armRuns(plan, counted));
+        const filled = arms.reduce((n, [, a]) => n + a.counted, 0);
+        const planned = arms.reduce((n, [, a]) => n + a.expected, 0);
+        const conflicts = arms.filter(([, a]) => a.status === 'CONFLICT').map(([id, a]) => `${id} ${a.unplanned[0]}`);
         const heldOut = rows.filter((r) => r.split === 'held-out' && Number.isFinite(Date.parse(r.startedAt))
             && ctx.windowDays.includes(ctx.dayOf(Date.parse(r.startedAt))));
-        const sealed = heldOut.filter((r) => r.sealed === true && /^[a-f0-9]{64}$/.test(r.heldOutHash || '')
-            && /^[a-f0-9]{64}$/.test(r.splitId || '') && /^[a-f0-9]{64}$/.test(r.taskIdHash || '')
-            && r.seal?.contentMatches === true && r.seal.currentHash === r.heldOutHash && r.seal.visibleToLearning === false
-            && Array.isArray(r.seal.errors) && r.seal.errors.length === 0 && Array.isArray(r.seal.hits) && r.seal.hits.length === 0
-            && Date.parse(r.splitAt) <= Date.parse(r.seal.checkedAt) && Date.parse(r.seal.checkedAt) <= Date.parse(r.startedAt));
+        const sealed = heldOut.filter(C.sealedBeforeRun);
         return {
             records: counted.map((r) => ({ at: r.startedAt, ok: Number.isFinite(r.exit) && r.exit === 0, why: `${r.run}: exit ${r.exit}` })),
             coveredDays: clockDays(ctx),
             totals: [
-                { ok: counted.length >= 108, why: `${counted.length} of 108 bounded calibration runs with a plan arm` },
+                { ok: planned > 0 && arms.every(([, a]) => a.status === 'COMPLETE'),
+                    why: `${filled} of ${planned} planned calibration cells filled once (${arms.map(([id, a]) => `${id} ${a.counted}/${a.expected}`).join(', ')})${conflicts.length ? `, CONFLICT ${conflicts.join('; ')}` : ''}` },
                 { ok: heldOut.length > 0 && sealed.length === heldOut.length,
                     why: `${sealed.length} of ${heldOut.length} held-out runs were sealed before execution` },
             ],

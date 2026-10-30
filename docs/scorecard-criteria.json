@@ -477,7 +477,7 @@
           "id": "learning-window",
           "kind": "operational",
           "weight": 2,
-          "needs": "108 bounded calibration runs with sealed held-out tasks",
+          "needs": "all 108 planned calibration cells (12 tasks x 3 arms x 3 repeats) filled once, with sealed held-out tasks",
           "probe": "node tooling/window-probe.js learning-window",
           "expect": "^window=learning-window covered=14/14 violations=0 records=(?<population>\\d+)$",
           "watch": [
