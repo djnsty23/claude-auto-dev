@@ -41,7 +41,8 @@ const throwsCode = (fn) => { try { fn(); return null; } catch (e) { return e.pub
 const scratch = fs.realpathSync.native(fs.mkdtempSync(path.join(os.tmpdir(), 'unattended-queue-')));
 const home = path.join(scratch, 'home');
 fs.mkdirSync(home);
-const env = { ...process.env, HOME: home, USERPROFILE: home, GIT_TERMINAL_PROMPT: '0', AUTODEV_LEDGER_LOCK_WAIT_MS: '300' };
+const env = { ...process.env, HOME: home, USERPROFILE: home, GIT_TERMINAL_PROMPT: '0', AUTODEV_LEDGER_LOCK_WAIT_MS: '300',
+    AUTODEV_WORKER_OUTBOX: path.join(scratch, 'outbox') };
 delete env.CLAUDE_CONFIG_DIR;
 
 function cli(args) {
@@ -77,7 +78,8 @@ const readLedger = () => JSON.parse(fs.readFileSync(ledger, 'utf8')).records;
 const recOf = (id) => readLedger().find((r) => r.taskId === id);
 
 // The fake `claude`: reads the pointer prompt, then the prompt file it names,
-// and writes the report the RESULT note in argv asks for.
+// and writes the report the RESULT note in argv asks for. That report sits in the outbox, so what it
+// saw goes to a fixed file the suite reads.
 const fakeWorker = path.join(scratch, 'fake-worker.js');
 fs.writeFileSync(fakeWorker, [
     "const fs = require('fs'), path = require('path');",
@@ -85,7 +87,7 @@ fs.writeFileSync(fakeWorker, [
     "const full = fs.readFileSync(/Read (.+?) in full/.exec(prompt)[1], 'utf8');",
     "const m = /the last line of (.+?) is `RESULT (\\S+) /.exec(prompt);",
     "fs.mkdirSync(path.dirname(m[1]), { recursive: true });",
-    "fs.writeFileSync(path.join(path.dirname(m[1]), 'argv.json'), JSON.stringify({ argv: process.argv.slice(2), cwd: process.cwd(), step0: full.startsWith('STEP 0') }));",
+    `fs.writeFileSync(${JSON.stringify(path.join(scratch, 'argv-'))} + m[2] + '.json', JSON.stringify({ argv: process.argv.slice(2), cwd: process.cwd(), step0: full.startsWith('STEP 0') }));`,
     "fs.writeFileSync(m[1], 'did the work\\nRESULT ' + m[2] + ' done: fake worker\\n');",
 ].join('\n'));
 
@@ -221,7 +223,7 @@ try {
     for (let i = 0; i < 100 && !exited; i++) { exited = fs.existsSync(logFile) && /CLAUDE_EXIT=0/.test(fs.readFileSync(logFile, 'utf8')); if (!exited) sleep(200); }
     if (!exited) couldNotCheck('the fake worker ran to an exit line', `no CLAUDE_EXIT=0 in ${logFile} after 20 s`);
     else {
-        const seen = JSON.parse(fs.readFileSync(path.join(path.dirname(lr.report), 'argv.json'), 'utf8'));
+        const seen = JSON.parse(fs.readFileSync(path.join(scratch, 'argv-guide-a.json'), 'utf8'));
         check('the worker ran in the repo, where STEP 0 makes its worktree', seen.cwd.toLowerCase() === repo.toLowerCase(), seen.cwd);
         check('the worker read the full prompt through the pointer, STEP 0 first', seen.step0 === true);
         // The supervisor used to drop --report, so the worker was told <log>.report.md while settle read this path.

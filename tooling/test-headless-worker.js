@@ -1677,6 +1677,16 @@ try {
         write(path.join(dir, 'reports', 'ASKOB', 'answer.json'), '{"label":"Seeded"}');
         H.syncOutbox(o, since, seen);
         check('33. answer.json travels back to the outbox scratch dir', read(path.join(w.scratch, 'answer.json')) === '{"label":"Seeded"}');
+        // An outbox report older than the run is an earlier run's, even when nothing moved it aside.
+        const old = { code: 'OLDOB', report: path.join(dir, 'reports', 'OLDOB.md'), outbox: outboxOf('OLDOB') };
+        const oldReport = H.workerPaths(old).report;
+        write(oldReport, 'RESULT OLDOB done: an earlier run\n');
+        const before = new Date(Date.now() - 60000);
+        fs.utimesSync(oldReport, before, before);
+        const oldCopied = H.syncOutbox(old, Date.now(), new Map());
+        check('33. syncOutbox skips an outbox report written before the run started',
+            oldCopied.length === 0 && !fs.existsSync(old.report), JSON.stringify(oldCopied));
+        check('33. control: the same report touched now is copied', (fs.utimesSync(oldReport, new Date(), new Date()), H.syncOutbox(old, Date.now() - 500, new Map())).length === 1);
     }
 } finally {
     // Kill by pid, never by pattern; a dead pid is the expected answer here.
