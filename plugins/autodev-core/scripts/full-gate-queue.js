@@ -428,7 +428,13 @@ function probeAlive(pid) {
             if (!win) return false;
         }
     }
-    const msys = msysPidSet();
+    const listedBefore = msysPids !== undefined;
+    let msys = msysPidSet();
+    // A listing taken earlier in this attempt cannot speak for a process started
+    // since, so a miss there is re-asked of a fresh one. Without this a Git Bash
+    // gate admitted after a waiter listed ps read dead and tripped the capacity
+    // breaker for every gate on the machine [measured 2026-10-30].
+    if (listedBefore && msys !== null && !msys.has(String(pid))) { msysPids = undefined; msys = msysPidSet(); }
     const psRan = msys !== null;
     const found = psRan && msys.has(String(pid));
     if (found) return true;

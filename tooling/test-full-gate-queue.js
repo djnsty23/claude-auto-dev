@@ -30,6 +30,7 @@
  *   M11 a signal-0 hit is proof for any pid on Windows         -> a dead holder at F + 1 is never reclaimed
  *   M12 harness borrows the reserved lane when no product waits -> two harness gates hold both of two lanes
  *   M13 the cap is lanes - 1 even on one lane                  -> a one-lane machine never runs a harness gate
+ *   M14 a miss in an earlier ps listing is a death verdict     -> a Git Bash started since reads dead
  */
 'use strict';
 
@@ -275,6 +276,25 @@ function scenarioMsysWaiter(subject, msys) {
     rows.push([`H releases: the lock is handed to the live MSYS pid ${msys}, not dropped`,
         rel.code === 0 && lockPid(fx) === msys, `${rel.out}\nlock: ${lockPid(fx)}`]);
     return rows;
+}
+
+/**
+ * A Git Bash started after this attempt's ps listing: a capacity reclaim
+ * judged such a gate dead and tripped the breaker for every gate. In process,
+ * so the listing is shared the way one attempt shares it. Null when no second
+ * Git Bash could be started.
+ */
+async function scenarioMsysAfterListing(subject, listed) {
+    const q = require(subject);
+    q.resetProbes();
+    const first = q.isAlive(listed);
+    const later = await msysPid();
+    if (!later.pid) return null;
+    const verdict = q.isAlive(later.pid);
+    return [
+        [`MSYS pid ${listed}, in the attempt's first ps listing, reads alive`, first === true, String(first)],
+        [`MSYS pid ${later.pid}, started after that listing, reads alive`, verdict === true, String(verdict)],
+    ];
 }
 
 /**
@@ -575,7 +595,7 @@ function mutant(id, anchor, replacement) {
     const file = path.join(dir, 'full-gate-queue.js');
     fs.writeFileSync(file, src.replace(anchor, replacement));
     // The libraries it requires, copied beside it unchanged.
-    for (const lib of ['gate-identity.js', 'gate-records.js']) fs.copyFileSync(path.join(path.dirname(SUBJECT), lib), path.join(dir, lib));
+    for (const lib of ['gate-identity.js', 'gate-records.js', 'capacity.js']) fs.copyFileSync(path.join(path.dirname(SUBJECT), lib), path.join(dir, lib));
     return file;
 }
 
@@ -950,6 +970,14 @@ async function main() {
         report('MSYS waiter', scenarioMsysWaiter(SUBJECT, msys.pid));
         const m3 = mutant('M3', 'if (found) return true;', 'if (found) { /* planted: ps ignored */ }');
         if (m3) expectRed('M3', 'liveness ignores ps', scenarioMsysWaiter(m3, msys.pid));
+        const after = await scenarioMsysAfterListing(SUBJECT, msys.pid);
+        if (after) {
+            report('MSYS pid started after the listing', after);
+            const m14 = mutant('M14', 'if (listedBefore && msys !== null && !msys.has(String(pid))) {', 'if (false) {');
+            if (m14) expectRed('M14', 'a miss in an earlier ps listing is a death verdict', (await scenarioMsysAfterListing(m14, msys.pid)) || [['a second Git Bash started', false, 'none']]);
+        } else {
+            console.log('SKIP  MSYS pid started after the listing and planted M14: a second Git Bash did not start');
+        }
     } else {
         console.log(`SKIP  MSYS waiter and planted M3: ${msys.why}`);
     }
