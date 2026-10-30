@@ -77,7 +77,7 @@ g(repo, 'push', '-q', 'origin', 'main');
 g(repo, 'fetch', '-q', 'origin');
 const ledger = path.join(scratch, 'ledger.json');
 const briefFile = path.join(scratch, 'brief.md');
-fs.writeFileSync(briefFile, 'MISSION. Add a guide.\n');
+fs.writeFileSync(briefFile, 'MISSION. Add a guide.\n\n## Acceptance criteria\n- AC1: the guide renders\n  check: node -e "process.exit(0)"\n');
 const sid = 'local_12345678-1234-1234-1234-123456789abc';
 
 // brief, record, settle for one slug through one copy of the script.
