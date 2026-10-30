@@ -121,10 +121,10 @@ Run this skill as written, with three additions:
 - The module scaffolder, when present, installs every `02-modules.md` module before `auto` starts. A
   module that cannot install, for example because it needs SMTP the free tier lacks, becomes a story and
   a ledger row. With a kit, a web site is scaffolded BY the kit, not by `create-next-app`:
-  `node <kit>/scripts/new-site.mjs <name> --into <parent> --with <ids from 02-modules.md>`. It writes
+  `node "<kit>/scripts/new-site.mjs" <name> --into "<parent>" --with <ids from 02-modules.md>`. It writes
   the template, installs the modules, and leaves `AGENTS.md` listing what is installed and what is not,
   which every later session in the site reads. A module added later goes through
-  `node <kit>/scripts/install-module.mjs <id> --site .`, which refreshes that list.
+  `node "<kit>/scripts/install-module.mjs" <id> --site .`, which refreshes that list.
 - Provisioning runs from the External services list. A provisioning script's exit code is the verdict:
   done, waiting on a person, or failed. Waiting on a person is not failure. The setup stories it could
   not finish stay `needs-setup` with the script's guided step as their `blockedReason`. `05-provision.md`

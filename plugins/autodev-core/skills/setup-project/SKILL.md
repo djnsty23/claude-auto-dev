@@ -49,8 +49,10 @@ or app in the kit's stack, scaffold with it, naming the modules `docs/new-app/02
 without that file, every registry module whose `provides` covers a Step 1 requirement):
 
 ```bash
-node <kit>/scripts/new-site.mjs <name> --into <parent> --with <id,id>
+node "<kit>/scripts/new-site.mjs" <name> --into "<parent>" --with <id,id>
 ```
+
+Keep the quotes: a path with a space split into two words lands the site in a truncated parent.
 
 Keep the `AGENTS.md` and `CLAUDE.md` it writes: they tell later sessions which modules are installed and
 which to install before building a common part. Report the kit path and the modules installed in
