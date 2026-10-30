@@ -127,7 +127,50 @@ try {
     r = panel(path.join(root, 'nowhere'));
     check('a missing pairs dir is refused with exit 2', r.status === 2);
     r = spawnSync(process.execPath, [subject, 'run', p.dir, '--judges', '9'], { env, encoding: 'utf8' });
-    check('an out-of-range panel size is refused', r.status === 2 && /--judges takes 1 to 7/.test(r.stderr), r.stderr);
+    check('an out-of-range panel size is refused', r.status === 2 && /--judges takes 2 to 7/.test(r.stderr), r.stderr);
+
+    // A2: one judge is one model's preference, not a panel.
+    setModes(['good', 'good', 'good']);
+    r = panel(p.dir, ['--judges', '1']);
+    check('A2. a one-judge panel is refused, never a KEEP', r.status === 2 && /--judges takes 2 to 7/.test(r.stderr), `exit ${r.status} ${r.stdout}${r.stderr}`);
+    setModes(['good', 'crash', 'good']);
+    r = panel(p.dir, ['--judges', '2']);
+    check('A2. a KEEP needs at least two complete judges', r.status === 2 && readPanel(p.dir).quorum === 2 && readPanel(p.dir).answered === 1, `exit ${r.status} ${r.stdout}`);
+
+    // A1: the default pair set must not be decodable from its ids. An attacker
+    // that ignores the images rebuilds the set with the old default seed (1) and
+    // reads the orientation off the ids.
+    const sweep = path.join(scripts, 'unslop-sweep.js');
+    const outDir = (name, tag) => {
+        const d = path.join(root, name);
+        fs.mkdirSync(d, { recursive: true });
+        const routes = [];
+        for (const route of ['/', '/pricing', '/about']) {
+            const shot = `${route === '/' ? 'home' : route.slice(1)}-390.png`;
+            fs.writeFileSync(path.join(d, shot), `${tag} ${route}`);
+            routes.push({ route, state: 'signed-out', widths: { 390: { shot } } });
+        }
+        fs.writeFileSync(path.join(d, 'scorecard.json'), JSON.stringify({ routes }));
+        return d;
+    };
+    const bOut = outDir('sweep-before', 'BEFORE'); const aOut = outDir('sweep-after', 'AFTER');
+    const shotsOf = (d) => Object.fromEntries(JSON.parse(fs.readFileSync(path.join(d, 'scorecard.json'), 'utf8')).routes.map((x) => [`${x.route}|${x.state}|390`, path.join(d, x.widths[390].shot)]));
+    const guess = makePairs(shotsOf(bOut), shotsOf(aOut), 1).key;
+    let decoded = 0; const idSets = [];
+    for (let i = 0; i < 4; i++) {
+        const pd = path.join(root, `blind-${i}`);
+        const s = spawnSync(process.execPath, [sweep, 'pairs', bOut, aOut, '--pairs', pd], { encoding: 'utf8' });
+        const key = JSON.parse(fs.readFileSync(path.join(pd, '.key.json'), 'utf8'));
+        idSets.push(Object.keys(key).sort().join(','));
+        if (s.status === 0 && Object.entries(guess).every(([id, g]) => key[id] && key[id].after === g.after)) decoded++;
+    }
+    check('A1. the default pair set cannot be decoded from its ids with the fixed seed', decoded === 0, `${decoded} of 4 runs decoded 6/6`);
+    check('A1. default pair ids are opaque and differ per run', new Set(idSets).size === 4 && idSets.every((s) => !/\bp00\d\b/.test(s)), idSets.join(' | '));
+    const seeded = path.join(root, 'seeded');
+    spawnSync(process.execPath, [sweep, 'pairs', bOut, aOut, '--pairs', seeded, '--seed', '5'], { encoding: 'utf8' });
+    check('A1. a seeded pair set is marked non-blind', JSON.parse(fs.readFileSync(path.join(seeded, 'pairs.json'), 'utf8')).blind === false);
+    r = panel(seeded);
+    check('A1. the panel refuses a non-blind (seeded) pair set', r.status === 2 && /not blind/.test(r.stderr), `exit ${r.status} ${r.stdout}${r.stderr}`);
 
     const booked = fs.existsSync(budgetLedger) ? fs.readFileSync(budgetLedger, 'utf8') : '';
     check('judge calls are booked in the shared execution budget', /judge-panel/.test(booked) && /"judge"/.test(booked), booked.slice(0, 200));

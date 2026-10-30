@@ -467,15 +467,25 @@ function rng(seed) {
     return () => { s ^= s << 13; s >>>= 0; s ^= s >>> 17; s ^= s << 5; s >>>= 0; return s / 4294967296; };
 }
 
+/** Uniform in [0, 1) from the OS's CSPRNG: nothing a judge can rebuild. */
+function secureRandom() { return crypto.randomBytes(6).readUIntBE(0, 6) / 2 ** 48; }
+
 /**
  * Before/after shot pairs for a blind judge. Every capture is shown TWICE, once
  * with the after image as A and once as B, under ids shuffled across the whole
  * set, so a judge that reads by position, or swaps its labels, cannot score.
  * Returns the judge's manifest (pair id, image A, image B, nothing else) and
  * the key (capture and which side is the after), kept apart.
+ *
+ * BLIND by default: a private CSPRNG shuffle and opaque random ids, so neither
+ * the order nor an id says which side is the after. `[measured 2026-10-30]` a
+ * judge that ignored the images rebuilt the old fixed-seed shuffle from the
+ * sequential ids and decoded 6 of 6 sides into a KEEP. A `seed` gives the old
+ * reproducible set (sequential ids) and is a non-blind test mode only.
  */
 function makePairs(beforeShots, afterShots, seed) {
-    const rand = rng(seed);
+    const seeded = seed !== undefined && seed !== null;
+    const rand = seeded ? rng(seed) : secureRandom;
     const entries = [];
     for (const k of Object.keys(beforeShots).filter((c) => afterShots[c]).sort()) {
         entries.push({ capture: k, after: 'a' }, { capture: k, after: 'b' });
@@ -486,8 +496,15 @@ function makePairs(beforeShots, afterShots, seed) {
     }
     const manifest = [];
     const key = {};
+    const used = new Set();
+    const opaqueId = () => {
+        let id;
+        do id = 'p' + crypto.randomBytes(4).toString('hex'); while (used.has(id));
+        used.add(id);
+        return id;
+    };
     entries.forEach((e, i) => {
-        const id = 'p' + String(i + 1).padStart(3, '0');
+        const id = seeded ? 'p' + String(i + 1).padStart(3, '0') : opaqueId();
         const k = e.capture;
         manifest.push({ id, a: e.after === 'a' ? afterShots[k] : beforeShots[k], b: e.after === 'a' ? beforeShots[k] : afterShots[k] });
         key[id] = { capture: k, after: e.after };
@@ -987,7 +1004,7 @@ function usage() {
   report        <out> [--top 10] [--json]
   stories       <out> [--prd prd.json] [--write] [--sprint N]
   compare       <before out> <after out> [--codes A,B] [--routes /a,/b] [--json]
-  pairs         <before out> <after out> --pairs <dir> [--seed 1]
+  pairs         <before out> <after out> --pairs <dir> [--seed N: reproducible, NOT blind, tests only]
   pair-score    <pairs dir> --verdicts <json>
   vision-pack   <out> [--max 12]
   vision-merge  <out> --vision <json>
@@ -1082,7 +1099,8 @@ async function main(argv) {
         if (!args.pairs) throw new Bail(2, 'pairs needs --pairs <dir>');
         const dir = path.resolve(args.pairs);
         fs.mkdirSync(dir, { recursive: true });
-        const pr = makePairs(shots(args._[1]), shots(args._[2]), args.seed || 1);
+        const seeded = args.seed !== undefined && args.seed !== true;
+        const pr = makePairs(shots(args._[1]), shots(args._[2]), seeded ? Number(args.seed) : undefined);
         const manifest = pr.manifest.map((p) => {
             const a = path.join(dir, p.id + '-a.png');
             const b = path.join(dir, p.id + '-b.png');
@@ -1090,11 +1108,13 @@ async function main(argv) {
             fs.copyFileSync(p.b, b);
             return { id: p.id, a: path.basename(a), b: path.basename(b) };
         });
-        fs.writeFileSync(path.join(dir, 'pairs.json'), JSON.stringify({ instructions: 'For each pair, answer which image reads as the more finished, consistent UI: "a", "b" or "tie". Return {"<id>": "a"|"b"|"tie"}.', pairs: manifest }, null, 1));
+        // A seeded set is reproducible, so anyone holding the seed can rebuild the
+        // key: judge-panel.js refuses it. `blind` says which kind this is.
+        fs.writeFileSync(path.join(dir, 'pairs.json'), JSON.stringify({ instructions: 'For each pair, answer which image reads as the more finished, consistent UI: "a", "b" or "tie". Return {"<id>": "a"|"b"|"tie"}.', blind: !seeded, pairs: manifest }, null, 1));
         // The key is written beside, never inside, what the judge reads. Give
         // the judge pairs.json and the images only.
         fs.writeFileSync(path.join(dir, '.key.json'), JSON.stringify(pr.key, null, 1));
-        console.log(`${manifest.length} blind pairs (${manifest.length / 2} captures, each in both orders) in ${dir} (judge reads pairs.json and the images; .key.json stays with you)`);
+        console.log(`${manifest.length} ${seeded ? `NON-BLIND seeded (--seed ${args.seed}, test mode)` : 'blind'} pairs (${manifest.length / 2} captures, each in both orders) in ${dir} (judge reads pairs.json and the images; .key.json stays with you)`);
         return 0;
     }
     if (cmd === 'pair-score') {
