@@ -521,6 +521,24 @@ function standing(prs, acceptedAt, now, prFacts) {
     return { value: true, reason: `${facts.length} PR(s) merged and clean for ${STAND_DAYS} days` };
 }
 
+/**
+ * The earliest non-accept worker attempt whose PRs merged: { attempt, prs },
+ * { unreadable: url }, or {}. A side session already reads its own merges.
+ */
+function mergedPrs(attempts, prFacts) {
+    for (const a of attempts) {
+        if (a.code === 'side') continue;
+        const prs = [];
+        for (const url of a.prs || []) {
+            const f = prFacts(url);
+            if (!f) return { unreadable: url };
+            if (f.state === 'MERGED' && ms(f.mergedAt) !== null) prs.push(url);
+        }
+        if (prs.length) return { attempt: a, prs };
+    }
+    return {};
+}
+
 /** One task's outcome from its attempts. */
 function computeOutcome(taskId, attempts, { now, prFacts }) {
     const costs = attempts.map((a) => (typeof a.costUsd === 'number' ? a.costUsd + (a.judgeCostUsd || 0) : null));
@@ -540,6 +558,22 @@ function computeOutcome(taskId, attempts, { now, prFacts }) {
         out.standingDay7 = s.value;
         out.status = s.value === true ? 'standing' : s.value === false ? 'not-standing' : 'accepted-day7-unknown';
         out.reason = s.reason;
+        return out;
+    }
+    // `[measured 2026-10-30]` 4 judge accepts were written as follow-up for a
+    // missing receipt and then merged, and outcomes read only the accept's PRs,
+    // so delivered work counted as abandoned. A merged PR from any attempt
+    // delivered the task, as it does for a side session.
+    const landed = mergedPrs(attempts, prFacts);
+    if (landed.unreadable) {
+        out.reason = `PR facts unreadable for ${landed.unreadable}`;
+        return out;
+    }
+    if (landed.attempt) {
+        const s = standing(landed.prs, landed.attempt.startedAt, now, prFacts);
+        Object.assign(out, { accepted: true, prs: landed.prs, standingDay7: s.value,
+            status: s.value === true ? 'standing' : s.value === false ? 'not-standing' : 'accepted-day7-unknown',
+            reason: `merged after a ${landed.attempt.decision || landed.attempt.runStatus || 'missing'} verdict: ${s.reason}` });
         return out;
     }
     const last = attempts[attempts.length - 1];
