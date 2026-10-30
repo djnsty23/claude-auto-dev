@@ -60,7 +60,7 @@
  *                                     place of the probes; a value of null, "throw", "timeout" or "nan" is unknown
  *   AUTODEV_CAPACITY_SAMPLE_MS=N      the spacing between healthy samples, over the config
  *   AUTODEV_CAPACITY_TEST_PAUSE_MS=N  a pause inside the mutex, between the ledger read and its write
- * admit() and release() also take { now, probe, isAlive } options for in-process suites.
+ * admit() and release() also take { now, probe, isAlive, isAliveFresh } options for in-process suites.
  *
  *   node capacity.js status [--json]                 the ledger, read-only apart from reclaiming dead pids
  *   node capacity.js observe                         append one sample of admitted load against the reserves
@@ -294,6 +294,27 @@ function defaultIsAlive(pid) {
     return require(path.join(__dirname, 'full-gate-queue.js')).isAlive(pid);
 }
 
+function defaultIsAliveFresh(pid) {
+    return require(path.join(__dirname, 'full-gate-queue.js')).isAliveFresh(pid);
+}
+
+/**
+ * The liveness probe every ledger read and the mutex use. A "dead" from the
+ * caller's probe is confirmed on fresh tables before it reclaims a reservation:
+ * full-gate-queue caches its `ps -e` listing per process, so in any process
+ * that probed before an MSYS pid was born, that pid reads dead while `ps -p`
+ * still sees it, and the class's breaker trips on a healthy run
+ * [measured 2026-10-30: a live Git Bash pid tripped the gate breaker].
+ */
+function livenessFor(opts) {
+    const first = opts.isAlive || defaultIsAlive;
+    const fresh = opts.isAliveFresh || defaultIsAliveFresh;
+    return (pid) => {
+        const alive = first(pid);
+        return alive === false ? fresh(pid) : alive;
+    };
+}
+
 function emptyLedger() { return { schema: 1, reservations: [], classes: {} }; }
 
 function classState(ledger, cls) {
@@ -362,7 +383,7 @@ function admit(req, opts = {}) {
     if (isOff(env)) return { admitted: true, id: null, off: true, why: 'AUTODEV_CAPACITY=off: admitted without a reservation', probe: null };
     const base = opts.base || defaultBase(env);
     const now = opts.now || Date.now;
-    const isAlive = opts.isAlive || defaultIsAlive;
+    const isAlive = livenessFor(opts);
     const probeFn = opts.probe || ((p) => sample(p, env));
     const cfg = readConfig(base, env);
     if (!cfg.config) return { admitted: false, why: `${cfg.why}; admission defers until it parses`, probe: null };
@@ -426,7 +447,7 @@ function release(id, opts = {}) {
     if (!id) return { released: false, why: 'no reservation to release' };
     const env = opts.env || process.env;
     const base = opts.base || defaultBase(env);
-    const isAlive = opts.isAlive || defaultIsAlive;
+    const isAlive = livenessFor(opts);
     const now = opts.now || Date.now;
     try {
         return underMutex(base, isAlive, () => {
@@ -447,7 +468,7 @@ function release(id, opts = {}) {
 function status(opts = {}) {
     const env = opts.env || process.env;
     const base = opts.base || defaultBase(env);
-    const isAlive = opts.isAlive || defaultIsAlive;
+    const isAlive = livenessFor(opts);
     const now = opts.now || Date.now;
     try {
         return underMutex(base, isAlive, () => {
@@ -472,7 +493,7 @@ function clearBreaker(cls, opts = {}) {
     if (!CLASSES.includes(cls)) return { cleared: false, why: `unknown capacity class ${JSON.stringify(cls)}; one of ${CLASSES.join(', ')}` };
     const env = opts.env || process.env;
     const base = opts.base || defaultBase(env);
-    const isAlive = opts.isAlive || defaultIsAlive;
+    const isAlive = livenessFor(opts);
     try {
         return underMutex(base, isAlive, () => {
             const l = loadLedger(base, { isAlive, nowIso: new Date().toISOString() });

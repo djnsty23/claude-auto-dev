@@ -396,6 +396,18 @@ function isAlive(pid) {
 }
 
 /**
+ * isAlive on fresh tables: forgets this pid's cached answer and the `ps -e`
+ * listing first. The cache lives as long as the process unless resetProbes()
+ * runs, so a pid born after the listing reads dead. Confirm a "dead" with this
+ * before acting on it.
+ */
+function isAliveFresh(pid) {
+    aliveCache.delete(pid);
+    msysPids = undefined;
+    return isAlive(pid);
+}
+
+/**
  * Every MSYS pid, from one `ps -e` per attempt: a waiter probes the holder and
  * every ticket on each poll, and one listing costs what one `ps -p` does.
  * Null when ps could not run.
@@ -1335,7 +1347,7 @@ function leaseFor(base, dir) {
 
 module.exports = {
     takeTurn, takeAnyLane, releaseLock, releaseLanes, leaveQueues, readStatus, readLock, resetProbes,
-    queueDirFor, lanePath, lanePaths, lanesFileFor, laneCount, defaultLockPath, isAlive, parseArgs,
+    queueDirFor, lanePath, lanePaths, lanesFileFor, laneCount, defaultLockPath, isAlive, isAliveFresh, parseArgs,
     reservedLine, HARNESS, PRODUCT, holderAlive, holderWhy, admitted, bootNow, confirmOwnership,
     readLaneLocks, readLaneTickets, leaseFor, readLeases: records.readLeases, withWorktreeMutex: records.withWorktreeMutex,
 };
