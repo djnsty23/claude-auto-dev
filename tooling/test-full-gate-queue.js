@@ -575,7 +575,7 @@ function mutant(id, anchor, replacement) {
     const file = path.join(dir, 'full-gate-queue.js');
     fs.writeFileSync(file, src.replace(anchor, replacement));
     // The libraries it requires, copied beside it unchanged.
-    for (const lib of ['gate-identity.js', 'gate-records.js']) fs.copyFileSync(path.join(path.dirname(SUBJECT), lib), path.join(dir, lib));
+    for (const lib of ['gate-identity.js', 'gate-records.js', 'capacity.js']) fs.copyFileSync(path.join(path.dirname(SUBJECT), lib), path.join(dir, lib));
     return file;
 }
 
