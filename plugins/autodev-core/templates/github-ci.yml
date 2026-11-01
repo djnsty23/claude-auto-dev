@@ -1,0 +1,66 @@
+# github-ci.yml - a starting CI workflow for a PRODUCT repo that opts in to the autodev cheap review.
+#
+# This file is a template. It is NOT a workflow of the harness repo (nothing here runs it).
+# Copy it into the product repo as .github/workflows/ci.yml and read the three notes below.
+#
+# WHAT IT RUNS. On every pull request: install, then lint, typecheck and test, each through the
+# npm script of that name in package.json. A script the product does not define is SKIPPED with a
+# visible "::notice::", not failed and not silently green: add the script, or delete the step you
+# do not want. The commands are the product's own, so this file never needs to know the stack.
+#
+# WHY A PR GATE AT ALL. The autodev review and merge steps ask for a gate receipt. CI is the
+# cheapest place to produce the same three checks every contributor and every agent runs, on a
+# clean machine, before anything merges.
+#
+# THREE THINGS TO SET AFTER COPYING (see "Product opt-in" in the harness README):
+#   1. package.json  "autodevDeployGate": { "smoke": "<command with {url}>", "url": "https://..." }
+#      The post-deploy check (deploy-gate.js) refuses to pass without a smoke command.
+#   2. AUTODEV_REVIEWER_CMD in the environment of the machine that runs the review, naming a
+#      cheaper reviewer command. Without one the review falls back to agy, then gemini.
+#   3. Pin the action versions below to commit SHAs if the repo's policy asks for it.
+#
+# This workflow holds no secrets and asks for read access only. It does not deploy.
+name: ci
+
+on:
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          # Add `cache: npm` here once the repo has a package-lock.json: setup-node fails without one.
+
+      - name: Install
+        run: |
+          if [ -f package-lock.json ]; then npm ci; else npm install; fi
+
+      # One step per script. Each step reads package.json itself: a script that is missing is
+      # reported and skipped, and a script that exists and fails fails the job.
+      - name: Lint
+        run: |
+          if node -e "process.exit((require('./package.json').scripts || {}).lint ? 0 : 1)"; then npm run lint; else echo "::notice::no lint script in package.json, step skipped"; fi
+
+      - name: Typecheck
+        run: |
+          if node -e "process.exit((require('./package.json').scripts || {}).typecheck ? 0 : 1)"; then npm run typecheck; else echo "::notice::no typecheck script in package.json, step skipped"; fi
+
+      - name: Test
+        run: |
+          if node -e "process.exit((require('./package.json').scripts || {}).test ? 0 : 1)"; then npm test; else echo "::notice::no test script in package.json, step skipped"; fi

@@ -3,7 +3,7 @@ name: review
 description: Review changed code for correctness and quality, then apply the project-specific checks Claude Code's built-in reviewer does not know about.
 when_to_use: "Invoked when the user says \"review\", \"check this\", \"review the diff\", or before shipping a change."
 allowed-tools: Bash, Read, Grep, Glob, Task
-model: opus
+model: sonnet
 user-invocable: true
 argument-hint: "[quick|deep]"
 ---
@@ -16,6 +16,25 @@ behavior from a skill example. If unavailable, perform the review directly and
 state which reviewer ran. For CLI review channels load `docs/codex-channels.md`
 when present. Existing authorization applies; an unavailable preferred reviewer
 does not prevent local review.
+
+## A pull request: autoreview first
+
+When the change is an open pull request, load `autoreview` and run it before
+anything below. It sends the diff to a cheap reviewer, writes the review
+receipt `merge-lock.js` requires, and escalates only what it cannot settle.
+Do not start with the expensive reviewer: a green cheap pass costs a fraction
+of an opus read, and an escalation tells you exactly what the cheap pass could
+not decide.
+
+- approve: the receipt is the review. Add the project-specific delta below only
+  for what the cheap prompt cannot see (a rendered surface, a redesign).
+- request_changes: fix, then run it again on the new head.
+- escalate, or a money, auth or migration diff: use the opus `code-reviewer`
+  agent, and the two independent passes described below. `autoreview` Step 4
+  says how its escalation receipt is saved.
+
+For a local diff with no pull request there is no receipt to write, so review
+directly as below.
 
 Review correctness, edge cases, error handling, data boundaries, reuse and
 simplification. The project-specific checks below supplement that review.

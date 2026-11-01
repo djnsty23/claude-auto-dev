@@ -1,5 +1,74 @@
 # Changelog
 
+## [8.199.0]
+
+### Review and merge
+
+- `cheap-review.js` reviews a PR with a cheap model. The reviewer is
+  `AUTODEV_REVIEWER_CMD`, else `agy` on PATH, else
+  `%LOCALAPPDATA%\agy\bin\agy.exe` on Windows, else `gemini -p`. It runs in an
+  empty temp cwd with an allowlisted env, and its JSON is validated strictly.
+  Invalid or empty output, a timeout, a non-zero exit, an oversize diff, a head
+  mismatch, an unmet acceptance criterion or a P0 under approve all become
+  `escalate`.
+- `merge-lock.js merge` now requires `--review-receipt` (an approve receipt for
+  the exact repo, PR and head) beside the gate or fast-lane receipt.
+  `--review-override "<reason>"` replaces it and is recorded in the lock meta and
+  the deploy ledger. A sensitive diff also needs `--escalation-receipt` from the
+  opus `code-reviewer`, and an override does not waive it. A file list that
+  cannot be read counts as sensitive.
+- `paid-key-guard.js` refuses to start a reviewer, headless worker, unattended
+  launch or judge whose env holds `ANTHROPIC_API_KEY` or another paid key, so
+  runs stay on subscriptions. It names the variable, never the value.
+  `AUTODEV_ALLOW_PAID_KEY=1` is the explicit escape.
+
+### Deploy
+
+- `deploy-gate.js` waits, bounded, for the production deployment of a merge
+  SHA, runs `package.json` `autodevDeployGate.smoke`, and writes
+  PASS/FAIL/TIMEOUT to the deploy ledger. On FAIL it pushes only a
+  `revert/<sha>` branch, opens a draft PR and sends one owner notification. No
+  smoke command exits 2, never PASS.
+- `deploy-ledger.js` gains `appendEvent`, which the override and the deploy
+  gate write through.
+
+### Brain and workers
+
+- `worker-profiles.js` `TIERS`: reviewer → `AUTODEV_REVIEWER_CMD`, builder →
+  sonnet, escalation, plan and ship → opus. `execution-budget.js` gains per-tier
+  ceilings that only tighten, and `work-cost.js --tier-line` prints one cost line
+  per tier for a PR body.
+- `notify-policy.js` notifies only for blocked-on-owner, ready-to-merge (review
+  and gate receipts), deploy-done and deploy-failed. Everything else, unknown
+  kinds included, goes to `~/.claude/autodev/digest/YYYY-MM-DD.md`.
+- `ledger-rotate.js` gzip-rotates `*.jsonl` ledger lines older than 30 days into
+  monthly parts under the ledger lock. Lines with no timestamp stay hot.
+
+### Skills
+
+- New `autoreview` (sonnet): the cheap reviewer first, the opus `code-reviewer`
+  only on escalation, two independent passes for money, auth and migration
+  diffs.
+- New `deploy-check`: a PASS/FAIL checklist on the live URL with evidence, and
+  a draft revert PR only on FAIL.
+- New `rule-own-the-loop`: ping the owner only for the four notify kinds, steer
+  the existing worker instead of respawning, and pick the cheapest capable tier.
+  Brain and auto-brain point to it.
+- `audit` scores findings P0/P1/P2 with evidence, keeps a checked-clean list and
+  diffs against the previous run through the new `audit-diff.js`. Every number
+  names its probe.
+- `review` (now sonnet) and `ship` run `autoreview` first. Every
+  `merge-lock.js merge` example in skills and docs carries the review receipt.
+
+### Docs and tests
+
+- `plugins/autodev-core/templates/github-ci.yml` (lint, typecheck, test on
+  pull_request) for products. The README gains a "Product opt-in" section. This
+  repo adds no workflow.
+- New suites: cheap-review, paid-key-guard, deploy-gate, notify-policy,
+  ledger-rotate, model-tiers and audit-diff. The merge-lock suite covers every
+  new refusal path. Model, gh and git calls are stubbed throughout.
+
 ## [8.198.0]
 
 ### Hooks

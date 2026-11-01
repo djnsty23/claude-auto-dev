@@ -3,6 +3,14 @@
  * fast-lane.js - decide whether a merge candidate may skip the full gate, and
  * write the receipt merge-lock.js accepts in its place.
  *
+ * The receipt replaces the GATE only. merge-lock.js merge also requires
+ * --review-receipt FILE (cheap-review.js's JSON) or --review-override
+ * "<reason>" on every merge, and --escalation-receipt FILE when the diff is
+ * sensitive. It reuses this file's classifier for that: classify() with the
+ * size limit and the preview rule taken out, keeping only the reasons that
+ * read "matches the sensitive pattern". Keep that wording stable, or change
+ * merge-lock.js (SENSITIVE_REASON_RE) in the same commit.
+ *
  * WHY. The merge bar is one full gate per merge. A small candidate that touches
  * nothing sensitive gets a cheaper bar: the product's lint, typecheck, test and
  * build on the rebased tree, no gate queue and no screenshot sweep. Without a

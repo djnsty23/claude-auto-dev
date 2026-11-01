@@ -48,10 +48,22 @@
  * The worker values sit above every measured run (max 444 turns, 20.2 MB) except
  * the 1140-minute outlier, which is the runaway this exists to stop.
  *
+ * TIERS. A model tier (worker-profiles.js TIERS) can TIGHTEN a kind's ceilings, never loosen them:
+ * an attempt that names a tier holds, per key, the smaller of the kind's ceiling and the tier's.
+ *   reviewer    maxTurns 30,  wallMs 15 min, outputBytes 16 MiB, maxUsd 2   (a cheap read-only review)
+ *   builder     the worker ceilings, unchanged
+ *   escalation  maxTurns 120, wallMs 1 h,    outputBytes 32 MiB, maxUsd 10
+ *   plan        maxTurns 80,  wallMs 45 min, outputBytes 32 MiB, maxUsd 8
+ *   ship        maxTurns 150, wallMs 1 h,    outputBytes 32 MiB, maxUsd 10
+ * `[inferred]` Not measured: they are round numbers set well under the worker maxima so a cheap tier
+ * cannot run away, and the owner changes them in the config. An attempt that names no tier keeps
+ * the kind's ceilings exactly as before.
+ *
  * CONFIG. `<home>/.claude/autodev/execution-budget-config.json`, or the file
  * AUTODEV_BUDGET_CONFIG names. Any key overrides the default beside it:
  *   { "kinds": { "worker": { "maxTurns": N, "wallMs": N, "outputBytes": N, "maxUsd": N },
  *                "judge": { ... } },
+ *     "tiers": { "reviewer": { "maxTurns": N, ... }, "escalation": { ... } },
  *     "window": { "ms": N, "billedUsd": N, "subscriptionTurns": N } }
  * A config that does not parse refuses every reservation: a ceiling nobody can
  * read is not a ceiling.
@@ -82,8 +94,16 @@ const DEFAULTS = Object.freeze({
         judge: Object.freeze({ maxTurns: 4, wallMs: 120 * 1000, outputBytes: 16 * MIB, maxUsd: 0.5 }),
     }),
     window: Object.freeze({ ms: 24 * HOUR_MS, billedUsd: 100, subscriptionTurns: 10000 }),
+    tiers: Object.freeze({
+        reviewer: Object.freeze({ maxTurns: 30, wallMs: 15 * 60 * 1000, outputBytes: 16 * MIB, maxUsd: 2 }),
+        builder: Object.freeze({ maxTurns: 500, wallMs: 6 * HOUR_MS, outputBytes: 64 * MIB, maxUsd: 40 }),
+        escalation: Object.freeze({ maxTurns: 120, wallMs: HOUR_MS, outputBytes: 32 * MIB, maxUsd: 10 }),
+        plan: Object.freeze({ maxTurns: 80, wallMs: 45 * 60 * 1000, outputBytes: 32 * MIB, maxUsd: 8 }),
+        ship: Object.freeze({ maxTurns: 150, wallMs: HOUR_MS, outputBytes: 32 * MIB, maxUsd: 10 }),
+    }),
 });
 const KINDS = Object.keys(DEFAULTS.kinds);
+const TIER_NAMES = Object.keys(DEFAULTS.tiers);
 const CEILING_KEYS = ['maxTurns', 'wallMs', 'outputBytes', 'maxUsd'];
 const RETENTION_MS = 90 * 24 * HOUR_MS;
 const ATTEMPT_RE = /^[A-Za-z0-9][A-Za-z0-9:@._-]{0,159}$/;
@@ -118,20 +138,48 @@ function loadConfig(env = process.env) {
             kinds[k][key] = over[key] !== undefined ? over[key] : DEFAULTS.kinds[k][key];
         }
     }
+    const tiers = {};
+    for (const t of TIER_NAMES) {
+        const over = (raw.tiers && raw.tiers[t]) || {};
+        tiers[t] = {};
+        for (const key of CEILING_KEYS) {
+            if (over[key] !== undefined && pos(over[key]) === null) return { config: null, why: `the budget config ${file} sets tiers.${t}.${key} to ${JSON.stringify(over[key])}, not a number >= 0` };
+            tiers[t][key] = over[key] !== undefined ? over[key] : DEFAULTS.tiers[t][key];
+        }
+    }
     const w = raw.window || {};
     const window = {};
     for (const key of Object.keys(DEFAULTS.window)) {
         if (w[key] !== undefined && pos(w[key]) === null) return { config: null, why: `the budget config ${file} sets window.${key} to ${JSON.stringify(w[key])}, not a number >= 0` };
         window[key] = w[key] !== undefined ? w[key] : DEFAULTS.window[key];
     }
-    return { config: { kinds, window }, why: null, file };
+    return { config: { kinds, window, tiers }, why: null, file };
 }
 
-/** The ceilings for a kind, from the config, or the defaults when the config cannot be read. */
-function ceilingsFor(kind, env = process.env) {
+/**
+ * The ceilings for a kind, from the config, or the defaults when the config cannot be read.
+ * With a `tier`, each key is the smaller of the kind's and the tier's: a tier only tightens.
+ */
+function ceilingsFor(kind, env = process.env, tier = null) {
     if (!KINDS.includes(kind)) throw new Error(`unknown budget kind ${JSON.stringify(kind)}; one of ${KINDS.join(', ')}`);
     const c = loadConfig(env).config;
-    return { ...(c ? c.kinds[kind] : DEFAULTS.kinds[kind]) };
+    const base = { ...(c ? c.kinds[kind] : DEFAULTS.kinds[kind]) };
+    if (tier === null || tier === undefined) return base;
+    return tightenBy(base, tierCeilingsFor(tier, env));
+}
+
+/** The ceilings of a tier on their own, from the config or the defaults. Throws on an unknown tier. */
+function tierCeilingsFor(tier, env = process.env) {
+    if (!TIER_NAMES.includes(tier)) throw new Error(`unknown budget tier ${JSON.stringify(tier)}; one of ${TIER_NAMES.join(', ')}`);
+    const c = loadConfig(env).config;
+    return { ...(c ? c.tiers[tier] : DEFAULTS.tiers[tier]) };
+}
+
+/** Per key, the smaller of two ceiling sets. */
+function tightenBy(base, tierCeilings) {
+    const out = {};
+    for (const key of CEILING_KEYS) out[key] = Math.min(base[key], tierCeilings[key]);
+    return out;
 }
 
 /** `api` when the child env spends billed dollars, else `subscription`. */
@@ -208,9 +256,11 @@ function reserve(req, { env = process.env, ledger: file = ledgerPath(env) } = {}
     const { attemptId, kind } = req || {};
     if (typeof attemptId !== 'string' || !ATTEMPT_RE.test(attemptId)) return { ok: false, code: 'usage', why: `attempt id ${JSON.stringify(attemptId)} does not match ${ATTEMPT_RE}` };
     if (!KINDS.includes(kind)) return { ok: false, code: 'usage', why: `budget kind ${JSON.stringify(kind)} is not one of ${KINDS.join(', ')}` };
+    const tier = req.tier === undefined || req.tier === null ? null : req.tier;
+    if (tier !== null && !TIER_NAMES.includes(tier)) return { ok: false, code: 'usage', why: `budget tier ${JSON.stringify(tier)} is not one of ${TIER_NAMES.join(', ')}` };
     const cfg = loadConfig(env);
     if (!cfg.config) return { ok: false, code: 'config-unreadable', why: `${cfg.why}; nothing is reserved until it parses` };
-    const ceilings = cfg.config.kinds[kind];
+    const ceilings = tier === null ? cfg.config.kinds[kind] : tightenBy(cfg.config.kinds[kind], cfg.config.tiers[tier]);
     const billing = req.billing === 'api' || req.billing === 'subscription' ? req.billing : billingOf(env);
     const r = transact(file, (ledger, nowMs) => {
         if (Object.prototype.hasOwnProperty.call(ledger.attempts, attemptId)) {
@@ -221,6 +271,7 @@ function reserve(req, { env = process.env, ledger: file = ledgerPath(env) } = {}
             attemptId, kind, billing, account: req.account || 'default', state: 'reserved', reservedAt: new Date(nowMs).toISOString(),
             ceilings: { ...ceilings }, reserved: { turns: ceilings.maxTurns, usd: billing === 'api' ? ceilings.maxUsd : 0 },
             pid: null, log: req.log || null, note: req.note ? String(req.note).slice(0, 200) : null,
+            ...(tier === null ? {} : { tier }),
         };
         const pool = poolOf(attempt);
         const used = windowUse(ledger, pool, cfg.config, nowMs);
@@ -383,8 +434,8 @@ function status({ env = process.env } = {}) {
 }
 
 module.exports = {
-    DEFAULTS, KINDS, ATTEMPT_RE, RETENTION_MS,
-    loadConfig, ceilingsFor, billingOf, poolOf, chargeOf, windowUse, reserve, begin, settle, cancel, attemptOf,
+    DEFAULTS, KINDS, TIER_NAMES, ATTEMPT_RE, RETENTION_MS,
+    loadConfig, ceilingsFor, tierCeilingsFor, billingOf, poolOf, chargeOf, windowUse, reserve, begin, settle, cancel, attemptOf,
     usageFromLog, killTree, watch, status, ledgerPath, configPath, pollMs,
 };
 

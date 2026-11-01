@@ -65,6 +65,7 @@ const capacity = require('./capacity.js');
 const budget = require('./execution-budget.js');
 const profiles = require('./worker-profiles.js');
 const authority = require('./worker-authority.js');
+const paidKeys = require('./paid-key-guard.js');
 const { spawn, spawnSync } = require('node:child_process');
 
 const USAGE = [
@@ -799,6 +800,8 @@ function start(opts) {
     const prompt = readPrompt(o.promptFile, o);
     const argv = buildArgv({ claudeBin: o.claudeBin, prompt, model: o.model, effort: o.effort, permissionMode: o.permissionMode, pluginDir: o.pluginDir, keepTools: o.keepTools, profile: o.profile, cwd: o.cwd, report: workerPaths(o).report, secrets: o.secrets });
     const plan = buildEnv(process.env, { code: o.code, configDir: o.configDir, kind: o.profile, secrets: o.secrets });
+    // A paid key in the env the worker would receive bills per token, not the subscription. Refused here, dry run included, before anything is reserved or spawned.
+    paidKeys.assertSubscriptionEnv(plan.env, { allow: paidKeys.allowedByEnv(process.env) });
     if (opts['dry-run']) {
         return {
             dryRun: true, code: o.code, argv, command: spawnPlan(argv).command,
@@ -901,7 +904,9 @@ function supervise(opts) {
     const o = startOptions(opts);
     const prompt = readPrompt(o.promptFile, o);
     const argv = buildArgv({ claudeBin: o.claudeBin, prompt, model: o.model, effort: o.effort, permissionMode: o.permissionMode, pluginDir: o.pluginDir, keepTools: o.keepTools, profile: o.profile, cwd: o.cwd, report: workerPaths(o).report, secrets: o.secrets });
-    const { env } = buildEnv(process.env, { code: o.code, configDir: o.configDir, kind: o.profile, secrets: o.secrets });
+    const built = buildEnv(process.env, { code: o.code, configDir: o.configDir, kind: o.profile, secrets: o.secrets });
+    // `start` already refused a paid key. A supervisor launched by hand cannot throw (its stdio is ignored), so it strips instead.
+    const env = paidKeys.allowedByEnv(process.env) ? built.env : paidKeys.stripPaidKeys(built.env);
     const plan = spawnPlan(argv);
     fs.mkdirSync(path.dirname(o.log), { recursive: true });
     // The worker cannot create the ledger side (a mkdir under ~/.claude is refused in

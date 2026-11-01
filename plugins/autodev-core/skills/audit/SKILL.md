@@ -109,6 +109,58 @@ is a Test integrity finding. Motion that janks, shifts layout, ends on a wrong
 value or ignores reduced motion is a UX/UI finding. The flair item belongs to
 brainstorm's delight pass, not to audit.
 
+## Findings file and the run-to-run diff
+
+The markdown report is for people. The findings file is the record the next run
+compares against. Write it to `.claude/reports/audit-<YYYY-MM-DD>.json` before
+you write the report, and build the report from it.
+
+```json
+{ "schema": 1, "date": "2026-01-01", "revision": "<sha>",
+  "findings": [ { "severity": "P1", "file": "src/a.js", "line": 10,
+                  "title": "unchecked input", "evidence": "curl -i /api/x -> 500" } ],
+  "checked_clean": [ "auth routes: 14 of 14 read, no bypass found" ],
+  "metrics": [ { "name": "files scanned", "value": 310, "probe": "rg --files src | wc -l" } ] }
+```
+
+**Score each finding P0, P1 or P2.** P0 is exploitable security, data loss or an
+app-breaking defect. P1 is a significant user-facing or maintenance cost. P2 is
+a confirmed defect of limited impact. The Severity Definitions table maps onto
+these: Critical is P0, High is P1, Medium and Low are P2.
+
+**Every finding carries evidence**: a path, a URL, or the command and its
+output. A candidate with none is not a finding. Drop it, or name it as
+unverified in the prose.
+
+**Keep a checked-clean list.** Say what you looked at and found clean, with the
+population ("14 of 14 routes"). A clean area with no population is a claim
+about the probe, and an empty list reads as "looked at nothing".
+
+**No invented metrics.** Every number in the report, whether a count, a score or
+a percentage, names the probe that produced it. A number with no probe is
+deleted, not softened. A rating is a judgement: say so, with the evidence it
+rests on.
+
+Then diff against the previous run. The script finds the previous file itself
+and refuses a findings file that breaks the rules above:
+
+```bash
+node "${CLAUDE_PLUGIN_ROOT}/scripts/audit-diff.js" \
+  --curr .claude/reports/audit-<date>.json --dir .claude/reports
+```
+
+It prints **new**, **still open** and **resolved** findings. Exit 1 means the
+current file lacks evidence or a probe: fix the file, do not report around it.
+Exit 2 means a file was unreadable, which is not a clean diff. A first run has
+no previous file, so every finding is new and the output says so. Put the three
+lists at the top of the report. Only a finding in `resolved` counts as fixed. A
+finding that stopped appearing because the scope narrowed is not resolved, so
+state the scope next to the diff.
+
+For a security sweep across several repos that proves each finding is reachable
+from outside, use `heal`. Borrow its filter here: say who can reach a security
+finding before you score it P0.
+
 ## Output Format
 
 ```markdown
@@ -183,28 +235,6 @@ this marketplace, quick validation is `node tooling/validate.js`; the full gate
 is `npm run gate` on the clean committed tree. Another project has its own
 commands. Static validation supplements the behavioral audit. Record actual
 time/resource use instead of promising a fixed duration or seven agents.
-
-## Real Results (From Production Test)
-
-Historical report excerpt (247 files; date/raw artifacts not supplied here).
-These were reported candidates/ratings, not independently reverified current
-defects. Do not use this excerpt as a baseline or proof of today’s quality:
-
-| Category | Critical | High | Total |
-|----------|----------|------|-------|
-| Security | 2 | 5 | 14 |
-| Performance | 0 | 4 | 8 |
-| Accessibility | 2 | 5 | 7 |
-| Type Safety | 1 | 2 | 8 |
-| UX/UI | 3 | 4 | 10 |
-| Test Coverage | 23 | 15 | 38 |
-| **Overall Score** | **5.5/10** | - | **85 issues** |
-
-Key findings:
-- Test coverage is the biggest gap (95% hooks untested)
-- 68 components use hardcoded colors
-- Edge Functions lack input validation
-- 530 console statements reported; count alone does not establish a defect
 
 ## Quality Framework Reference
 

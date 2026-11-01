@@ -55,6 +55,36 @@ You are a code reviewer for this project. Your job is to review code changes and
 ### Verdict: APPROVE | CHANGES REQUESTED
 ```
 
+## Escalation Receipt
+
+`merge-lock.js` refuses a sensitive diff (money, auth, migrations and the other
+paths `fast-lane.js` classifies sensitive) without an escalation receipt, and
+the `autoreview` skill dispatches you for it. You have no Write tool, so you
+cannot save a file: you PRINT the receipt and the caller saves it exactly as
+printed.
+
+Print it only when all of these hold. Otherwise print no receipt and say which
+one failed.
+
+- The brief names the repo (`OWNER/NAME`), the PR number and the full 40-character
+  head SHA. Do not guess any of them.
+- You reviewed the diff of that exact head (`git diff <base>...<head>`), not the
+  working tree, and `git rev-parse` or `gh pr view` shows the PR head is that SHA.
+- Your verdict is APPROVE with no blockers.
+
+Then end the review with one fenced `json` block holding only this object, on
+one line, with `model` set to the exact model ID you are running as (never a
+name you are not running as):
+
+```json
+{"schema":1,"repo":"OWNER/NAME","pr":123,"head":"<40-character sha>","reviewer":"code-reviewer","model":"<your model id>","verdict":"approve"}
+```
+
+`merge-lock.js` accepts the receipt only when `reviewer` is `code-reviewer`,
+`model` contains `opus`, `verdict` is `approve`, and `repo`, `pr` and `head`
+equal the merge it is asked to make. A receipt for a different head is refused,
+so review the head you were given and no other.
+
 ## Memory
 
 After each review, remember:

@@ -86,8 +86,8 @@ this machine. `CLAUDE.md` has the specifics.
 
 <!-- GENERATED BELOW — DO NOT EDIT BY HAND.
      Generator: tooling/generate-agents-md.js
-     Source:    plugins/autodev-core/skills/rule-*/SKILL.md (15 rules)
-     Version:   autodev 8.198.0
+     Source:    plugins/autodev-core/skills/rule-*/SKILL.md (16 rules)
+     Version:   autodev 8.199.0
      Variant:   B
      Regenerate with: node tooling/generate-agents-md.js --write
      Drift gate:      node tooling/generate-agents-md.js --check   (npm run check:agents-md) -->
@@ -105,10 +105,10 @@ generation time over the rules on disk:
 
 | variant | bytes | dated claims kept |
 |---|---|---|
-| A  full body | 121,096 | 16 of 16 |
-| B  description + first paragraph + dated PARAGRAPHS + Never/Always ← emitted | 20,186 | 16 of 16 |
-| B′ same, but dated LINES instead of paragraphs | 14,614 | 0 of 16 |
-| C  description only | 6,774 | 0 of 16 |
+| A  full body | 125,795 | 16 of 16 |
+| B  description + first paragraph + dated PARAGRAPHS + Never/Always ← emitted | 20,893 | 16 of 16 |
+| B′ same, but dated LINES instead of paragraphs | 15,321 | 0 of 16 |
+| C  description only | 7,250 | 0 of 16 |
 
 ### rule-ab-testing
 
@@ -292,6 +292,18 @@ a permission reset or a reason to stop work the user already authorized. Follow
 the user's current preferences and the host's actual question-tool schema.
 
 Full text: `plugins/autodev-core/skills/rule-options-protocol/SKILL.md`
+
+### rule-own-the-loop
+
+**paths:** `**/prd.json`, `**/PUBLISH-QUEUE.md`, `**/*.workflow.js`
+
+A coordinator carries a task to done itself and pings the owner only for an owner decision, a PR ready to merge with both receipts, or a deploy outcome. Everything else goes to the daily digest. Steer the worker you have, pick the cheapest capable model tier. Load before notifying the owner or spawning a worker.
+
+A coordinator that hands every decision back to the owner is a relay, and a
+relay costs the owner more attention than doing the work. Own the task until it
+is done, deployed and verified. Interrupt the owner for four things only.
+
+Full text: `plugins/autodev-core/skills/rule-own-the-loop/SKILL.md`
 
 ### rule-ramifications
 

@@ -12,15 +12,23 @@
  * reads the merged tree back.
  *
  *   node merge-lock.js merge --repo OWNER/NAME --pr N --head SHA --gate-receipt FILE
+ *                            --review-receipt FILE [--escalation-receipt FILE]
  *                            [--wait-timeout-ms N]
  *   node merge-lock.js merge --repo OWNER/NAME --pr N --head SHA --fast-lane-receipt FILE
+ *                            --review-receipt FILE [--escalation-receipt FILE]
  *                            [--wait-timeout-ms N]
+ *   node merge-lock.js merge ... --review-override "<reason, 10+ characters>"
+ *                            in place of --review-receipt
  *   node merge-lock.js status --repo OWNER/NAME
  *   node merge-lock.js --help
  *
+ * EVERY merge needs a proof of the tree (a gate or fast-lane receipt) AND a
+ * review of it (a review receipt, or a recorded override). A sensitive diff
+ * also needs an escalation receipt. All three are below.
+ *
  * WHAT `merge` DOES, in order:
- *   1. Checks the gate receipt (below). A missing or failing receipt refuses
- *      before any lock is taken.
+ *   1. Checks the gate receipt (below), then the review receipt or override.
+ *      A missing or failing receipt refuses before any lock is taken.
  *   2. Takes the per-repo lock `<home>/.claude/autodev/locks/merge-<owner>__<name>.lock`
  *      through autodev-core's full-gate-queue.js: an atomic `wx` create, a
  *      first-come ticket queue beside it, and a dead holder's lock moved aside
@@ -36,6 +44,12 @@
  *   3. `gh pr view`: refuses unless the PR is OPEN and its head is --head.
  *   4. Reads the base branch head, then `gh api repos/R/compare/<base>...<head>`:
  *      refuses unless behind_by is 0, so the candidate already contains the base.
+ *   4b. Classifies GitHub's own file list with fast-lane.js's sensitive
+ *      patterns (and the base's autodevFastLane.sensitive). A sensitive path,
+ *      a file list that cannot be read, or a base config that cannot be read
+ *      all count as sensitive, and then --escalation-receipt is required.
+ *   4c. With --review-override, appends one event to the deploy ledger (below).
+ *      A ledger that cannot be written refuses the merge.
  *   5. `gh pr merge N --repo R --rebase --match-head-commit <head>`.
  *   6. Reads the PR back until it is MERGED, because gh can fail after GitHub
  *      accepted the merge, and compares the tree of the PR's merge commit with
@@ -84,6 +98,32 @@
  * and, when the base sets autodevFastLane.previewTest, a green test step ran
  * that script. A base with no or a malformed previewPaths refuses it.
  *
+ * THE REVIEW RECEIPT, --review-receipt FILE, is the JSON that cheap-review.js
+ * writes: {schema:1, repo, pr, head, reviewer, model, verdict, reason,
+ * findings, acceptance, checked_clean, story, diff_lines, started_at, ms,
+ * est_cost}. It is accepted only when schema is 1, repo, pr and head equal the
+ * arguments exactly, and verdict is "approve". It is also refused when an
+ * acceptance item says met:false or a finding is P0, because an approve that
+ * carries either contradicts itself. A `request_changes` or `escalate`
+ * receipt, a receipt for another head, and a hand-written one that omits a
+ * field all refuse before any lock is taken. A receipt is text, so a forged
+ * one passes: it stops merging an unreviewed head by mistake, not a forgery.
+ *
+ * --review-override "<reason>" replaces the review receipt when review cannot
+ * run (the reviewer is down, the diff is over its line cap and was read by a
+ * person). The reason must hold at least 10 characters after whitespace is
+ * collapsed. It is written into the lock's meta line, where `status` shows it,
+ * and appended to the deploy ledger as one event line, kind "review-override",
+ * through deploy-ledger.js's appendEvent: `<config dir>/autodev/deploy-ledger-events.jsonl`,
+ * or the file AUTODEV_DEPLOY_EVENTS names. It cannot be combined with
+ * --review-receipt.
+ *
+ * SENSITIVE DIFFS. `--escalation-receipt FILE` is {schema:1, repo, pr, head,
+ * reviewer:"code-reviewer", model, verdict:"approve"} where model contains
+ * "opus": the code-reviewer agent's printed JSON, saved by its caller. It is
+ * required when the diff is sensitive and checked whenever it is given. A
+ * review override does NOT waive it.
+ *
  * EXIT. 0 merged and the merged tree matches the proved tree. 1 refused (bad
  * arguments, receipt, PR state, head or base mismatch, GitHub refused the
  * merge) or merged with a different tree. 2 indeterminate: gh could not be run
@@ -105,6 +145,7 @@
  *   AUTODEV_GH_BIN=PATH                 the gh binary (default gh)
  *   AUTODEV_MERGE_LOCK_POLL_MS=N        a waiter's poll interval (default 3000)
  *   AUTODEV_MERGE_LOCK_READBACK_MS=N    how long to wait for the PR to read MERGED (default 60000)
+ *   AUTODEV_DEPLOY_EVENTS=FILE          where a review override is appended (deploy-ledger.js's events file by default)
  */
 'use strict';
 
@@ -130,6 +171,8 @@ const WRAPPER_BASH = '{ git rev-parse HEAD; <gate command>; echo "gate-receipt: 
 const WRAPPER_PWSH = '& { git rev-parse HEAD; <gate command>; "gate-receipt: exit $LASTEXITCODE" } *> receipt.log';
 const STALE_MS = 600000;
 const DEFAULT_TIMEOUT_MS = 1800000;
+const MIN_OVERRIDE_CHARS = 10;
+const MAX_OVERRIDE_CHARS = 300;
 
 /** A refusal or an indeterminate stop, carried to main as one exit code. */
 class Stop extends Error {
@@ -219,6 +262,124 @@ function receiptProblem(file, head, { full = false } = {}) {
             + 'so the exit is not the gate\'s. A pipe after the gate command reports the pipe\'s status';
     }
     return full ? fullProblem(run) : null;
+}
+
+// ---------------------------------------------------------------------------
+// The review receipt, the review override and the escalation receipt.
+// ---------------------------------------------------------------------------
+
+/** { receipt } for a JSON object file, else { problem }. readText handles a BOM and UTF-16LE. */
+function readJsonReceipt(file, flag) {
+    let text;
+    try { text = readText(file); } catch (e) { return { problem: `cannot read ${flag} ${file} (${e.code || e.message})` }; }
+    let j;
+    try { j = JSON.parse(text); } catch (e) { return { problem: `${flag} ${file} is not JSON (${e.message})` }; }
+    if (!j || typeof j !== 'object' || Array.isArray(j)) return { problem: `${flag} ${file} is not a JSON object` };
+    return { receipt: j };
+}
+
+/** null when schema, repo, pr and head name the target exactly, else why not. */
+function targetProblem(r, flag, file, { repo, pr, head }) {
+    if (r.schema !== 1) return `${flag} ${file}: schema is ${JSON.stringify(r.schema)}, not 1`;
+    if (r.repo !== repo) return `${flag} ${file} is for repo ${JSON.stringify(r.repo)}, not ${repo}`;
+    // cheap-review.js writes the PR number; a digit string is the same number.
+    if (!['number', 'string'].includes(typeof r.pr) || String(r.pr) !== String(pr)) {
+        return `${flag} ${file} is for PR ${JSON.stringify(r.pr)}, not ${pr}`;
+    }
+    if (typeof r.head !== 'string' || r.head.toLowerCase() !== head) {
+        return `${flag} ${file} reviewed head ${JSON.stringify(r.head)}, not ${head}. Review the PR's current head again`;
+    }
+    return null;
+}
+
+/**
+ * null when the file is an approving review of exactly repo#pr at head, else
+ * why not. Beyond the verdict it refuses an approve that carries an unmet
+ * acceptance item or a P0 finding, which cheap-review.js turns into
+ * "escalate", so such a receipt was edited or written by hand.
+ */
+function reviewReceiptProblem(file, target) {
+    const flag = '--review-receipt';
+    if (!file) return `no --review-receipt given. Run cheap-review.js review --out FILE and pass that file, or pass --review-override "<reason>"`;
+    const got = readJsonReceipt(file, flag);
+    if (got.problem) return got.problem;
+    const r = got.receipt;
+    const wrong = targetProblem(r, flag, file, target);
+    if (wrong) return wrong;
+    if (r.verdict !== 'approve') {
+        const why = typeof r.reason === 'string' && r.reason ? `: ${r.reason.slice(0, 160)}` : '';
+        return `${flag} ${file}: verdict is ${JSON.stringify(r.verdict)}, not "approve"${why}`;
+    }
+    if (Array.isArray(r.acceptance) && r.acceptance.some((a) => !a || a.met !== true)) {
+        return `${flag} ${file}: verdict is approve but an acceptance item is not met`;
+    }
+    if (Array.isArray(r.findings) && r.findings.some((f) => f && f.severity === 'P0')) {
+        return `${flag} ${file}: verdict is approve but a finding is P0`;
+    }
+    return null;
+}
+
+/**
+ * null when the file is the code-reviewer agent's approval of exactly repo#pr
+ * at head by a model whose name contains "opus", else why not.
+ */
+function escalationReceiptProblem(file, target) {
+    const flag = '--escalation-receipt';
+    if (!file) return 'no --escalation-receipt given. Dispatch the code-reviewer agent on opus and save the JSON it prints';
+    const got = readJsonReceipt(file, flag);
+    if (got.problem) return got.problem;
+    const r = got.receipt;
+    const wrong = targetProblem(r, flag, file, target);
+    if (wrong) return wrong;
+    if (r.reviewer !== 'code-reviewer') return `${flag} ${file}: reviewer is ${JSON.stringify(r.reviewer)}, not "code-reviewer"`;
+    if (r.verdict !== 'approve') return `${flag} ${file}: verdict is ${JSON.stringify(r.verdict)}, not "approve"`;
+    if (typeof r.model !== 'string' || !/opus/i.test(r.model)) {
+        return `${flag} ${file}: model is ${JSON.stringify(r.model)}, which does not contain "opus". Escalation is judged by opus`;
+    }
+    return null;
+}
+
+/** { reason } with whitespace collapsed, or { problem }, for --review-override. */
+function normalizeOverride(raw) {
+    const reason = String(raw === null || raw === undefined ? '' : raw).replace(/[\u0000-\u001f\u007f\s]+/g, ' ').trim();
+    if (reason.length < MIN_OVERRIDE_CHARS) {
+        return { problem: `--review-override needs a reason of at least ${MIN_OVERRIDE_CHARS} characters saying why review could not run (got ${reason.length})` };
+    }
+    if (reason.length > MAX_OVERRIDE_CHARS) {
+        return { problem: `--review-override reason is ${reason.length} characters; keep it under ${MAX_OVERRIDE_CHARS}` };
+    }
+    return { reason };
+}
+
+const SENSITIVE_REASON_RE = / matches the sensitive pattern /;
+
+/**
+ * Why this diff is sensitive, as a list; empty when it is not. Reuses
+ * fast-lane.js's classifier with the size limit and the preview rule taken
+ * out, so only its sensitive-path reasons remain, on GitHub's own file list
+ * and the base's autodevFastLane.sensitive. What cannot be read counts as
+ * sensitive: a failed read must not lower the bar.
+ */
+function sensitiveReasons(cmp, pkgText) {
+    let config;
+    try { config = fastLane.parseConfig(pkgText); } catch (e) {
+        return [`the autodevFastLane config at the base is unreadable (${e.message})`];
+    }
+    const files = fastLane.filesFromCompare(cmp);
+    if (!files) return ['GitHub gave no usable changed-file list (missing, or 300 files or more)'];
+    const v = fastLane.classify(files, { ...config, maxLines: Number.MAX_SAFE_INTEGER, previewPaths: null, previewTest: null });
+    return v.reasons.filter((r) => SENSITIVE_REASON_RE.test(r));
+}
+
+/**
+ * Appends one event through deploy-ledger.js, which takes the ledger lock and
+ * stamps schema and time. Returns the file; throws when it cannot write, so an
+ * unrecorded override never merges.
+ */
+function appendDeployEvent(event, env = process.env) {
+    const r = require(path.join(__dirname, 'deploy-ledger.js')).appendEvent(event, { env });
+    if (!r.ok) throw Object.assign(new Error(r.why), { code: r.why });
+    return r.file;
 }
 
 // ---------------------------------------------------------------------------
@@ -391,13 +552,12 @@ function pkgAtRemote(repo, sha, env) {
  * The fast lane, judged on what GitHub will merge: the receipt's tree is the
  * head's tree, and the classifier says eligible for GitHub's own diff.
  */
-function checkFastLane({ repo, baseRef, base, head, cmp, provedTree, receipt, env, log }) {
+function checkFastLane({ repo, baseRef, base, head, cmp, provedTree, receipt, pkgText, log }) {
     if (String(receipt.tree).toLowerCase() !== provedTree) {
         throw refuse(`the fast-lane receipt proves tree ${receipt.tree}, but ${head} has tree ${provedTree} on GitHub`);
     }
     let config;
-    const text = pkgAtRemote(repo, base.sha, env);
-    try { config = fastLane.parseConfig(text); } catch (e) {
+    try { config = fastLane.parseConfig(pkgText); } catch (e) {
         throw refuse(`the autodevFastLane config at ${baseRef} ${base.sha} is unreadable (${e.message}); run the full gate`);
     }
     const { verdict: v, problem } = fastLane.profileProblem(receipt, fastLane.filesFromCompare(cmp), config);
@@ -413,7 +573,7 @@ function checkFastLane({ repo, baseRef, base, head, cmp, provedTree, receipt, en
         + `steps green on tree ${provedTree.slice(0, 12)}`);
 }
 
-async function mergeHeld({ repo, pr, head, env, log, readbackMs, pollMs, fastReceipt = null }) {
+async function mergeHeld({ repo, pr, head, env, log, readbackMs, pollMs, fastReceipt = null, override = null, escalation = false }) {
     const view = ghJson(['pr', 'view', String(pr), '--repo', repo, '--json', 'headRefOid,baseRefName,state'],
         `reading ${repo}#${pr}`, env);
     if (view.state !== 'OPEN') throw refuse(`${repo}#${pr} is ${view.state}, not OPEN`);
@@ -430,7 +590,25 @@ async function mergeHeld({ repo, pr, head, env, log, readbackMs, pollMs, fastRec
         throw refuse(`${head} is ${cmp.behind_by} commit(s) behind ${baseRef} at ${base.sha}. Rebase onto origin/${baseRef} and gate that tree again`);
     }
     const provedTree = commitTree(repo, head, env);
-    if (fastReceipt) checkFastLane({ repo, baseRef, base, head, cmp, provedTree, receipt: fastReceipt, env, log });
+    // package.json at the base is read once: the fast lane and the sensitive
+    // classifier both take their config from it.
+    const pkgText = pkgAtRemote(repo, base.sha, env);
+    if (fastReceipt) checkFastLane({ repo, baseRef, base, head, cmp, provedTree, receipt: fastReceipt, pkgText, log });
+    const sensitive = sensitiveReasons(cmp, pkgText);
+    if (sensitive.length && !escalation) {
+        throw refuse(`${repo}#${pr} is a sensitive diff (${sensitive.slice(0, 4).join('; ')}${sensitive.length > 4 ? `; and ${sensitive.length - 4} more` : ''}), `
+            + 'and needs --escalation-receipt FILE: dispatch the code-reviewer agent on opus and save the JSON it prints. A review override does not waive it');
+    }
+    if (sensitive.length) log(`${TAG} sensitive diff (${sensitive.length} reason(s)); the escalation receipt is on file`);
+    if (override) {
+        let file;
+        try {
+            file = appendDeployEvent({ kind: 'review-override', repo, pr, head, reason: override, sensitive: sensitive.length > 0 }, env);
+        } catch (e) {
+            throw refuse(`could not record the review override in the deploy ledger (${e.code || e.message}); an unrecorded override does not merge`);
+        }
+        log(`${TAG} REVIEW OVERRIDE recorded in ${file}: ${override}`);
+    }
     log(`${TAG} ${repo}#${pr}: head ${head} contains ${baseRef} at ${base.sha.slice(0, 7)}; merging`);
 
     const m = runGh(['pr', 'merge', String(pr), '--repo', repo, '--rebase', '--match-head-commit', head], env);
@@ -471,10 +649,14 @@ async function mergeHeld({ repo, pr, head, env, log, readbackMs, pollMs, fastRec
 // ---------------------------------------------------------------------------
 
 function parseArgs(argv) {
-    const out = { cmd: null, repo: null, pr: null, head: null, receipt: null, fastLane: null, timeoutMs: null, help: false, bad: null };
+    const out = {
+        cmd: null, repo: null, pr: null, head: null, receipt: null, fastLane: null, timeoutMs: null,
+        reviewReceipt: null, reviewOverride: null, escalation: null, help: false, bad: null,
+    };
     const takes = {
         '--repo': 'repo', '--pr': 'pr', '--head': 'head', '--gate-receipt': 'receipt',
         '--fast-lane-receipt': 'fastLane', '--wait-timeout-ms': 'timeoutMs',
+        '--review-receipt': 'reviewReceipt', '--review-override': 'reviewOverride', '--escalation-receipt': 'escalation',
     };
     for (let i = 0; i < argv.length; i++) {
         const a = argv[i];
@@ -494,8 +676,11 @@ function parseArgs(argv) {
 }
 
 function help() {
-    console.log('usage: node merge-lock.js merge --repo OWNER/NAME --pr N --head SHA --gate-receipt FILE [--wait-timeout-ms N]');
-    console.log('       node merge-lock.js merge --repo OWNER/NAME --pr N --head SHA --fast-lane-receipt FILE [--wait-timeout-ms N]');
+    console.log('usage: node merge-lock.js merge --repo OWNER/NAME --pr N --head SHA --gate-receipt FILE --review-receipt FILE');
+    console.log('                                  [--escalation-receipt FILE] [--wait-timeout-ms N]');
+    console.log('       node merge-lock.js merge --repo OWNER/NAME --pr N --head SHA --fast-lane-receipt FILE --review-receipt FILE');
+    console.log('                                  [--escalation-receipt FILE] [--wait-timeout-ms N]');
+    console.log('       node merge-lock.js merge ... --review-override "<reason>"   (in place of --review-receipt)');
     console.log('       node merge-lock.js status --repo OWNER/NAME');
     console.log('');
     console.log('Merges one PR under a per-repo lock (<home>/.claude/autodev/locks/merge-<owner>__<name>.lock),');
@@ -513,8 +698,17 @@ function help() {
     console.log('and build (and test, when the base sets autodevFastLane.previewTest) and needs every path of');
     console.log('GitHub\'s diff inside autodevFastLane.previewPaths, read from package.json at the base, with no');
     console.log('sensitive path. No previewPaths at the base refuses it.');
+    console.log('');
+    console.log('Every merge also needs a review: --review-receipt FILE, the JSON cheap-review.js writes, with schema 1,');
+    console.log('this repo, PR and head exactly, and verdict "approve". --review-override "<reason>" (10+ characters)');
+    console.log('replaces it when review cannot run; the reason goes into the lock meta line and one line appended to');
+    console.log('the deploy ledger events file, and it cannot be combined with --review-receipt.');
+    console.log('A sensitive diff (fast-lane.js sensitive patterns on GitHub\'s file list, or a list or config that');
+    console.log('cannot be read) also needs --escalation-receipt FILE: {schema:1, repo, pr, head, reviewer:"code-reviewer",');
+    console.log('model containing "opus", verdict:"approve"}, which the code-reviewer agent prints. An override does not');
+    console.log('waive it.');
     console.log('Exit 0 merged with the proved tree, 1 refused or a different tree, 2 indeterminate.');
-    console.log('env: AUTODEV_GH_BIN (default gh), AUTODEV_MERGE_LOCK_POLL_MS, AUTODEV_MERGE_LOCK_READBACK_MS');
+    console.log('env: AUTODEV_GH_BIN (default gh), AUTODEV_MERGE_LOCK_POLL_MS, AUTODEV_MERGE_LOCK_READBACK_MS, AUTODEV_DEPLOY_EVENTS');
 }
 
 async function main() {
@@ -543,6 +737,7 @@ async function main() {
     const timeoutMs = args.timeoutMs === null ? DEFAULT_TIMEOUT_MS : Number(args.timeoutMs);
     if (!Number.isFinite(timeoutMs) || timeoutMs < 0) return fail(1, '--wait-timeout-ms must be a number of milliseconds');
     if (args.receipt && args.fastLane) return fail(1, 'pass --gate-receipt or --fast-lane-receipt, not both');
+    if (args.reviewReceipt && args.reviewOverride !== null) return fail(1, 'pass --review-receipt or --review-override, not both');
     let fastReceipt = null;
     if (args.fastLane) {
         const f = fastLane.receiptProblem(args.fastLane, head);
@@ -552,6 +747,20 @@ async function main() {
         const why = receiptProblem(args.receipt, head);
         if (why) return fail(1, why);
     }
+    const target = { repo: args.repo, pr, head };
+    let override = null;
+    if (args.reviewOverride !== null) {
+        const o = normalizeOverride(args.reviewOverride);
+        if (o.problem) return fail(1, o.problem);
+        override = o.reason;
+    } else {
+        const why = reviewReceiptProblem(args.reviewReceipt, target);
+        if (why) return fail(1, why);
+    }
+    if (args.escalation !== null) {
+        const why = escalationReceiptProblem(args.escalation, target);
+        if (why) return fail(1, why);
+    }
 
     const pollMs = Math.max(50, Number(env.AUTODEV_MERGE_LOCK_POLL_MS) || 3000);
     const readbackMs = Math.max(0, Number(env.AUTODEV_MERGE_LOCK_READBACK_MS) || 60000);
@@ -559,13 +768,14 @@ async function main() {
     const onSignal = signalHandler({ lockPath, state });
     for (const s of ['SIGINT', 'SIGTERM', 'SIGHUP']) process.on(s, () => onSignal(s));
 
-    const what = `merge-lock.js merge ${args.repo}#${pr} head ${head}, started ${new Date().toISOString().slice(0, 19)}Z`;
+    const what = `merge-lock.js merge ${args.repo}#${pr} head ${head}, started ${new Date().toISOString().slice(0, 19)}Z`
+        + (override ? `, REVIEW OVERRIDE "${override}"` : '');
     try {
         const got = await acquire({ lockPath, what, timeoutMs, pollMs, log, isStopped: () => Boolean(state.stopped) });
         if (!got) return fail(2, `lock ${path.basename(lockPath)} not taken within ${timeoutMs} ms; nothing was merged`);
         state.held = true;
         log(`${TAG} lock taken: ${lockPath} (pid ${process.pid})`);
-        await mergeHeld({ repo: args.repo, pr, head, env, log, readbackMs, pollMs, fastReceipt });
+        await mergeHeld({ repo: args.repo, pr, head, env, log, readbackMs, pollMs, fastReceipt, override, escalation: args.escalation !== null });
     } catch (e) {
         if (e instanceof Stop) return fail(e.exit, e.message);
         return fail(2, `internal error (${e && e.message}); read ${args.repo}#${pr} before retrying`);
@@ -574,7 +784,10 @@ async function main() {
     }
 }
 
-module.exports = { lockPathFor, receiptProblem, readText, parseArgs, ghCommand, signalHandler, acquire, PASS_LINE, EXIT_PASS };
+module.exports = {
+    lockPathFor, receiptProblem, reviewReceiptProblem, escalationReceiptProblem, normalizeOverride, sensitiveReasons,
+    appendDeployEvent, readText, parseArgs, ghCommand, signalHandler, acquire, PASS_LINE, EXIT_PASS,
+};
 
 if (require.main === module) {
     main().catch((e) => {

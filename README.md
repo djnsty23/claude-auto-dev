@@ -225,6 +225,58 @@ in one repo might, and two sharing a word in their titles probably will not.
 not report your own questions back to you, and persists its dedup state to disk so
 restarting it does not re-raise what you already answered.
 
+## Product opt-in
+
+A product repo opts in to the cheap review, the post-deploy gate and the model tiers with four
+steps. This repository itself adds no workflow and runs no CI of its own from these files: the
+template below is a file to copy, not one that is active here.
+
+1. **Copy the CI template.** `plugins/autodev-core/templates/github-ci.yml` goes to
+   `.github/workflows/ci.yml` in the product. It runs lint, typecheck and test on every pull
+   request through the product's own npm scripts, and skips (with a visible notice) any script the
+   product does not define.
+2. **Set the smoke command.** In the product's `package.json`:
+
+   ```json
+   { "autodevDeployGate": { "smoke": "node scripts/smoke.js {url}", "url": "https://example.com" } }
+   ```
+
+   `deploy-gate.js` waits for the production deployment of a merged commit, runs `smoke` with
+   `{url}` filled in, records PASS, FAIL or TIMEOUT, and on FAIL opens a DRAFT revert pull request
+   for a person. With no smoke command it exits 2 and never reports a pass. It never pushes the
+   base branch, never merges and never promotes. `--dry-run` prints the plan and changes nothing.
+3. **Name the reviewer.** Set `AUTODEV_REVIEWER_CMD` to the command that reviews a diff (the prompt
+   arrives on stdin). `cheap-review.js` uses the first reviewer it finds, in this order:
+   1. `AUTODEV_REVIEWER_CMD`
+   2. `agy` on PATH
+   3. on Windows, `%LOCALAPPDATA%\agy\bin\agy.exe`
+   4. `gemini -p` on PATH
+
+   With none of them it refuses rather than approving unseen.
+4. **Keep paid keys out.** `paid-key-guard.js` refuses to start a reviewer or worker whose
+   environment holds `ANTHROPIC_API_KEY` or another paid key. A review then runs on a subscription
+   or a free tier, not on a metered key by accident. `AUTODEV_ALLOW_PAID_KEY=1` is the explicit
+   escape, set on purpose and per run.
+
+Reviewer settings, all optional:
+
+| Variable | Meaning |
+|---|---|
+| `AUTODEV_REVIEWER_CMD` | The reviewer command line, split into arguments with no shell. Quotes group words. |
+| `AUTODEV_REVIEWER_MODEL` | A model id. Recorded in the review receipt, and passed on as `--model` (agy) or `-m` (gemini). |
+| `AUTODEV_REVIEWER_ENV` | Comma-separated names of extra environment variables the reviewer may see. The rest of the environment is dropped before it starts. |
+| `AUTODEV_REVIEWER_COST_PER_MTOK` | Price per million tokens. With it the receipt carries an estimated cost, without it the cost is reported as unknown, never zero. |
+
+Model tiers (`worker-profiles.js` `TIERS`): the reviewer tier is the external command above, the
+builder tier is Sonnet, and the escalation, plan and ship tiers are Opus. Each tier has an
+execution ceiling in `execution-budget.js` that can only tighten a run's limits, and
+`work-cost.js --tier-line` prints a one-line cost per tier for a pull request body.
+
+Events that need the owner (blocked, ready to merge, deployed, deploy failed) go through
+`notify-policy.js`. Every other kind, and any kind it does not know, lands in a daily digest
+file instead of being dropped. `ledger-rotate.js` compresses old lines of the append-only ledgers
+into monthly archives and leaves any line it cannot date in the live file.
+
 ## Updates
 
 ```

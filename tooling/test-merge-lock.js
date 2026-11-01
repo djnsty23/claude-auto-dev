@@ -4,6 +4,12 @@
 // Run: node tooling/test-merge-lock.js
 // Exits 1 on any failure, 0 when all pass.
 //
+// EVERY MERGE CASE PASSES A VALID REVIEW RECEIPT (reviewOf below) beside its
+// gate or fast-lane receipt, because merge-lock refuses a merge without one.
+// Section G is that requirement's subject: a missing, mismatched or
+// non-approving review receipt, an override, and the escalation receipt a
+// sensitive diff needs.
+//
 // THE SUBJECT RUNS AS A SUBPROCESS against a gh stub. The stub is a node
 // script written into the fixture and named by AUTODEV_GH_BIN, because a .cmd
 // shim is not found without a shell. It answers the five gh calls merge-lock
@@ -114,9 +120,14 @@ process.exitCode = 1;
 const LOG = path.join(root, 'calls.log');
 let caseNo = 0;
 
+// GitHub's file list for a diff that is not sensitive. Every merge classifies
+// it, and a state with no list reads as sensitive.
+const PLAIN_FILES = [{ filename: 'src/components/Footer.tsx', status: 'modified', additions: 3, deletions: 1, changes: 4, patch: '@@' }];
+
 /** A fresh stub state. `over` replaces top-level keys. */
 function writeState(over = {}) {
     const st = {
+        files: PLAIN_FILES,
         pr: { headRefOid: HEAD, baseRefName: 'main', state: 'OPEN' },
         branches: { main: { sha: BASE0, tree: sha('e') } },
         behindBy: 0,
@@ -148,8 +159,22 @@ function env(stateFile, who, extra = {}) {
     };
 }
 
+let reviewNo = 0;
+/** Writes a review receipt in the shape cheap-review.js writes; `over` replaces fields. */
+function reviewOf(over = {}) {
+    const file = path.join(root, `review-${++reviewNo}.json`);
+    fs.writeFileSync(file, JSON.stringify({
+        schema: 1, repo: REPO, pr: 7, head: HEAD, reviewer: 'agy', model: 'cheap-model', verdict: 'approve', reason: '',
+        findings: [], acceptance: [{ criterion: 'the footer renders', met: true, evidence: 'Footer.tsx line 3' }],
+        checked_clean: ['no secrets'], story: null, diff_lines: 4, started_at: '2026-11-01T00:00:00.000Z', ms: 900, est_cost: null,
+        ...over,
+    }));
+    return file;
+}
+const REVIEW = reviewOf();
+
 function mergeArgs(extra = []) {
-    return [SUBJECT, 'merge', '--repo', REPO, '--pr', '7', '--head', HEAD, '--gate-receipt', RECEIPT, ...extra];
+    return [SUBJECT, 'merge', '--repo', REPO, '--pr', '7', '--head', HEAD, '--gate-receipt', RECEIPT, '--review-receipt', REVIEW, ...extra];
 }
 
 function runSync(stateFile, who, extra = [], envExtra = {}) {
@@ -392,7 +417,7 @@ async function main() {
         fs.writeFileSync(pass, u16(`${HEAD}\nlint exit 0 12.3\ntest exit 0 88.1\ngate-receipt: exit 0\n`));
         fs.writeFileSync(red, u16(`${HEAD}\nlint exit 0 12.3\ntest exit 1 88.1\ngate-receipt: exit 1\n`));
         const run = (file, who) => {
-            const r = spawnSync(process.execPath, [SUBJECT, 'merge', '--repo', REPO, '--pr', '7', '--head', HEAD, '--gate-receipt', file],
+            const r = spawnSync(process.execPath, [SUBJECT, 'merge', '--repo', REPO, '--pr', '7', '--head', HEAD, '--gate-receipt', file, '--review-receipt', REVIEW],
                 { encoding: 'utf8', env: env(writeState(), who), timeout: 120000, windowsHide: true });
             return { exit: r.status, out: r.stdout || '', err: r.stderr || '' };
         };
@@ -433,7 +458,7 @@ async function main() {
             return file;
         };
         const runFast = (file, who, state = {}, extra = []) => {
-            const r = spawnSync(process.execPath, [SUBJECT, 'merge', '--repo', REPO, '--pr', '7', '--head', HEAD, '--fast-lane-receipt', file, ...extra],
+            const r = spawnSync(process.execPath, [SUBJECT, 'merge', '--repo', REPO, '--pr', '7', '--head', HEAD, '--fast-lane-receipt', file, '--review-receipt', REVIEW, ...extra],
                 { encoding: 'utf8', env: env(writeState({ files: smallFiles, ...state }), who), timeout: 120000, windowsHide: true });
             return { exit: r.status, out: r.stdout || '', err: r.stderr || '' };
         };
@@ -601,7 +626,8 @@ async function main() {
         };
         const a = go('S7', mergeArgs());
         for (let i = 0; i < 200 && !/lock taken/.test(a.out); i++) await sleep(50);
-        const b = go('S8', [SUBJECT, 'merge', '--repo', REPO, '--pr', '8', '--head', HEAD2, '--gate-receipt', R2]);
+        const b = go('S8', [SUBJECT, 'merge', '--repo', REPO, '--pr', '8', '--head', HEAD2, '--gate-receipt', R2,
+            '--review-receipt', reviewOf({ pr: 8, head: HEAD2 })]);
         await Promise.all([a.done, b.done]);
         const bMerged = calls('S8').some((c) => c.what.startsWith('pr merge'));
         check('C3. two PRs on one base: after the first merges, the second, gated on the old base, is refused as behind',
@@ -702,6 +728,188 @@ async function main() {
         check('E3. a malformed repo, PR, head, timeout, a missing value and an unknown command are refused before gh',
             bad.every((r) => r.status === 1 && /REFUSED/.test(r.stderr)) && !calls('bad').length && lockGone(),
             bad.map((r) => r.status).join(','));
+    }
+
+    // -----------------------------------------------------------------------
+    // G. The review receipt, the override and the escalation receipt.
+    // -----------------------------------------------------------------------
+    {
+        const target = { repo: REPO, pr: 7, head: HEAD };
+        const gate = ['--gate-receipt', RECEIPT];
+        // A merge with no default review receipt: `extra` carries the review arguments.
+        const runG = (who, extra, state = {}, envExtra = {}) => {
+            const r = spawnSync(process.execPath, [SUBJECT, 'merge', '--repo', REPO, '--pr', '7', '--head', HEAD, ...gate, ...extra],
+                { encoding: 'utf8', env: env(writeState(state), who, envExtra), timeout: 120000, windowsHide: true });
+            return { exit: r.status, out: r.stdout || '', err: r.stderr || '' };
+        };
+        const mergedCount = (who) => calls(who).filter((c) => c.what.startsWith('pr merge')).length;
+        const refusedEarly = (who, r, re) => r.exit === 1 && calls(who).length === 0 && re.test(r.err) && lockGone();
+        const eventsFile = path.join(HOME, '.claude', 'autodev', 'deploy-ledger-events.jsonl');
+        const events = () => { try { return fs.readFileSync(eventsFile, 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l)); } catch { return []; } };
+        const escalationOf = (over = {}) => {
+            const file = path.join(root, `escalation-${++reviewNo}.json`);
+            fs.writeFileSync(file, JSON.stringify({ schema: 1, repo: REPO, pr: 7, head: HEAD, reviewer: 'code-reviewer', model: 'claude-opus-5-5', verdict: 'approve', ...over }));
+            return file;
+        };
+        const AUTH_FILES = [
+            { filename: 'src/components/Footer.tsx', status: 'modified', additions: 3, deletions: 1, changes: 4, patch: '@@' },
+            { filename: 'src/lib/auth/session.ts', status: 'modified', additions: 5, deletions: 0, changes: 5, patch: '@@' },
+        ];
+
+        // G1. no review receipt at all.
+        const none = runG('rv-none', []);
+        check('G1. a merge with a gate receipt and no review receipt is refused before gh or the lock',
+            refusedEarly('rv-none', none, /no --review-receipt given/), detail(none));
+
+        // G2-G4. a receipt for another head, PR or repo.
+        const headMm = runG('rv-head', ['--review-receipt', reviewOf({ head: sha('9') })]);
+        check('G2. a review receipt for another head is refused before gh or the lock',
+            refusedEarly('rv-head', headMm, /reviewed head "9{40}", not a{40}/), detail(headMm));
+        const prMm = runG('rv-pr', ['--review-receipt', reviewOf({ pr: 8 })]);
+        check('G3. a review receipt for another PR is refused before gh or the lock',
+            refusedEarly('rv-pr', prMm, /is for PR 8, not 7/), detail(prMm));
+        const repoMm = runG('rv-repo', ['--review-receipt', reviewOf({ repo: 'Acme/Other' })]);
+        check('G4. a review receipt for another repo is refused before gh or the lock',
+            refusedEarly('rv-repo', repoMm, /is for repo "Acme\/Other", not Acme\/Widget/), detail(repoMm));
+
+        // G5. any verdict but approve.
+        const verdicts = ['request_changes', 'escalate', 'APPROVE', undefined].map((v, i) => {
+            const r = runG(`rv-verdict${i}`, ['--review-receipt', reviewOf({ verdict: v, reason: 'a P0 in the handler' })]);
+            return { v, ok: refusedEarly(`rv-verdict${i}`, r, /verdict is .*, not "approve"/), r };
+        });
+        check('G5. a review receipt whose verdict is request_changes, escalate, wrongly cased or absent is refused before gh or the lock',
+            verdicts.every((x) => x.ok), verdicts.filter((x) => !x.ok).map((x) => `${x.v}: ${detail(x.r)}`).join(' | '));
+
+        // G6. a bad schema, no JSON, an array, a missing file.
+        const badFile = path.join(root, 'review-text.txt');
+        fs.writeFileSync(badFile, 'approve');
+        const arrFile = path.join(root, 'review-array.json');
+        fs.writeFileSync(arrFile, '[1]');
+        const schemas = [
+            ['schema 2', reviewOf({ schema: 2 }), /schema is 2, not 1/],
+            ['no schema', reviewOf({ schema: undefined }), /schema is undefined, not 1/],
+            ['plain text', badFile, /is not JSON/],
+            ['a JSON array', arrFile, /is not a JSON object/],
+            ['a missing file', path.join(root, 'nope.json'), /cannot read --review-receipt/],
+        ].map(([label, file, re], i) => {
+            const r = runG(`rv-schema${i}`, ['--review-receipt', file]);
+            return { label, ok: refusedEarly(`rv-schema${i}`, r, re), r };
+        });
+        check('G6. a review receipt with a bad schema, no JSON, a JSON array or no file is refused before gh or the lock',
+            schemas.every((x) => x.ok), schemas.filter((x) => !x.ok).map((x) => `${x.label}: ${detail(x.r)}`).join(' | '));
+
+        // G7. an approve that contradicts itself.
+        const odd = [
+            ['an unmet acceptance item', reviewOf({ acceptance: [{ criterion: 'c', met: false, evidence: 'e' }] }), /acceptance item is not met/],
+            ['a P0 finding', reviewOf({ findings: [{ severity: 'P0', file: 'a.js', line: 1, why: 'w' }] }), /a finding is P0/],
+        ].map(([label, file, re], i) => {
+            const r = runG(`rv-odd${i}`, ['--review-receipt', file]);
+            return { label, ok: refusedEarly(`rv-odd${i}`, r, re), r };
+        });
+        check('G7. an approve receipt that holds an unmet acceptance item or a P0 finding is refused before gh or the lock',
+            odd.every((x) => x.ok), odd.filter((x) => !x.ok).map((x) => `${x.label}: ${detail(x.r)}`).join(' | '));
+
+        // G8. an override shorter than 10 characters (after whitespace collapses).
+        const shorts = ['', 'too short', '   x\n\ty   z   '].map((reason, i) => {
+            const r = runG(`ov-short${i}`, ['--review-override', reason]);
+            return { reason, ok: refusedEarly(`ov-short${i}`, r, /needs a reason of at least 10 characters/), r };
+        });
+        check('G8. a review override of under 10 characters, empty or padded with whitespace, is refused before gh or the lock',
+            shorts.every((x) => x.ok), shorts.filter((x) => !x.ok).map((x) => `${JSON.stringify(x.reason)}: ${detail(x.r)}`).join(' | '));
+
+        // G9. an override together with a receipt.
+        const both = runG('ov-both', ['--review-receipt', REVIEW, '--review-override', 'the reviewer was down for an hour']);
+        check('G9. a review override combined with a review receipt is refused before gh or the lock',
+            refusedEarly('ov-both', both, /--review-receipt or --review-override, not both/), detail(both));
+
+        // G10. an override merges, and is recorded in the lock meta and the ledger.
+        const before = events().length;
+        const reason = 'reviewer was down;\nread the diff by hand';
+        const ov = runG('ov-ok', ['--review-override', reason]);
+        const cleaned = 'reviewer was down; read the diff by hand';
+        const asideTexts = asides('released').map((n) => { try { return fs.readFileSync(path.join(path.dirname(LOCK), n), 'utf8'); } catch { return ''; } });
+        const ev = events().slice(before);
+        check('G10. a review override merges, and its reason is in the lock meta line and one deploy ledger event',
+            ov.exit === 0 && mergedCount('ov-ok') === 1 && lockGone()
+            && asideTexts.some((t) => t.split('\n')[1] && t.split('\n')[1].includes(`REVIEW OVERRIDE "${cleaned}"`))
+            && ev.length === 1 && ev[0].kind === 'review-override' && ev[0].reason === cleaned && ev[0].repo === REPO
+            && ev[0].pr === 7 && ev[0].head === HEAD && ev[0].schema === 1 && /^\d{4}-\d\d-\d\dT/.test(ev[0].at),
+            `${detail(ov)}; ledger events ${ev.length}`);
+
+        // G11. a sensitive diff with no escalation receipt, under a receipt and under an override.
+        const sensNone = runG('sens-none', ['--review-receipt', REVIEW], { files: AUTH_FILES });
+        check('G11. a sensitive diff (an auth path) with a review receipt and no escalation receipt is refused under the lock, before any merge',
+            sensNone.exit === 1 && mergedCount('sens-none') === 0 && /sensitive diff .*src\/lib\/auth\/session\.ts matches the sensitive pattern auth.*needs --escalation-receipt/.test(sensNone.err)
+            && lockGone(), detail(sensNone));
+
+        // G12. an escalation receipt that opus did not write.
+        const badEsc = [
+            ['a sonnet model', escalationOf({ model: 'claude-sonnet-5-5' }), /does not contain "opus"/],
+            ['no model', escalationOf({ model: undefined }), /does not contain "opus"/],
+            ['another reviewer', escalationOf({ reviewer: 'agy' }), /not "code-reviewer"/],
+            ['request_changes', escalationOf({ verdict: 'request_changes' }), /not "approve"/],
+            ['another head', escalationOf({ head: sha('9') }), /reviewed head/],
+            ['another PR', escalationOf({ pr: 9 }), /is for PR 9, not 7/],
+            ['schema 2', escalationOf({ schema: 2 }), /schema is 2, not 1/],
+        ].map(([label, file, re], i) => {
+            const r = runG(`esc-bad${i}`, ['--review-receipt', REVIEW, '--escalation-receipt', file], { files: AUTH_FILES });
+            return { label, ok: refusedEarly(`esc-bad${i}`, r, re), r };
+        });
+        check('G12. an escalation receipt whose model is not opus, or with another reviewer, verdict, head, PR or schema, is refused before gh or the lock',
+            badEsc.every((x) => x.ok), badEsc.filter((x) => !x.ok).map((x) => `${x.label}: ${detail(x.r)}`).join(' | '));
+
+        // G13. an override does not waive the escalation receipt, and records nothing when refused.
+        const evBefore = events().length;
+        const sensOv = runG('sens-ov', ['--review-override', 'the reviewer was down for an hour'], { files: AUTH_FILES });
+        check('G13. a review override does not waive the escalation receipt: a sensitive diff is refused and no ledger event is written',
+            sensOv.exit === 1 && mergedCount('sens-ov') === 0 && /needs --escalation-receipt/.test(sensOv.err) && events().length === evBefore && lockGone(),
+            `${detail(sensOv)}; new ledger events ${events().length - evBefore}`);
+
+        // G14. what cannot be read counts as sensitive.
+        const noList = runG('sens-nolist', ['--review-receipt', REVIEW], { files: undefined });
+        const badCfg = runG('sens-badcfg', ['--review-receipt', REVIEW], { basePkg: '{ not json' });
+        const cfgSens = runG('sens-cfg', ['--review-receipt', REVIEW], { basePkg: JSON.stringify({ autodevFastLane: { sensitive: ['^src/components/footer'] } }) });
+        check('G14. a diff with no readable file list, a base config that is not JSON, or a path the base config marks sensitive needs the escalation receipt',
+            [noList, badCfg, cfgSens].every((r) => r.exit === 1 && /needs --escalation-receipt/.test(r.err))
+            && /no usable changed-file list/.test(noList.err) && /config at the base is unreadable/.test(badCfg.err)
+            && /autodevFastLane\.sensitive \^src\/components\/footer/.test(cfgSens.err)
+            && mergedCount('sens-nolist') + mergedCount('sens-badcfg') + mergedCount('sens-cfg') === 0,
+            [noList, badCfg, cfgSens].map((r) => detail(r)).join(' | '));
+
+        // G15. the happy path: review plus escalation merges a sensitive diff; review alone merges a plain one (B1).
+        const happy = runG('happy', ['--review-receipt', REVIEW, '--escalation-receipt', escalationOf()], { files: AUTH_FILES });
+        check('G15. a sensitive diff with an approving review receipt and an opus escalation receipt merges through the lock',
+            happy.exit === 0 && mergedCount('happy') === 1 && /sensitive diff \(\d+ reason/.test(happy.out)
+            && /matches the proved tree/.test(happy.out) && lockGone(), detail(happy));
+        const happyOv = runG('happy-ov', ['--review-override', 'reviewer down; escalation done', '--escalation-receipt', escalationOf()], { files: AUTH_FILES });
+        check('G16. a sensitive diff merges on an override plus an opus escalation receipt, and the ledger event says sensitive',
+            happyOv.exit === 0 && mergedCount('happy-ov') === 1 && events().slice(-1)[0].sensitive === true, detail(happyOv));
+
+        // G17. an unwritable ledger refuses the override rather than merging unrecorded.
+        const blocked = path.join(root, 'ledger-is-a-dir');
+        fs.mkdirSync(blocked, { recursive: true });
+        const noLedger = runG('ov-noledger', ['--review-override', 'the reviewer was down for an hour'], {}, { AUTODEV_DEPLOY_EVENTS: blocked });
+        check('G17. a review override that cannot be written to the deploy ledger does not merge',
+            noLedger.exit === 1 && mergedCount('ov-noledger') === 0 && /an unrecorded override does not merge/.test(noLedger.err) && lockGone(), detail(noLedger));
+
+        // G18. the exported checkers, in process.
+        const f = (name, obj) => { const p = path.join(root, name); fs.writeFileSync(p, typeof obj === 'string' || Buffer.isBuffer(obj) ? obj : JSON.stringify(obj)); return p; };
+        const okRev = ml.reviewReceiptProblem(REVIEW, target) === null;
+        const okRevStr = ml.reviewReceiptProblem(reviewOf({ pr: '7', head: HEAD.toUpperCase() }), target) === null;
+        const okRevU16 = ml.reviewReceiptProblem(f('review-u16.json', Buffer.concat([Buffer.from([0xff, 0xfe]),
+            Buffer.from(fs.readFileSync(REVIEW, 'utf8'), 'utf16le')])), target) === null;
+        const okEsc = ml.escalationReceiptProblem(escalationOf(), target) === null
+            && ml.escalationReceiptProblem(escalationOf({ model: 'Claude-OPUS-5' }), target) === null;
+        const sens = (files, pkg) => ml.sensitiveReasons({ files }, pkg);
+        const plain = sens([{ filename: 'docs/readme.md', additions: 1, deletions: 0, changes: 1, patch: '@@' }], null).length === 0;
+        const money = sens([{ filename: 'src/billing/x.ts', additions: 1, deletions: 0, changes: 1, patch: '@@' }], null).length === 1;
+        const mig = sens([{ filename: 'supabase/migrations/001_a.sql', additions: 1, deletions: 0, changes: 1, patch: '@@' }], null).length >= 1;
+        const huge = ml.sensitiveReasons({ files: Array.from({ length: 300 }, (_, i) => ({ filename: `f${i}.md`, additions: 1, deletions: 0, changes: 1, patch: '@@' })) }, null).length === 1;
+        const big = sens([{ filename: 'docs/readme.md', additions: 5000, deletions: 0, changes: 5000, patch: '@@' }], null).length === 0;
+        const ovs = [ml.normalizeOverride('  twelve   chars  ').reason === 'twelve chars', !!ml.normalizeOverride(undefined).problem, !!ml.normalizeOverride('x'.repeat(301)).problem];
+        check('G18. the exported checkers accept the exact receipts (digit-string PR, upper-case head, UTF-16LE, any-case opus), and the classifier ignores size and flags auth, billing, migrations and an unreadable list',
+            okRev && okRevStr && okRevU16 && okEsc && plain && money && mig && huge && big && ovs.every(Boolean),
+            `review ${okRev}/${okRevStr}/${okRevU16}, escalation ${okEsc}, classifier ${plain}/${money}/${mig}/${huge}/${big}, override ${ovs.join('/')}`);
     }
 
     fs.rmSync(root, { recursive: true, force: true });

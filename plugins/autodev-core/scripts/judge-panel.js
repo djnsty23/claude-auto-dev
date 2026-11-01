@@ -48,6 +48,7 @@ const { spawnSync } = require('child_process');
 const hw = require('./headless-worker.js');
 const capacity = require('./capacity.js');
 const budget = require('./execution-budget.js');
+const paidKeys = require('./paid-key-guard.js');
 const { scorePairs } = require('./unslop-sweep.js');
 
 const DEFAULT_MODEL = 'claude-opus-5-5';
@@ -148,6 +149,7 @@ function judgeBatch({ lens, pairs, dir, refs, o, judgeIndex }) {
         '--json-schema', JSON.stringify(VERDICT_SCHEMA), '--model', o.model];
     const plan = hw.spawnPlan(argv);
     const { env } = hw.buildEnv(process.env, { code: 'judge-panel', configDir: o.configDir || null, kind: 'judge' });
+    try { paidKeys.assertSubscriptionEnv(env, { allow: paidKeys.allowedByEnv(process.env) }); } catch (e) { return { ok: false, error: `paid-key-refused: ${e.message}`, costUsd: 0 }; }
     const c = capacity.admit({ cls: 'judge', path: dir, note: `judge-panel ${judgeIndex}` });
     if (!c.admitted) return { ok: false, error: `capacity-deferred: ${c.why}`, costUsd: 0 };
     const attemptId = `panel-${judgeIndex}-${Date.now()}-${crypto.randomBytes(3).toString('hex')}`;

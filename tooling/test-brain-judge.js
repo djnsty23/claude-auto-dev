@@ -47,6 +47,8 @@ fs.mkdirSync(home);
 const baseEnv = { ...process.env, HOME: home, USERPROFILE: home, GIT_TERMINAL_PROMPT: '0' };
 delete baseEnv.CLAUDE_CONFIG_DIR;
 delete baseEnv.AUTODEV_HEADLESS;
+// A paid key in the developer's shell would make every judge refuse; the paid-key cases set their own.
+for (const k of ['ANTHROPIC_API_KEY', 'ANTHROPIC_AUTH_TOKEN', 'OPENAI_API_KEY', 'GEMINI_API_KEY', 'GOOGLE_API_KEY', 'CLAUDE_CODE_USE_BEDROCK', 'CLAUDE_CODE_USE_VERTEX', 'AWS_BEARER_TOKEN_BEDROCK', 'AUTODEV_ALLOW_PAID_KEY', 'AUTODEV_PAID_KEY_NAMES']) delete baseEnv[k];
 const autodev = path.join(home, '.claude', 'autodev');
 const stateDir = path.join(autodev, 'brain-judge');
 const clockDir = path.join(autodev, 'brain-clock');
@@ -389,6 +391,14 @@ try {
     const one = judge(['judge', '--task-id', 'worker-old-one', '--judge-bin', fakeJudge]);
     check('judge --task-id judges one record and logs it as manual', one.value && one.value.decision === 'follow-up' && judge(['log', '--limit', '1']).value.judgements[0].mode === 'manual');
     check('judge refuses a record that has not finished', judge(['judge', '--task-id', 'worker-loop-c', '--judge-bin', fakeJudge]).code === 'bad-state');
+    // A paid key in the judge's env bills per token: the judge is refused like a deferral, nothing is spawned, the value is never printed.
+    const paidArgv = path.join(scratch, 'paid-argv.json');
+    const CANARY = 'sk-ant-canary-value-for-the-suite';
+    const paidJ = judge(['judge', '--task-id', 'worker-old-one', '--judge-bin', fakeJudge], { ANTHROPIC_API_KEY: CANARY, AUTODEV_FAKE_JUDGE_ARGV: paidArgv });
+    check('a judge with a paid key in its env is refused as paid-key-refused, names the variable, never the value, and spawns nothing',
+        /paid-key-refused/.test(paidJ.stdout) && /ANTHROPIC_API_KEY/.test(paidJ.stdout) && !(paidJ.stdout + paidJ.stderr).includes(CANARY) && !fs.existsSync(paidArgv), paidJ.stdout.slice(0, 300));
+    const paidOk = judge(['judge', '--task-id', 'worker-old-one', '--judge-bin', fakeJudge], { ANTHROPIC_API_KEY: CANARY, AUTODEV_ALLOW_PAID_KEY: '1', AUTODEV_FAKE_JUDGE_ARGV: paidArgv });
+    check('control: AUTODEV_ALLOW_PAID_KEY=1 lets the same judge run', fs.existsSync(paidArgv) && !/paid-key-refused/.test(paidOk.stdout), paidOk.stdout.slice(0, 300));
     // The judge logs in where the switch points it: the default login can be refused while another account works.
     const judgeCfg = path.join(scratch, 'judge-cfg');
     fs.mkdirSync(judgeCfg);

@@ -123,6 +123,7 @@ const os = require('node:os');
 const claudePaths = require('./claude-paths.js');
 const acceptance = require('./acceptance-receipt.js');
 const authority = require('./worker-authority.js');
+const paidKeys = require('./paid-key-guard.js');
 const { scriptPlacement, readLedger: readHeadlessLedger, namedTools } = require('./headless-worker.js');
 const crypto = require('node:crypto');
 const { spawnSync } = require('node:child_process');
@@ -198,7 +199,7 @@ const LOCK_WAIT_MS = Number(process.env.AUTODEV_LEDGER_LOCK_WAIT_MS) || 10 * 100
 // A queued task whose launch was refused this many times stays queued for a person.
 const MAX_LAUNCH_ATTEMPTS = 3;
 // Refusals a later tick can clear with no person. They are logged, never counted.
-const TRANSIENT_LAUNCH_CODES = ['fetch-failed', 'origin-unreadable', 'git-unavailable', 'ledger-locked'];
+const TRANSIENT_LAUNCH_CODES = ['fetch-failed', 'origin-unreadable', 'git-unavailable', 'ledger-locked', 'paid-key-refused'];
 
 function fault(code, message) { const e = new Error(message || code); e.publicCode = code; throw e; }
 
@@ -765,6 +766,8 @@ function launch(opts) {
         };
         try {
             if (rec.state !== 'queued') fault('bad-state', `task ${rec.taskId} is ${rec.state}, not queued`);
+            // headless-worker refuses a paid key too; checking the env it would build here fails before any worktree, prompt file or child exists.
+            try { paidKeys.assertSubscriptionEnv(authority.childEnv(process.env, { kind: 'builder' }).env, { allow: paidKeys.allowedByEnv(process.env) }); } catch (e) { fault('paid-key-refused', e.message); }
             resolveRepo(rec.repo);
             if (fetched.status !== 0) fault('fetch-failed', `git fetch origin exited ${fetched.status}: ${fetched.stderr}`);
             if (git(rec.repo, ['rev-parse', '--verify', '--quiet', `${rec.base}^{commit}`]).status !== 0) fault('base-unresolved', `${rec.base} does not resolve in ${rec.repo}`);

@@ -290,7 +290,7 @@ function main() {
                 JSON.stringify(am))) sharedFails.push('measured');
             aliveAfter(pidsOf(measured));
             // An API-key run is billed, in the api pool only.
-            const billed = startRun('USE-api', { mode: 'ok', configFile: cfgU, ledger: path.join(ROOT, 'usage.json'), env: { ANTHROPIC_API_KEY: 'placeholder-not-a-key' } });
+            const billed = startRun('USE-api', { mode: 'ok', configFile: cfgU, ledger: path.join(ROOT, 'usage.json'), env: { ANTHROPIC_API_KEY: 'placeholder-not-a-key', AUTODEV_ALLOW_PAID_KEY: '1' } });
             waitForEnd(billed);
             const ab = billed.attemptId ? ledgerAttempt(billed.ledger, billed.attemptId) : null;
             aliveAfter(pidsOf(billed));

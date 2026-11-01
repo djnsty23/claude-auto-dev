@@ -44,9 +44,11 @@ fs.mkdirSync(home);
 const env = { ...process.env, HOME: home, USERPROFILE: home, GIT_TERMINAL_PROMPT: '0', AUTODEV_LEDGER_LOCK_WAIT_MS: '300',
     AUTODEV_WORKER_OUTBOX: path.join(scratch, 'outbox') };
 delete env.CLAUDE_CONFIG_DIR;
+// A paid key in the developer's shell would make every launch refuse; the paid-key case below sets its own.
+for (const k of ['ANTHROPIC_API_KEY', 'ANTHROPIC_AUTH_TOKEN', 'OPENAI_API_KEY', 'GEMINI_API_KEY', 'GOOGLE_API_KEY', 'CLAUDE_CODE_USE_BEDROCK', 'CLAUDE_CODE_USE_VERTEX', 'AWS_BEARER_TOKEN_BEDROCK', 'AUTODEV_ALLOW_PAID_KEY', 'AUTODEV_PAID_KEY_NAMES']) delete env[k];
 
-function cli(args) {
-    const r = spawnSync(process.execPath, [SUBJECT, ...args], { encoding: 'utf8', env, stdio: ['ignore', 'pipe', 'pipe'] });
+function cli(args, extraEnv = {}) {
+    const r = spawnSync(process.execPath, [SUBJECT, ...args], { encoding: 'utf8', env: { ...env, ...extraEnv }, stdio: ['ignore', 'pipe', 'pipe'] });
     let json = null;
     try { json = JSON.parse(r.stdout); } catch { /* help text or a crash */ }
     return { status: r.status, stdout: r.stdout, stderr: r.stderr, json };
@@ -176,6 +178,17 @@ try {
     const named = val(cli(['launch', '--task-id', 'worker-guide-a', '--dry-run', '--dev', '--claude-bin', fakeWorker, '--ledger', ledger]));
     fs.writeFileSync(briefCopy, briefBefore);
     check('launch passes the tool families the brief names: a brief naming ArtifactData keeps the Artifact tools', heavy(named) === 'Artifact,ArtifactComments,ArtifactData', named ? named.headless.argv.join(' ').slice(-200) : 'no value');
+    // A paid key in the env a worker would receive bills per token. launch refuses it before any
+    // worktree, prompt file or child exists, naming the variable and never the value.
+    const CANARY = 'sk-ant-canary-value-for-the-suite';
+    const paidArgs = ['launch', '--task-id', 'worker-guide-a', '--dry-run', '--dev', '--claude-bin', fakeWorker, '--ledger', ledger];
+    const paid = cli(paidArgs, { ANTHROPIC_API_KEY: CANARY });
+    check('launch refuses a paid key in the env with code paid-key-refused, naming the variable and never its value',
+        code(paid) === 'paid-key-refused' && /ANTHROPIC_API_KEY/.test(paid.json.error.message) && !(paid.stdout + paid.stderr).includes(CANARY), paid.stdout.slice(0, 200));
+    check('and that refusal leaves the ledger byte-identical', fs.readFileSync(ledger, 'utf8') === before);
+    check('paid-key-refused is a transient launch code: a person clears it by fixing the env, so it is never counted against the task',
+        require(SUBJECT).TRANSIENT_LAUNCH_CODES.includes('paid-key-refused'));
+    check('control: AUTODEV_ALLOW_PAID_KEY=1 lets the same launch through', cli(paidArgs, { ANTHROPIC_API_KEY: CANARY, AUTODEV_ALLOW_PAID_KEY: '1' }).status === 0);
     check('a flag a command never reads is refused as usage, never ignored: status --model',
         code(cli(['status', '--model', 'm', '--ledger', ledger])) === 'usage');
     const stray = cli(['launch', '--task-id', 'worker-guide-a', '--repo', repo, '--dry-run', '--ledger', ledger]);

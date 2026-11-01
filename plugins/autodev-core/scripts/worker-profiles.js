@@ -53,7 +53,43 @@ const FAMILIES = Object.freeze({
 
 const KINDS = Object.keys(PROFILES);
 
+/**
+ * MODEL TIERS. A profile says which TOOLS a run starts with; a tier says which MODEL does the work,
+ * so the cheapest capable one is the default and the expensive one is an escalation.
+ *   reviewer    an external, cheaper reviewer command (cheap-review.js). The command is named by the
+ *               env var in `cmdEnv`; it is not a Claude model, so there is no `model`.
+ *   builder     implementation workers: sonnet.
+ *   escalation  the second look after a reviewer escalates or requests a human-grade pass: opus.
+ *   plan        planning a feature across several files: opus.
+ *   ship        the release and deploy decision: opus.
+ * Execution ceilings per tier live in execution-budget.js (TIER_NAMES is the same list).
+ */
+const TIERS = Object.freeze({
+    reviewer: Object.freeze({ cmdEnv: 'AUTODEV_REVIEWER_CMD' }),
+    builder: Object.freeze({ model: 'sonnet' }),
+    escalation: Object.freeze({ model: 'opus' }),
+    plan: Object.freeze({ model: 'opus' }),
+    ship: Object.freeze({ model: 'opus' }),
+});
+
+// A profile kind runs at one tier. `review` is the in-house Claude reviewer, which is the escalation
+// pass; the cheap external reviewer is the `reviewer` tier and has no profile (it gets no tools).
+const KIND_TIER = Object.freeze({ builder: 'builder', review: 'escalation', judge: 'escalation', probe: 'builder' });
+
 function fault(code, message) { const e = new Error(message); e.publicCode = code; throw e; }
+
+/**
+ * The tier for a kind: a tier name (itself) or a profile kind. { tier, model, cmdEnv }, `model` and
+ * `cmdEnv` null when the tier has none. An unknown name throws with publicCode usage: a run never
+ * falls back to a default tier, because the default would be a guess about cost.
+ */
+function tierFor(kind) {
+    const tier = Object.prototype.hasOwnProperty.call(TIERS, kind) ? kind
+        : Object.prototype.hasOwnProperty.call(KIND_TIER, kind) ? KIND_TIER[kind] : null;
+    if (!tier) fault('usage', `tier must be one of ${Object.keys(TIERS).join(', ')} or a profile kind (${KINDS.join(', ')}); got ${kind}`);
+    const t = TIERS[tier];
+    return { tier, model: t.model || null, cmdEnv: t.cmdEnv || null };
+}
 
 function requireKind(kind) {
     if (!KINDS.includes(kind)) fault('usage', `--profile must be one of ${KINDS.join(', ')}; got ${kind}`);
@@ -105,4 +141,4 @@ function grade(manifest, resolved) {
     return { missingRequired, hidden, exact };
 }
 
-module.exports = { PROFILES, FAMILIES, KINDS, requireKind, namedFamilies, resolve, toolsArgs, initManifest, grade };
+module.exports = { PROFILES, FAMILIES, KINDS, TIERS, tierFor, requireKind, namedFamilies, resolve, toolsArgs, initManifest, grade };
