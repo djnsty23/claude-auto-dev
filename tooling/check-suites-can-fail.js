@@ -158,6 +158,14 @@ const SUBJECT_OVERRIDES = {
         'plugins/autodev-memory/skills/mem-search/SKILL.md',
     ],
 
+    // The subject is two Markdown documents whose scaffold commands must quote
+    // the kit and parent paths. The suite lists them as relative strings joined
+    // to the repo root, and Markdown is not `.js`, so derivation finds nothing.
+    'test-scaffold-command-quoting.js': [
+        'plugins/autodev-core/skills/setup-project/SKILL.md',
+        'plugins/autodev-core/skills/spec/references/new-app-chain.md',
+    ],
+
     // The subject is a hooks module (Claude Code function hooks): ES modules
     // with an .mjs extension, which derivation cannot yield. Left to
     // derivation this suite DOES find something — prd-states.js, the CommonJS
