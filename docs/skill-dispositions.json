@@ -370,6 +370,24 @@
     },
     {
       "plugin": "autodev-core",
+      "name": "reflect",
+      "invocable": true,
+      "status": "proposed",
+      "evidence": {
+        "fires30d": {
+          "model": 0,
+          "typed": 0,
+          "preload": 0
+        },
+        "lastFired": null,
+        "listingBytes": null
+      },
+      "disposition": "retain",
+      "drill": false,
+      "reason": "New on 2026-11-01. Turns one session's corrections and retries into edits to existing skills, rules or checks. learn-from-fixes mines git history and fleet-wide session patterns, not the current conversation."
+    },
+    {
+      "plugin": "autodev-core",
       "name": "review",
       "invocable": true,
       "status": "proposed",
@@ -784,6 +802,24 @@
     },
     {
       "plugin": "autodev-core",
+      "name": "thrift",
+      "invocable": true,
+      "status": "proposed",
+      "evidence": {
+        "fires30d": {
+          "model": 0,
+          "typed": 0,
+          "preload": 0
+        },
+        "lastFired": null,
+        "listingBytes": null
+      },
+      "disposition": "retain",
+      "drill": false,
+      "reason": "New on 2026-10-30. Chooses the best value before any paid service, model or plan is recommended or run. cost-reconcile reconciles a known spend, not the choice of provider."
+    },
+    {
+      "plugin": "autodev-core",
       "name": "unslop",
       "invocable": true,
       "status": "proposed",
@@ -799,6 +835,24 @@
       "disposition": "retain",
       "drill": false,
       "reason": "Fired 1 time(s) in the window, last on 2026-10-10. No overlap found that would justify a merge."
+    },
+    {
+      "plugin": "autodev-core",
+      "name": "verifier",
+      "invocable": true,
+      "status": "proposed",
+      "evidence": {
+        "fires30d": {
+          "model": 0,
+          "typed": 0,
+          "preload": 0
+        },
+        "lastFired": null,
+        "listingBytes": null
+      },
+      "disposition": "retain",
+      "drill": false,
+      "reason": "New on 2026-11-01. Generates a project-local driver skill that runs an app's main user flows and is proven to go red. prove captures before and after evidence per change but owns no reusable driver."
     },
     {
       "plugin": "autodev-core",
