@@ -100,6 +100,24 @@
     },
     {
       "plugin": "autodev-core",
+      "name": "autoreview",
+      "invocable": true,
+      "status": "proposed",
+      "evidence": {
+        "fires30d": {
+          "model": 0,
+          "typed": 0,
+          "preload": 0
+        },
+        "lastFired": null,
+        "listingBytes": null
+      },
+      "disposition": "retain",
+      "drill": false,
+      "reason": "New on 2026-11-01. The cheap first read of a pull request that writes the review receipt merge-lock requires. review covers a local diff against project rules, code-reviewer is the escalation."
+    },
+    {
+      "plugin": "autodev-core",
       "name": "brain",
       "invocable": true,
       "status": "proposed",
@@ -187,6 +205,24 @@
       "disposition": "retain",
       "drill": false,
       "reason": "New on 2026-10-25 from a cluster of cost-estimate corrections (charged unit, billed versus gross versus pending, unknown read as zero). No other skill owns spend or quota figures."
+    },
+    {
+      "plugin": "autodev-core",
+      "name": "deploy-check",
+      "invocable": true,
+      "status": "proposed",
+      "evidence": {
+        "fires30d": {
+          "model": 0,
+          "typed": 0,
+          "preload": 0
+        },
+        "lastFired": null,
+        "listingBytes": null
+      },
+      "disposition": "retain",
+      "drill": false,
+      "reason": "New on 2026-11-01. Wraps deploy-gate.js: waits for the merged revision, runs smoke, records PASS or FAIL and opens only a draft revert PR. ship keeps entry points, auth and mobile checks."
     },
     {
       "plugin": "autodev-core",
@@ -547,6 +583,24 @@
       "disposition": "retain",
       "drill": false,
       "reason": "A shipped hook (panel-recommendation) points the model at it. Removing it orphans the hook text."
+    },
+    {
+      "plugin": "autodev-core",
+      "name": "rule-own-the-loop",
+      "invocable": false,
+      "status": "proposed",
+      "evidence": {
+        "fires30d": {
+          "model": 0,
+          "typed": 0,
+          "preload": 0
+        },
+        "lastFired": null,
+        "listingBytes": null
+      },
+      "disposition": "retain",
+      "drill": false,
+      "reason": "New on 2026-11-01. The notify, steer and cheapest-tier rule brain and auto-brain point at. No other rule states when a coordinator pings the owner."
     },
     {
       "plugin": "autodev-core",

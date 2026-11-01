@@ -81,7 +81,7 @@ try {
     check('T5 worker + escalation', eq(budget.ceilingsFor('worker', NO_CFG, 'escalation'), { maxTurns: 120, wallMs: HOUR, outputBytes: 32 * MIB, maxUsd: 10 }));
     check('T5 judge + ship never loosens the judge (4 turns, 120 s, 16 MiB, $0.5)', eq(budget.ceilingsFor('judge', NO_CFG, 'ship'), { maxTurns: 4, wallMs: 120000, outputBytes: 16 * MIB, maxUsd: 0.5 }));
     let unknownThrew = false;
-    try { budget.ceilingsFor('worker', NO_CFG, 'wizard'); } catch { unknownThrew = true; }
+    try { budget.ceilingsFor('worker', NO_CFG, 'no-such-tier'); } catch { unknownThrew = true; }
     check('T5 an unknown tier throws', unknownThrew);
     check('T5 tierCeilingsFor gives the tier on its own', eq(budget.tierCeilingsFor('plan', NO_CFG), { maxTurns: 80, wallMs: 45 * 60000, outputBytes: 32 * MIB, maxUsd: 8 }));
 
@@ -108,8 +108,8 @@ try {
         const plain = budget.reserve({ attemptId: 'T7-plain', kind: 'worker' }, { env, ledger });
         check('T7 an attempt with no tier keeps the worker ceilings and has no tier field', plain.ok && plain.attempt.ceilings.maxTurns === 500 && plain.attempt.reserved.turns === 500 && !('tier' in plain.attempt), JSON.stringify(plain.attempt));
         const before = fs.readFileSync(ledger, 'utf8');
-        const unknown = budget.reserve({ attemptId: 'T7-unknown', kind: 'worker', tier: 'wizard' }, { env, ledger });
-        check('T7 an unknown tier is a usage refusal', unknown.ok === false && unknown.code === 'usage' && /wizard/.test(unknown.why), JSON.stringify(unknown));
+        const unknown = budget.reserve({ attemptId: 'T7-unknown', kind: 'worker', tier: 'no-such-tier' }, { env, ledger });
+        check('T7 an unknown tier is a usage refusal', unknown.ok === false && unknown.code === 'usage' && /no-such-tier/.test(unknown.why), JSON.stringify(unknown));
         check('T7 and it reserved nothing', fs.readFileSync(ledger, 'utf8') === before && !before.includes('T7-unknown'));
         check('T7 the same attempt id is still refused as a restart', budget.reserve({ attemptId: 'T7-reviewer', kind: 'worker', tier: 'reviewer' }, { env, ledger }).code === 'attempt-restart');
         // The smaller reservation is what the window is charged.
