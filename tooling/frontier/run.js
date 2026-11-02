@@ -1198,8 +1198,9 @@ function status(c) {
 function candidateOpt(opts, src) {
     if (opts.candidate === undefined) return null;
     if (opts.candidate === true) fault('usage', '--candidate needs a commit');
-    const v = String(opts.candidate).toLowerCase();
-    return SHA_RE.test(v) ? v : revParse(src, v);
+    const raw = String(opts.candidate);
+    const v = raw.toLowerCase();
+    return SHA_RE.test(v) ? v : revParse(src, raw);
 }
 /** --plan <file> --arm <id> as an arm, or null without --arm. --variant, when given too, must be the arm's. */
 function armOpt(opts, src = DEFAULT_SRC) {
