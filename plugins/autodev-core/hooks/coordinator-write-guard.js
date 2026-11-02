@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// PreToolUse hook on Bash — the coordinator-write ban, as a mechanism, and
+// PreToolUse hook on Bash (and Monitor since Claude Code 2.1.314) — the coordinator-write ban, as a mechanism, and
 // since 2026-09-08 the `--no-verify` ask (second header, further down).
 // Exit 2 = block, exit 0 = allow; exit 0 with a JSON decision on stdout = ask.
 //
@@ -797,7 +797,7 @@ try {
         process.exit(0);
     }
 
-    if ((data.tool_name || '') !== 'Bash') process.exit(0);
+    if ((data.tool_name || '') !== 'Bash' && data.tool_name !== 'Monitor') process.exit(0);
 
     const command = (data.tool_input && data.tool_input.command) || '';
     if (!command) process.exit(0);

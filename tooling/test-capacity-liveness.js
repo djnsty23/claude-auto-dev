@@ -199,5 +199,5 @@ async function main() {
 main().catch((e) => {
     console.error(`test-capacity-liveness: ${e && e.stack ? e.stack : e}`);
     try { fs.rmSync(root, { recursive: true, force: true }); } catch { /* best effort */ }
-    process.exitCode = 2;
+    process.exitCode = 1;
 });

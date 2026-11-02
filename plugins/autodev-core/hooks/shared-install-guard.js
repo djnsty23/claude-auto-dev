@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// PreToolUse hook on Bash: deny a package install in a tree whose node_modules
+// PreToolUse hook on Bash (and Monitor since Claude Code 2.1.314): deny a package install in a tree whose node_modules
 // is shared with the main checkout, and name the command that unshares it.
 //
 // WHY. scripts/shared-install.js gives a new worktree the main checkout's
@@ -239,7 +239,7 @@ if (require.main === module) {
     try {
         let data;
         try { data = JSON.parse(fs.readFileSync(0, 'utf8')); } catch { process.exit(0); }
-        if (!data || typeof data !== 'object' || data.tool_name !== 'Bash') process.exit(0);
+        if (!data || typeof data !== 'object' || ((data.tool_name || '') !== 'Bash' && data.tool_name !== 'Monitor')) process.exit(0);
         const command = data.tool_input && typeof data.tool_input.command === 'string' ? data.tool_input.command : '';
         const reason = command ? decide(command, typeof data.cwd === 'string' ? data.cwd : process.cwd()) : null;
         if (reason) {

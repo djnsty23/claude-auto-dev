@@ -1257,6 +1257,177 @@ const verdicts = {};
     }
 }
 
+// ---------------------------------------------------------------------------
+// N. MONITOR TOOL PARITY (Claude Code 2.1.314). PreToolUse hooks with matcher
+//    "Bash" also fire for shell commands started by the Monitor tool. Replay
+//    all 99 dangerous cases and 6 benign cases as tool_name "Monitor".
+// ---------------------------------------------------------------------------
+{
+    const monitor = (command, over = {}) => ({
+        tool_name: 'Monitor',
+        session_id: 'SESSION-A',
+        cwd: OTHER_REPO,
+        tool_input: { command, description: 'radar' },
+        ...over,
+    });
+    const asHome = { HOME: fixture, USERPROFILE: fixture };
+    const inHome = { cwd: HOME_REPO };
+    const spacedHome = path.join(fixture, 'home with space');
+    const spacedForeign = path.join(fixture, 'product with space');
+    const scratchRepo = path.join(CFG_DIR, 'autodev', 'reports', 'brain39-w1', 'U3', 'repo');
+    const hookedRepo = path.join(fixture, 'hooked');
+    const bareRepo = path.join(fixture, 'bare-push');
+    const mhome = path.join(fixture, 'mhome');
+    const marker = path.join(mhome, '.claude', 'autodev', 'merge-lock.enforce');
+    const sub = { agent_id: 'a1b2c3', agent_type: 'general-purpose' };
+
+    const isBlockedOrAsked = (res) => {
+        if (res.exit === 2 && /^Blocked:/.test(res.stderr) && res.stdout.length === 0) return true;
+        if (res.exit !== 0 || res.stderr.length !== 0) return false;
+        try {
+            const out = JSON.parse(res.stdout).hookSpecificOutput;
+            return !!(out && out.hookEventName === 'PreToolUse' && out.permissionDecision === 'ask');
+        } catch {
+            return false;
+        }
+    };
+
+    const monCases = [
+        // 1-4: default role
+        [1, () => { writeRole({ session_id: 'SESSION-A', home_repos: [HOME_REPO] }); return run({ payload: monitor('git commit -m "x"') }); }],
+        [2, () => run({ payload: monitor('git push origin HEAD') })],
+        [3, () => run({ payload: monitor('git push --force-with-lease origin HEAD') })],
+        [4, () => run({ payload: monitor('git commit -m "x"', { cwd: PREFIX_TRAP }) })],
+        // 5: two homes
+        [5, () => { writeRole({ session_id: 'SESSION-A', home_repos: [HOME_REPO, SECOND_HOME] }); return run({ payload: monitor('git commit -m "x"') }); }],
+        // 6-20: default role
+        [6, () => { writeRole({ session_id: 'SESSION-A', home_repos: [HOME_REPO] }); return run({ payload: monitor('git merge --no-ff feature') }); }],
+        [7, () => run({ payload: monitor('git rebase origin/main') })],
+        [8, () => run({ payload: monitor('git rebase --continue') })],
+        [9, () => run({ payload: monitor(`git -C "${OTHER_REPO}" merge origin/main`, inHome) })],
+        [10, () => run({ payload: monitor(`git -C '${OTHER_REPO}' commit -m x`, inHome) })],
+        [11, () => run({ payload: monitor(`cd "${OTHER_REPO}" && git push origin main`, inHome) })],
+        [12, () => run({ payload: monitor(`git -C ${OTHER_REPO} commit -m "x"`, inHome) })],
+        [13, () => run({ payload: monitor('git -C ../product commit -m "x"', inHome) })],
+        [14, () => run({ payload: monitor(`cd ${OTHER_REPO} && git commit -m "x"`, inHome) })],
+        [15, () => run({ payload: monitor(`git --work-tree=${OTHER_REPO} commit -m "x"`, inHome) })],
+        [16, () => run({ payload: monitor(`git --git-dir=${path.join(OTHER_REPO, '.git')} commit -m "x"`, inHome) })],
+        [17, () => run({ payload: monitor(`git --git-dir ${path.join(OTHER_REPO, '.git')} push`, inHome) })],
+        [18, () => run({ payload: monitor(`git --git-dir=${path.join(HOME_REPO, '.git')} commit -m "x"`) })],
+        [19, () => run({ payload: monitor('npm test ; git push origin HEAD') })],
+        [20, () => run({ payload: monitor('echo $(git push origin HEAD)') })],
+        // 21-27: spacedHome
+        [21, () => { writeRole({ session_id: 'SESSION-A', home_repos: [spacedHome] }); return run({ payload: monitor(`git -C "${spacedForeign}" commit`, { cwd: spacedHome }) }); }],
+        [22, () => run({ payload: monitor(`cd "${spacedForeign}" && git push`, { cwd: spacedHome }) })],
+        [23, () => run({ payload: monitor(`git -C '${spacedForeign}' commit`, { cwd: spacedHome }) })],
+        [24, () => run({ payload: monitor(`cd '${spacedForeign}' && git push`, { cwd: spacedHome }) })],
+        [25, () => run({ payload: monitor(`git --git-dir="${path.join(spacedForeign, '.git')}" commit`, { cwd: spacedHome }) })],
+        [26, () => run({ payload: monitor(`git --work-tree="${spacedForeign}" commit`, { cwd: spacedHome }) })],
+        [27, () => run({ payload: monitor(`git -C ${path.join(fixture, 'other one').split(' ').join('\\ ')} commit`, { cwd: spacedHome }) })],
+        // 28: two writes in chain
+        [28, () => { writeRole({ session_id: 'SESSION-A', home_repos: [HOME_REPO] }); return run({ payload: monitor('git commit -m "x" && git push origin HEAD') }); }],
+        // 29: machine-wide claim
+        [29, () => { writeRole({ home_repos: [HOME_REPO] }); return run({ payload: monitor('git commit -m "x"', { session_id: 'ANYONE' }) }); }],
+        // 30-37: ~ and $HOME in command
+        [30, () => { writeRole({ session_id: 'SESSION-A', home_repos: [HOME_REPO] }); return run({ payload: monitor('cd ~/product && git commit -m "x"', inHome), env: asHome }); }],
+        [31, () => run({ payload: monitor('git -C ~/product commit -m "x"', inHome), env: asHome })],
+        [32, () => run({ payload: monitor('git --work-tree=~/product push origin HEAD', inHome), env: asHome })],
+        [33, () => run({ payload: monitor('cd $HOME/product && git merge topic', inHome), env: asHome })],
+        [34, () => run({ payload: monitor('git -C ${HOME}/product rebase main', inHome), env: asHome })],
+        [35, () => run({ payload: monitor('cd ${HOME}/product && git commit -m "x"', inHome), env: asHome })],
+        [36, () => run({ payload: monitor('{ git -C ~/product commit -m "x"; }', inHome), env: asHome })],
+        [37, () => run({ payload: monitor('git -C %USERPROFILE%\\product commit -m "x"', inHome), env: asHome })],
+        // 38-41: portable home_repos
+        [38, () => { writeRole({ session_id: 'SESSION-A', home_repos: ['~/harness'] }); return run({ payload: monitor('git commit -m "x"'), env: asHome }); }],
+        [39, () => { writeRole({ session_id: 'SESSION-A', home_repos: ['$HOME/harness'] }); return run({ payload: monitor('git commit -m "x"'), env: asHome }); }],
+        [40, () => { writeRole({ session_id: 'SESSION-A', home_repos: ['%USERPROFILE%/harness'] }); return run({ payload: monitor('git commit -m "x"'), env: asHome }); }],
+        [41, () => { writeRole({ session_id: 'SESSION-A', home_repos: ['~foo/harness'] }); return run({ payload: monitor('git commit -m "x"', inHome), env: asHome }); }],
+        // 42-64: --no-verify asks (no role file)
+        [42, () => run({ roleFile: ABSENT, payload: monitor('git push --no-verify origin HEAD') })],
+        [43, () => run({ roleFile: ABSENT, payload: monitor('git commit -n -m x') })],
+        [44, () => run({ roleFile: ABSENT, payload: monitor('git commit --no-verify -F msg.txt') })],
+        [45, () => run({ roleFile: ABSENT, payload: monitor('git -c core.hooksPath=/dev/null push') })],
+        [46, () => run({ roleFile: ABSENT, payload: monitor('git commit -an -m x') })],
+        [47, () => run({ roleFile: ABSENT, payload: monitor('git push origin HEAD --no-verify') })],
+        [48, () => run({ roleFile: ABSENT, payload: monitor('npm test && git push --no-verify') })],
+        [49, () => run({ roleFile: ABSENT, payload: monitor('{ git commit -n -m x; }') })],
+        [50, () => run({ roleFile: ABSENT, payload: monitor('cd /tmp && git commit -m x --no-verify') })],
+        [51, () => run({ roleFile: ABSENT, payload: monitor('bash -c "git commit -n -m x"') })],
+        [52, () => run({ roleFile: ABSENT, payload: monitor('git -c core.HOOKSPATH=/dev/null push origin HEAD') })],
+        [53, () => run({ roleFile: ABSENT, payload: monitor('git -ccore.hooksPath=/dev/null push') })],
+        [54, () => run({ roleFile: ABSENT, payload: monitor('git merge --no-verify feature') })],
+        [55, () => run({ roleFile: ABSENT, payload: monitor('git rebase --no-verify main') })],
+        [56, () => run({ roleFile: ABSENT, payload: monitor('git am -n patch.mbox') })],
+        [57, () => run({ roleFile: ABSENT, payload: monitor('git push origin HEAD "--no-verify"') })],
+        [58, () => run({ roleFile: ABSENT, payload: monitor("git commit '-n' -m x") })],
+        [59, () => run({ roleFile: ABSENT, payload: monitor("cat > brief.md <<'EOF'\nline one\nnever --no-verify\nEOF\ngit push --no-verify origin HEAD") })],
+        [60, () => run({ roleFile: ABSENT, payload: monitor("git commit -n -m x && cat <<'EOF' > notes.md\nnever --no-verify") })],
+        [61, () => run({ roleFile: ABSENT, payload: monitor('git push --no-verify origin HEAD', { cwd: hookedRepo }) })],
+        [62, () => run({ roleFile: ABSENT, payload: monitor('git commit -n -m x', { cwd: hookedRepo }) })],
+        [63, () => run({ roleFile: ABSENT, payload: monitor(`git -C ${hookedRepo} push --no-verify origin HEAD`, { cwd: fixture }) })],
+        [64, () => run({ roleFile: ABSENT, payload: monitor('git push --no-verify origin HEAD', { cwd: path.join(fixture, 'nowhere') }) })],
+        // 65-66: role held + --no-verify
+        [65, () => { writeRole({ session_id: 'SESSION-A', home_repos: [HOME_REPO] }); return run({ payload: monitor('git push --no-verify origin HEAD') }); }],
+        [66, () => run({ payload: monitor('git push --no-verify origin HEAD', inHome) })],
+        // 67-78: merge-lock
+        [67, () => { fs.writeFileSync(marker, ''); return run({ roleFile: ABSENT, payload: monitor('gh pr merge 12 --rebase'), env: { HOME: mhome, USERPROFILE: mhome } }); }],
+        [68, () => run({ roleFile: ABSENT, payload: monitor('gh pr merge 12 --repo acme/widget --squash --delete-branch'), env: { HOME: mhome, USERPROFILE: mhome } })],
+        [69, () => run({ roleFile: ABSENT, payload: monitor('cd /tmp && gh pr merge 12'), env: { HOME: mhome, USERPROFILE: mhome } })],
+        [70, () => run({ roleFile: ABSENT, payload: monitor('GH_TOKEN=x gh pr merge 12'), env: { HOME: mhome, USERPROFILE: mhome } })],
+        [71, () => run({ roleFile: ABSENT, payload: monitor('gh api -X PUT repos/acme/widget/pulls/12/merge -f merge_method=rebase'), env: { HOME: mhome, USERPROFILE: mhome } })],
+        [72, () => run({ roleFile: ABSENT, payload: monitor('gh api --method PUT /repos/acme/widget/pulls/12/merge'), env: { HOME: mhome, USERPROFILE: mhome } })],
+        [73, () => run({ roleFile: ABSENT, payload: monitor('gh api repos/{owner}/{repo}/pulls/12/merge --method=PUT'), env: { HOME: mhome, USERPROFILE: mhome } })],
+        [74, () => run({ roleFile: ABSENT, payload: monitor('gh pr --repo acme/widget merge 12'), env: { HOME: mhome, USERPROFILE: mhome } })],
+        [75, () => run({ roleFile: ABSENT, payload: monitor('env GH_TOKEN=x gh pr merge 12'), env: { HOME: mhome, USERPROFILE: mhome } })],
+        [76, () => run({ roleFile: ABSENT, payload: monitor('"g""h" pr "mer""ge" 12'), env: { HOME: mhome, USERPROFILE: mhome } })],
+        [77, () => run({ roleFile: ABSENT, payload: monitor("gh api -X PUT 'repos/acme/widget/pulls/12/merge?x=1'"), env: { HOME: mhome, USERPROFILE: mhome } })],
+        [78, () => { const r = run({ roleFile: ABSENT, payload: monitor('gh api -XPUT https://api.github.com/repos/acme/widget/pulls/12/merge'), env: { HOME: mhome, USERPROFILE: mhome } }); try { fs.unlinkSync(marker); } catch {} return r; }],
+        // 79-84: subagents & scratch
+        [79, () => { writeRole({ session_id: 'SESSION-A', home_repos: [HOME_REPO] }); return run({ payload: monitor('git commit -m "x"', { agent_type: 'general-purpose' }) }); }],
+        [80, () => run({ payload: monitor('git commit -m "x"', { agent_id: '' }) })],
+        [81, () => run({ payload: monitor('git commit -m "x"', { agent_id: { id: 'x' } }) })],
+        [82, () => run({ payload: monitor('git push origin HEAD', { cwd: scratchRepo }) })],
+        [83, () => run({ payload: monitor('git commit -m "x"', { cwd: path.join(CFG_DIR, 'autodev', 'reports-extra', 'repo') }) })],
+        [84, () => run({ payload: monitor(`git -C "${scratchRepo}" commit -m a && git -C "${OTHER_REPO}" commit -m b`) })],
+        // 85-99: subagent default-branch push
+        [85, () => run({ roleFile: ABSENT, payload: monitor('git push origin main', sub) })],
+        [86, () => run({ roleFile: ABSENT, payload: monitor('git push origin HEAD:main', sub) })],
+        [87, () => run({ roleFile: ABSENT, payload: monitor('git push origin HEAD:heads/main', sub) })],
+        [88, () => run({ roleFile: ABSENT, payload: monitor('git push origin +HEAD:heads/master', sub) })],
+        [89, () => run({ roleFile: ABSENT, payload: monitor('git push origin +main', sub) })],
+        [90, () => run({ roleFile: ABSENT, payload: monitor('git push origin feature:refs/heads/master', sub) })],
+        [91, () => run({ roleFile: ABSENT, payload: monitor('git push origin :main', sub) })],
+        [92, () => run({ roleFile: ABSENT, payload: monitor('git push -o ci.skip origin main', sub) })],
+        [93, () => run({ roleFile: ABSENT, payload: monitor(`git -C "${OTHER_REPO}" push origin main`, sub) })],
+        [94, () => run({ roleFile: ABSENT, payload: monitor(`cd "${OTHER_REPO}" && git push -u origin main`, sub) })],
+        [95, () => run({ roleFile: ABSENT, payload: monitor('git push --all origin', sub) })],
+        [96, () => run({ roleFile: ABSENT, payload: monitor('git push --mirror origin', sub) })],
+        [97, () => { runBudgeted('git', ['-C', bareRepo, 'checkout', '-q', '-b', 'main'], { encoding: 'utf8', timeout: 60000 }); return run({ roleFile: ABSENT, payload: monitor('git push', { ...sub, cwd: bareRepo }) }); }],
+        [98, () => run({ roleFile: ABSENT, payload: monitor('git push origin HEAD', { ...sub, cwd: bareRepo }) })],
+        [99, () => run({ roleFile: ABSENT, payload: monitor('git push origin @', { ...sub, cwd: bareRepo }) })],
+    ];
+
+    for (const [id, fn] of monCases) {
+        const res = fn();
+        check(`N. Monitor replay cwg-dangerous-${id} blocks`, isBlockedOrAsked(res),
+            `exit ${res.exit}, stdout ${res.stdout.length}B, stderr ${res.stderr.length}B`);
+    }
+
+    writeRole({ session_id: 'SESSION-A', home_repos: [HOME_REPO] });
+    expectSilentAllow('N. Monitor benign-1: no role file, foreign commit is allowed',
+        run({ roleFile: ABSENT, payload: monitor('git commit -m "x"') }));
+    expectSilentAllow('N. Monitor benign-2: committing inside home repo is allowed',
+        run({ payload: monitor('git commit -m "x"', inHome) }));
+    expectSilentAllow('N. Monitor benign-3: double-quoted mention of git push is allowed',
+        run({ payload: monitor('echo "remember to git push before lunch"') }));
+    expectSilentAllow('N. Monitor benign-4: read-only git status in a foreign repo is allowed',
+        run({ payload: monitor('git status --porcelain') }));
+    expectSilentAllow('N. Monitor benign-5: git pull --ff-only is allowed',
+        run({ payload: monitor('git pull --ff-only origin main') }));
+    expectSilentAllow('N. Monitor benign-6: empty Monitor command is allowed',
+        run({ payload: monitor('') }));
+}
+
 fs.rmSync(fixture, { recursive: true, force: true });
 
 // The population, not a bare verdict: what was driven, and how. Without it a

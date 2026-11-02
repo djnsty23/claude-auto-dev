@@ -177,6 +177,14 @@ const SUBJECT_OVERRIDES = {
     // derivation cannot yield it. The CJS stub throws at import, which the
     // suite turns into exit 1, and its CLI half exits non-zero the same way.
     'test-text-hygiene.js': ['plugins/autodev-core/scripts/text-hygiene.mjs'],
+
+    // The subject is two markdown files carrying the module-kit scaffold
+    // commands, which derivation cannot yield (it derives .js only). Stubbing
+    // either drops the matched command count below 3, turning the suite red.
+    'test-scaffold-command-quoting.js': [
+        'plugins/autodev-core/skills/setup-project/SKILL.md',
+        'plugins/autodev-core/skills/spec/references/new-app-chain.md',
+    ],
 };
 
 /**

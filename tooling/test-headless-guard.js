@@ -205,6 +205,31 @@ expectSilentAllow('13b. env armed, run_in_background is 1: silent allow',
         `armed: ${detail(armed)}; disarmed: ${detail(disarmed)}`);
 }
 
+// 15. MONITOR TOOL PARITY (Claude Code 2.1.314).
+//     Monitor has no run_in_background flag and is long-running by nature, so
+//     any Monitor command in a headless worker is denied (strict headless policy).
+{
+    const mon = (command) => bash({ command, description: 'radar' }, { tool_name: 'Monitor' });
+    const monDang = [
+        ['15a. Monitor, env armed, `npm run gate` (no run_in_background flag, strict policy denies)', 'npm run gate'],
+        ['15b. Monitor, env armed, command ends in a single &', 'npm run gate > log 2>&1 &'],
+        ['15c. Monitor, env armed, trailing & followed by whitespace', 'sleep 5 &   \n'],
+        ['15d. Monitor, env armed, `npm run gate > log 2>&1 & echo started`: the & before a following command', 'npm run gate > log 2>&1 & echo started'],
+        ['15e. Monitor, env armed, `(npm run gate &)`: the & inside a subshell', '(npm run gate &)'],
+        ['15f. Monitor, env armed, `sleep 5&`: the & glued to its command', 'sleep 5&'],
+        ['15g. Monitor, env armed, a heredoc whose OPENER line ends in &', 'cat <<EOF &\nbody\nEOF\n'],
+    ];
+    for (const [label, cmd] of monDang) {
+        expectDeny(label, run({ payload: mon(cmd), headless: '1' }));
+    }
+    expectSilentAllow('15h. Monitor, env unset, command without &: silent allow',
+        run({ payload: mon('npm run gate') }));
+    expectSilentAllow('15i. Monitor, env unset, command ends in &: silent allow',
+        run({ payload: mon('npm run gate > log 2>&1 &') }));
+    expectSilentAllow('15j. Monitor, env armed, no command: silent allow',
+        run({ payload: bash({ description: 'radar' }, { tool_name: 'Monitor' }), headless: '1' }));
+}
+
 // The population, not a bare verdict: what was driven, and how.
 console.log(`\n${tally(pass, fail, infra)}`);
 console.log(`subject: ${path.relative(path.resolve(__dirname, '..'), HOOK)}, `
