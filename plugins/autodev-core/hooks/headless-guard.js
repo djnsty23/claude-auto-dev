@@ -136,10 +136,12 @@ try {
         process.exit(0);
     }
     if (!data || typeof data !== 'object') process.exit(0);
-    if ((data.tool_name || '') !== 'Bash') process.exit(0);
+    if ((data.tool_name || '') !== 'Bash' && data.tool_name !== 'Monitor') process.exit(0);
 
     const input = data.tool_input;
-    const backgrounded = !!input && typeof input === 'object' && input.run_in_background === true;
+    const isMonitor = data.tool_name === 'Monitor' && !!input && typeof input === 'object'
+        && typeof input.command === 'string' && input.command.length > 0;
+    const backgrounded = isMonitor || (!!input && typeof input === 'object' && input.run_in_background === true);
     const backgroundAmp = !!input && typeof input === 'object' && typeof input.command === 'string'
         && hasBackgroundAmp(input.command);
 

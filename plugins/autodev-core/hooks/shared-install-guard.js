@@ -239,7 +239,7 @@ if (require.main === module) {
     try {
         let data;
         try { data = JSON.parse(fs.readFileSync(0, 'utf8')); } catch { process.exit(0); }
-        if (!data || typeof data !== 'object' || data.tool_name !== 'Bash') process.exit(0);
+        if (!data || typeof data !== 'object' || (data.tool_name !== 'Bash' && data.tool_name !== 'Monitor')) process.exit(0);
         const command = data.tool_input && typeof data.tool_input.command === 'string' ? data.tool_input.command : '';
         const reason = command ? decide(command, typeof data.cwd === 'string' ? data.cwd : process.cwd()) : null;
         if (reason) {

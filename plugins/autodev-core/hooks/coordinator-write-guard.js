@@ -797,7 +797,7 @@ try {
         process.exit(0);
     }
 
-    if ((data.tool_name || '') !== 'Bash') process.exit(0);
+    if ((data.tool_name || '') !== 'Bash' && data.tool_name !== 'Monitor') process.exit(0);
 
     const command = (data.tool_input && data.tool_input.command) || '';
     if (!command) process.exit(0);
