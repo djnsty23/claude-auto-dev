@@ -1424,6 +1424,8 @@ const verdicts = {};
         run({ payload: monitor('git status --porcelain') }));
     expectSilentAllow('N. Monitor benign-5: git pull --ff-only is allowed',
         run({ payload: monitor('git pull --ff-only origin main') }));
+    expectSilentAllow('N. Monitor benign-6: empty Monitor command is allowed',
+        run({ payload: monitor('') }));
 }
 
 fs.rmSync(fixture, { recursive: true, force: true });

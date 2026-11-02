@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// PreToolUse hook on Bash: in a HEADLESS worker, refuse a backgrounded command.
+// PreToolUse hook on Bash (and Monitor since Claude Code 2.1.314): in a HEADLESS worker, refuse a backgrounded command.
 //
 // WHY. A `claude -p` worker exits the moment its turn ends. A Bash command
 // started with `run_in_background: true`, or with a trailing `&`, keeps running
