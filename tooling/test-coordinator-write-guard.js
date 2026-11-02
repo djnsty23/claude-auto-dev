@@ -1260,7 +1260,7 @@ const verdicts = {};
 // ---------------------------------------------------------------------------
 // N. MONITOR TOOL PARITY (Claude Code 2.1.314). PreToolUse hooks with matcher
 //    "Bash" also fire for shell commands started by the Monitor tool. Replay
-//    all 99 dangerous cases and 5 benign cases as tool_name "Monitor".
+//    all 99 dangerous cases and 6 benign cases as tool_name "Monitor".
 // ---------------------------------------------------------------------------
 {
     const monitor = (command, over = {}) => ({

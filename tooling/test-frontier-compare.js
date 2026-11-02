@@ -279,6 +279,11 @@ try {
     check('arm: a candidate arm with a short sha is refused', refused(() => R.loadArm(PLAN, 'CAN', null, head.slice(0, 12)), 'no-candidate'));
     const can = R.armOpt({ plan: PLAN, arm: 'CAN', candidate: 'HEAD' }, g);
     check('arm: --candidate HEAD resolves to the full sha in the source repo', can.sha === head && can.pluginPin === 'candidate', JSON.stringify(can));
+    gx('tag', 'CandRef');
+    gx('pack-refs', '--all');
+    const canRef = R.armOpt({ plan: PLAN, arm: 'CAN', candidate: 'CandRef' }, g);
+    check('arm: --candidate preserves ref case for packed mixed-case refs and lowercases 40-hex shas',
+        canRef.sha === head && R.armOpt({ plan: PLAN, arm: 'CAN', candidate: head.toUpperCase() }, g).sha === head);
     check('arm: --candidate with no commit is a usage error', refused(() => R.armOpt({ plan: PLAN, arm: 'CAN', candidate: true }, g), 'usage'));
     check('pin: candidate is the exact commit it names', R.pinRev(gc, {}, can) === head);
     // The acceptance case: an untagged candidate loads different plugins than current,

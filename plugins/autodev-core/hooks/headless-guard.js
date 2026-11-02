@@ -8,7 +8,9 @@
 // still running. `[measured 2026-09-16]` a headless worker backgrounded
 // `npm run gate`, ended its turn, and reported the gate as passed while the
 // sweep was still in flight. Prose in the brief had told it not to; prose did
-// not stop it. This hook does.
+// not stop it. This hook does. Since Claude Code 2.1.314, Monitor commands also
+// dispatch through the Bash matcher; Monitor has no `run_in_background` flag and
+// is long-running by nature, so any non-empty Monitor command is denied here too.
 //
 // IT IS A GUARD, NOT ADVICE. There is no userConfig switch, deliberately: a
 // guard the model can switch off by asking for a setting is not a guard, and
