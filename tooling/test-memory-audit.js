@@ -260,6 +260,40 @@ const kinds = (p) => (p ? p.findings.map((f) => f.kind) : []);
         p.gaps[1].name === 'later' && p.gaps[1].refs === 1);
 }
 
+// ──────── 8c. the global store is audited too, and rule names resolve
+//
+// <config>/memory loads in every session and was never audited. A memory that
+// cites a rule file (<config>/rules/x.md) by name is not dangling, and an
+// index link that leaves the store is live when its file exists.
+{
+    const rulesDir = path.join(CONFIG, 'rules');
+    fs.mkdirSync(rulesDir, { recursive: true });
+    fs.writeFileSync(path.join(rulesDir, 'backup-protocol.md'), '# Backup protocol\n');
+    const globalDir = path.join(CONFIG, 'memory');
+    fs.mkdirSync(globalDir, { recursive: true });
+    fs.writeFileSync(path.join(globalDir, 'stray.md'), mem('stray', 'not indexed', 'Body about kilns.'));
+    fs.writeFileSync(path.join(globalDir, 'MEMORY.md'),
+        '- [Map](credentials-map.md) — x\n- [Backup](../rules/backup-protocol.md) — rule\n- [Gone](../rules/nope.md) — dead\n');
+    makeProject('rulelink', { 'a.md': mem('cites', 'x', 'Follow [[backup-protocol]] and [[no-such-rule]].') },
+        '- [A](a.md) — x\n');
+    const r = spawnSync(process.execPath, [AUDIT, '--json'], {
+        encoding: 'utf8', env: { ...process.env, CLAUDE_CONFIG_DIR: CONFIG }, maxBuffer: 32 * 1024 * 1024,
+    });
+    let j = null;
+    try { j = JSON.parse(r.stdout); } catch { /* leave null */ }
+    const g = j && j.global;
+    const gd = (kind) => (g ? g.findings.filter((f) => f.kind === kind).map((f) => f.detail) : []);
+    check('the global store is audited', !!g && g.memoryCount === 2);
+    check('  an unindexed global memory is reported', gd('unindexed').some((d) => d.startsWith('stray.md')));
+    check('  an index link out of the store to an existing file is not dead',
+        !gd('dead-index-link').some((d) => d.includes('backup-protocol')));
+    check('  one to a missing file still is', gd('dead-index-link').some((d) => d.includes('nope.md')));
+    const p = j && forProject(j.projects, 'rulelink');
+    const dangling = p ? p.findings.filter((f) => f.kind === 'dangling-link').map((f) => f.detail) : [];
+    check('a [[link]] naming a rule file is not dangling', !!p && !dangling.some((d) => d.includes('backup-protocol')));
+    check('  a [[link]] naming no rule still is', dangling.some((d) => d.includes('no-such-rule')));
+}
+
 // ───────────────────────────────── 9. the active/stale filter and --all
 //
 // Both halves, because one alone cannot tell "filtered correctly" from
