@@ -45,6 +45,14 @@ const GLOBAL_NAMES = (() => {
     return out;
 })();
 
+// Rule files (<config>/rules/*.md): memories cite a rule as [[backup-protocol]].
+const RULE_NAMES = (() => {
+    try {
+        return new Set(fs.readdirSync(path.join(CONFIG_DIR, 'rules'))
+            .filter((f) => f.endsWith('.md')).map((f) => f.slice(0, -3)));
+    } catch { return new Set(); }
+})();
+
 // MEMORY.md is loaded into context every session. Claude Code warns past these.
 const INDEX_MAX_LINES = 200;
 const INDEX_MAX_BYTES = 25 * 1024;
@@ -118,40 +126,10 @@ function similarity(a, b) {
     return shared / Math.min(wa.size, wb.size);
 }
 
-if (!fs.existsSync(PROJECTS)) {
-    const msg = `No project memory found at ${PROJECTS}.`;
-    console.log(asJson ? JSON.stringify({ projects: [] }) : msg);
-    process.exit(0);
-}
-
-const report = [];
-
-for (const slug of fs.readdirSync(PROJECTS)) {
-    const memDir = path.join(PROJECTS, slug, 'memory');
-    if (!fs.existsSync(memDir)) continue;
-
-    const projectPath = decodeProjectDir(slug);
-    const projectExists = fs.existsSync(projectPath);
-
+// Audit one memory directory: index health, frontmatter, duplicates, index
+// drift and wiki links. Shared by the project stores and the global store.
+function auditStore(memDir) {
     const files = fs.readdirSync(memDir).filter((f) => f.endsWith('.md'));
-    const lastTouched = newestMtime(memDir);
-    const idleDays = lastTouched ? daysSince(lastTouched) : null;
-
-    // "Active" = memory touched recently, or the repo itself has recent commits.
-    let repoIdleDays = null;
-    if (projectExists) {
-        try {
-            const ts = execSync('git log -1 --format=%ct', {
-                cwd: projectPath, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'],
-            }).trim();
-            if (ts) repoIdleDays = daysSince(Number(ts) * 1000);
-        } catch { /* not a git repo */ }
-    }
-    const active = (idleDays !== null && idleDays <= staleDays) ||
-                   (repoIdleDays !== null && repoIdleDays <= staleDays);
-
-    if (!active && !includeAll) continue;
-
     const findings = [];
 
     // --- index health
@@ -218,7 +196,8 @@ for (const slug of fs.readdirSync(PROJECTS)) {
     // --- index/file drift
     const fileSet = new Set(files);
     for (const link of indexLinks) {
-        if (!fileSet.has(path.basename(link))) {
+        // A link that leaves the store (../rules/x.md) is live if its file exists.
+        if (!fileSet.has(path.basename(link)) && !fs.existsSync(path.resolve(memDir, link))) {
             const from = indexSource.get(link);
             findings.push({ kind: 'dead-index-link', detail: from ? `${link} (in ${from})` : link });
         }
@@ -240,7 +219,7 @@ for (const slug of fs.readdirSync(PROJECTS)) {
     const gapRefs = new Map();
     for (const m of memories) {
         for (const l of [...m.body.matchAll(/\[\[([^\]]+)\]\]/g)].map((x) => x[1])) {
-            if (names.has(l) || GLOBAL_NAMES.has(l)) continue;
+            if (names.has(l) || GLOBAL_NAMES.has(l) || RULE_NAMES.has(l)) continue;
             findings.push({ kind: 'dangling-link', detail: `${m.file} → [[${l}]]` });
             if (!gapRefs.has(l)) gapRefs.set(l, new Set());
             gapRefs.get(l).add(m.file);
@@ -249,28 +228,63 @@ for (const slug of fs.readdirSync(PROJECTS)) {
     const gaps = [...gapRefs]
         .map(([name, from]) => ({ name, refs: from.size, from: [...from].sort() }))
         .sort((a, b) => b.refs - a.refs || a.name.localeCompare(b.name));
+    return { findings, memoryCount: memories.length, subIndexes: [...subIndexes], gaps };
+}
+
+const report = [];
+
+for (const slug of fs.existsSync(PROJECTS) ? fs.readdirSync(PROJECTS) : []) {
+    const memDir = path.join(PROJECTS, slug, 'memory');
+    if (!fs.existsSync(memDir)) continue;
+
+    const projectPath = decodeProjectDir(slug);
+    const projectExists = fs.existsSync(projectPath);
+
+    const lastTouched = newestMtime(memDir);
+    const idleDays = lastTouched ? daysSince(lastTouched) : null;
+
+    // "Active" = memory touched recently, or the repo itself has recent commits.
+    let repoIdleDays = null;
+    if (projectExists) {
+        try {
+            const ts = execSync('git log -1 --format=%ct', {
+                cwd: projectPath, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'],
+            }).trim();
+            if (ts) repoIdleDays = daysSince(Number(ts) * 1000);
+        } catch { /* not a git repo */ }
+    }
+    const active = (idleDays !== null && idleDays <= staleDays) ||
+                   (repoIdleDays !== null && repoIdleDays <= staleDays);
+
+    if (!active && !includeAll) continue;
+
+    const { findings, memoryCount, subIndexes, gaps } = auditStore(memDir);
 
     if (!projectExists) findings.push({ kind: 'project-gone', detail: `${projectPath} no longer exists on disk` });
 
     report.push({
         slug, projectPath, projectExists, active,
-        memoryCount: memories.length,
-        subIndexes: [...subIndexes],
+        memoryCount, subIndexes,
         idleDays, repoIdleDays,
         findings,
         gaps,
     });
 }
 
+// The global store (<config>/memory) is loaded in every session, so it gets the
+// same audit as a project store. It has no project path and is always active.
+const GLOBAL_DIR = path.join(CONFIG_DIR, 'memory');
+const globalStore = fs.existsSync(GLOBAL_DIR) ? { path: GLOBAL_DIR, ...auditStore(GLOBAL_DIR) } : null;
+
 if (asJson) {
-    console.log(JSON.stringify({ configDir: CONFIG_DIR, staleDays, projects: report }, null, 2));
+    console.log(JSON.stringify({ configDir: CONFIG_DIR, staleDays, global: globalStore, projects: report }, null, 2));
     process.exit(0);
 }
 
-const needsWork = report.filter((r) => r.findings.length);
+const needsWork = [...(globalStore ? [globalStore] : []), ...report].filter((r) => r.findings.length);
 console.log(`\nMemory audit — ${report.length} ${includeAll ? '' : 'active '}project(s) under ${CONFIG_DIR}\n`);
 
-if (!report.length) {
+if (!report.length && !globalStore) {
     // "None found" and "could not look" print identically unless the config
     // directory is checked first. Only the second is a probe failure, and it
     // is the one that must not exit 0 and read as an all-clear.
@@ -283,11 +297,8 @@ if (!report.length) {
     process.exit(0);
 }
 
-for (const r of report) {
-    const idle = r.idleDays === null ? 'never written' : `${r.idleDays}d since last write`;
-    console.log(`  ${r.slug}`);
-    console.log(`    ${r.memoryCount} memories · ${idle}${r.repoIdleDays !== null ? ` · repo ${r.repoIdleDays}d idle` : ''}`);
-    if (!r.findings.length) { console.log('    ✓ clean\n'); continue; }
+function printFindings(r) {
+    if (!r.findings.length) { console.log('    ✓ clean\n'); return; }
     const grouped = {};
     for (const f of r.findings) (grouped[f.kind] = grouped[f.kind] || []).push(f.detail);
     for (const [kind, details] of Object.entries(grouped)) {
@@ -302,6 +313,19 @@ for (const r of report) {
     console.log('');
 }
 
+if (globalStore) {
+    console.log(`  global (${globalStore.path})`);
+    console.log(`    ${globalStore.memoryCount} memories`);
+    printFindings(globalStore);
+}
+
+for (const r of report) {
+    const idle = r.idleDays === null ? 'never written' : `${r.idleDays}d since last write`;
+    console.log(`  ${r.slug}`);
+    console.log(`    ${r.memoryCount} memories · ${idle}${r.repoIdleDays !== null ? ` · repo ${r.repoIdleDays}d idle` : ''}`);
+    printFindings(r);
+}
+
 console.log(needsWork.length
-    ? `${needsWork.length} project(s) need attention. Nothing was modified — this tool only reports.\n`
+    ? `${needsWork.length} store(s) need attention. Nothing was modified — this tool only reports.\n`
     : 'All memory stores are clean.\n');
