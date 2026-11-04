@@ -57,4 +57,7 @@ node evals/qwen/run.js summary
 ```
 
 Product repos resolve under `$QWEN_EVAL_REPOS`, by default `Downloads/code/<repo>` in the home
-directory. Arm a costs no Claude quota. Arms b and c do, so estimate before a full run.
+directory. Arm a costs no Claude quota. Arms b and c do, so estimate before a full run and cap it
+with `--budget-tokens N`: the run stops before a task once the projected total would pass N.
+Arm b rows carry `draftDiff` and `claudeDiff`, the diff Claude made on top of the draft, which
+is what `fixes.md` is built from.
