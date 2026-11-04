@@ -107,6 +107,9 @@ const ALL_SUBJECTS = process.argv.includes('--all-subjects');
 //     `require('./check-foo.js')` ARE tooling/check-foo.js. That is a fact about
 //     where the file sits, not a similarity heuristic.
 //
+// evals/ joined the same full-path rules on 2026-11-04, when test-qwen-eval.js
+// came back NOT verified for naming evals/qwen/run.js as path.join segments.
+//
 // Rule 4's unique-basename search deliberately did NOT widen. It is the one rule
 // that guesses, and the measurement is under it.
 //

@@ -176,7 +176,12 @@ function deriveCandidates(suiteFile, root) {
     //    RegExp built through a template literal loses `\w` and `\.` to escape
     //    collapsing, and the result is a silent false-empty rather than an error.
     //    That cost a wrong reading while measuring this very change.
-    for (const m of src.matchAll(/['"`]((?:\.\.\/)*(?:plugins|templates|tooling)\/[\w./-]+\.js)['"`]/g)) {
+    //    evals/ joined rules 1-3 on 2026-11-04, on the same footing tooling/ did
+    //    on 2026-09-03: tooling/test-qwen-eval.js names evals/qwen/run.js as a
+    //    __dirname-anchored path.join and derived nothing, so CI reported it NOT
+    //    verified. A path written out in full is not a guess, so the tree it
+    //    lives in is the only thing that changed. Rule 4 still does not widen.
+    for (const m of src.matchAll(/['"`]((?:\.\.\/)*(?:plugins|templates|tooling|evals)\/[\w./-]+\.js)['"`]/g)) {
         add(m[1].replace(/^(\.\.\/)+/, ''), 'literal');
     }
     // 2. path.join / path.resolve segment lists: 'plugins', 'autodev-core', 'hooks', 'x.js'
@@ -184,7 +189,7 @@ function deriveCandidates(suiteFile, root) {
         const call = m[1];
         const parts = [...call.matchAll(/['"`]([\w.-]+)['"`]/g)].map((x) => x[1]);
         if (!parts.length || !parts[parts.length - 1].endsWith('.js')) continue;
-        for (const top of ['plugins', 'tooling']) {
+        for (const top of ['plugins', 'tooling', 'evals']) {
             const i = parts.indexOf(top);
             if (i >= 0) add(parts.slice(i).join('/'), 'pathjoin');
         }
@@ -200,7 +205,7 @@ function deriveCandidates(suiteFile, root) {
     // 3. A bare require of a repo-relative module, with or without .js
     for (const m of src.matchAll(/require\(['"`]((?:\.\.\/)+[\w./-]+)['"`]\)/g)) {
         const p = m[1].replace(/^(\.\.\/)+/, '');
-        if (/^(plugins|templates|tooling)\//.test(p)) add(p.endsWith('.js') ? p : p + '.js', 'require');
+        if (/^(plugins|templates|tooling|evals)\//.test(p)) add(p.endsWith('.js') ? p : p + '.js', 'require');
     }
     // 3b. A './' require resolves against the suite's own directory, the same
     //     fact as 2b. test-standing-order-wake.js names its subject exactly this
