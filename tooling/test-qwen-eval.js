@@ -76,7 +76,7 @@ check('repeated --task collects, flags are booleans', a._[0] === 'run' && a.arm 
 // manifest shape
 const m = JSON.parse(fs.readFileSync(path.join(ROOT, 'evals', 'qwen', 'manifest.json'), 'utf8'));
 const bad = m.tasks.filter((t) => !(t.id && t.repo && /^[0-9a-f]{40}$/.test(t.parent) && /^[0-9a-f]{40}$/.test(t.fix)
-    && t.brief && t.brief.length > 40 && t.files.length && t.tests.length && t.accept && t.passLine));
+    && t.brief && t.brief.length > 40 && t.subject && t.files.length && t.tests.length && t.accept && t.passLine));
 check(`every manifest task carries repo, SHAs, brief, files, tests, acceptance and pass line (${m.tasks.length} tasks)`, bad.length === 0 && m.tasks.length >= 5, bad.map((t) => t.id).join());
 // This repo is public: tasks from private repos live in a private data dir (--data).
 check('the public manifest holds only this repo\'s tasks', m.tasks.every((t) => t.repo === 'claude-auto-dev'), m.tasks.map((t) => t.repo).join());

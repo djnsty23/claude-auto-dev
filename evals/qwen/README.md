@@ -24,6 +24,10 @@ the hidden acceptance test: the model never sees them, and the harness copies th
 `brief` is the task statement, `files` the files the model is shown (arm a) or pointed at (arms b, c).
 `accept` runs from `pkgDir`, and a pass is exit 0 plus a match of `passLine`.
 
+`--brief subject` replaces the brief with the fix commit's subject line alone: a terse ticket,
+closer to how work is really delegated. The written briefs name the cause and often the fix, so
+on them Qwen alone passes almost everything and the arms barely separate.
+
 Tasks touching secrets, payments or production data are left out. `run.js verify` proves every
 acceptance test fails on the parent and passes on the fix, with no model call.
 

@@ -31,6 +31,11 @@ function setData(dir) {
 }
 setData(process.env.QWEN_EVAL_DATA || HERE);
 
+// "full" is the written task statement. "subject" is the fix commit's subject
+// line alone: a terse ticket, the harder and more realistic delegation.
+let BRIEF_MODE = 'full';
+const briefOf = (task) => (BRIEF_MODE === 'subject' ? task.subject : task.brief);
+
 const USAGE = `usage: node evals/qwen/run.js <command> [options]
 
 commands:
@@ -50,6 +55,8 @@ options:
   --claude-model <id>   default claude-opus-5-5
   --effort <level>      Claude effort, default medium
   --rounds <n>          fix rounds after the first attempt, default 2
+  --brief full|subject  the written brief (default) or the fix commit's
+                        subject line alone, a terse ticket
   --keep                keep the scratch worktree
   --dry-run             print what would run, call no model
 `;
@@ -263,7 +270,7 @@ function fileContext(h, task) {
 }
 
 function qwenPrompt(h, task) {
-  return `Task (repo ${task.repo}):\n${task.brief}\n\nRelevant files at the start state:\n\n${fileContext(h, task)}\n\n` +
+  return `Task (repo ${task.repo}):\n${briefOf(task)}\n\nRelevant files at the start state:\n\n${fileContext(h, task)}\n\n` +
     'Answer with edit blocks only, in exactly this shape, one per change:\n' +
     '### FILE: <path from the repo root>\n@@ SEARCH\n<exact lines copied from the file>\n@@ REPLACE\n<new lines>\n@@ END\n' +
     'SEARCH must match the file exactly and be unique. Keep blocks small. Do not edit test files.';
@@ -343,14 +350,14 @@ async function claudeAttempt(cfg, h, task, rounds, review) {
   let prompt;
   if (review) {
     const codes = fixCodes();
-    prompt = `Task (repo ${task.repo}):\n${task.brief}\n${hint}\n\n` +
+    prompt = `Task (repo ${task.repo}):\n${briefOf(task)}\n${hint}\n\n` +
       'A junior model already edited the working tree for this task. Its diff:\n```diff\n' + review + '\n```\n' +
       'Review it against the task, then fix whatever is wrong or missing, with the smallest change. You cannot run commands. Do not edit test files.\n' +
       'End your answer with one line per correction you made, in this form:\n' +
       'FIX: <code or NEW> | <rule the junior broke> | <one-line example from this diff>\n' +
       'Write FIX: none if the draft was correct as it stood.' + (codes ? `\nKnown codes:\n${codes}` : '');
   } else {
-    prompt = `Task (repo ${task.repo}):\n${task.brief}\n${hint}\n\nMake the change with the smallest edit. You cannot run commands. Do not edit test files.`;
+    prompt = `Task (repo ${task.repo}):\n${briefOf(task)}\n${hint}\n\nMake the change with the smallest edit. You cannot run commands. Do not edit test files.`;
   }
   let session = null; let firstPass = null; let accept = null; let round = 0; const fixes = [];
   for (; round <= rounds; round++) {
@@ -372,7 +379,7 @@ async function runOne(cfg, task, arm) {
   const t0 = Date.now();
   const row = { ts: new Date().toISOString(), task: task.id, repo: task.repo, arm, parent: task.parent, fix: task.fix,
     qwenModel: arm === 'c' ? null : cfg.qwenModel, claudeModel: arm === 'a' ? null : cfg.claudeModel, effort: arm === 'a' ? null : cfg.effort,
-    maxRounds: cfg.rounds };
+    maxRounds: cfg.rounds, brief: BRIEF_MODE };
   try {
     if (arm === 'a') {
       Object.assign(row, await qwenAttempt(cfg, h, task, cfg.rounds));
@@ -461,6 +468,10 @@ async function main() {
   const cmd = args._[0];
   if (args.help || !cmd) { process.stdout.write(USAGE); return 0; }
   if (args.data) setData(path.resolve(args.data));
+  if (args.brief) {
+    if (!['full', 'subject'].includes(args.brief)) throw new Error('--brief must be full or subject');
+    BRIEF_MODE = args.brief;
+  }
   const tasks = loadManifest();
   const pick = () => {
     if (!args.task.length || args.task.includes('all')) return tasks;
