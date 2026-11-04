@@ -451,11 +451,12 @@ function summary() {
   const rows = readRows();
   const arms = {};
   for (const r of rows) {
-    const a = (arms[r.arm] = arms[r.arm] || { n: 0, first: 0, pass: 0, rounds: 0, wall: 0, tokens: 0, cost: 0 });
+    const key = `${r.arm}/${r.brief || 'full'}`;
+    const a = (arms[key] = arms[key] || { n: 0, first: 0, pass: 0, rounds: 0, wall: 0, tokens: 0, cost: 0 });
     a.n++; a.first += r.firstPass ? 1 : 0; a.pass += r.pass ? 1 : 0; a.rounds += r.fixRounds || 0; a.wall += r.wallMs || 0;
     if (r.claude) { const t = r.claude.tokens; a.tokens += t.input + t.output + t.cacheWrite + t.cacheRead; a.cost += r.claude.costUsd; }
   }
-  console.log('arm  runs  first-pass  final-pass  avg-rounds  avg-wall-s  avg-claude-tokens  avg-api-equiv-usd');
+  console.log('arm/brief  runs  first-pass  final-pass  avg-rounds  avg-wall-s  avg-claude-tokens  avg-api-equiv-usd');
   for (const [k, a] of Object.entries(arms)) {
     console.log(`${k}    ${a.n}     ${a.first}/${a.n}         ${a.pass}/${a.n}         ${(a.rounds / a.n).toFixed(2)}        ${(a.wall / a.n / 1000).toFixed(0)}          ${Math.round(a.tokens / a.n)}             ${(a.cost / a.n).toFixed(3)}`);
   }
