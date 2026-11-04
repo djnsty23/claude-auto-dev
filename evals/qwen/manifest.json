@@ -1,0 +1,90 @@
+{
+  "version": 1,
+  "tasks": [
+    {
+      "id": "cad-383f548",
+      "repo": "claude-auto-dev",
+      "parent": "3e65a10243d77aff65b3feacdc8ccd1e5f4b2a50",
+      "fix": "383f548879a478396d3923968355970f7858b8e5",
+      "subject": "fix(worktree-residue): treat build-output names as regenerable only at the worktree root",
+      "brief": "In plugins/autodev-core/scripts/worktree-residue.js, the REGENERABLE list treats generic build-output names as disposable at any depth, so a hand-written document such as .claude/reports/build/notes.md is deleted by the reaper. Keep node_modules, .next, __pycache__ and .venv (and *.pyc) regenerable at any depth, but make the other generic output and cache names (dist, build, out, coverage, .turbo, .vercel, .cache, .pytest_cache, target, .parcel-cache, playwright-report, test-results, and the tsconfig.tsbuildinfo and next-env.d.ts files) count only at the worktree root. Paths are relative, with / separators.",
+      "files": [
+        "plugins/autodev-core/scripts/worktree-residue.js"
+      ],
+      "tests": [
+        "tooling/test-worktree-reap.js"
+      ],
+      "pkgDir": ".",
+      "accept": "node tooling/test-worktree-reap.js",
+      "passLine": "\\b0 failed\\b"
+    },
+    {
+      "id": "cad-a8d37f5",
+      "repo": "claude-auto-dev",
+      "parent": "3a9f19ed5b472f955d4175d4451521f359a10b2f",
+      "fix": "a8d37f5612b24fc87ba398aed468e8a48b9b3933",
+      "subject": "fix(conveyor): let intake read --limit",
+      "brief": "idea-conveyor.js intake accepts a --limit option, but the per-command flag guard (COMMAND_FLAGS) does not list it for intake, so `intake ... --limit 2` is refused with \"intake does not read --limit\". Let intake read --limit. `--limit 0` must still be refused with the existing \"whole number from 1\" usage message.",
+      "files": [
+        "plugins/autodev-core/scripts/idea-conveyor.js"
+      ],
+      "tests": [
+        "tooling/test-idea-conveyor.js"
+      ],
+      "pkgDir": ".",
+      "accept": "node tooling/test-idea-conveyor.js",
+      "passLine": "\\b0 failed\\b"
+    },
+    {
+      "id": "cad-9da41c2",
+      "repo": "claude-auto-dev",
+      "parent": "7562c3566f09d81c3fca1fa5364a63b21995dfb6",
+      "fix": "9da41c244ce93923a8ed4ee5f20ff01a82a6e25b",
+      "subject": "fix(hook-bypass): end an unterminated heredoc at end of input, not end of line",
+      "brief": "In hook-bypass.js, HEREDOC_RE is meant to match a heredoc body up to its delimiter line, or to the end of input when the heredoc is unterminated. Because the regex uses the m flag, its `$` alternative matches at every line end, so a multi-line body stops after its first line and later body lines are tokenised as shell. A body line like \"never --no-verify\" then triggers a false ask. Fix the regex so the unterminated case runs to the true end of input. A real git call after a closed heredoc must still be detected.",
+      "files": [
+        "plugins/autodev-core/scripts/hook-bypass.js"
+      ],
+      "tests": [
+        "tooling/test-coordinator-write-guard.js"
+      ],
+      "pkgDir": ".",
+      "accept": "node tooling/test-coordinator-write-guard.js",
+      "passLine": "\\b0 failed\\b"
+    },
+    {
+      "id": "cad-3d877e2",
+      "repo": "claude-auto-dev",
+      "parent": "3eda95af98c3f27df5762f3332d7fc2b7ca6d886",
+      "fix": "3d877e2e93c7d8d01948670f5f003b552ea852a5",
+      "subject": "fix: skip string metadata when selecting prompt images",
+      "brief": "In hooks/user-prompt-image-scan.js, latestUserMessage() scans the transcript tail and returns the first user record it meets. A trailing metadata record whose content is a plain string (either { role: \"user\", content: \"...\" } or wrapped as { message: { role: \"user\", content: \"...\" } }) then hides the real prompt record that carries an image. Return the newest user record whose content is an array, skipping string-content user records. A transcript with only string-content records must still produce no output.",
+      "files": [
+        "plugins/autodev-core/hooks/user-prompt-image-scan.js"
+      ],
+      "tests": [
+        "tooling/test-image-records.js"
+      ],
+      "pkgDir": ".",
+      "accept": "node tooling/test-image-records.js",
+      "passLine": "image record cases passed through real hook subprocesses"
+    },
+    {
+      "id": "cad-cd7439c",
+      "repo": "claude-auto-dev",
+      "parent": "e2d5d17888678a5744ff19864ce89a74415848e3",
+      "fix": "cd7439cf0fdda8262472ec8aa8ae6c11f5d73c2e",
+      "subject": "fix(skill-trigger-eval): an errored result is an error, not a miss",
+      "brief": "tooling/skill-trigger-eval.js marks a run as errored only when there is no result event and the exit status is non-zero. A run whose result event has is_error: true (for example an expired login, subtype \"success\") is graded as a miss instead. Add and export a function runError(parsed, status): with no parsed.result it returns status !== 0; otherwise it returns true when result.is_error is set and result.subtype is not \"error_max_turns\" (every one-turn run ends with that, by design). Use it in cmdRun for the errored flag, and record the result text in the row's err field when there is one. Export runError beside parseStream.",
+      "files": [
+        "tooling/skill-trigger-eval.js"
+      ],
+      "tests": [
+        "tooling/test-skill-trigger-eval.js"
+      ],
+      "pkgDir": ".",
+      "accept": "node tooling/test-skill-trigger-eval.js",
+      "passLine": "\\b0 failed\\b"
+    }
+  ]
+}
