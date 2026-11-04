@@ -234,6 +234,32 @@ const kinds = (p) => (p ? p.findings.map((f) => f.kind) : []);
         !kinds(forProject(run(), 'goodlink')).includes('dangling-link'));
 }
 
+// ──────────── 8b. links into the global store resolve; the rest rank as gaps
+//
+// A project memory may link a global one (<config>/memory). The audit never
+// read that store, so those links were reported dangling. What does not
+// resolve anywhere is a gap, ranked by how many memories cite it.
+{
+    const globalDir = path.join(CONFIG, 'memory');
+    fs.mkdirSync(globalDir, { recursive: true });
+    fs.writeFileSync(path.join(globalDir, 'credentials-map.md'),
+        mem('credentials-map', 'where secrets live', 'Body about vaults.'));
+    makeProject('gaps', {
+        'a.md': mem('one', 'x', 'See [[credentials-map]] and [[write-me]] and [[later]].'),
+        'b.md': mem('two', 'y', 'Also [[write-me]], twice: [[write-me]].'),
+        'c.md': mem('three', 'z', 'Again [[write-me]].'),
+    }, '- [A](a.md) — x\n- [B](b.md) — y\n- [C](c.md) — z\n');
+    const p = forProject(run(), 'gaps');
+    const dangling = p ? p.findings.filter((f) => f.kind === 'dangling-link').map((f) => f.detail) : [];
+    check('a [[link]] to a GLOBAL memory is not dangling',
+        !!p && !dangling.some((d) => d.includes('credentials-map')));
+    check('  a link that resolves nowhere is still dangling', dangling.some((d) => d.includes('[[later]]')));
+    check('  gaps rank by citing memories, most first, each memory counted once',
+        !!p && Array.isArray(p.gaps) && p.gaps.length === 2 &&
+        p.gaps[0].name === 'write-me' && p.gaps[0].refs === 3 &&
+        p.gaps[1].name === 'later' && p.gaps[1].refs === 1);
+}
+
 // ───────────────────────────────── 9. the active/stale filter and --all
 //
 // Both halves, because one alone cannot tell "filtered correctly" from
