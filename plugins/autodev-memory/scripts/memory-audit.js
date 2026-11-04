@@ -31,6 +31,14 @@ const PROJECTS = path.join(CONFIG_DIR, 'projects');
 const INDEX_MAX_LINES = 200;
 const INDEX_MAX_BYTES = 25 * 1024;
 
+// A second index page, linked from MEMORY.md (MEMORY-archive.md and the like).
+const SUB_INDEX = /^MEMORY-[^/\\]+\.md$/;
+
+// Markdown link targets ending in .md: `[Title](file.md)`.
+function linksIn(text) {
+    return [...text.matchAll(/\]\(([^)]+\.md)\)/g)].map((m) => m[1]);
+}
+
 function decodeProjectDir(slug) {
     // Claude encodes an absolute path by replacing separators with '-'. That is
     // lossy (a real '-' in a directory name is indistinguishable), so treat the
@@ -131,21 +139,39 @@ for (const slug of fs.readdirSync(PROJECTS)) {
     // --- index health
     const indexPath = path.join(memDir, 'MEMORY.md');
     let indexLinks = [];
+    const indexSource = new Map(); // link -> sub-index it came from, when not MEMORY.md
     if (fs.existsSync(indexPath)) {
         const raw = fs.readFileSync(indexPath, 'utf8');
         const lines = raw.split('\n').length;
         const bytes = Buffer.byteLength(raw);
         if (lines > INDEX_MAX_LINES) findings.push({ kind: 'index-too-long', detail: `${lines} lines (max ${INDEX_MAX_LINES})` });
         if (bytes > INDEX_MAX_BYTES) findings.push({ kind: 'index-too-large', detail: `${(bytes / 1024).toFixed(1)}KB (max 25KB)` });
-        indexLinks = [...raw.matchAll(/\]\(([^)]+\.md)\)/g)].map((m) => m[1]);
+        indexLinks = linksIn(raw);
     } else if (files.length > 1) {
         findings.push({ kind: 'index-missing', detail: `${files.length} memories with no MEMORY.md index` });
+    }
+
+    // --- sub-indexes: a MEMORY-*.md that MEMORY.md links to is part of the index.
+    // Stores outgrow the 200-line budget and move old pointers into a second
+    // page (MEMORY-archive.md). Those memories are indexed, one hop down, so
+    // reading MEMORY.md alone reported every archived memory as unindexed.
+    // One hop only: an unlinked MEMORY-*.md is an ordinary memory.
+    const subIndexes = new Set();
+    for (const link of indexLinks) {
+        const base = path.basename(link);
+        if (SUB_INDEX.test(base) && files.includes(base)) subIndexes.add(base);
+    }
+    for (const sub of subIndexes) {
+        for (const link of linksIn(fs.readFileSync(path.join(memDir, sub), 'utf8'))) {
+            indexLinks.push(link);
+            indexSource.set(link, sub);
+        }
     }
 
     // --- per-file parse + duplicate detection
     const memories = [];
     for (const f of files) {
-        if (f === 'MEMORY.md') continue;
+        if (f === 'MEMORY.md' || subIndexes.has(f)) continue;
         const raw = fs.readFileSync(path.join(memDir, f), 'utf8');
         const { fm, body } = parseFrontmatter(raw);
         memories.push({ file: f, name: fm.name || f.replace(/\.md$/, ''), type: fm.type || '(none)', body: body.trim() });
@@ -174,11 +200,17 @@ for (const slug of fs.readdirSync(PROJECTS)) {
     // --- index/file drift
     const fileSet = new Set(files);
     for (const link of indexLinks) {
-        if (!fileSet.has(path.basename(link))) findings.push({ kind: 'dead-index-link', detail: link });
+        if (!fileSet.has(path.basename(link))) {
+            const from = indexSource.get(link);
+            findings.push({ kind: 'dead-index-link', detail: from ? `${link} (in ${from})` : link });
+        }
     }
     const linked = new Set(indexLinks.map((l) => path.basename(l)));
     for (const m of memories) {
-        if (!linked.has(m.file)) findings.push({ kind: 'unindexed', detail: `${m.file} is not listed in MEMORY.md` });
+        if (!linked.has(m.file)) {
+            const where = subIndexes.size ? `MEMORY.md or ${[...subIndexes].join(', ')}` : 'MEMORY.md';
+            findings.push({ kind: 'unindexed', detail: `${m.file} is not listed in ${where}` });
+        }
     }
 
     // --- wiki links pointing at nothing
@@ -194,6 +226,7 @@ for (const slug of fs.readdirSync(PROJECTS)) {
     report.push({
         slug, projectPath, projectExists, active,
         memoryCount: memories.length,
+        subIndexes: [...subIndexes],
         idleDays, repoIdleDays,
         findings,
     });
