@@ -38,12 +38,21 @@ const GLOBAL_NAMES = (() => {
     for (const f of files) {
         out.add(f.replace(/\.md$/, ''));
         try {
-            const m = fs.readFileSync(path.join(dir, f), 'utf8').match(/^name:\s*(.+)$/m);
-            if (m) out.add(m[1].trim().replace(/^["']|["']$/g, ''));
+            const { fm } = parseFrontmatter(fs.readFileSync(path.join(dir, f), 'utf8'));
+            if (fm.name) out.add(fm.name);
+            for (const a of aliasesOf(fm)) out.add(a);
         } catch { /* unreadable file: its basename still counts */ }
     }
     return out;
 })();
+
+// A renamed memory keeps its old names, so links written before the rename
+// still resolve: `aliases: old-name, older-name` (or `[old-name]`), one line.
+// From the Second Brain OS study (2026-11, F11).
+function aliasesOf(fm) {
+    return String(fm.aliases || '').replace(/^\[|\]$/g, '').split(',')
+        .map((s) => s.trim().replace(/^["']|["']$/g, '')).filter(Boolean);
+}
 
 // Rule files (<config>/rules/*.md): memories cite a rule as [[backup-protocol]].
 const RULE_NAMES = (() => {
@@ -170,7 +179,7 @@ function auditStore(memDir) {
         if (f === 'MEMORY.md' || subIndexes.has(f)) continue;
         const raw = fs.readFileSync(path.join(memDir, f), 'utf8');
         const { fm, body } = parseFrontmatter(raw);
-        memories.push({ file: f, name: fm.name || f.replace(/\.md$/, ''), type: fm.type || '(none)', body: body.trim() });
+        memories.push({ file: f, name: fm.name || f.replace(/\.md$/, ''), aliases: aliasesOf(fm), type: fm.type || '(none)', body: body.trim() });
         if (!fm.name) findings.push({ kind: 'missing-frontmatter', detail: `${f} has no name:` });
         if (!fm.description) findings.push({ kind: 'missing-frontmatter', detail: `${f} has no description:` });
     }
@@ -216,6 +225,13 @@ function auditStore(memDir) {
     // referring to and nobody has written. Ranked by how many memories cite it,
     // the gap list is the plan for what to write next, not a list to delete.
     const names = new Set(memories.map((m) => m.name));
+    for (const m of memories) {
+        for (const a of m.aliases) {
+            const owner = memories.find((o) => o !== m && o.name === a);
+            if (owner) findings.push({ kind: 'alias-collision', detail: `${m.file} aliases "${a}", the name of ${owner.file}` });
+        }
+    }
+    for (const m of memories) for (const a of m.aliases) names.add(a);
     const gapRefs = new Map();
     for (const m of memories) {
         for (const l of [...m.body.matchAll(/\[\[([^\]]+)\]\]/g)].map((x) => x[1])) {

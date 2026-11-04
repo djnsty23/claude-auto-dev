@@ -88,6 +88,14 @@ the next harness item, ahead of new product work: remove it, then check that
 its count falls in the following window. Each worker report ends with a
 `BLOCKER:` line, so an absent one is a prompt fault, not a clean run.
 
+Re-check what is already done. `scripts/recheck-passed.js sample` (daily as a
+brain-clock observer, one draw per ISO week) picks five stories at
+`passes: true` across repos into `recheck/ledger.jsonl`, flagging a shipped sha
+off the default branch and a story with no evidence field. Each week run
+`status`, re-verify each open sample in a fresh context, and record
+`verdict <repo>:<id> --agree|--disagree --note`. A disagreement is kept in
+`recheck/cases.jsonl` and its story reopens.
+
 ## 3. Start bounded workers with one owner per unit
 
 Load `isolate` and `rule-agent-concurrency`. Before dispatch, record story,
