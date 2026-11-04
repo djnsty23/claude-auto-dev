@@ -71,7 +71,10 @@ check('a FIX line with no code becomes NEW with the whole text as its rule', rx[
 const home = os.homedir();
 const row = JSON.stringify({ tail: `at ${home}${path.sep}x.js and ${home.replace(/\\/g, '/')}/y.js` });
 const scrubbed = scrub(row);
-check('scrub removes the home directory from a results row', !scrubbed.includes(home.replace(/\\/g, '/')) && !scrubbed.includes(JSON.stringify(home).slice(1, -1)) && scrubbed.includes('~'), scrubbed);
+// A path escaped twice before the row is stringified (four backslashes per separator in the row).
+const twice = JSON.stringify({ tail: JSON.stringify(`${home}${path.sep}t.js`) });
+check('scrub removes a doubly escaped home directory', !scrub(twice).includes(path.basename(home)) || path.sep === '/', scrub(twice));
+check('scrub removes the home directory from a results row',!scrubbed.includes(home.replace(/\\/g, '/')) && !scrubbed.includes(JSON.stringify(home).slice(1, -1)) && scrubbed.includes('~'), scrubbed);
 
 // summarise: an error row graded nothing, and a rerun replaces the earlier row.
 const sum = summarise([
