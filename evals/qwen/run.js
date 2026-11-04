@@ -59,7 +59,7 @@ options:
                         subject line alone, a terse ticket
   --keep                keep the scratch worktree
   --budget-tokens N     stop before a task once the Claude tokens spent so far, projected over
-                        the remaining tasks at the running average, would pass N
+                        the remaining tasks at the running average (from 3 tasks on), pass N
   --dry-run             print what would run, call no model
 `;
 
@@ -544,7 +544,9 @@ async function main() {
   const budget = args['budget-tokens'] === undefined ? Infinity : Number(args['budget-tokens']);
   let spent = 0; let done = 0;
   for (let i = 0; i < sel.length; i++) {
-    const projected = done ? spent + (spent / done) * (sel.length - i) : 0;
+    // [measured 2026-11-04] one hard task (431k tokens) projected 8.6M from a sample of one and
+    // stopped a run whose earlier average was 149k, so project only from 3 tasks on.
+    const projected = done >= 3 ? spent + (spent / done) * (sel.length - i) : spent;
     if (projected > budget) {
       console.log(`budget: stopping before ${sel[i].id}: ${spent} Claude tokens spent on ${done} tasks, ${Math.round(projected)} projected for all ${sel.length}, over ${budget}`);
       return 3;
