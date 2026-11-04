@@ -62,6 +62,10 @@ try {
 const fx = parseFixLines('Reviewed.\nFIX: NEW | exported name differs from the brief | runErr instead of runError\n- **FIX: Q2 | kept a dead branch | if (false) {...}**\nFIX: none\n');
 check('FIX lines parse into code, rule and example; FIX: none is skipped', fx.length === 2 && fx[0].code === 'NEW' && fx[0].example === 'runErr instead of runError' && fx[1].code === 'Q2', JSON.stringify(fx));
 check('an answer saying FIX: none yields no fixes', parseFixLines('All good.\nFIX: none').length === 0);
+// [measured 2026-11-04] a regex example with a bare | split into a regex "code".
+const rx = parseFixLines('FIX: NEW | anchor build dirs at any depth | /(^|\\/)\\.next\\//\nFIX: half a sentence with no fields');
+check('a bare | inside the example stays in the example', rx[0].code === 'NEW' && rx[0].example === '/(^|\\/)\\.next\\//', JSON.stringify(rx[0]));
+check('a FIX line with no code becomes NEW with the whole text as its rule', rx[1].code === 'NEW' && /half a sentence/.test(rx[1].rule), JSON.stringify(rx[1]));
 
 // scrub: a results row never carries the home directory, in any spelling.
 const home = os.homedir();
