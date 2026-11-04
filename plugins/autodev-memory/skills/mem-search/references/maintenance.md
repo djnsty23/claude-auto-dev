@@ -74,7 +74,10 @@ Apply only repairs supported by the underlying files:
    decision or authority while supplying metadata.
 2. Repair index links by resolving their exact relative targets, including
    subdirectories. Remove a pointer only after establishing it is obsolete;
-   restore a renamed target's link when that is the actual cause.
+   restore a renamed target's link when that is the actual cause. When you
+   rename a memory, keep the old name in its frontmatter as
+   `aliases: old-name`, so `[[old-name]]` links still resolve in
+   `memory-audit.js`.
 3. Add concise pointers for unindexed memories. A dangling `[[link]]` may mark
    knowledge still to be written; do not remove it solely because it is absent.
 4. For overlapping memories, preserve unique conditions, evidence, dates and
