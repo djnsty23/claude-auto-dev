@@ -27,6 +27,24 @@ const staleDays = Number((args.find((a) => a.startsWith('--stale-days=')) || '')
 const CONFIG_DIR = configDir();
 const PROJECTS = path.join(CONFIG_DIR, 'projects');
 
+// Names in the global store (<config>/memory), so a project memory's link to a
+// global memory resolves. A missing or unreadable store yields no names, which
+// only means fewer links resolve: every one of them is still reported.
+const GLOBAL_NAMES = (() => {
+    const dir = path.join(CONFIG_DIR, 'memory');
+    const out = new Set();
+    let files = [];
+    try { files = fs.readdirSync(dir).filter((f) => f.endsWith('.md')); } catch { return out; }
+    for (const f of files) {
+        out.add(f.replace(/\.md$/, ''));
+        try {
+            const m = fs.readFileSync(path.join(dir, f), 'utf8').match(/^name:\s*(.+)$/m);
+            if (m) out.add(m[1].trim().replace(/^["']|["']$/g, ''));
+        } catch { /* unreadable file: its basename still counts */ }
+    }
+    return out;
+})();
+
 // MEMORY.md is loaded into context every session. Claude Code warns past these.
 const INDEX_MAX_LINES = 200;
 const INDEX_MAX_BYTES = 25 * 1024;
@@ -214,12 +232,23 @@ for (const slug of fs.readdirSync(PROJECTS)) {
     }
 
     // --- wiki links pointing at nothing
+    // A project memory may link a global one (~/.claude/memory), so a name
+    // found there resolves. What is left is a gap: a memory the store keeps
+    // referring to and nobody has written. Ranked by how many memories cite it,
+    // the gap list is the plan for what to write next, not a list to delete.
     const names = new Set(memories.map((m) => m.name));
+    const gapRefs = new Map();
     for (const m of memories) {
         for (const l of [...m.body.matchAll(/\[\[([^\]]+)\]\]/g)].map((x) => x[1])) {
-            if (!names.has(l)) findings.push({ kind: 'dangling-link', detail: `${m.file} → [[${l}]]` });
+            if (names.has(l) || GLOBAL_NAMES.has(l)) continue;
+            findings.push({ kind: 'dangling-link', detail: `${m.file} → [[${l}]]` });
+            if (!gapRefs.has(l)) gapRefs.set(l, new Set());
+            gapRefs.get(l).add(m.file);
         }
     }
+    const gaps = [...gapRefs]
+        .map(([name, from]) => ({ name, refs: from.size, from: [...from].sort() }))
+        .sort((a, b) => b.refs - a.refs || a.name.localeCompare(b.name));
 
     if (!projectExists) findings.push({ kind: 'project-gone', detail: `${projectPath} no longer exists on disk` });
 
@@ -229,6 +258,7 @@ for (const slug of fs.readdirSync(PROJECTS)) {
         subIndexes: [...subIndexes],
         idleDays, repoIdleDays,
         findings,
+        gaps,
     });
 }
 
@@ -264,6 +294,10 @@ for (const r of report) {
         console.log(`    ${kind} (${details.length})`);
         details.slice(0, 4).forEach((d) => console.log(`      · ${d}`));
         if (details.length > 4) console.log(`      · …and ${details.length - 4} more`);
+    }
+    if (r.gaps.length) {
+        const top = r.gaps.slice(0, 5).map((g) => `[[${g.name}]] ×${g.refs}`).join(', ');
+        console.log(`    gaps to write, most cited first: ${top}${r.gaps.length > 5 ? `, …${r.gaps.length - 5} more` : ''}`);
     }
     console.log('');
 }
