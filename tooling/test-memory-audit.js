@@ -294,6 +294,30 @@ const kinds = (p) => (p ? p.findings.map((f) => f.kind) : []);
     check('  a [[link]] naming no rule still is', dangling.some((d) => d.includes('no-such-rule')));
 }
 
+// ──────── 8d. a renamed memory keeps its old name as an alias
+//
+// `aliases: old-name, older` in a memory's frontmatter makes [[old-name]]
+// resolve, in its own store and from a project store citing a global memory.
+// An alias that is another memory's name is reported: one name, two files.
+{
+    const globalDir = path.join(CONFIG, 'memory');
+    fs.writeFileSync(path.join(globalDir, 'renamed-global.md'),
+        '---\nname: renamed-global\ndescription: x\naliases: [old-global]\n---\n\nBody about glazes.\n');
+    makeProject('aliases', {
+        'new.md': '---\nname: new-name\ndescription: x\naliases: old-name, "older-name"\n---\n\nBody about wheels.\n',
+        'b.md': mem('cites-old', 'x', 'See [[old-name]], [[older-name]], [[old-global]] and [[never-was]].'),
+        'c.md': '---\nname: clash\ndescription: x\naliases: cites-old\n---\n\nBody about clay.\n',
+    }, '- [N](new.md) — x\n- [B](b.md) — x\n- [C](c.md) — x\n');
+    const p = forProject(run(), 'aliases');
+    const of = (kind) => (p ? p.findings.filter((f) => f.kind === kind).map((f) => f.detail) : []);
+    check('an alias resolves a [[link]] to the old name', !!p && !of('dangling-link').some((d) => d.includes('[[old-name]]')));
+    check('  a quoted alias in the list resolves too', !!p && !of('dangling-link').some((d) => d.includes('[[older-name]]')));
+    check('  a global memory\'s alias resolves from a project', !!p && !of('dangling-link').some((d) => d.includes('[[old-global]]')));
+    check('  a name nobody carries is still dangling', of('dangling-link').some((d) => d.includes('[[never-was]]')));
+    check('  an alias that is another memory\'s name is reported',
+        of('alias-collision').some((d) => d.includes('cites-old') && d.includes('c.md')));
+}
+
 // ───────────────────────────────── 9. the active/stale filter and --all
 //
 // Both halves, because one alone cannot tell "filtered correctly" from
