@@ -106,6 +106,8 @@ For each plausible video claim:
 1. Find the official documentation or repository for the coding agent, SDK,
    framework, harness, protocol or evaluation tool that supports or contradicts
    it. If no primary source exists, label it community-only.
+   Several videos or posts that repeat one source count as one piece of
+   evidence, however many there are.
 2. Read the current repository's `AGENTS.md` or `CLAUDE.md`, README, activating
    config and relevant implementation.
 3. Search for the effect, not only the implementation shape suggested by the

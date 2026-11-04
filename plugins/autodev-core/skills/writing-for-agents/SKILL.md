@@ -106,6 +106,9 @@ prohibition only as a hard guardrail, and pair it with the positive target.
 - **Hunt no-ops.** An instruction the model already follows by default pays load
   to say nothing. The test is model-relative and settled by RUNNING the
   document, not by argument. Delete the whole sentence rather than trimming it.
+- **Add an example before another rule.** When output keeps missing the
+  target, one complete example of the target usually fixes more than one more
+  rule. Rules pile up and get skimmed. An example shows the shape.
 
 ## One addition, specific to briefs
 

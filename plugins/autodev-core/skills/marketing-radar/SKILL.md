@@ -121,6 +121,9 @@ For each plausible practitioner claim, find a current primary platform source
 that supports, limits or contradicts the mechanism. Then inspect the current
 repository, anonymized dataset or workflow that would be changed.
 
+Several posts, newsletters or videos that repeat one source count as one piece
+of evidence. Trace each back to its origin before counting it.
+
 Classify each lead:
 
 - `already handled`: current evidence shows the process already does it;
