@@ -107,6 +107,9 @@ const ALL_SUBJECTS = process.argv.includes('--all-subjects');
 //     `require('./check-foo.js')` ARE tooling/check-foo.js. That is a fact about
 //     where the file sits, not a similarity heuristic.
 //
+// evals/ joined the same full-path rules on 2026-11-04, when test-qwen-eval.js
+// came back NOT verified for naming evals/qwen/run.js as path.join segments.
+//
 // Rule 4's unique-basename search deliberately did NOT widen. It is the one rule
 // that guesses, and the measurement is under it.
 //
@@ -156,6 +159,14 @@ const SUBJECT_OVERRIDES = {
         'plugins/autodev-core/skills/sessions/SKILL.md',
         'plugins/autodev-core/skills/setup-project/SKILL.md',
         'plugins/autodev-memory/skills/mem-search/SKILL.md',
+    ],
+
+    // The subject is two Markdown documents whose scaffold commands must quote
+    // the kit and parent paths. The suite lists them as relative strings joined
+    // to the repo root, and Markdown is not `.js`, so derivation finds nothing.
+    'test-scaffold-command-quoting.js': [
+        'plugins/autodev-core/skills/setup-project/SKILL.md',
+        'plugins/autodev-core/skills/spec/references/new-app-chain.md',
     ],
 
     // The subject is a hooks module (Claude Code function hooks): ES modules
