@@ -11,7 +11,7 @@ const { spawnSync } = require('child_process');
 
 const ROOT = path.resolve(__dirname, '..');
 const SUBJECT = path.join(ROOT, 'evals', 'qwen', 'run.js');
-const { parseBlocks, applyBlocks, parseArgs, parseFixLines, scrub } = require(SUBJECT);
+const { parseBlocks, applyBlocks, parseArgs, parseFixLines, scrub, summarise } = require(SUBJECT);
 
 let pass = 0, fail = 0;
 function check(label, ok, detail) {
@@ -68,6 +68,19 @@ const home = os.homedir();
 const row = JSON.stringify({ tail: `at ${home}${path.sep}x.js and ${home.replace(/\\/g, '/')}/y.js` });
 const scrubbed = scrub(row);
 check('scrub removes the home directory from a results row', !scrubbed.includes(home.replace(/\\/g, '/')) && !scrubbed.includes(JSON.stringify(home).slice(1, -1)) && scrubbed.includes('~'), scrubbed);
+
+// summarise: an error row graded nothing, and a rerun replaces the earlier row.
+const sum = summarise([
+    { task: 't1', arm: 'a', brief: 'subject', error: 'fetch failed', pass: false },
+    { task: 't1', arm: 'a', brief: 'subject', firstPass: true, pass: true, fixRounds: 0, wallMs: 1000 },
+    { task: 't2', arm: 'a', brief: 'subject', firstPass: false, pass: false, fixRounds: 2, wallMs: 1000 },
+    { task: 't2', arm: 'a', brief: 'subject', firstPass: false, pass: true, fixRounds: 1, wallMs: 1000 },
+    { task: 't1', arm: 'a', firstPass: false, pass: true, fixRounds: 1, wallMs: 1000 },
+]);
+const s = sum['a/subject'];
+check('error rows are counted apart, never as failures', s && s.errors === 1 && s.n === 2, JSON.stringify(s));
+check('the latest graded row per task wins', s && s.pass === 2 && s.first === 1, JSON.stringify(s));
+check('a row with no brief field is the full brief, kept apart from subject', sum['a/full'] && sum['a/full'].n === 1);
 
 // parseArgs
 const a = parseArgs(['run', '--arm', 'c', '--task', 'x', '--task', 'y', '--keep']);

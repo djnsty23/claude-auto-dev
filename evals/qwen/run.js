@@ -447,18 +447,35 @@ function taxonomy() {
   console.log(`fixes.md: ${rows.length} codes`);
 }
 
-function summary() {
-  const rows = readRows();
-  const arms = {};
+/**
+ * Per arm and brief mode: the latest graded row of each task. A row with
+ * `error` (endpoint down, claude -p gave no JSON) graded nothing, so it is
+ * counted apart and never as a failure: [measured 2026-11-04] a Qwen server
+ * restart mid-run turned 18 fetch failures into an apparent 2/20.
+ */
+function summarise(rows) {
+  const latest = new Map(); const errors = {};
   for (const r of rows) {
     const key = `${r.arm}/${r.brief || 'full'}`;
-    const a = (arms[key] = arms[key] || { n: 0, first: 0, pass: 0, rounds: 0, wall: 0, tokens: 0, cost: 0 });
+    if (r.error) { errors[key] = (errors[key] || 0) + 1; continue; }
+    latest.set(`${key} ${r.task}`, { key, r });
+  }
+  const arms = {};
+  for (const { key, r } of latest.values()) {
+    const a = (arms[key] = arms[key] || { n: 0, first: 0, pass: 0, rounds: 0, wall: 0, tokens: 0, cost: 0, errors: 0 });
     a.n++; a.first += r.firstPass ? 1 : 0; a.pass += r.pass ? 1 : 0; a.rounds += r.fixRounds || 0; a.wall += r.wallMs || 0;
     if (r.claude) { const t = r.claude.tokens; a.tokens += t.input + t.output + t.cacheWrite + t.cacheRead; a.cost += r.claude.costUsd; }
   }
-  console.log('arm/brief  runs  first-pass  final-pass  avg-rounds  avg-wall-s  avg-claude-tokens  avg-api-equiv-usd');
+  for (const [k, n] of Object.entries(errors)) (arms[k] = arms[k] || { n: 0, first: 0, pass: 0, rounds: 0, wall: 0, tokens: 0, cost: 0, errors: 0 }).errors = n;
+  return arms;
+}
+
+function summary() {
+  const arms = summarise(readRows());
+  const avg = (x, n) => (n ? x / n : 0);
+  console.log('arm/brief  tasks  first-pass  final-pass  avg-rounds  avg-wall-s  avg-claude-tokens  avg-api-equiv-usd  error-rows');
   for (const [k, a] of Object.entries(arms)) {
-    console.log(`${k}    ${a.n}     ${a.first}/${a.n}         ${a.pass}/${a.n}         ${(a.rounds / a.n).toFixed(2)}        ${(a.wall / a.n / 1000).toFixed(0)}          ${Math.round(a.tokens / a.n)}             ${(a.cost / a.n).toFixed(3)}`);
+    console.log(`${k}    ${a.n}     ${a.first}/${a.n}         ${a.pass}/${a.n}         ${avg(a.rounds, a.n).toFixed(2)}        ${avg(a.wall, a.n * 1000).toFixed(0)}          ${Math.round(avg(a.tokens, a.n))}             ${avg(a.cost, a.n).toFixed(3)}    ${a.errors}`);
   }
 }
 
@@ -506,4 +523,4 @@ if (require.main === module) {
   main().then((code) => { process.exitCode = code; }, (e) => { process.stderr.write(`run.js: ${e.message}\n`); process.exitCode = 1; });
 }
 
-module.exports = { parseBlocks, applyBlocks, parseArgs, parseFixLines, scrub };
+module.exports = { parseBlocks, applyBlocks, parseArgs, parseFixLines, scrub, summarise };
