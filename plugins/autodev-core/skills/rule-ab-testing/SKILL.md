@@ -120,6 +120,12 @@ meant. Neither was obvious from reasoning about it.
    examples — a contradiction is information about your frame, not an invitation
    to build a theory that rescues it.
 
+10. **Search for the case against it before recommending.** Look for what the
+    project has already rejected or measured against this idea: its decisions
+    log, recorded rejections and memory store, searched with the counter-claim.
+    If nothing argues against it, say so in the recommendation, so the reader
+    knows the search ran.
+
 ## Compare the whole affected population
 
 Hold the revision, inputs and acceptance criterion constant across variants.
