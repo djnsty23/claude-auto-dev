@@ -436,7 +436,9 @@ function claudeTotal(row) {
 /** Test output can carry the home directory; a results row may be committed to a public repo. */
 function scrub(json) {
   const home = os.homedir();
-  const forms = [home, home.replace(/\\/g, '/'), home.replace(/\\/g, '\\\\'), JSON.stringify(home).slice(1, -1)];
+  // [measured 2026-11-04] test output that JSON-escapes a Windows path twice reaches the row with
+  // four backslashes per separator, a form the first three missed.
+  const forms = [home, home.replace(/\\/g, '/'), home.replace(/\\/g, '\\\\'), home.replace(/\\/g, '\\\\\\\\'), JSON.stringify(home).slice(1, -1)];
   let out = json;
   for (const f of [...new Set(forms)].sort((a, b) => b.length - a.length)) out = out.split(f).join('~');
   return out;
