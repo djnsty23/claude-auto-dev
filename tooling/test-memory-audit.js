@@ -179,6 +179,44 @@ const kinds = (p) => (p ? p.findings.map((f) => f.kind) : []);
         kinds(forProject(run(), 'unindexed')).includes('unindexed'));
 }
 
+// ─────────────── 7b. a sub-index linked from MEMORY.md is part of the index
+//
+// Stores past the 200-line budget move old pointers into MEMORY-archive.md.
+// On the real autodev store, 285 of 286 "unindexed" findings were memories
+// listed there. The negative half keeps the hop honest: a MEMORY-*.md that
+// MEMORY.md does NOT link is an ordinary memory and indexes nothing.
+{
+    const p = forProject((() => {
+        makeProject('subindex', {
+            'a.md': mem('current', 'x', 'Body about lighthouses.'),
+            'b.md': mem('archived', 'y', 'Body about orchards and grafting.'),
+            'MEMORY-archive.md': '# Archived memory index\n\n- [B](b.md) — y\n- [Gone](gone.md) — z\n',
+        }, '- [A](a.md) — x\n- [Older memories](MEMORY-archive.md) — aged out\n');
+        return run();
+    })(), 'subindex');
+    const details = (kind) => (p ? p.findings.filter((f) => f.kind === kind).map((f) => f.detail) : []);
+    check('a memory listed only in a linked MEMORY-archive.md is NOT unindexed',
+        !!p && !details('unindexed').some((d) => d.startsWith('b.md')));
+    check('  the sub-index itself is not audited as a memory',
+        !!p && p.memoryCount === 2 && !details('missing-frontmatter').length);
+    check('  a dead link inside the sub-index is still reported, naming the page',
+        details('dead-index-link').some((d) => d.includes('gone.md') && d.includes('MEMORY-archive.md')));
+    check('  and the sub-index is listed in the report', !!p && (p.subIndexes || []).includes('MEMORY-archive.md'));
+}
+
+{
+    const p = forProject((() => {
+        makeProject('unlinkedsub', {
+            'a.md': mem('current', 'x', 'Body about lighthouses.'),
+            'b.md': mem('stray', 'y', 'Body about orchards and grafting.'),
+            'MEMORY-notes.md': mem('notes', 'z', 'Mentions [B](b.md) in passing.'),
+        }, '- [A](a.md) — x\n');
+        return run();
+    })(), 'unlinkedsub');
+    check('  a MEMORY-*.md that MEMORY.md does not link indexes nothing',
+        !!p && p.findings.some((f) => f.kind === 'unindexed' && f.detail.startsWith('b.md')));
+}
+
 // ──────────────────────────────────────────────── 8. dangling wiki links
 {
     makeProject('dangling', { 'a.md': mem('solo', 'x', 'Body referencing [[nonexistent-memory]] here.') },
