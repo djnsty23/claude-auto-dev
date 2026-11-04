@@ -58,6 +58,8 @@ options:
   --brief full|subject  the written brief (default) or the fix commit's
                         subject line alone, a terse ticket
   --keep                keep the scratch worktree
+  --budget-tokens N     stop before a task once the Claude tokens spent so far, projected over
+                        the remaining tasks at the running average, would pass N
   --dry-run             print what would run, call no model
 `;
 
@@ -333,8 +335,13 @@ function parseFixLines(text) {
   for (const line of text.split('\n')) {
     const m = line.replace(/[*`]/g, '').match(/^\s*(?:[-•]\s*)?FIX:\s*(.+)$/);
     if (!m || /^none\b/i.test(m[1].trim())) continue;
-    const [code, rule, example] = m[1].split('|').map((s) => (s || '').trim());
-    out.push({ code, rule, example });
+    // Fields are split on a spaced pipe only: an example can be a regex with a bare | in it.
+    const parts = m[1].split(/\s+\|\s+/).map((s) => s.trim());
+    if (/^(Q\d+|NEW)$/i.test(parts[0])) {
+      out.push({ code: parts[0].toUpperCase(), rule: parts[1] || '', example: parts.slice(2).join(' | ') });
+    } else {
+      out.push({ code: 'NEW', rule: m[1].trim(), example: '' });
+    }
   }
   return out;
 }
@@ -389,8 +396,16 @@ async function runOne(cfg, task, arm) {
       const draft = await qwenAttempt(cfg, h, task, 0);
       row.qwenDraftPass = draft.pass; row.qwen = draft.qwen;
       const diff = git(h.wt, ['diff']) || '(the draft changed nothing)';
+      // Snapshot the draft so Claude's own change can be diffed against it for the taxonomy.
+      let draftTree = null;
+      try { stageAll(h.wt); draftTree = git(h.wt, ['write-tree']).trim(); } catch (e) { row.diffError = e.message.slice(0, 300); }
       const fixed = await claudeAttempt(cfg, h, task, cfg.rounds, diff.slice(0, 40000));
       Object.assign(row, fixed);
+      row.draftDiff = diff.slice(0, 8000);
+      // A failed snapshot must not cost the row its grade, so it is recorded apart from row.error.
+      if (draftTree) {
+        try { stageAll(h.wt); row.claudeDiff = git(h.wt, ['diff', '--cached', draftTree, '--']).slice(0, 8000); } catch (e) { row.diffError = e.message.slice(0, 300); }
+      }
       row.firstPass = draft.pass; // first attempt is the Qwen draft
       row.reviewFirstPass = fixed.firstPass;
     }
@@ -405,6 +420,17 @@ async function runOne(cfg, task, arm) {
   console.log(`${task.id} arm=${arm} first=${row.firstPass} pass=${row.pass} rounds=${row.fixRounds} wall=${(row.wallMs / 1000).toFixed(0)}s` +
     (ct ? ` claudeTokens in=${ct.input} out=${ct.output} cw=${ct.cacheWrite} cr=${ct.cacheRead}` : '') + (row.error ? ` ERROR ${row.error}` : ''));
   return row;
+}
+
+/** Stage the tree for a diff; the node_modules junction can read as a symlink that ignore rules ending in / miss. */
+function stageAll(wt) {
+  git(wt, ['add', '-A', '--', '.', ':(exclude,glob)**/node_modules', ':(exclude,glob)**/node_modules/**']);
+}
+
+function claudeTotal(row) {
+  if (!row.claude) return 0;
+  const t = row.claude.tokens;
+  return t.input + t.output + t.cacheWrite + t.cacheRead;
 }
 
 /** Test output can carry the home directory; a results row may be committed to a public repo. */
@@ -515,7 +541,18 @@ async function main() {
   if (args.arm !== 'c' && !cfg.qwenModel) cfg.qwenModel = (await qwenModel(cfg.qwenUrl))[0];
   const sel = pick();
   if (args['dry-run']) { for (const t of sel) console.log(`would run arm ${args.arm} on ${t.id} (${t.repo} ${t.parent})`); return 0; }
-  for (const t of sel) await runOne(cfg, t, args.arm);
+  const budget = args['budget-tokens'] === undefined ? Infinity : Number(args['budget-tokens']);
+  let spent = 0; let done = 0;
+  for (let i = 0; i < sel.length; i++) {
+    const projected = done ? spent + (spent / done) * (sel.length - i) : 0;
+    if (projected > budget) {
+      console.log(`budget: stopping before ${sel[i].id}: ${spent} Claude tokens spent on ${done} tasks, ${Math.round(projected)} projected for all ${sel.length}, over ${budget}`);
+      return 3;
+    }
+    const row = await runOne(cfg, sel[i], args.arm);
+    spent += claudeTotal(row); done++;
+    if (row.claude) console.log(`budget: ${spent} Claude tokens after ${done} of ${sel.length} tasks`);
+  }
   return 0;
 }
 
