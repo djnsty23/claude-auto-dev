@@ -1,0 +1,95 @@
+# Second Brain OS: what autodev should take from it
+
+Studied 2026-11-04 by Andrei (djnsty23), at commit `53aea82` of
+`github.com/undefined-ui/second-brain-os` (MIT), the source of secondbrainos.dev.
+
+Second Brain OS is a free, markdown-only guide for running an agent-maintained
+Obsidian vault, plus an agents course, five handbooks, 18 skills, 72 slash
+commands and 6 subagents. Autodev already covers most of it, often more
+strictly, so the useful part is small: two auditor fixes shipped with this study (PRs #496 and #497), and four
+harness ideas worth a measured trial. The surprise was that the biggest gain
+came from our own tool, not theirs: reading their two-level index page showed
+that `memory-audit.js` misreported 404 of its 785 "unindexed" findings.
+
+Every claim is tagged `[measured]` (with its probe), `[stated]` (who said it)
+or `[inferred]` (what it rests on). Their text is summarised here, never copied.
+
+## Ranked adoption list
+
+| # | Idea (their source) | What we have | Gap | Cost | Verdict |
+|---|---|---|---|---|---|
+| S1 | Two-level index: a master index linking topic or archive index pages (`docs/07-retrieval/context-budget.md`, "summary layers") | We already split `MEMORY.md` into `MEMORY-archive.md` in three stores `[measured: ls MEMORY*.md per store]` | `memory-audit.js` read only `MEMORY.md`, so 785 memories read "unindexed", 404 of them falsely, and the archive page matched most bodies as a near-duplicate `[measured: memory-audit.js --json, before and after]` | 41 lines plus 5 test cases | **Adapt. Done**, PR #496 |
+| S2 | A "Gaps" list: linked pages that do not exist yet, ranked, as the plan for what to write next (`docs/04-structuring/index-and-log.md`) | Our memory instructions already say an unmatched `[[name]]` marks something worth writing later `[stated: harness memory instructions]`, and `maintenance.md` step 3 says not to remove one for that reason `[measured: read]` | The audit prints 269 `dangling-link` lines in file order with no ranking, and 7 of them resolve in the global store `~/.claude/memory`, which it never reads `[measured: names cross-checked against ~/.claude/memory]` | ~40 lines plus tests | **Adapt. Done**, PR #497 |
+| S3 | Behavioural assertions over transcripts: each past failure becomes a case of "X happened", "X before Y", "no X" rules checked against logged tool calls (`plugins/agents-course/skills/evals-bootstrap`, `docs/course-5-evals/evals-practice.md`) | `analyze-session-patterns.js` ranks failure classes, `skill-trigger-eval.js` checks first-turn skill loads `[stated: research agent, grep of plugins/ and tooling/]` | Nothing asserts worker rules such as "gate ran before commit" or "`gh pr view` before saying merged" over real transcripts `[inferred: no such suite found by grep]` | A new `check:` suite plus seed cases; a few hundred lines | **Adopt, deferred.** Needs its own design and a planted-defect control (`rule-gate-integrity`) |
+| S4 | Weekly random re-check of passed work, each disagreement becoming a new case (`docs/course-5-evals/judges-and-golden-sets.md`) | `drift-audit.js` looks only at untouched stories `[stated: research agent]` | A story at `passes: true` is never sampled again. The judge-zero-accepts incident (memory, 2026-10-30) stayed invisible for that reason `[inferred]` | One Brain routine step, 3 to 5 records a week | **Adopt, deferred.** Brain-side process, so the Brain should own it |
+| S5 | A narrow critic: fresh context, a handful of checkable rules, PASS or numbered defects, hunting claimed-but-missing work, hardcoded values, swallowed errors and edits to tests (`plugins/agents-course/agents/loop-critic.md`) | `code-reviewer` agent, `adversarial-loop`, `check-pr-ready.js` catching deleted tests and `.only` `[stated: research agent]` | The reviewer has no "check the claim against the disk" rule, and its suggestion tier can send retries after style `[inferred: read of the agent file by the research agent]` | A loop-mode section in one agent file | **Adapt, deferred.** Run it against the current reviewer first (`rule-ab-testing`) |
+| S6 | Supersede, never overwrite: a contradicted fact stays, dated and marked superseded (`docs/04-structuring/contradictions-and-supersession.md`, `skills/second-brain-changed-my-mind`) | Markdown memory: `maintenance.md` step 4 keeps superseded context and conflicting claims explicit `[measured: read]`, and `decision-rejections.md` records overruled calls `[measured: file exists]`. SQLite memory: `memory-db.js` dedups by hash only `[stated: research agent]` | No `superseded_by` on SQLite observations, and no probe separating "not stored", "not retrieved" and "not used" | A column, a migration and a probe | **Adapt, deferred** for SQLite. Markdown is covered |
+| S7 | Every harness piece names the model weakness it exists for, and is retested after each model upgrade (`docs/course-4-harness/harness-practice.md`) | `skill-dispositions.js` retains, merges or retires skills by fire count `[stated: research agent]` | Hooks and `~/.claude/rules` only grow | A `because` field in the dispositions manifest for hooks | **Adapt, deferred** |
+| S8 | Four graph-health numbers in a dated log: orphan rate, average degree, component count, stale rate (`skills/second-brain-metrics`, `docs/05-graphs/metrics.md`) | `memory-audit.js` snapshots, memory-kb's 90-day staleness marker `[measured: read SKILL.md]` | Our stores read as "barely connected" by their thresholds: average outbound links 1.2 to 2.1, 35 to 57% of memories with no inbound link `[measured: link count over 3 stores]`. But our retrieval is the index plus semantic search, not link walking, so these numbers do not predict recall here `[inferred]` | Small | **Skip** until a scheduled routine runs the audit. A history needs a producer. Whether one exists was not established: the grep over scheduled tasks timed out |
+| S9 | Restate the goal near the end of the context every few steps (`plugins/agents-course/skills/context-audit`) | `context-depth-nudge.js` handles depth only `[stated: research agent]` | Long worker briefs sink into the middle of the window `[inferred]` | One hook | **Defer behind an A/B.** It fights our rule that a hook with nothing to say prints nothing |
+| S10 | Typed links (supports, contradicts, extends, part-of, applies) | None | We do not query by relation `[inferred]` | Discipline on every write | **Skip** |
+| S11 | An append-only `log.md` of every agent operation | `~/claude-memory` mirrors every memory change into git `[stated: backup-protocol rule]` | None that the git history does not answer | n/a | **Skip** |
+| S12 | Answers cite the pages they read and name what is not covered (`skills/second-brain-query`) | memory-kb's provenance header and its "evidence to check, not an answer" rule `[measured: read SKILL.md]` | None | n/a | **Skip**, covered |
+| S13 | Read-only by default: four of six agents cannot write (`agents/README.md`) | `researcher`, `plan-reviewer`, `code-reviewer` and `scout` all lack Write and Edit `[measured: agent type list in this session]` | None | n/a | **Skip**, covered |
+| S14 | Hooks fast, silent on success, blocking only for the reason they exist (`docs/06-agents/hooks.md`) | Repo `CLAUDE.md`: nothing to say means zero output; `check:hooks` hard gate `[measured: read]` | None | n/a | **Skip**, covered |
+| S15 | "Keys, not prompts": restrict by permission, not instruction (`docs/06-agents/safety-and-guardrails.md`) | `pre-tool-filter.js`, workers carrying no secrets since 8.198 `[stated: memory 2026-10-30]` | None | n/a | **Skip**, covered |
+| S16 | Privacy audit before sharing (`skills/second-brain-privacy`) | `check-no-private-names.js` and the commit-msg hook, which refused a commit message in this very session for naming a private project `[measured: hook output]` | None | n/a | **Skip**, covered |
+| S17 | Fingerprint repeated attempts, score ratchets, a done check that must fail first, fresh context per retry (`docs/track-loop`, `skills/goal-test`) | Smart Retry cap of 2, `judge-panel.js`, `prove`, `check-suites-can-fail.js`, worker rule T5 `[stated: research agent]` | Marginal. Their overnight loop also uses `git add -A` and `git reset --hard`, which we ban | n/a | **Skip** |
+| S18 | 72 thin slash commands, each pointing at a skill | Skills are our unit, with trigger phrases | Commands add surface and loaded tokens for no new behaviour `[inferred]` | n/a | **Skip** |
+| S19 | Ingest contract: one to three concept pages per source, nothing ingested until linked both ways (`skills/second-brain-ingest`) | Our memory format comes from the harness instructions `[stated]`, which already say to link liberally | We cannot change the harness text; the auditor is where we act (S1, S2) | n/a | **Skip** |
+
+## The five questions
+
+**1. What is it for?** A course and reference for engineers building agents
+and an agent-kept personal wiki, repositioned on 2026-11-02 from "second brain"
+to "guides and resources for AI engineers" `[measured: gh api commits]`. The
+audience is individuals with an Obsidian vault and Claude Code.
+
+**2. What is there?** 406 tree entries, 288 of them markdown or JSON
+`[measured: gh api git/trees?recursive=1]`. 50 commits since 2026-09-07, all by
+one author under two names, last push 2026-11-03, 1,311 stars, MIT
+`[measured: gh api repos and commits]`. Most of the volume is prose: the skills
+are 1.7 to 3.5 KB each, the commands a single line pointing at a skill
+`[measured: tree sizes]`.
+
+**3. How does it run?** It does not, as a system. It is copy-in material:
+skills, agents and commands you place under `.claude/`, a vault template, and
+Python helpers (`vault_stats.py`, `link_check.py`, `graph_export.py`) that were
+not run here. The site is a static 3D graph generated from the repo.
+
+**4. Where is the risk?** In adopting, not in running. Several course pages
+restate public material from other vendors and authors, and its reading list
+cites papers whose identifiers we could not verify without fetching them
+`[stated: research agent]`. Their overnight loop resets the tree hard, which
+would destroy concurrent work here.
+
+**5. What would I tell someone tomorrow?** Their memory doctrine is the same as
+ours, in simpler words: keep contradictions, link at write time, index
+first, never trust a count that only grows. The value was a mirror held up to
+our tooling, which turned out not to read the index layout we already use.
+
+## What was not established
+
+- Whether a scheduled routine runs `memory-audit.js`. The search timed out, so
+  S8's skip rests on an unknown.
+- Anything about the site's 3D graph beyond its existence. It needs JavaScript
+  and was not rendered.
+- The arXiv papers and tools in their `resources/` pages. None was fetched.
+- The global memory store `~/.claude/memory` is not audited by `memory-audit.js`
+  at all. S2 only reads its names to resolve links.
+
+## What would change this
+
+- A scheduled memory-maintenance routine appearing: S8's history becomes cheap
+  and worth having.
+- Retrieval moving from index plus semantic search to link walking: orphan rate
+  and degree start predicting recall.
+- A worker-rule regression slipping past review twice: S3 moves to the top.
+
+## Appendix: probes
+
+```bash
+gh api repos/undefined-ui/second-brain-os --jq '{license:.license.spdx_id,stars:.stargazers_count,pushed:.pushed_at}'
+gh api 'repos/undefined-ui/second-brain-os/git/trees/main?recursive=1' --jq '.tree|length'
+node plugins/autodev-memory/scripts/memory-audit.js --json   # tally .projects[].findings[].kind
+```
