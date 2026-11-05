@@ -1,0 +1,129 @@
+{
+  "about": "The top failure classes mined by usage-mine.js from this machine's transcripts, one replayable case each. Evidence is counts only (top-level sessions, synthetic eval transcripts excluded, since the date given). Prompts and files are paraphrased fixtures: no transcript text, no names, no client data. knownRed names the open work that turns a case green; run.js fails when a knownRed case passes, so the entry is deleted in the change that fixes it.",
+  "cases": [
+    {
+      "id": "ls-alias-substitution",
+      "kind": "harness",
+      "class": "tool-error/shell-fault",
+      "evidence": { "since": "2026-10-08", "sessions": 642, "events": 826, "tokens": 11500000, "shape": "523 of the 826 are node MODULE_NOT_FOUND on a path picked with $(ls ...), which the profile alias ls -F suffixes with *. 458 of those also gave node an MSYS /c/ path." },
+      "prompt": "Find the newest installed copy of the worker script under the plugin cache and run its ready subcommand with node.",
+      "checker": "checks/ls-alias-substitution.js",
+      "knownRed": { "until": "F1: a bash-rules rule that refuses or rewrites $(ls ...) into a path (command ls, or a glob with sort -V)" }
+    },
+    {
+      "id": "fix-failing-test",
+      "kind": "replay",
+      "class": "gate-red",
+      "evidence": { "since": "2026-10-08", "sessions": 305, "events": 534, "tokens": 4000000, "retries": 524, "shape": "A red test or gate run followed by more runs. One red is the normal start of a fix, the reruns after it are the cost." },
+      "prompt": "npm test fails in this folder. Find out why and fix the code, not the test, so that npm test passes. Then say DONE-GREEN.",
+      "replay": {
+        "files": {
+          "package.json": "{\n  \"name\": \"replay-fix-failing-test\",\n  \"private\": true,\n  \"scripts\": { \"test\": \"node test.js\" }\n}\n",
+          "price.js": "// Applies a percentage discount and rounds to cents.\nfunction discounted(price, percent) {\n  return Math.round(price * percent) / 100;\n}\nmodule.exports = { discounted };\n",
+          "test.js": "const assert = require('assert');\nconst { discounted } = require('./price');\nassert.strictEqual(discounted(200, 25), 150);\nassert.strictEqual(discounted(19.99, 10), 17.99);\nassert.strictEqual(discounted(50, 0), 50);\nconsole.log('PASS');\n"
+        },
+        "doneMarker": "DONE-GREEN",
+        "maxEvents": 1,
+        "tools": ["Bash", "Read", "Edit", "Write", "Glob", "Grep"],
+        "maxTurns": 12
+      }
+    },
+    {
+      "id": "script-with-regex",
+      "kind": "replay",
+      "class": "hook-block/autodev-fn:heredoc-backslash",
+      "evidence": { "since": "2026-10-08", "sessions": 299, "events": 494, "tokens": 4700000, "shape": "A script with backslashes (a regex, a Windows path) sent through a Bash heredoc, which the autodev-fn rule refuses because the shell mangles it." },
+      "prompt": "Write a small node script that counts the lines of versions.txt matching a version number like 1.2 or 10.04, run it, and report the count as COUNT=<n>.",
+      "replay": {
+        "files": {
+          "versions.txt": "release 1.2 shipped\nno number here\nhotfix 10.04\nv3\nbuild 2.0.1 (rc)\nnotes: see 7.5\n"
+        },
+        "doneMarker": "COUNT=4",
+        "tools": ["Bash", "Read", "Edit", "Write", "Glob", "Grep"],
+        "maxTurns": 10
+      }
+    },
+    {
+      "id": "find-then-read",
+      "kind": "replay",
+      "class": "tool-error/file-missing",
+      "evidence": { "since": "2026-10-08", "sessions": 164, "events": 232, "shape": "A Read or a command on a path that does not exist: a guessed name, a worktree-relative path from the wrong root, or /tmp meaning two places." },
+      "prompt": "There is a date formatting helper in this project, I think at src/helpers/dateFormat.js. Tell me what it returns for an invalid date, quoting the value as RETURNS=<value>.",
+      "replay": {
+        "files": {
+          "src/utils/format-date.js": "// Formats a Date as YYYY-MM-DD.\nfunction formatDate(d) {\n  if (!(d instanceof Date) || Number.isNaN(d.getTime())) return 'n/a-date';\n  return d.toISOString().slice(0, 10);\n}\nmodule.exports = { formatDate };\n",
+          "src/index.js": "const { formatDate } = require('./utils/format-date');\nconsole.log(formatDate(new Date()));\n"
+        },
+        "doneMarker": "RETURNS=.?n/a-date",
+        "tools": ["Bash", "Read", "Glob", "Grep"],
+        "maxTurns": 8
+      }
+    },
+    {
+      "id": "quotes-in-shell",
+      "kind": "replay",
+      "class": "tool-error/shell-quoting",
+      "evidence": { "since": "2026-10-08", "sessions": 160, "events": 203, "shape": "A one-liner whose nested quotes collapse: unexpected EOF, unterminated quoted string. The same text behaves differently in Git Bash, cmd and PowerShell." },
+      "prompt": "Turn each line of names.txt into a JSON object {\"name\": <line>} and write them as a JSON array to names.json. Print the array, then say DONE-JSON.",
+      "replay": {
+        "files": {
+          "names.txt": "Ana O'Neil\nTom \"TJ\" Jones\nLi $Wei\nback\\slash\n"
+        },
+        "doneMarker": "DONE-JSON",
+        "tools": ["Bash", "Read", "Edit", "Write"],
+        "maxTurns": 10
+      }
+    },
+    {
+      "id": "context-depth-once-per-band",
+      "kind": "harness",
+      "class": "hook-block/checking-context-depth",
+      "evidence": { "since": "2026-10-08", "sessions": 149, "events": 401, "shape": "The context-depth Stop hook blocking past the soft line. By design: 2.7 per session is the cost of one block per 50k band, and this case pins that it stays one per band." },
+      "prompt": "A long session crosses 251k context, stops again at the same depth, then crosses 301k. The depth hook should ask once per band, not every turn.",
+      "checker": "checks/context-depth-once-per-band.js"
+    },
+    {
+      "id": "worker-report-outbox",
+      "kind": "harness",
+      "class": "permission-denied/mode:dontAsk",
+      "evidence": { "since": "2026-10-08", "sessions": 127, "events": 590, "shape": "Headless workers in dontAsk mode refused writes. The 2026-11-05 smoke worker was told to write its REPORT.md under the config dir, where dontAsk refuses every write." },
+      "prompt": "A queued smoke task with one runnable acceptance criterion is launched as a headless worker. Its prompt must name a report path the worker is allowed to write.",
+      "checker": "checks/worker-report-outbox.js",
+      "knownRed": { "until": "the conveyor-unstick launcher fix, on release/v8.199.0-candidate (djnsty23/claude-auto-dev#516): the prompt names a report outbox outside the config dir" }
+    },
+    {
+      "id": "worker-prompt-authority",
+      "kind": "harness",
+      "class": "hook-block/worker-authority",
+      "evidence": { "since": "2026-10-08", "sessions": 101, "events": 302, "shape": "worker-authority refusing builders. The largest shapes: git config extensions.worktreeConfig (51), a credential file (50), git push (45)." },
+      "prompt": "The same queued task is launched as a builder. Its prompt must not invite an action the builder's own guard refuses, such as pushing or opening a PR.",
+      "checker": "checks/worker-prompt-authority.js",
+      "knownRed": { "until": "F2: the worker prompt says push and PRs stay with the coordinator, and the worktreeConfig step agrees with worker-authority" }
+    },
+    {
+      "id": "stop-hook-latency",
+      "kind": "harness",
+      "class": "hook-timeout/checking-for-unreported-work",
+      "evidence": { "since": "2026-10-08", "sessions": 69, "events": 136, "shape": "stop-brain-report cancelled at its 5 s timeout. Falling: 8, 70, 41, 14, 3 over weeks 41 to 45, so the slow path is latent rather than gone. Measured: its git calls take about 35 ms. A coordinator id missing from the session store makes checkBrainRole parse all 2,818 records (815 MB), 4.77 s of a 5 s budget." },
+      "prompt": "A session committed since its last sighting, and the coordinator's desktop id is no longer in the session store. Every Stop hook must still finish well inside its timeout.",
+      "checker": "checks/stop-hook-latency.js",
+      "knownRed": { "until": "F4: the Stop-path role lookup stops parsing the whole store when the coordinator's id is missing" }
+    },
+    {
+      "id": "failing-command-no-repeat",
+      "kind": "replay",
+      "class": "retry-identical",
+      "evidence": { "since": "2026-10-08", "sessions": 64, "events": 169, "shape": "A failed tool call repeated byte for byte. Rising: 17, 44, 15, 35, 58 over weeks 41 to 45." },
+      "prompt": "Run npm run build in this folder and get it passing. When it passes, say DONE-BUILD.",
+      "replay": {
+        "files": {
+          "package.json": "{\n  \"name\": \"replay-no-repeat\",\n  \"private\": true,\n  \"scripts\": { \"build\": \"node build.js\" }\n}\n",
+          "build.js": "const fs = require('fs');\nif (!fs.existsSync('build.config.json')) {\n  console.error('build failed: build.config.json is missing. Create it with {\"target\": \"web\"}.');\n  process.exit(1);\n}\nconst c = JSON.parse(fs.readFileSync('build.config.json', 'utf8'));\nif (c.target !== 'web') { console.error('build failed: target must be \"web\"'); process.exit(1); }\nconsole.log('BUILD OK');\n"
+        },
+        "doneMarker": "DONE-BUILD",
+        "tools": ["Bash", "Read", "Edit", "Write"],
+        "maxTurns": 10
+      }
+    }
+  ]
+}
