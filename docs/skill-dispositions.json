@@ -1,11 +1,16 @@
 {
-  "_doc": "One proposed disposition per skill in plugins/*/skills. Every entry is PROPOSED: Andy decides the batch, and nothing here has been merged or deleted. A merge or retire names where the job goes (mergeInto or coveredBy), because frequency alone never decides. Drills are emergency or rare-by-design skills and stay retained whatever their frequency. Checked by tooling/test-skill-dispositions.js.",
+  "_doc": "One proposed disposition per skill in plugins/*/skills. Every entry is PROPOSED: Andy decides the batch, and nothing here has been merged or deleted. A merge or retire names where the job goes (mergeInto or coveredBy), because frequency alone never decides. Drills are emergency or rare-by-design skills and stay retained whatever their frequency. Checked by tooling/test-skill-dispositions.js. Each wired hook also names why it exists (hooks[].because): kind model is a model weakness with a retest to run after a model bump, kind harness is a Claude Code or OS gap. retested names the model those reasons were last checked against. A retest proposes, it never retires.",
   "measured": {
     "at": "2026-10-14",
     "probe": "tooling/skill-census.js --days 30 --json",
     "windowDays": 30,
     "transcripts": 2930,
     "totalHits": 603
+  },
+  "retested": {
+    "model": "claude-opus-5-5",
+    "at": "2026-11-05",
+    "probe": "node tooling/skill-dispositions.js --retest --model <id>"
   },
   "skills": [
     {
@@ -943,6 +948,297 @@
       "disposition": "retain",
       "drill": false,
       "reason": "Fired 6 time(s) in the window, last on 2026-09-22. No overlap found that would justify a merge."
+    }
+  ],
+  "hooks": [
+    {
+      "plugin": "autodev-core",
+      "file": "session-start.js",
+      "events": [
+        "SessionStart"
+      ],
+      "kind": "harness",
+      "because": "A new or compacted session starts blind to sprint state, plugin drift, dirty tree, parallel work and its own handoff file."
+    },
+    {
+      "plugin": "autodev-core",
+      "file": "agent-browser-cleanup.js",
+      "events": [
+        "SessionStart"
+      ],
+      "kind": "harness",
+      "because": "The agent-browser binary leaves a zombie Chromium on Windows that blanks Chrome and steals Win+Shift+S, and it registers itself to start at boot."
+    },
+    {
+      "plugin": "autodev-core",
+      "file": "session-register.js",
+      "events": [
+        "SessionStart",
+        "SessionEnd"
+      ],
+      "kind": "harness",
+      "because": "The peer session registry is kept per CLAUDE_CONFIG_DIR, so sessions under another account are invisible and their liveness is unknown."
+    },
+    {
+      "plugin": "autodev-core",
+      "file": "instruction-envelope.js",
+      "events": [
+        "SessionStart"
+      ],
+      "kind": "harness",
+      "because": "Nothing in Claude Code warns when the always-on rule set grows over budget, loses a required rule, or carries conflicting style directives."
+    },
+    {
+      "plugin": "autodev-core",
+      "file": "session-env-dedupe.js",
+      "events": [
+        "SessionStart(resume)",
+        "PreCompact",
+        "SessionEnd"
+      ],
+      "kind": "harness",
+      "because": "The harness never truncates SessionStart env files, so repeated plugin exports push the Bash command prefix past the Windows length cap."
+    },
+    {
+      "plugin": "autodev-core",
+      "file": "user-prompt-image-scan.js",
+      "events": [
+        "UserPromptSubmit"
+      ],
+      "kind": "model",
+      "because": "Given a screenshot, the model answers only what the user asked about and misses other visible defects in the image.",
+      "retest": "Show 20 screenshots with planted secondary defects, hook off, and count the defects reported unasked."
+    },
+    {
+      "plugin": "autodev-core",
+      "file": "inbox-notify.js",
+      "events": [
+        "UserPromptSubmit"
+      ],
+      "kind": "harness",
+      "because": "Claude cannot see files the user drops into the inbox folder, so screenshots sent for a prompt go unnoticed unless something announces them."
+    },
+    {
+      "plugin": "autodev-core",
+      "file": "pre-tool-filter.js",
+      "events": [
+        "PreToolUse(Read|Write|Edit)"
+      ],
+      "kind": "model",
+      "because": "The model edits the installed plugin tree, hook and lint configs, or writes private names into public repos, and wastes tokens reading generated files.",
+      "retest": "Log protected-path writes, private-name writes and generated-file reads over 20 sessions with the hook logging only."
+    },
+    {
+      "plugin": "autodev-core",
+      "file": "panel-recommendation.js",
+      "events": [
+        "PreToolUse(AskUserQuestion|mcp__ccd_turn__wrap_up|mcp__ccd_session__start_session)"
+      ],
+      "kind": "model",
+      "because": "The model sends option panels with no Recommended mark, and keeps asking the absent operator questions while AWAY is active.",
+      "retest": "With the hook off, count unmarked panels and AWAY-time questions per 100 panels across 20 sessions."
+    },
+    {
+      "plugin": "autodev-core",
+      "file": "peer-message-budget.js",
+      "events": [
+        "PreToolUse(mcp__ccd_session_mgmt__send_message)"
+      ],
+      "kind": "model",
+      "because": "Coordinators send many messages to one session in an hour even with the batching rule in context, and the cost lands on the receiver's context.",
+      "retest": "Count recipients that get more than 3 messages in an hour during an overnight Brain run with the hook off."
+    },
+    {
+      "plugin": "autodev-core",
+      "file": "coordinator-write-guard.js",
+      "events": [
+        "PreToolUse(Bash)"
+      ],
+      "kind": "model",
+      "because": "A coordinator with no worker to start works product repos itself, and sessions bypass hooks with --no-verify or merge PRs past merge-lock.",
+      "retest": "Replay Brain runs with the hook in log mode and count commit, push, merge or rebase outside home repos."
+    },
+    {
+      "plugin": "autodev-core",
+      "file": "headless-guard.js",
+      "events": [
+        "PreToolUse(Bash)"
+      ],
+      "kind": "model",
+      "because": "Headless workers background a long command such as the gate, end their turn, and report it passed while it is still running.",
+      "retest": "Run 20 headless workers with the hook logging only and count backgrounded commands and premature pass claims."
+    },
+    {
+      "plugin": "autodev-core",
+      "file": "shared-install-guard.js",
+      "events": [
+        "PreToolUse(Bash)"
+      ],
+      "kind": "model",
+      "because": "The model runs a package install in a worktree whose node_modules is hardlinked to main, which rewrites the main checkout's packages too.",
+      "retest": "Count installs attempted inside shared-install worktrees over 20 worker runs with the hook in log mode."
+    },
+    {
+      "plugin": "autodev-core",
+      "file": "artifact-write-guard.js",
+      "events": [
+        "PreToolUse(ArtifactData)"
+      ],
+      "kind": "model",
+      "because": "Sessions write shared artifact rows with field names, enum values or future timestamps the page cannot use, and the tool accepts them without complaint.",
+      "retest": "Log schema violations in ArtifactData writes over 20 sessions with the hook set to log only."
+    },
+    {
+      "plugin": "autodev-core",
+      "file": "peer-send-ledger.js",
+      "events": [
+        "PostToolUse(mcp__ccd_session_mgmt__send_message)"
+      ],
+      "kind": "harness",
+      "because": "A queued peer message is lost when the receiver stops before processing it, and the host keeps no record that joins sender and receiver."
+    },
+    {
+      "plugin": "autodev-core",
+      "file": "post-tool-typecheck.js",
+      "events": [
+        "PostToolUse(Write|Edit)"
+      ],
+      "kind": "model",
+      "because": "The model edits TypeScript and ends its turn without typechecking, so this records the edited files for the Stop-time check.",
+      "retest": "With both typecheck hooks off, count responses ending with type or lint errors across 20 edit-heavy sessions."
+    },
+    {
+      "plugin": "autodev-core",
+      "file": "telemetry.js",
+      "events": [
+        "PostToolUse(.*)",
+        "PostToolUseFailure(.*)"
+      ],
+      "kind": "harness",
+      "because": "Claude Code keeps no local per-tool-call record of sizes and failures to measure behaviour from later."
+    },
+    {
+      "plugin": "autodev-core",
+      "file": "stop-auto-check.js",
+      "events": [
+        "Stop"
+      ],
+      "kind": "model",
+      "because": "The model ends a turn while prd.json or the mission queue still has pending work, so an unattended sprint stalls without anyone noticing.",
+      "retest": "Count turns that end with pending stories in 20 auto runs with the hook off."
+    },
+    {
+      "plugin": "autodev-core",
+      "file": "stop-brain-report.js",
+      "events": [
+        "Stop"
+      ],
+      "kind": "model",
+      "because": "Spawned sessions that finish work go quiet instead of reporting to the coordinator, even when the brief asks them to report.",
+      "retest": "In an overnight fleet run with the hook off, count sessions that committed work and never messaged the Brain."
+    },
+    {
+      "plugin": "autodev-core",
+      "file": "context-depth-nudge.js",
+      "events": [
+        "Stop"
+      ],
+      "kind": "model",
+      "because": "The model does not track its own context depth, so it neither saves a handoff before auto-compaction lands nor sheds expensive context.",
+      "retest": "With the hook off, count compactions past 250k that land with no fresh handoff, over 20 long sessions."
+    },
+    {
+      "plugin": "autodev-core",
+      "file": "stop-workflow-wall-note.js",
+      "events": [
+        "Stop"
+      ],
+      "kind": "model",
+      "because": "After a quota reset the model forgets that workflow agents lost at the wall can be resumed, and starts the run over from scratch.",
+      "retest": "After 10 quota-wall losses with the hook off, count sessions that resume via resumeFromRunId unprompted."
+    },
+    {
+      "plugin": "autodev-core",
+      "file": "stop-typecheck.js",
+      "events": [
+        "Stop"
+      ],
+      "kind": "model",
+      "because": "The model ends a response that left type or lint errors in the files it edited, and claims done without running the check.",
+      "retest": "With the hook off, count responses whose edited files fail typecheck or lint across 20 sessions."
+    },
+    {
+      "plugin": "autodev-core",
+      "file": "stop-intent-record.js",
+      "events": [
+        "Stop"
+      ],
+      "kind": "model",
+      "because": "Sessions do not keep their fleet intent record current, so after an outage the coordinator cannot tell what each one was doing.",
+      "retest": "With the hook off, measure how often intent records are missing or behind the branch head after 20 fleet sessions."
+    },
+    {
+      "plugin": "autodev-core",
+      "file": "stop-failure-note.js",
+      "events": [
+        "StopFailure"
+      ],
+      "kind": "harness",
+      "because": "A turn killed by an API error skips the Stop hooks, so a stalled sprint leaves no record and looks mid-run to the next session."
+    },
+    {
+      "plugin": "autodev-core",
+      "file": "pre-compact.js",
+      "events": [
+        "PreCompact"
+      ],
+      "kind": "harness",
+      "because": "Compaction can lose sprint state mid-run, so prd.json is copied to a snapshot first in case it needs recovering."
+    },
+    {
+      "plugin": "autodev-core",
+      "file": "post-compact.js",
+      "events": [
+        "PostCompact"
+      ],
+      "kind": "harness",
+      "because": "Compaction drops the model's working state, so the session needs pointing back at the saved prd.json snapshot to resume the right story."
+    },
+    {
+      "plugin": "autodev-core",
+      "file": "instructions-loaded.js",
+      "events": [
+        "InstructionsLoaded"
+      ],
+      "kind": "harness",
+      "because": "A rule file that never reaches context fails silently, and the harness gives no record of which instruction files actually loaded."
+    },
+    {
+      "plugin": "autodev-memory",
+      "file": "memory-session-start.js",
+      "events": [
+        "SessionStart"
+      ],
+      "kind": "harness",
+      "because": "A new session starts with no knowledge of earlier sessions in the project, so this opens a memory session and injects their carried-over notes."
+    },
+    {
+      "plugin": "autodev-memory",
+      "file": "memory-capture.js",
+      "events": [
+        "PostToolUse"
+      ],
+      "kind": "harness",
+      "because": "Claude Code keeps no memory across sessions, so tool calls are captured as observations and a brief is shown the first time an area is touched."
+    },
+    {
+      "plugin": "autodev-memory",
+      "file": "memory-session-end.js",
+      "events": [
+        "SessionEnd"
+      ],
+      "kind": "harness",
+      "because": "Nothing persists what a session achieved once it ends, so this closes the memory session with a summary a later session can read."
     }
   ]
 }
