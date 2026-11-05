@@ -45,6 +45,7 @@ const crypto = require('crypto');
 const { spawnSync } = require('child_process');
 const { configDir } = require('./claude-paths.js');
 const mine = require('./usage-mine.js');
+const { withLedgerLock, writeAtomic } = require('./ledger-lock.js');
 
 const SMALL_URL = process.env.AUTODEV_LOCAL_SMALL_URL || 'http://127.0.0.1:8081';
 const TOPIC_INPUT_CHARS = 60000; // the opening of a session says what it is for, and keeps a call near 3 s
@@ -56,7 +57,6 @@ const PR_URL = /https:\/\/github\.com\/[\w.-]+\/[\w.-]+\/pull\/\d+/g;
 function usageDir() { return process.env.AUTODEV_USAGE_DIR || path.join(configDir(), 'autodev', 'usage'); }
 function digestDir() { return path.join(usageDir(), 'digests'); }
 function readJson(f, dflt) { try { return JSON.parse(fs.readFileSync(f, 'utf8')); } catch { return dflt; } }
-function writeJson(f, v) { fs.mkdirSync(path.dirname(f), { recursive: true }); const t = `${f}.tmp`; fs.writeFileSync(t, JSON.stringify(v, null, 1)); fs.renameSync(t, f); }
 const config = () => readJson(path.join(usageDir(), 'digest-config.json'), {});
 
 const strings = (v) => (Array.isArray(v) ? v.map((s) => String(s).trim()).filter(Boolean) : []);
@@ -334,8 +334,15 @@ async function run(opts) {
             let r;
             try { r = await digestOne(f, opts); } catch (e) { r = { status: 'retry', why: e.message }; }
             tally[r.status] = (tally[r.status] || 0) + 1;
-            ledger.files[f] = { key: srcKey(f), status: r.status, why: r.why || '', out: r.out || '', topicOk: r.topicOk, at: new Date().toISOString() };
-            writeJson(ledgerPath(), ledger);
+            const rec = { key: srcKey(f), status: r.status, why: r.why || '', out: r.out || '', topicOk: r.topicOk, at: new Date().toISOString() };
+            // Two runs can overlap (a schedule and a hand run). Re-read under the lock and
+            // merge one record, so neither run's records overwrite the other's.
+            withLedgerLock(ledgerPath(), () => {
+                const latest = readJson(ledgerPath(), { files: {} });
+                if (!latest.files) latest.files = {};
+                latest.files[f] = rec;
+                writeAtomic(ledgerPath(), JSON.stringify(latest, null, 1));
+            });
         }
     } finally { releaseSmall(); }
     return { todo: todo.length, batch: batch.length, tally };
