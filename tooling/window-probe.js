@@ -134,12 +134,22 @@ function defaultHome(env = process.env) {
     try { return require('../plugins/autodev-core/scripts/claude-paths.js').configDir(env); } catch { return null; }
 }
 
+/**
+ * The line of git's stderr that says why it failed. git can add a trailing hint after its
+ * fatal line (on Linux, "Stopping at filesystem boundary" when the cwd is under a separate
+ * mount such as /tmp), so the last line is not the cause. Prefer a fatal: or error: line.
+ */
+function gitCause(stderr) {
+    const lines = String(stderr || '').split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
+    return lines.find((l) => /^(fatal|error):/i.test(l)) || lines.pop() || 'no stderr';
+}
+
 /** git in `repo`: stdout trimmed, or null when git failed, with the cause in `.lastError`. */
 function gitIn(repo) {
     const git = (args) => {
         const r = require('child_process').spawnSync('git', args, { cwd: repo, encoding: 'utf8', windowsHide: true, timeout: 30000, maxBuffer: 16 * 1024 * 1024 });
         if (!r.error && r.status === 0) return r.stdout.trim();
-        const said = String(r.stderr || '').trim().split(/\r?\n/).pop() || 'no stderr';
+        const said = gitCause(r.stderr);
         git.lastError = `git ${args[0]} in ${repo}: ${r.error ? (r.error.code || r.error.message) : `exit ${r.status}${r.signal ? ` ${r.signal}` : ''}`}, ${said}`;
         return null;
     };
@@ -175,4 +185,4 @@ function main(argv = process.argv.slice(2), io = { log: console.log, err: consol
 
 if (require.main === module) process.exitCode = main();
 
-module.exports = { grade, format, windowDays, readJsonl, readJson, dayOf, addDays, dayStart, run, main, WINDOW_DAYS, DAY_MS };
+module.exports = { gitCause, grade, format, windowDays, readJsonl, readJson, dayOf, addDays, dayStart, run, main, WINDOW_DAYS, DAY_MS };
