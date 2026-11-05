@@ -88,8 +88,7 @@
       "class": "permission-denied/mode:dontAsk",
       "evidence": { "since": "2026-10-08", "sessions": 127, "events": 590, "shape": "Headless workers in dontAsk mode refused writes. The 2026-11-05 smoke worker was told to write its REPORT.md under the config dir, where dontAsk refuses every write." },
       "prompt": "A queued smoke task with one runnable acceptance criterion is launched as a headless worker. Its prompt must name a report path the worker is allowed to write.",
-      "checker": "checks/worker-report-outbox.js",
-      "knownRed": { "until": "the conveyor-unstick launcher fix, on release/v8.199.0-candidate (djnsty23/claude-auto-dev#516): the prompt names a report outbox outside the config dir" }
+      "checker": "checks/worker-report-outbox.js"
     },
     {
       "id": "worker-prompt-authority",
