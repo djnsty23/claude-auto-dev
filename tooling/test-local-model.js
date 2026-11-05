@@ -50,6 +50,8 @@ else if (mode === 'hang') setTimeout(() => {}, 60000);
 `);
 const configOk = path.join(tmp, 'local-model.json');
 fs.writeFileSync(configOk, JSON.stringify({ helper }));
+const callLog = path.join(tmp, 'calls-log', 'local-model-calls.jsonl');
+const logRows = () => { try { return fs.readFileSync(callLog, 'utf8').trim().split('\n').filter(Boolean).map((l) => JSON.parse(l)); } catch { return []; } };
 const configMissingHelper = path.join(tmp, 'missing.json');
 fs.writeFileSync(configMissingHelper, JSON.stringify({ helper: path.join(tmp, 'nope.mjs') }));
 
@@ -69,7 +71,7 @@ function runCli(args, { env = {}, stdin } = {}) {
   try { fs.rmSync(marker, { force: true }); } catch { /* absent */ }
   return new Promise((resolve) => {
     const child = spawn(process.execPath, [SCRIPT, ...args], {
-      env: { PATH: process.env.PATH, SystemRoot: process.env.SystemRoot, AUTODEV_LOCAL_CONFIG: configOk, ...env },
+      env: { PATH: process.env.PATH, SystemRoot: process.env.SystemRoot, AUTODEV_LOCAL_CONFIG: configOk, AUTODEV_LOCAL_LOG: callLog, HOME: tmp, USERPROFILE: tmp, ...env },
       windowsHide: true,
     });
     let stdout = '';
@@ -155,6 +157,42 @@ async function main() {
   check('unknown task exits 2', r.code === 2, `code ${r.code}`);
   r = await runCli(['browse', '-']);
   check('browse without a question exits 2', r.code === 2, `code ${r.code}`);
+
+  console.log('call log (L2)');
+  fs.rmSync(path.dirname(callLog), { recursive: true, force: true });
+  await runCli(['triage', '-']);
+  await runCli(['triage', '-'], { env: { FAKE_MODE: 'handback' } });
+  await runCli(['commit', '-'], { env: { AUTODEV_LOCAL_BIG_URL: downUrl } });
+  await runCli(['receipt', 'r.log']);
+  await runCli(['copy', 'x']);
+  await runCli(['summarize', 'x']);
+  const rows = logRows();
+  check('one log line per routed call, none for a usage error', rows.length === 5, `rows ${rows.length}: ${JSON.stringify(rows)}`);
+  const [okRow, failRow, bigRow, codeRow, claudeRow] = rows;
+  check('ok row: task, 4B, outcome ok, numeric latency, ISO ts',
+    okRow && okRow.task === 'triage' && okRow.model === '4B' && okRow.outcome === 'ok' && Number.isFinite(okRow.latencyMs) && !Number.isNaN(Date.parse(okRow.ts)), JSON.stringify(okRow));
+  check('helper failure: fallback to claude, attempted, reason kept',
+    failRow && failRow.outcome === 'fallback' && failRow.fallbackTo === 'claude' && failRow.attempted === true && /HTTP 500/.test(failRow.reason), JSON.stringify(failRow));
+  check('27B down: fallback, model 27B, attempted',
+    bigRow && bigRow.model === '27B' && bigRow.outcome === 'fallback' && bigRow.attempted === true && /attach-only/.test(bigRow.reason), JSON.stringify(bigRow));
+  check('receipt: fallback to code, not attempted',
+    codeRow && codeRow.fallbackTo === 'code' && codeRow.attempted === false && codeRow.model === null, JSON.stringify(codeRow));
+  check('copy: fallback to claude, not attempted',
+    claudeRow && claudeRow.fallbackTo === 'claude' && claudeRow.attempted === false, JSON.stringify(claudeRow));
+
+  fs.appendFileSync(callLog, 'not json\n{"task":"triage"}\n');
+  r = await runCli(['stats']);
+  check('stats states its population and the unparseable lines', /^5 call\(s\) in the last 7 day\(s\)/.test(r.stdout) && /2 unparseable line\(s\)/.test(r.stdout), r.stdout);
+  check('stats counts triage 1 ok, 1 fallback, 2 local tries', /^triage\s+1\s+1\s+2\s/m.test(r.stdout), r.stdout);
+  check('stats counts answered steps', /1 step\(s\) answered locally/.test(r.stdout), r.stdout);
+  check('stats lists why local tries fell back', /1x helper exited 3: local model failed: HTTP 500/.test(r.stdout), r.stdout);
+  r = await runCli(['stats'], { env: { AUTODEV_LOCAL_LOG: path.join(tmp, 'none.jsonl') } });
+  check('stats on an absent log says so, exit 0', r.code === 0 && /^0 call\(s\).*\(file absent\)/.test(r.stdout), r.stdout);
+
+  const blocker = path.join(tmp, 'blocker');
+  fs.writeFileSync(blocker, 'a file where the log directory should be');
+  r = await runCli(['triage', '-'], { env: { AUTODEV_LOCAL_LOG: path.join(blocker, 'calls.jsonl') } });
+  check('an unwritable log keeps the answer and exit 0', r.code === 0 && /fake answer/.test(r.stdout) && /call log not written/.test(r.stderr), `code ${r.code}, ${r.stderr}`);
 
   up.close();
   fs.rmSync(tmp, { recursive: true, force: true });

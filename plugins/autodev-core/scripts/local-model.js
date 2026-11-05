@@ -31,6 +31,14 @@
 // treats exit 3 as "do it yourself", so a gate or a skill never fails because
 // the local model is absent.
 //
+// THE CALL LOG. Every routed call appends one JSON line to
+// <claude dir>/autodev/local-model-calls.jsonl ($AUTODEV_LOCAL_LOG overrides):
+// ts, task, route, model, outcome (ok or fallback), latencyMs, and on a
+// fallback, fallbackTo (claude or code) and reason. It exists to measure what
+// the local models save, so `local-model.js stats` reads it back with its
+// population. A log that cannot be written costs a stderr line, never the
+// answer or the exit code.
+//
 // EXIT: 0 the local answer is on stdout; 3 hand back (stderr says why);
 //       2 this script was called wrongly.
 
@@ -81,6 +89,7 @@ const SHAPES = {
 const USAGE = [
   'usage: node local-model.js <task> <args...>',
   '       node local-model.js routes',
+  '       node local-model.js stats [--days=7]',
   '',
   'Runs a task on a local model when the routing table sends it there.',
   'Exit 0: the answer is on stdout. Exit 3: hand back, do the step yourself',
@@ -91,6 +100,7 @@ const USAGE = [
   '  AUTODEV_LOCAL_CONFIG   config file, default <claude dir>/autodev/local-model.json',
   '  AUTODEV_LOCAL_BIG_URL  large-model base URL, default $BIG_LLM_URL or http://127.0.0.1:8080',
   '  AUTODEV_LOCAL_TIMEOUT_MS  helper budget, default 330000',
+  '  AUTODEV_LOCAL_LOG      call log, default <claude dir>/autodev/local-model-calls.jsonl',
 ].join('\n');
 
 function routesTable() {
@@ -193,12 +203,95 @@ async function main() {
     console.log(routesTable());
     return 0;
   }
+  if (argv[0] === 'stats') {
+    const days = Number((argv.find((a) => a.startsWith('--days=')) || '').slice(7)) || 7;
+    console.log(stats(readLog(logPath(process.env)), days, Date.now()));
+    return 0;
+  }
   const spec = ROUTES[argv[0]];
   const stdinText = spec && spec.route !== 'claude' && spec.route !== 'code' && argv[1] === '-' ? readStdin() : undefined;
+  const started = Date.now();
   const r = await run(argv, process.env, stdinText);
+  if (r.code !== 2) {
+    const why = logCall(process.env, record(argv[0], r, Date.now() - started));
+    if (why) process.stderr.write(`[local-model] call log not written: ${why}\n`);
+  }
   if (r.stdout) process.stdout.write(r.stdout + '\n');
   if (r.reason) process.stderr.write(`[local-model] ${r.code === 3 ? 'hand back: ' : ''}${r.reason}\n`);
   return r.code;
+}
+
+const MODEL_OF = { small: '4B', big: '27B' };
+
+function logPath(env) {
+  return env.AUTODEV_LOCAL_LOG || path.join(os.homedir(), '.claude', 'autodev', 'local-model-calls.jsonl');
+}
+
+/** One log line for one routed call. */
+function record(task, r, latencyMs) {
+  const local = r.route === 'small' || r.route === 'big';
+  const rec = { ts: new Date().toISOString(), task, route: r.route, model: MODEL_OF[r.route] || null, outcome: r.code === 0 ? 'ok' : 'fallback', latencyMs };
+  if (r.code !== 0) {
+    rec.fallbackTo = r.route === 'code' ? 'code' : 'claude';
+    rec.attempted = local;
+    rec.reason = String(r.reason || '').slice(0, 300);
+  }
+  return rec;
+}
+
+/** Append one record. Returns null, or why it could not be written. Never throws. */
+function logCall(env, rec) {
+  try {
+    const file = logPath(env);
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    fs.appendFileSync(file, JSON.stringify(rec) + '\n');
+    return null;
+  } catch (e) {
+    return e.message;
+  }
+}
+
+function readLog(file) {
+  let text = '';
+  try { text = fs.readFileSync(file, 'utf8'); } catch (e) { return { file, missing: e.code === 'ENOENT', rows: [], bad: 0 }; }
+  const rows = [];
+  let bad = 0;
+  for (const line of text.split(/\r?\n/)) {
+    if (!line.trim()) continue;
+    try {
+      const o = JSON.parse(line);
+      if (o && typeof o.task === 'string' && (o.outcome === 'ok' || o.outcome === 'fallback') && !Number.isNaN(Date.parse(o.ts))) rows.push(o);
+      else bad++;
+    } catch { bad++; }
+  }
+  return { file, missing: false, rows, bad };
+}
+
+/** The saving, with the population that produced it. */
+function stats(log, days, now) {
+  const since = now - days * 864e5;
+  const rows = log.rows.filter((o) => Date.parse(o.ts) >= since);
+  const head = `${rows.length} call(s) in the last ${days} day(s) from ${log.file}` +
+    (log.missing ? ' (file absent)' : '') + (log.bad ? `, ${log.bad} unparseable line(s)` : '');
+  if (!rows.length) return head;
+  const by = {};
+  for (const o of rows) {
+    const t = by[o.task] || (by[o.task] = { ok: 0, fallback: 0, attempted: 0, ms: [] });
+    t[o.outcome]++;
+    if (o.outcome === 'ok' || o.attempted) { t.attempted++; if (Number.isFinite(o.latencyMs)) t.ms.push(o.latencyMs); }
+  }
+  const median = (a) => { if (!a.length) return '-'; const s = [...a].sort((x, y) => x - y); const m = s[Math.floor(s.length / 2)]; return m < 1000 ? `${m}ms` : `${Math.round(m / 100) / 10}s`; };
+  const lines = [head, '', 'task     ok  fallback  local tries  median latency'];
+  for (const [task, t] of Object.entries(by)) {
+    lines.push(`${task.padEnd(8)} ${String(t.ok).padStart(3)}  ${String(t.fallback).padStart(8)}  ${String(t.attempted).padStart(11)}  ${median(t.ms)}`);
+  }
+  const ok = rows.filter((o) => o.outcome === 'ok').length;
+  const reasons = {};
+  for (const o of rows) if (o.outcome === 'fallback' && o.attempted) reasons[o.reason] = (reasons[o.reason] || 0) + 1;
+  lines.push('', `${ok} step(s) answered locally, ${(ok / days).toFixed(1)} a day: reads Claude did not make.`);
+  const top = Object.entries(reasons).sort((a, b) => b[1] - a[1]).slice(0, 5);
+  if (top.length) lines.push('', 'local tries that fell back:', ...top.map(([r, n]) => `  ${n}x ${r}`));
+  return lines.join('\n');
 }
 
 if (require.main === module) {
@@ -209,4 +302,4 @@ if (require.main === module) {
   });
 }
 
-module.exports = { ROUTES, run, resolveHelper, routesTable };
+module.exports = { ROUTES, run, resolveHelper, routesTable, record, readLog, stats };
