@@ -8,6 +8,7 @@ work, what an unattended session cannot do, and what a queued brief carries.
 - Channels that actually start work
 - What an unattended worker cannot do
 - A queued task must be able to finish whole
+- Sending a red unit back
 
 ## Channels that actually start work
 
@@ -119,3 +120,29 @@ enqueue` carries two things:
 Leave a task out of the queue, rather than choosing a smaller one, when it cannot
 meet both. A run that is trivial so that it gets accepted inflates the delivery
 window it is graded by and proves nothing.
+
+## Sending a red unit back
+
+When one unit of a batch fails acceptance, return that unit alone. Sending the
+batch back rewrites units that were already green: their next version differs
+without being better, each needs re-verifying, and any of them can fail this
+time for an unrelated reason. One red becomes several unknowns.
+
+The re-dispatch brief carries a retry packet, five lines:
+
+```
+UNIT      the story id or slice that failed, nothing else
+VERDICT   red
+REASON    the failing check by name (test, gate stage, acceptance line)
+EVIDENCE  expected versus actual, with file:line or the failing output
+SCOPE     the files this fix may touch; every other unit stays as it is
+```
+
+The scope line keeps a fix from growing: without it a worker opens the file,
+fixes two neighbouring things, and a one-unit correction lands as a diff nobody
+asked for. A diff outside SCOPE is a red result, not a bonus.
+
+Cap a unit at three attempts. A unit red after its third packet is a fault in the
+plan or the brief that produced it, which the worker cannot see: stop
+re-dispatching, record the three verdicts on the story, and rework the split or
+the acceptance test yourself before anything runs again.

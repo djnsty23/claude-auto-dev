@@ -154,6 +154,8 @@ triage, not acceptance or deployment permission. Re-run integration checks after
 a rebase or changed base.
 
 Load `review`, or `adversarial-loop` for harness/security/verification changes.
+A red unit goes back alone, with the retry packet and its three-attempt cap
+from [dispatch-channels](references/dispatch-channels.md#sending-a-red-unit-back).
 Fix findings or record disconfirming evidence. Freeze acceptance scope after the
 audit pass and queue independent new scope. Repeated identical observations add
 no evidence. A score is not a completion condition. Set `passes: true` only when
