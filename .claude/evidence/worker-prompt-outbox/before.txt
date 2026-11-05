@@ -37,7 +37,7 @@ PASS  ready --task-id and settle --dev are refused the same way
 PASS  the composed prompt opens with STEP 0 and carries the brief
 PASS  a headless prompt names no scheduled task to leave alone
 FAIL  a headless prompt tells the worker to write its report in its outbox  (<home>/AppData/Local/Temp/unattended-queue-McMN17/outbox/guide-a-3af89835/REPORT.md)
-FAIL    and never names the ledger report under the config dir, which the worker cannot write  (<home>/AppData/Local/Temp/unattended-queue-McMN17/home/.claude/autodev/reports/worker-guide-a/REPORT.md)
+FAIL    and never names the ledger report under the config dir, which the worker cannot write  (<home>/AppData/Local/Temp/unattended-queue-McMN17/<fixture-home>/.claude/autodev/reports/worker-guide-a/REPORT.md)
 PASS  control: the scheduled-task prompt still names its task
 PASS  launch refuses when the branch appeared after enqueue
 PASS  a refused launch stays queued with lastLaunchError and an attempt count
