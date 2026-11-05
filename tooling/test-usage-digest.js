@@ -12,7 +12,8 @@
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
-const { spawnSync } = require('child_process');
+const http = require('http');
+const { spawn, spawnSync } = require('child_process');
 
 const SUBJECT = path.join(__dirname, '..', 'plugins', 'autodev-core', 'scripts', 'usage-digest.js');
 
@@ -176,6 +177,67 @@ const header = (body) => body.split('\n')[0];
         check('status counts the ledger', st.records === 2 && st.byStatus.ok === 2 && st.configured === true && st.ingest === false, JSON.stringify(st));
         const kept = fs.readdirSync(path.join(usage, 'digests', 'proj-a'));
         check('digests are written under the usage dir', kept.length === 1 && /^2026-11-05-aaaa1111\.md$/.test(kept[0]), kept);
+
+        // The real model call, through the CLI, with a local server standing in for the model.
+        // Every check above injects askTopic, so none of them reach this path. The child is
+        // spawned, not spawnSync'd, because the stub answers on this process's event loop.
+        const replies = [];
+        const asked = [];
+        const stub = http.createServer((req, res) => {
+            if (req.url === '/health') { res.end('{}'); return; }
+            let body = '';
+            req.on('data', (c) => { body += c; });
+            req.on('end', () => {
+                asked.push(JSON.parse(body));
+                const next = replies.shift();
+                res.statusCode = next.status || 200;
+                res.end(JSON.stringify({ choices: [{ message: { content: next.content } }], usage: { prompt_tokens: 3, completion_tokens: 2 } }));
+            });
+        });
+        await new Promise((resolve) => stub.listen(0, '127.0.0.1', resolve));
+        const url = `http://127.0.0.1:${stub.address().port}`;
+        const cliRun = (...args) => new Promise((resolve) => {
+            const child = spawn(process.execPath, [SUBJECT, ...args], { windowsHide: true, env: { ...process.env, AUTODEV_LOCAL_SMALL_URL: url, AUTODEV_SMALL_START: '', AUTODEV_SMALL_STOP: '' } });
+            let out = '';
+            let err = '';
+            child.stdout.on('data', (c) => { out += c; });
+            child.stderr.on('data', (c) => { err += c; });
+            child.on('close', (code) => resolve({ code, out, err }));
+        });
+        try {
+            session('C--code-proj-live', 'dddd4444-0000-0000-0000-000000000000', 'C:/code/proj-live');
+            let c = await cliRun('run', '--project', 'proj-live', '--dry-run');
+            check('--dry-run counts the batch and calls no model', c.code === 0 && /1 transcript\(s\) need a digest, 1 in this batch \(dry run/.test(c.out) && asked.length === 0, c.out + c.err);
+            c = await cliRun('run', '--limit', 'many');
+            check('a non-numeric --limit is refused with exit 2', c.code === 2 && /--limit takes a positive number/.test(c.err), c.err);
+
+            replies.push({ content: '<think>{"topic":"Hidden reasoning topic"}</think>\nHere it is: {"topic":"Fix parser failure in tests"} done' });
+            c = await cliRun('run', '--limit', '1', '--project', 'proj-live');
+            check('run reaches the model and records the digest', c.code === 0 && /ok: 1/.test(c.out) && asked.length === 1, c.out + c.err);
+            const sent = asked[0] || { messages: [] };
+            check('the session log is what the model is asked about', /SESSION LOG/.test((sent.messages[1] || {}).content || '') && /parser/.test((sent.messages[1] || {}).content || ''));
+            const liveDir = path.join(usage, 'digests', 'proj-live');
+            const liveFile = fs.existsSync(liveDir) ? fs.readdirSync(liveDir)[0] : null;
+            const liveBody = liveFile ? fs.readFileSync(path.join(liveDir, liveFile), 'utf8') : '';
+            check('the topic is parsed out of the surrounding prose, past the think block', /^# Fix parser failure in tests/.test(liveBody) && /topic by: 4B, checked/.test(liveBody), header(liveBody));
+
+            const fp = session('C--code-proj-parse', 'eeee5555-0000-0000-0000-000000000000', 'C:/code/proj-parse');
+            replies.push({ content: 'no json in this answer' });
+            c = await cliRun('one', fp, '--print');
+            check('an answer with no JSON falls back to a code topic', c.code === 0 && /refused: empty/.test(c.out), c.out + c.err);
+            replies.push({ content: '{"topic": broken}' });
+            c = await cliRun('one', fp, '--print');
+            check('an answer with malformed JSON falls back to a code topic', c.code === 0 && /refused: empty/.test(c.out), c.out + c.err);
+
+            session('C--code-proj-down', 'ffff6666-0000-0000-0000-000000000000', 'C:/code/proj-down');
+            replies.push({ status: 500, content: '' });
+            c = await cliRun('run', '--project', 'proj-down');
+            check('a model error is a retry and exit 1, not a clean run', c.code === 1 && /retry: 1/.test(c.out), c.out + c.err);
+        } finally {
+            await new Promise((resolve) => stub.close(resolve));
+        }
+        const down = await cliRun('run', '--project', 'proj-down');
+        check('a model that is not up refuses with exit 2 and reads nothing', down.code === 2 && /local model is not answering/.test(down.err), down.out + down.err);
     } catch (e) {
         check('suite ran without throwing', false, e && e.stack);
     } finally {
