@@ -114,6 +114,9 @@ const USAGE = [
     '        Invalid API key, an expired OAuth token, subscription access disabled) settles, plain or --unreported,',
     '        as result auth-refused with that text as its reason, unless a report holds a RESULT line. It is its own',
     '        result, never done, stopped, failed or unreported: the worker never ran. status shows authRefused first.',
+    'settle, deferred: an ended run whose supervisor wrote CAPACITY_DEFERRED (capacity refused or a tripped crash',
+    '        breaker) settles --unreported as result deferred, with that line as its reason. claude never started,',
+    '        so it is its own result, never done, stopped, failed or unreported: the task is retried, not failed.',
     'settle --started-at <iso>: settle exactly the record of that code with that startedAt. Refused as unknown-record',
     '        when no record matches and already-settled when it is settled. Without it, the newest unsettled record.',
     'ask:    a worker asks by writing <report dir>/<CODE>/ask.json and keeps working. status shows ask=open',
@@ -129,10 +132,11 @@ const PROMPT_MAX = 8000;
 const RESULT_STATES = ['done', 'stopped', 'failed'];
 // What a SETTLED record's `result` field can hold: a RESULT line's state, or
 // `lost` for a record settled by `settle --lost`, or `unreported` for one settled
-// by `settle --unreported`, or `auth-refused` for a run whose login was refused.
+// by `settle --unreported`, or `auth-refused` for a run whose login was refused,
+// or `deferred` for a run the capacity gate turned away before claude started.
 // Kept apart from RESULT_STATES on purpose: none is ever parsed from a report,
 // so a worker cannot claim one.
-const SETTLED_RESULTS = [...RESULT_STATES, 'lost', 'unreported', 'auth-refused'];
+const SETTLED_RESULTS = [...RESULT_STATES, 'lost', 'unreported', 'auth-refused', 'deferred'];
 // `[measured 2026-10-10]` two workers ran about 50 minutes, then every turn of
 // `claude -p` ended in a stream-json `result` event whose text was the first
 // pattern below, and the supervisor wrote CLAUDE_EXIT=1. They settled as plain
@@ -1480,7 +1484,18 @@ function settleUnreported(rec, code, exit, refusal = null, records = []) {
     const settledAt = new Date().toISOString();
     // A run the supervisor ended before the model started (BUDGET_DENIED,
     // CAPACITY_DEFERRED, CLAUDE_SPAWN_ERROR) keeps that line as its blocker.
-    const blocker = supervisorBlocker(readText(rec.log)) || (reportText !== null && !retry && reportBlocker(reportText)) || { status: 'unknown' };
+    const supervisor = supervisorBlocker(readText(rec.log));
+    // [measured 2026-11-05] a crash breaker stayed tripped for two days, and every
+    // launch in that time ended CAPACITY_DEFERRED. Settled as unreported, each
+    // closed as a failed task and stalled its whole chain, though claude never
+    // started. Only a report with no RESULT line of anyone's lets this through.
+    if (supervisor && /^CAPACITY_DEFERRED=/.test(supervisor.text) && !retry && !other) {
+        const settledAt = new Date().toISOString();
+        const reason = supervisor.text;
+        Object.assign(rec, { state: 'settled', result: 'deferred', reason, sentence: null, exit, settledAt, blocker: supervisor });
+        return { code, state: 'deferred', reason, sentence: null, exit, report: rec.report, settledAt, blocker: supervisor };
+    }
+    const blocker = supervisor || (reportText !== null && !retry && reportBlocker(reportText)) || { status: 'unknown' };
     Object.assign(rec, { state: 'settled', result: 'unreported', reason, sentence: null, exit, settledAt, blocker });
     return { code, state: 'unreported', reason, sentence: null, exit, report: rec.report, settledAt, blocker };
 }

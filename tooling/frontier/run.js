@@ -807,6 +807,20 @@ function rowFor(c, meta, extra) {
     }, extra);
 }
 
+const capacity = require('../../plugins/autodev-core/scripts/capacity.js');
+
+/**
+ * Stop a supervisor on purpose: settle its capacity reservation while it is
+ * still alive, then kill its tree. [measured 2026-11-03] a bare kill of an
+ * overdue run left the reservation behind, the next ledger read took it for a
+ * crash, and the worker breaker refused every headless launch for two days.
+ */
+function stopSupervisor(pid) {
+    if (!pid) return;
+    capacity.releaseByPid(Number(pid));
+    killTree(pid);
+}
+
 function killTree(pid) {
     if (!pid) return;
     if (process.platform === 'win32') spawnSync('taskkill', ['/F', '/T', '/PID', String(pid)], { windowsHide: true, encoding: 'utf8' });
@@ -842,7 +856,7 @@ function finish(c, run, { allowKill = true } = {}) {
         let timedOut = false;
         if (!exitM) {
             if (!allowKill) return null;
-            killTree(meta.supervisorPid);
+            stopSupervisor(meta.supervisorPid);
             timedOut = true;
         }
         const exitMs = exitM ? fs.statSync(p.log).mtimeMs : Date.now();
@@ -1143,7 +1157,7 @@ function batchLoop(c, id) {
                 }
             }
             if (stop) {
-                for (const it of batch.items.filter((x) => x.state === 'running')) killTree(readJson(runPaths(c, it.run).meta).supervisorPid);
+                for (const it of batch.items.filter((x) => x.state === 'running')) stopSupervisor(readJson(runPaths(c, it.run).meta).supervisorPid);
                 batch.state = stop; save(); return batch;
             }
             const running = batch.items.filter((x) => x.state === 'running').map((x) => x.run);
@@ -1298,6 +1312,6 @@ if (require.main === module) {
     }
 }
 
-module.exports = { parseArgs, fixTokens, scanForTokens, workerEnv, checksEnv, composePrompt, parseStream, tokensOf, leakHits,
+module.exports = { stopSupervisor, parseArgs, fixTokens, scanForTokens, workerEnv, checksEnv, composePrompt, parseStream, tokensOf, leakHits,
     gradeLocate, gradeReview, gradeDecide, decideAnswer, plantedFindings, readRows, rowFor, loadArm, pinRev, pinFor, armPin, armOpt, prepare, createBatch, RUN_RE, SCRUB_RE, SETTINGS_KEEP, CODEY,
     processList, heavyJobs, noteLoad, loadRecord, quietGate, HEAVY_RE };
