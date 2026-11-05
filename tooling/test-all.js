@@ -29,6 +29,14 @@ const path = require('path');
 const { spawnSuite } = require('./suite-tmp.js');
 const receipts = require('./coverage-receipt.js');
 
+// Known-flake notes for a failed suite, or [] when the matcher cannot load.
+// Lazy and guarded: suites copy this runner into fixtures with no plugins/
+// beside it, and an annotation must never be why the runner fails.
+function flakeNotes(text) {
+  try { return require('../plugins/autodev-core/scripts/known-flakes.js').gateNotes(text, { cwd: repoRoot }); }
+  catch { return []; }
+}
+
 const scriptsDir = __dirname;
 const repoRoot = path.resolve(scriptsDir, '..');
 
@@ -376,7 +384,15 @@ async function main() {
     // a verdict this runner can vouch for.
     const state = r.state === 'pass' || r.state === 'indet' ? r.state : 'fail';
     console.log(`${state === 'pass' ? 'PASS ' : state === 'fail' ? 'FAIL ' : 'INDET'}  ${r.label}`);
-    if (state === 'fail') failed++;
+    if (state === 'fail') {
+      failed++;
+      // Known flakes annotate a red; they never change it (known-flakes.js).
+      if (run && r.log) {
+        let text = '';
+        try { text = fs.readFileSync(path.join(run.runDir, r.log), 'utf8'); } catch { /* no log, no note */ }
+        for (const note of flakeNotes(text)) console.log(`       ${note}`);
+      }
+    }
     else if (state === 'indet') { indeterminate++; indetLabels.push(r.label); }
   }
   console.log(
