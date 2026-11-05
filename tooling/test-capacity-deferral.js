@@ -30,7 +30,7 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 const crypto = require('crypto');
-const { spawn, spawnSync } = require('child_process');
+const { spawnSync } = require('child_process');
 
 const ROOT = fs.realpathSync.native(fs.mkdtempSync(path.join(os.tmpdir(), 'capacity-deferral-')));
 const HOME = path.join(ROOT, 'home');
@@ -105,7 +105,7 @@ function attempt(code, log) {
     return taskId;
 }
 
-const children = [];
+const orphans = [];
 try {
     // ------------------------------------------------------------ D1 to D4
     const deferredId = attempt('d1', `CAPACITY_WAIT=${BREAKER}\n\nCAPACITY_DEFERRED=${BREAKER}\nCLAUDE_EXIT=-1\n`);
@@ -188,7 +188,22 @@ try {
     // ------------------------------------------------------------ D8
     const frontier = require(path.join(__dirname, 'frontier', 'run.js'));
     const capBase = capacity.defaultBase();
-    const sleeper = () => { const c = spawn(process.execPath, ['-e', 'setTimeout(() => {}, 60000)'], { stdio: 'ignore', windowsHide: true }); children.push(c); return c; };
+    // The sleeper is a detached GRANDCHILD, as a real supervisor is to the process
+    // that stops it. A direct child, once killed, stays a zombie until this
+    // process's event loop reaps it, and gone() and killTree() block that loop in
+    // Atomics.wait. A signal-0 probe answers alive for a zombie on Linux and
+    // macOS, so both D8 checks read red there [measured 2026-11-05: every
+    // ubuntu and macos CI run since 8cbdf853; windows has no zombies]. A
+    // launcher that exits at once hands the sleeper to init, which reaps it.
+    const LAUNCH = "const c = require('child_process').spawn(process.execPath, ['-e', 'setTimeout(() => {}, 60000)'],"
+        + " { detached: true, stdio: 'ignore', windowsHide: true }); c.unref(); process.stdout.write(String(c.pid));";
+    const sleeper = () => {
+        const r = spawnSync(process.execPath, ['-e', LAUNCH], { encoding: 'utf8', timeout: 30000, windowsHide: true });
+        const pid = Number((r.stdout || '').trim());
+        if (!Number.isInteger(pid) || pid <= 0) throw new Error(`sleeper launcher gave no pid: ${r.stdout} ${r.stderr}`);
+        orphans.push(pid);
+        return { pid, kill: () => process.kill(pid) };
+    };
     const plant = (pid) => write(capacity.ledgerPath(capBase), JSON.stringify({ schema: 1, reservations: [{ id: `r-${pid}`, pid, cls: 'worker', diskBytes: 1, commitBytes: 1, createdUtc: iso(Date.now()) }], classes: {} }));
     const gone = (pid) => { for (let i = 0; i < 80; i++) { try { process.kill(pid, 0); } catch { return true; } Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 100); } return false; };
     const a = sleeper();
@@ -207,7 +222,7 @@ try {
     failed++;
     console.log(`FAIL crashed  ${e && e.stack ? e.stack.split('\n').slice(0, 4).join(' | ') : e}`);
 } finally {
-    for (const c of children) { try { c.kill(); } catch { /* gone */ } }
+    for (const pid of orphans) { try { process.kill(pid); } catch { /* gone */ } }
     try { fs.rmSync(ROOT, { recursive: true, force: true }); } catch { /* a locked file on Windows; the OS temp cleaner owns it */ }
 }
 console.log(`capacity-deferral: ${total} checks, ${failed} failed`);
