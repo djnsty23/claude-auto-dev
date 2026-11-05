@@ -23,6 +23,7 @@
 - A Qwen evaluation harness was added, with brief modes, a token budget, fix diffs and three coded fix rules.
 - `judge-panel` blinds pair sets by default and keeps a floor of two judges.
 - `usage-mine` ranks failure classes from this machine's transcripts. `evals/usage` replays the top ten as cases, with a knownRed entry for each open fix (#517). The worker-report-outbox case is green in this release, so its knownRed entry is gone.
+- `usage-digest` writes one checked digest per session, with the topic line from the local 4B and every other line from code. Its ledger writes one record at a time under the ledger lock, so two overlapping runs keep each other's records, and `test-ledger-writers` loads it with 20 concurrent runs.
 
 ### Skills, memory and hooks
 
