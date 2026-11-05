@@ -114,9 +114,49 @@ case pins that cost at one block per band, so a change that makes it fire every 
 - **Skill attribution is weak evidence.** The skill field sticks to the last skill loaded in a
   session, so one skill appears on events it had nothing to do with.
 
+## Session digests
+
+`usage-digest.js` writes one short Markdown file per session so memory-kb can answer "which
+session dealt with this". The local 4B writes the topic line and nothing else. Code writes the
+date, project, model, minutes, the failure classes counted by usage-mine's extractor, the tool
+error count, PR links, commit shas and edited files.
+
+Two designs were graded by Opus on the same 20 real sessions `[measured 2026-11-05]`:
+
+| Design | Passed | Invented a fix | Invented a claim | Privacy hit |
+|---|---|---|---|---|
+| 4B prose, each claim checked against a cited log line | 7 of 20 | 2 | 5 | 1 |
+| 4B topic only, every other line from code | 20 of 20 | 0 | 0 | 0 |
+
+The second costs about 13k tokens and 2.5 s per session on the local 4B. Every one of its 20
+digests passed the secret scanner.
+
+The topic is refused, and `<project> session, edited <files>` used instead, when it is empty,
+quotes any ten-word run of a human turn, has under 60% of its word stems in the log, or names a
+person. A name is caught by a denylist or by a capitalised word that the log never writes in
+lowercase and no tool call contains. That heuristic replaced 0 of 18 real topics and catches a
+planted name on no list. Its gap is a name the log also writes in lowercase, in a handle or a
+path. Only the denylist covers that, so edited files whose path carries a listed name are left
+out as well.
+
+PR links come only from `gh pr create`, `merge`, `view` and the other subcommands that act on
+one PR, from their output or their command line. `gh pr list` output named PRs the session never
+touched in one of the 20 sessions.
+
+The private lists stay out of this public repo. `<config>/autodev/usage/digest-config.json`
+holds `clientMarkers` (client projects get no digest), `knownNames` and `userNames` (replaced
+with "the user"). Without the first two the script digests nothing and exits 2. A digest is kept
+only when `scan-transcript-secrets.js --file` exits 0 and prints its clean line. Otherwise it is
+deleted, and a missing scanner counts as a failure. Ingest into memory-kb is off until the same
+file says `"ingest": true`, because the embedding key's billing tier is not yet confirmed.
+
 ## Commands
 
 ```bash
+node plugins/autodev-core/scripts/usage-digest.js run --limit 20  # newest first, skips what the ledger has
+node plugins/autodev-core/scripts/usage-digest.js one <transcript.jsonl> --print
+node plugins/autodev-core/scripts/usage-digest.js status
+node tooling/test-usage-digest.js
 node plugins/autodev-core/scripts/usage-mine.js mine            # incremental, by file size and mtime
 node plugins/autodev-core/scripts/usage-mine.js report --since 2026-10-08 --weeks 5
 node plugins/autodev-core/scripts/usage-mine.js observe         # the weekly brain-clock observer
