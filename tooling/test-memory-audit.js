@@ -347,6 +347,33 @@ const kinds = (p) => (p ? p.findings.map((f) => f.kind) : []);
         r.status === 0 && !!parsed && Array.isArray(parsed.projects) && parsed.projects.length === 0);
 }
 
+// ─────────────────────────────── 11. the human report, which --json never reaches
+{
+    const textConfig = path.join(TMP, 'textconfig');
+    const dirtyDir = path.join(TMP, 'textdirty');
+    const cleanDir = path.join(TMP, 'textclean');
+    fs.mkdirSync(dirtyDir, { recursive: true });
+    fs.mkdirSync(cleanDir, { recursive: true });
+    const store = (dir, files) => {
+        const memDir = path.join(textConfig, 'projects', slugFor(dir), 'memory');
+        fs.mkdirSync(memDir, { recursive: true });
+        for (const [file, body] of Object.entries(files)) fs.writeFileSync(path.join(memDir, file), body);
+    };
+    store(dirtyDir, {
+        'MEMORY.md': '- [a](a.md) — a\n',
+        'a.md': mem('a', 'a memory', 'Links [[gap-one]], [[gap-two]], [[gap-three]], [[gap-four]], [[gap-five]], [[gap-six]].'),
+        'b.md': mem('b', 'a memory missing from the index', 'Body.'),
+    });
+    store(cleanDir, { 'MEMORY.md': '- [c](c.md) — c\n', 'c.md': mem('c', 'a clean memory', 'Body.') });
+    const r = spawnSync(process.execPath, [AUDIT], { encoding: 'utf8', env: { ...process.env, CLAUDE_CONFIG_DIR: textConfig } });
+    check('the text report exits 0', r.status === 0);
+    check('  and groups findings under their kind, with a count', /^ {4}\S.* \(\d+\)$/m.test(r.stdout));
+    check('  and caps a long kind at four details', /· …and 2 more/.test(r.stdout));
+    check('  and caps the gap list, most cited first', /gaps to write, most cited first: \[\[gap-\w+\]\] ×1,.*…1 more/.test(r.stdout));
+    check('  and marks the clean store clean', /✓ clean/.test(r.stdout));
+    check('  and says how many stores need attention', /1 store\(s\) need attention/.test(r.stdout));
+}
+
 // ─────────────────────────────────────────────────────────── report
 let failed = 0;
 for (const [label, ok] of cases) {
