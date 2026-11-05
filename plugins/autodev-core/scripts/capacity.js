@@ -482,6 +482,65 @@ function release(id, opts = {}) {
     }
 }
 
+/**
+ * Release every reservation `pid` holds, before a caller kills that pid on
+ * purpose. A deliberate kill is a settlement: the next ledger read would
+ * otherwise reclaim the dead pid and trip its class's crash breaker
+ * [measured 2026-11-03: the frontier harness killed an overdue supervisor by
+ * pid and the worker breaker stayed tripped for two days]. Call it while the
+ * pid is still alive. { released: [ids], why }.
+ */
+function releaseByPid(pid, opts = {}) {
+    if (!Number.isInteger(pid) || pid <= 0) return { released: [], why: 'no pid' };
+    const env = opts.env || process.env;
+    const base = opts.base || defaultBase(env);
+    const isAlive = livenessFor(opts);
+    const now = opts.now || Date.now;
+    try {
+        return underMutex(base, isAlive, () => {
+            const l = loadLedger(base, { isAlive, nowIso: new Date(now()).toISOString() });
+            if (l.malformed) return { released: [], why: l.why };
+            const mine = l.ledger.reservations.filter((r) => r.pid === pid).map((r) => r.id);
+            l.ledger.reservations = l.ledger.reservations.filter((r) => r.pid !== pid);
+            if (mine.length || l.changed) saveLedger(base, l.ledger);
+            return { released: mine, why: mine.length ? null : `pid ${pid} held no reservation` };
+        });
+    } catch (e) {
+        return { released: [], why: `capacity release failed (${e.code || e.message})` };
+    }
+}
+
+// A breaker nobody cleared within this long is an alarm: every admission of its class is refused meanwhile.
+const BREAKER_ALARM_MS = 60 * 60 * 1000;
+
+/**
+ * Tripped breakers older than `minAgeMs`, from a parsed ledger. Pure, so a
+ * read-only reporter can call it without reclaiming anything.
+ * [{ cls, trippedUtc, ageMin, line }].
+ */
+function breakerAlarms(ledger, now = Date.now(), minAgeMs = BREAKER_ALARM_MS) {
+    const out = [];
+    const classes = ledger && ledger.classes && typeof ledger.classes === 'object' ? ledger.classes : {};
+    for (const [cls, cs] of Object.entries(classes)) {
+        const b = cs && cs.breaker;
+        if (!b) continue;
+        const at = Date.parse(b.trippedUtc || '');
+        const age = Number.isFinite(at) ? now - at : Infinity;
+        if (age < minAgeMs) continue;
+        const ageMin = Number.isFinite(age) ? Math.round(age / 60000) : null;
+        out.push({ cls, trippedUtc: b.trippedUtc || null, ageMin,
+            line: `${cls} crash breaker tripped ${ageMin === null ? 'at an unknown time' : `${(ageMin / 60).toFixed(1)}h ago`}: ${breakerLine(cls, b)}` });
+    }
+    return out;
+}
+
+/** The ledger as it is on disk, read-only: { ledger, why }. A missing file is an empty ledger. */
+function readLedgerQuiet(base) {
+    const r = records.readJson(ledgerPath(base));
+    if (r.state === 'malformed') return { ledger: null, why: `the capacity ledger ${ledgerPath(base)} is unreadable (${r.error})` };
+    return { ledger: r.state === 'ok' ? r.value : emptyLedger(), why: null };
+}
+
 /** The ledger after reclaiming dead pids: { ledger, why, path }. */
 function status(opts = {}) {
     const env = opts.env || process.env;
@@ -590,7 +649,7 @@ function observe(opts = {}) {
 module.exports = {
     observe,
     CLASSES, DEFAULT_REQUESTS, GIB, DISK_RESERVE_MIN, DISK_RESERVE_MAX, COMMIT_RESERVE_MIN, RESUME_SAMPLES, SAMPLE_SPACING_MS,
-    admit, release, status, breakerFor, clearBreaker, sample, probeDisk, probeCommit, evaluate, diskReserve, commitReserve,
+    admit, release, releaseByPid, breakerAlarms, readLedgerQuiet, BREAKER_ALARM_MS, status, breakerFor, clearBreaker, sample, probeDisk, probeCommit, evaluate, diskReserve, commitReserve,
     requestSize, ledgerPath, configPath, defaultBase, isOff, waitMs, pollMs,
 };
 

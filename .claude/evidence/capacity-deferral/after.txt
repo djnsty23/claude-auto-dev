@@ -1,0 +1,20 @@
+# after: working tree on b53a919c with the fix, 2026-11-05T11:46:29Z, node tooling/test-capacity-deferral.js
+ok   D1. a capacity-deferred run settles deferred, not unreported
+ok   D1. the task returns to queued with the attempt in its history
+ok   D1. it is not a failure: no runStatus, no verdict, a retry time ahead
+ok   D2. a deferred task is not ready before its retry time, and says why
+ok   D3. its dependant names the deferral
+ok   D4. control: exit 1 with no report still closes failed
+ok   D4. control: and its dependant is blocked with that reason
+ok   R1. requeue returns a capacity-deferred closed record to queued, its verdict and run status kept in history
+ok   R1. and it is ready to start again
+ok   R2. control: requeue refuses a run that exited 1 with no capacity deferral
+ok   D9. status lists a blocked dependant with its reason
+ok   D5. a held predecessor blocks its dependant, naming the hold and its reason
+ok   D6. a deferral past its retry time is ready again
+ok   D7. blocker-report raises an alarm for a breaker tripped two hours ago
+ok   D7. control: no alarm for a breaker tripped ten minutes ago
+ok   D8. the frontier stops an overdue supervisor without tripping the worker breaker
+ok   D8. control: a kill without settling trips it
+capacity-deferral: 17 checks, 0 failed
+exit 0

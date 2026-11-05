@@ -1,0 +1,72 @@
+# before: b53a919c clean tree, 2026-11-05T11:38:59Z, node tooling/test-capacity-deferral.js
+FAIL D1. a capacity-deferred run settles deferred, not unreported  ({"code":"d1","pid":54948,"supervisorImage":"node.exe","startedAt":"2026-11-05T11:38:59.062Z","log":"<home>\\AppData\\Local\\Temp\\capacity-deferral-tyjIvf\\world\\d1\\worker.log","report":"<home>\\AppData\\Local\\Temp\\capacity-deferral-tyjIvf\\world\\d1\\REPORT.md","configDir":null,"state":"settled","result":"unreported","reason":"exited -1 and <home>\\AppData\\Local\\Temp\\capacity-deferral-tyjIvf\\world\\d1\\REPORT.md does not exist","sentence":null,"exit":-1,"se)
+FAIL D1. the task returns to queued with the attempt in its history  ({"state":"closed","outcome":{"taskId":"worker-d1","action":"close","outcome":"SETTLED","runStatus":"failed","why":"settled unreported","applied":true}})
+FAIL D1. it is not a failure: no runStatus, no verdict, a retry time ahead  ({"runStatus":"failed"})
+FAIL D2. a deferred task is not ready before its retry time, and says why  ({
+  "ok": true,
+  "value": {
+    "ledger": "<home>\\AppData\\Local\\Temp\\capacity-deferral-tyjIvf\\world\\unattended.json",
+    "ready": [],
+    "pending": [],
+    "blocked": [
+      {
+        "taskId": "worker-d1-next",
+        "reason": "worker-d1: worker-d1 failed"
+      },
+      {
+        "taskId": "worker-d4-next",
+        "reason": "worker-d4: worker-d4 failed"
+      }
+    ],
+    "capped": [],
+    "running": 0,
+    "launchedLastHour": 2,
+    "slots": 0,
+    "maxConcurrent": 2,
+ )
+FAIL D3. its dependant names the deferral  ({
+  "ok": true,
+  "value": {
+    "ledger": "<home>\\AppData\\Local\\Temp\\capacity-deferral-tyjIvf\\world\\unattended.json",
+    "ready": [],
+    "pending": [],
+    "blocked": [
+      {
+        "taskId": "worker-d1-next",
+        "reason": "worker-d1: worker-d1 failed"
+      },
+      {
+        "taskId": "worker-d4-next",
+        "reason": "worker-d4: worker-d4 failed"
+      }
+    ],
+    "capped": [],
+    "running": 0,
+    "launchedLastHour": 2,
+    "slots": 0,
+    "maxConcurrent": 2,
+ )
+ok   D4. control: exit 1 with no report still closes failed
+ok   D4. control: and its dependant is blocked with that reason
+FAIL D9. status lists a blocked dependant with its reason  ({
+  "ok": true,
+  "value": {
+    "ledger": "<home>\\AppData\\Local\\Temp\\capacity-deferral-tyjIvf\\world\\unattended.json",
+    "recordsRead": 4,
+    "counts": {
+      "closed": 2,
+      "queued": 2
+    },
+    "ran": 0,
+    "versioned": 0,
+    "unversioned": 0,
+    "records": [
+      {
+  )
+FAIL D5. a held predecessor blocks its dependant, naming the hold and its reason  ({"ready":[],"pending":[{"taskId":"c2","reason":"c1 is held"}],"blocked":[],"capped":[],"running":0,"launchedLastHour":0,"slots":2,"maxConcurrent":2,"maxPerHour":2})
+ok   D6. a deferral past its retry time is ready again
+FAIL D7. blocker-report raises an alarm for a breaker tripped two hours ago  (undefined blockers: 0 runs, 0 reports (0 stated); top none found; gate wait unmeasured; unread headless-workers.json (absent), unattended-workers.json (absent))
+FAIL D7. control: no alarm for a breaker tripped ten minutes ago  ()
+FAIL crashed  TypeError: frontier.stopSupervisor is not a function |     at Object.<anonymous> (<home>\claude-auto-dev\.claude\worktrees\qrsteady-sharing-pro-6926f7\tooling\test-capacity-deferral.js:168:14) |     at Module._compile (node:internal/modules/cjs/loader:1830:14) |     at Object..js (node:internal/modules/cjs/loader:1961:10)
+capacity-deferral: 12 checks, 10 failed
+exit 1

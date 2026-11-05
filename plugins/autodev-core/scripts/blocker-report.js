@@ -16,6 +16,9 @@
 //   - missing evidence, ranked as its own cause: a report with no BLOCKER line
 //     ("blocker not stated"), a done run with no report ("report missing"), and
 //     the supervisor's line for a run that ended before the model started
+//   - machine alarms: a capacity crash breaker tripped over an hour ago, which
+//     refuses every launch of its class until an operator clears it. It leads
+//     the summary line, because no worker report can name it: none ran.
 // Writes <autodev>/blockers/latest.json and one history.jsonl row per day.
 // A missing ledger is reported as unread, never as zero blockers. A ledger that
 // parses but is not {records: [object, ...]} is unreadable: exit 2, nothing written.
@@ -24,6 +27,7 @@
 const fs = require('fs');
 const path = require('path');
 const { configDir } = require('./claude-paths.js');
+const capacity = require('./capacity.js');
 
 const DAY = 86400000;
 const LONG_WAIT_MIN = 10;
@@ -157,7 +161,14 @@ function queueWaits(base, since, now) {
     return { read: true, gate: sum('gate'), merge: sum('merge') };
 }
 
-function build(base, { now, days }) {
+/** Breakers tripped over an hour ago, read-only. An unreadable ledger is an alarm too: nobody can tell. */
+function capacityAlarms(capacityBase, now) {
+    const q = capacity.readLedgerQuiet(capacityBase);
+    if (!q.ledger) return [{ cls: null, trippedUtc: null, ageMin: null, line: `could not read the capacity ledger: ${q.why}` }];
+    return capacity.breakerAlarms(q.ledger, now);
+}
+
+function build(base, { now, days, capacityBase = path.join(base, 'locks', 'full-gate.lock') }) {
     const since = now - days * DAY;
     const unread = [];
     const runs = workerRuns(base, since, now, unread);
@@ -212,14 +223,15 @@ function build(base, { now, days }) {
     return {
         schema: 1, at: new Date(now).toISOString(), days,
         population: { runs: runs.length, reports, statedRuns, statedNone },
-        unread, ranked, queue,
+        unread, ranked, queue, alarms: capacityAlarms(capacityBase, now),
     };
 }
 
 function summaryLine(r) {
     const top = r.ranked[0];
     const g = r.queue.gate;
-    return `blockers: ${r.population.runs} runs, ${r.population.reports} reports (${r.population.statedRuns} stated); `
+    const alarm = (r.alarms || []).length ? `ALARM: ${r.alarms.map((a) => a.line).join('; ')}. ` : '';
+    return `${alarm}blockers: ${r.population.runs} runs, ${r.population.reports} reports (${r.population.statedRuns} stated); `
         + `top ${top ? `${top.cause} in ${top.runs} run(s)` : 'none found'}; `
         + `gate wait ${g && g.runs ? `p50 ${g.p50} p90 ${g.p90} min over ${g.runs}` : 'unmeasured'}`
         + (r.unread.length ? `; unread ${r.unread.join(', ')}` : '');
@@ -259,7 +271,8 @@ function main(argv) {
     const o = parseArgs(argv);
     if (o.bad) { console.error(`blocker-report: ${o.bad}`); return 2; }
     const base = path.resolve(o.base || path.join(configDir(), 'autodev'));
-    const r = build(base, o);
+    // The capacity ledger lives where capacity.js puts it, which an env override can move away from <base>.
+    const r = build(base, { ...o, capacityBase: o.base ? path.join(base, 'locks', 'full-gate.lock') : capacity.defaultBase() });
     if (r.unread.some((u) => !u.endsWith('(absent)'))) { console.error(`blocker-report: could not read ${r.unread.join(', ')}`); return 2; }
     if (o.write) {
         const dir = path.join(base, 'blockers');
@@ -280,7 +293,7 @@ function main(argv) {
     return 0;
 }
 
-module.exports = { classify, statedBlocker, minedLines, queueWaits, build, summaryLine, CLASSES };
+module.exports = { classify, statedBlocker, minedLines, queueWaits, build, summaryLine, capacityAlarms, CLASSES };
 
 if (require.main === module) {
     try { process.exitCode = main(process.argv.slice(2)); }
