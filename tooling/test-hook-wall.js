@@ -10,7 +10,7 @@ const plugin = path.join(root, 'plugins', 'fixture');
 fs.mkdirSync(path.join(plugin, 'hooks'), { recursive: true });
 let passed = 0;
 let failed = 0;
-function check(name, ok) { if (ok) passed++; else { failed++; console.log(`FAIL ${name}`); } }
+function check(name, ok, detail) { if (ok) passed++; else { failed++; console.log(`FAIL ${name}${detail === undefined ? '' : `  (${detail})`}`); } }
 const env = { ...process.env, HOME: root, USERPROFILE: root, CLAUDE_CONFIG_DIR: root, BRAIN_CLOCK_CLAUDE_DIR: root };
 const run = (...args) => spawnSync(process.execPath, [script, ...args], { env, encoding: 'utf8', timeout: 30000, windowsHide: true });
 const manifest = path.join(root, 'plugins', 'installed_plugins.json');
@@ -22,7 +22,10 @@ try {
     fs.writeFileSync(hook, hookBody);
     let r = run('--json');
     let row = JSON.parse(r.stdout)[0];
-    check('installed profile and representative stdin ran', r.status === 0 && row.errors === 0 && row.hooks === 1 && row.profile['autodev-core@test'] === '1');
+    // A wall time on a loaded runner can pass the budget, so this first run grades that the
+    // exit agrees with the row. "slow hook exceeds budget" below grades the budget itself.
+    check('installed profile and representative stdin ran', row.errors === 0 && row.hooks === 1 && row.profile['autodev-core@test'] === '1', JSON.stringify(row));
+    check('the exit agrees with the row', r.status === (row.p95Ms > row.budgetMs ? 1 : 0), `status ${r.status}, p95 ${row.p95Ms}, budget ${row.budgetMs}`);
     check('p95 is measured from five wall samples', row.samples.length === 5 && row.samples.every((x) => x > 0) && row.p95Ms === Math.max(...row.samples));
     check('budget uses existing event ceiling and startup', Math.abs(row.budgetMs - row.startupMs - 250) < 0.001);
     check('sample carries load classification', ['idle', 'load'].includes(row.load) && typeof row.cpuBusy === 'number');
