@@ -194,6 +194,14 @@ first Stop may emit none. Keep dispatch records until results are acknowledged
 tree and journal: a timed-out worker may still be running. Never kill by command
 pattern or spawn blindly.
 
+**Cheap reads go to a local model first.** Triage an inbox item with
+`node "${CLAUDE_PLUGIN_ROOT}/scripts/local-model.js" triage <file>`, pull a fact
+from page text with `browse <file> <question>`, and find code with
+`locate <repo> <question>`. Exit 0 is the answer. Exit 3 means do the step
+yourself. `local-model.js routes` prints which steps go where. Copy, flake or
+real, status lines and coding stay with you, and a LEAD or ACTION item still
+gets your reply.
+
 Use `workflow-run-triage.js`, then the workflow's resume mechanism for
 unfinished calls. Quota exhaustion needs a scheduler/reset event to run later; a
 Stop hook cannot wake a dead process. Promise monitoring only after an
