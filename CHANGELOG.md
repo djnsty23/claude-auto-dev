@@ -1,5 +1,35 @@
 # Changelog
 
+## [8.199.0]
+
+### Brain and workers
+
+- Headless workers write their report, ask.json and scratch output into an outbox under the temp dir. Their supervisor copies these to the ledger, because dontAsk refuses every write under ~/.claude (684058b9).
+- `unattended-worker launch` names that outbox in PROMPT.md and passes it with `--outbox`. Before this, a worker followed the ledger path and settled with no report (0c60fe23).
+- A launch the capacity gate turns away settles `deferred`, not unreported. The record returns to `queued` with a backoff of 15 minutes, doubling to 4 hours. `requeue` repairs records the old path closed as failed (#514).
+- A held predecessor blocks its dependants and names the hold. A crash breaker standing over 1h leads `blocker-report` and gets a MACHINE ALARMS section in `brain-brief`. The frontier settles a supervisor's capacity reservation before it kills it (#514).
+- `capacity` confirms a dead pid on fresh process tables before it trips a breaker. An empty table now reads as unknown.
+- `brain-judge` treats an accept refused for a missing receipt as follow-up. `unattended-worker` refuses a brief whose acceptance criteria the receipt gate cannot run. `worker-reconcile` verifies a held follow-up once its receipt runs.
+- `headless-worker` stores a structured blocker on every settle. `blocker-report` refuses bad ledgers and ranks missing evidence.
+
+### Local models and gates
+
+- Cheap steps can be routed to a local model, with a hand-back exit. Every local-model call is logged, and the saving is reported (#512, #513).
+- A known-flake list (`known-flakes.js`) annotates a red gate:fast step, a failed `npm test` suite and a red product gate the Brain reads. A match never changes a verdict (#515).
+
+### Frontier and evals
+
+- The frontier measures the candidate commit, gates promotion on the full matrix, and survives a budget reading from a reset window. Six path-to-10 tasks whose fixes shipped were replaced.
+- A Qwen evaluation harness was added, with brief modes, a token budget, fix diffs and three coded fix rules.
+- `judge-panel` blinds pair sets by default and keeps a floor of two judges.
+
+### Skills, memory and hooks
+
+- New skills: `thrift` for choosing paid services, plus `verifier` and `reflect`.
+- `memory-audit` audits the global store, resolves rule and global links, and ranks the gaps. Aliases keep the old links of a renamed memory working.
+- Hooks fail closed when the commands that guard them cannot run. Every hook names why it exists, and hooks are retested on model bumps.
+- Radar fences fetched transcripts as untrusted data and drops off-platform service solicitations. A blocked feed was replaced.
+
 ## [8.198.0]
 
 ### Hooks
