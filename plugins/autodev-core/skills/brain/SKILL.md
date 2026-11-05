@@ -202,6 +202,12 @@ yourself. `local-model.js routes` prints which steps go where. Copy, flake or
 real, status lines and coding stay with you, and a LEAD or ACTION item still
 gets your reply.
 
+**A red gate meets the known-flake list before anyone calls it.** Run
+`node "${CLAUDE_PLUGIN_ROOT}/scripts/known-flakes.js" match --repo <repo> <log>`.
+A match names the rerun that settles it: that suite alone, same tree, and a
+second red is real. No match means treat the red as real. A match never turns
+a red into a pass. Add an entry only after a rerun of the same tree passed.
+
 Use `workflow-run-triage.js`, then the workflow's resume mechanism for
 unfinished calls. Quota exhaustion needs a scheduler/reset event to run later; a
 Stop hook cannot wake a dead process. Promise monitoring only after an
