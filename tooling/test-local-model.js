@@ -83,9 +83,11 @@ function runCli(args, { env = {}, stdin } = {}) {
   });
 }
 
+const servers = [];
 function listen(handler) {
   return new Promise((resolve) => {
     const srv = http.createServer(handler);
+    servers.push(srv);
     srv.listen(0, '127.0.0.1', () => resolve(srv));
   });
 }
@@ -180,6 +182,10 @@ async function main() {
   check('copy: fallback to claude, not attempted',
     claudeRow && claudeRow.fallbackTo === 'claude' && claudeRow.attempted === false, JSON.stringify(claudeRow));
 
+  // The directory exists only if the subject wrote a row. Under a stubbed subject
+  // it does not, and a throw here used to leave `up` listening, so the suite hung
+  // until check:suites killed it instead of failing.
+  fs.mkdirSync(path.dirname(callLog), { recursive: true });
   fs.appendFileSync(callLog, 'not json\n{"task":"triage"}\n');
   r = await runCli(['stats']);
   check('stats states its population and the unparseable lines', /^5 call\(s\) in the last 7 day\(s\)/.test(r.stdout) && /2 unparseable line\(s\)/.test(r.stdout), r.stdout);
@@ -194,10 +200,15 @@ async function main() {
   r = await runCli(['triage', '-'], { env: { AUTODEV_LOCAL_LOG: path.join(blocker, 'calls.jsonl') } });
   check('an unwritable log keeps the answer and exit 0', r.code === 0 && /fake answer/.test(r.stdout) && /call log not written/.test(r.stderr), `code ${r.code}, ${r.stderr}`);
 
-  up.close();
-  fs.rmSync(tmp, { recursive: true, force: true });
   console.log(`\n${pass} passed, ${fail} failed (population: ${pass + fail} checks)`);
   process.exitCode = fail ? 1 : 0;
 }
 
-main().catch((e) => { console.error(e && e.stack || e); process.exitCode = 1; });
+// Every listener closes on every path out of main, a throw included: an open one
+// keeps the process alive, and a red suite that never exits reads as a timeout.
+main()
+  .catch((e) => { console.error(e && e.stack || e); process.exitCode = 1; })
+  .finally(() => {
+    for (const srv of servers) srv.close();
+    fs.rmSync(tmp, { recursive: true, force: true });
+  });
