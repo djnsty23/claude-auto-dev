@@ -130,6 +130,33 @@ async function unit() {
     ['near-a', 'near-b', 'near-c', 'repeat-a', 'repeat-b', 'finance-discussion']
       .every((id) => strictFiltered.retained.some((row) => row.id === id)));
 
+  const contactSolicitationCases = [
+    ['designer-portfolio', 'I am a designer and built a portfolio for your brand. Can I send it?', true],
+    ['custom-thumbnail', 'I made a custom thumbnail for this upload. Where can I send it?', true],
+    ['editor-samples', "I'm a video editor available at an affordable rate. May I share samples?", true],
+    ['designer-reel', "I'd love to work with you as a designer. What's the best way to send my reel?", true],
+    ['paid-redesign', 'I can redesign your ads for a reasonable price. Can I email the mockup?', true],
+    ['cro-portfolio', 'I offer CRO services. Could I share my portfolio?', true],
+    ['error-screenshot', 'Can I send a screenshot of the error?', false],
+    ['debug-export', 'Where can I send the GA4 export for debugging?', false],
+    ['team-dashboard', 'I made a dashboard for my team. Can I share the results?', false],
+    ['template-request', 'Can you send your attribution template?', false],
+    ['thumbnail-critique', 'The thumbnail is hard to read on mobile.', false],
+    ['editor-discussion', "I'm a video editor, and this point about pacing is accurate.", false],
+  ];
+  const contactComments = contactSolicitationCases.map(([id, text], index) =>
+    subject.normalizeComment({ id, text, author_id: id }, index % 2 === 0 ? 'top' : 'recent', index));
+  const contactFiltered = subject.filterCommentFeedback(contactComments);
+  const contactExcludedIds = new Set(contactFiltered.excluded.map((row) => row.id));
+  check('service solicitation plus transfer request is excluded without broad send-request false positives',
+    contactSolicitationCases.every(([id, , shouldExclude]) => contactExcludedIds.has(id) === shouldExclude)
+      && contactFiltered.retained.length === 6 && contactFiltered.excluded.length === 6);
+  check('service solicitation exclusions keep the off-platform reason and preserve comment metadata',
+    contactFiltered.reasons['off-platform-promotion'] === 6
+      && [...contactFiltered.retained, ...contactFiltered.excluded].every((row) =>
+        contactComments.some((input) => input.id === row.id
+          && Object.keys(input).every((key) => input[key] === row[key]))));
+
   // Freeze the conservative boundary independently of the matcher's vocabulary:
   // linked help is not a commercial offer merely because its author owns it.
   const creatorResourceCases = [
