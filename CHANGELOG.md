@@ -22,6 +22,7 @@
 - The frontier measures the candidate commit, gates promotion on the full matrix, and survives a budget reading from a reset window. Six path-to-10 tasks whose fixes shipped were replaced.
 - A Qwen evaluation harness was added, with brief modes, a token budget, fix diffs and three coded fix rules.
 - `judge-panel` blinds pair sets by default and keeps a floor of two judges.
+- `usage-mine` ranks failure classes from this machine's transcripts. `evals/usage` replays the top ten as cases, with a knownRed entry for each open fix (#517). The worker-report-outbox case is green in this release, so its knownRed entry is gone.
 
 ### Skills, memory and hooks
 
