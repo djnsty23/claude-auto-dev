@@ -21,7 +21,7 @@ is done, deployed and verified. Interrupt the owner for four things only.
 | Event | Notify the owner? | Condition |
 |-------|-------------------|-----------|
 | `blocked-on-owner` | Yes | A decision, credential or action only the owner can give, after you have tried what you can. One line: what is needed, the exact command or link |
-| `ready-to-merge` | Yes | The PR has a review receipt with verdict approve AND a gate (or fast-lane) receipt, both for the current head. A sensitive diff also has its escalation receipt |
+| `ready-to-merge` | Yes | The PR has a review receipt with verdict approve (or escalate beside an opus escalation receipt) AND a gate (or fast-lane) receipt, all for the current head. A sensitive diff also has its escalation receipt |
 | `deploy-done` | Yes | `deploy-check` recorded PASS and its checklist is complete |
 | `deploy-failed` | Yes, once | `deploy-gate.js` recorded FAIL, with the draft revert PR link |
 | Anything else | No | Progress, a retry, a worker finishing, a review round, a green gate alone, an idle worker |

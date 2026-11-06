@@ -104,10 +104,13 @@
  * est_cost}. It is accepted only when schema is 1, repo, pr and head equal the
  * arguments exactly, and verdict is "approve". It is also refused when an
  * acceptance item says met:false or a finding is P0, because an approve that
- * carries either contradicts itself. A `request_changes` or `escalate`
- * receipt, a receipt for another head, and a hand-written one that omits a
- * field all refuse before any lock is taken. A receipt is text, so a forged
- * one passes: it stops merging an unreviewed head by mistake, not a forgery.
+ * carries either contradicts itself. An `escalate` receipt is accepted only
+ * beside a valid --escalation-receipt for the same repo, PR and head, because
+ * escalate hands the decision to opus and that receipt is opus's approval. A
+ * `request_changes` receipt, an `escalate` receipt alone, a receipt for another
+ * head, and a hand-written one that omits a field all refuse before any lock
+ * is taken. A receipt is text, so a forged one passes: it stops merging an
+ * unreviewed head by mistake, not a forgery.
  *
  * --review-override "<reason>" replaces the review receipt when review cannot
  * run (the reviewer is down, the diff is over its line cap and was read by a
@@ -296,9 +299,11 @@ function targetProblem(r, flag, file, { repo, pr, head }) {
  * null when the file is an approving review of exactly repo#pr at head, else
  * why not. Beyond the verdict it refuses an approve that carries an unmet
  * acceptance item or a P0 finding, which cheap-review.js turns into
- * "escalate", so such a receipt was edited or written by hand.
+ * "escalate", so such a receipt was edited or written by hand. An "escalate"
+ * receipt passes only when escalationFile holds a valid opus approval of the
+ * same target. Absent, it refuses.
  */
-function reviewReceiptProblem(file, target) {
+function reviewReceiptProblem(file, target, escalationFile = null) {
     const flag = '--review-receipt';
     if (!file) return `no --review-receipt given. Run cheap-review.js review --out FILE and pass that file, or pass --review-override "<reason>"`;
     const got = readJsonReceipt(file, flag);
@@ -306,9 +311,15 @@ function reviewReceiptProblem(file, target) {
     const r = got.receipt;
     const wrong = targetProblem(r, flag, file, target);
     if (wrong) return wrong;
+    if (r.verdict === 'escalate' && escalationFile) {
+        // The findings that caused the escalation are what opus judged, so they are not re-read here.
+        const opus = escalationReceiptProblem(escalationFile, target);
+        return opus ? `${flag} ${file}: verdict is "escalate", not "approve", and the escalation does not settle it: ${opus}` : null;
+    }
     if (r.verdict !== 'approve') {
         const why = typeof r.reason === 'string' && r.reason ? `: ${r.reason.slice(0, 160)}` : '';
-        return `${flag} ${file}: verdict is ${JSON.stringify(r.verdict)}, not "approve"${why}`;
+        const next = r.verdict === 'escalate' ? '. Dispatch the code-reviewer agent on opus and pass the JSON it prints as --escalation-receipt' : '';
+        return `${flag} ${file}: verdict is ${JSON.stringify(r.verdict)}, not "approve"${why}${next}`;
     }
     if (Array.isArray(r.acceptance) && r.acceptance.some((a) => !a || a.met !== true)) {
         return `${flag} ${file}: verdict is approve but an acceptance item is not met`;
@@ -700,7 +711,8 @@ function help() {
     console.log('sensitive path. No previewPaths at the base refuses it.');
     console.log('');
     console.log('Every merge also needs a review: --review-receipt FILE, the JSON cheap-review.js writes, with schema 1,');
-    console.log('this repo, PR and head exactly, and verdict "approve". --review-override "<reason>" (10+ characters)');
+    console.log('this repo, PR and head exactly, and verdict "approve", or verdict "escalate" beside a valid');
+    console.log('--escalation-receipt for the same repo, PR and head. --review-override "<reason>" (10+ characters)');
     console.log('replaces it when review cannot run; the reason goes into the lock meta line and one line appended to');
     console.log('the deploy ledger events file, and it cannot be combined with --review-receipt.');
     console.log('A sensitive diff (fast-lane.js sensitive patterns on GitHub\'s file list, or a list or config that');
@@ -754,7 +766,7 @@ async function main() {
         if (o.problem) return fail(1, o.problem);
         override = o.reason;
     } else {
-        const why = reviewReceiptProblem(args.reviewReceipt, target);
+        const why = reviewReceiptProblem(args.reviewReceipt, target, args.escalation);
         if (why) return fail(1, why);
     }
     if (args.escalation !== null) {

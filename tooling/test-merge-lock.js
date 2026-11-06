@@ -780,6 +780,29 @@ async function main() {
         check('G5. a review receipt whose verdict is request_changes, escalate, wrongly cased or absent is refused before gh or the lock',
             verdicts.every((x) => x.ok), verdicts.filter((x) => !x.ok).map((x) => `${x.v}: ${detail(x.r)}`).join(' | '));
 
+        // G5b-G5e. an escalate review receipt is settled only by an opus receipt for the same target.
+        const escalated = (over = {}) => reviewOf({ verdict: 'escalate', reason: 'the diff is over the 1500-line cap', findings: [{ severity: 'P0', title: 'unread' }], ...over });
+        const esc = runG('rv-esc-ok', ['--review-receipt', escalated(), '--escalation-receipt', escalationOf()]);
+        check('G5b. cheap escalates and opus approves the same repo, PR and head: the merge is allowed through the lock',
+            esc.exit === 0 && mergedCount('rv-esc-ok') === 1 && /matches the proved tree/.test(esc.out) && lockGone(), detail(esc));
+        const escHead = runG('rv-esc-head', ['--review-receipt', escalated(), '--escalation-receipt', escalationOf({ head: sha('9') })]);
+        check('G5c. cheap escalates and the opus receipt is for another head: refused before gh or the lock',
+            refusedEarly('rv-esc-head', escHead, /verdict is "escalate".*reviewed head "9{40}", not a{40}/), detail(escHead));
+        const escOther = [
+            ['another PR', { pr: 9 }, /is for PR 9, not 7/],
+            ['another repo', { repo: 'Acme/Other' }, /is for repo "Acme\/Other"/],
+            ['a sonnet model', { model: 'claude-sonnet-5-5' }, /does not contain "opus"/],
+            ['request_changes from opus', { verdict: 'request_changes' }, /not "approve"/],
+        ].map(([label, over, re], i) => {
+            const r = runG(`rv-esc-other${i}`, ['--review-receipt', escalated(), '--escalation-receipt', escalationOf(over)]);
+            return { label, ok: refusedEarly(`rv-esc-other${i}`, r, re), r };
+        });
+        check('G5d. cheap escalates and the opus receipt names another PR or repo, another model or no approval: refused before gh or the lock',
+            escOther.every((x) => x.ok), escOther.filter((x) => !x.ok).map((x) => `${x.label}: ${detail(x.r)}`).join(' | '));
+        const rcEsc = runG('rv-esc-rc', ['--review-receipt', reviewOf({ verdict: 'request_changes' }), '--escalation-receipt', escalationOf()]);
+        check('G5e. an opus receipt does not settle request_changes: only escalate hands the decision to opus',
+            refusedEarly('rv-esc-rc', rcEsc, /verdict is "request_changes", not "approve"/), detail(rcEsc));
+
         // G6. a bad schema, no JSON, an array, a missing file.
         const badFile = path.join(root, 'review-text.txt');
         fs.writeFileSync(badFile, 'approve');
