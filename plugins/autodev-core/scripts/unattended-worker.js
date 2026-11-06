@@ -912,6 +912,17 @@ function closedRunOf(rec, code) {
 }
 
 /**
+ * How a closed run settled, or null. The headless ledger drops a settled run after
+ * seven days, so an older one reads from what reconcile stored on the record, which
+ * is exactly `SETTLED: settled <result>`. Any other reason names no result.
+ */
+function settledResultOf(rec, run) {
+    if (run) return run.state === 'settled' ? run.result : null;
+    const stored = /^SETTLED: settled ([a-z-]+)$/.exec(rec.settleReason || '');
+    return stored ? stored[1] : null;
+}
+
+/**
  * The capacity line a run's worker.log ends on, or ''. A run settled before its
  * blocker was recorded keeps the evidence only there. A deferred run never started
  * claude, so its log is a few lines: a real run's transcript is never read for this.
@@ -1134,11 +1145,12 @@ function run(argv) {
             if (rec.runStatus === 'succeeded') fault('bad-state', `task ${rec.taskId} succeeded: there is nothing to retry`);
             const run = closedRunOf(rec, 'not-deferred');
             const recorded = run && run.blocker && typeof run.blocker.text === 'string' ? run.blocker.text : '';
-            const unreported = run && run.state === 'settled' && run.result === 'unreported';
+            const result = settledResultOf(rec, run);
+            const unreported = result === 'unreported';
             const blocker = /^CAPACITY_DEFERRED=/.test(recorded) ? recorded : ((unreported && loggedDeferral(rec, run)) || recorded);
-            const deferred = run && run.state === 'settled' && (run.result === 'deferred' || (unreported && /^CAPACITY_DEFERRED=/.test(blocker)));
+            const deferred = result === 'deferred' || (unreported && /^CAPACITY_DEFERRED=/.test(blocker));
             if (!deferred && !(unreported && opts.unreported === true)) {
-                fault('not-deferred', `task ${rec.taskId}'s run ${run ? `settled ${run.result}${blocker ? ` (${blocker.slice(0, 120)})` : ''}` : 'is not in its headless ledger'}: `
+                fault('not-deferred', `task ${rec.taskId}'s run ${result ? `settled ${result}${blocker ? ` (${blocker.slice(0, 120)})` : ''}` : 'names no settled result'}: `
                     + 'only a run the capacity gate turned away before claude started can be requeued, or with --unreported one that ran and left no report');
             }
             const pid = livePid(rec, run);
@@ -1164,7 +1176,8 @@ function run(argv) {
             if (rec.state !== 'closed' || rec.channel !== 'headless') fault('bad-state', `task ${rec.taskId} is ${rec.state} on ${rec.channel || 'no'} channel; salvage is only for a closed headless run`);
             if (rec.runStatus === 'succeeded') fault('bad-state', `task ${rec.taskId} succeeded: there is nothing to salvage`);
             const run = closedRunOf(rec, 'not-salvageable');
-            if (!run || run.state !== 'settled' || run.result !== 'unreported') fault('not-salvageable', `task ${rec.taskId}'s run ${run ? `settled ${run.result}` : 'is not in its headless ledger'}: only an unreported run is salvaged`);
+            const result = settledResultOf(rec, run);
+            if (result !== 'unreported') fault('not-salvageable', `task ${rec.taskId}'s run ${result ? `settled ${result}` : 'names no settled result'}: only an unreported run is salvaged`);
             if (loggedDeferral(rec, run)) fault('not-salvageable', `task ${rec.taskId}'s run was turned away before claude started: requeue it`);
             const pid = livePid(rec, run);
             if (pid) fault('live-process', `task ${rec.taskId}'s run still has live process ${pid}: stop it before salvaging`);

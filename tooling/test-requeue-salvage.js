@@ -229,6 +229,41 @@ try {
     const rw = cli(['salvage', '--task-id', vw, '--reason', 'x', '--ledger', ledger]);
     check('V8. uncommitted work in its worktree refuses', rw.code === 'worktree-dirty', rw.detail);
 
+    // ------------------------------------------------------------ P
+    // The headless ledger drops a settled run after seven days. Two real C1s had aged out
+    // when salvage first met them, so the record's own settle reason has to answer.
+    const pruned = (slug, reason) => {
+        const hl = readJson(headless);
+        hl.records = hl.records.filter((r) => r.code !== slug);
+        write(headless, JSON.stringify(hl, null, 2));
+        if (reason === undefined) return;
+        const ul = readJson(ledger);
+        const r = ul.records.find((x) => x.slug === slug);
+        if (reason === null) delete r.settleReason; else r.settleReason = reason;
+        write(ledger, JSON.stringify(ul, null, 2));
+    };
+    const p1 = closedRun('p1', { report: 'RESULT p1 done: x\n' });
+    branchWithCommit('claude/p1', { push: true });
+    pruned('p1');
+    const rp1 = cli(['salvage', '--task-id', p1, '--reason', 'aged out', '--ledger', ledger]);
+    check('P1. salvage reads an aged-out run from the settle reason the record kept', rp1.status === 0 && rec(p1).runStatus === 'succeeded', rp1.detail);
+    for (const [slug, reason, label] of [['p2', 'SETTLED: settled failed', 'a failed run'], ['p3', null, 'no settle reason'], ['p4', 'operator says settled unreported', 'free text']]) {
+        const id = closedRun(slug, { report: `RESULT ${slug} done: x\n` });
+        branchWithCommit(`claude/${slug}`, { push: true });
+        pruned(slug, reason);
+        const r = cli(['salvage', '--task-id', id, '--reason', 'x', '--ledger', ledger]);
+        check(`P2. control: an aged-out run with ${label} is not salvaged`, r.code === 'not-salvageable', r.detail);
+    }
+    const p5 = closedRun('p5', { log: DEFERRED_LOG });
+    pruned('p5');
+    const rp5 = cli(['requeue', '--task-id', p5, '--reason', 'aged out', '--ledger', ledger]);
+    check('P3. requeue still finds an aged-out deferral in worker.log', rp5.status === 0 && (rec(p5).attempts || []).pop().outcome === 'capacity-deferred', rp5.detail);
+    const p6 = closedRun('p6');
+    pruned('p6');
+    const rp6a = cli(['requeue', '--task-id', p6, '--reason', 'x', '--ledger', ledger]);
+    const rp6b = cli(['requeue', '--task-id', p6, '--reason', 'x', '--unreported', '--ledger', ledger]);
+    check('P4. an aged-out unreported run needs --unreported, then returns', rp6a.code === 'not-deferred' && rp6b.status === 0 && rec(p6).state === 'queued', rp6a.detail + rp6b.detail);
+
     // ------------------------------------------------------------ G
     // The fake supervisor leaves a marker, so a refusal is proved before anything spawned.
     const marker = path.join(world, 'spawned.txt');
