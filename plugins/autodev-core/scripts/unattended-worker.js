@@ -224,7 +224,8 @@ const MAX_LAUNCH_ATTEMPTS = 3;
 const DEFER_BASE_MS = 15 * 60 * 1000;
 const DEFER_MAX_MS = 4 * HOUR_MS;
 // Refusals a later tick can clear with no person. They are logged, never counted.
-const TRANSIENT_LAUNCH_CODES = ['fetch-failed', 'origin-unreadable', 'git-unavailable', 'ledger-locked', 'paid-key-refused'];
+// paid-key-refused is not one: only a person can clear a key from the env, so it counts toward MAX_LAUNCH_ATTEMPTS.
+const TRANSIENT_LAUNCH_CODES = ['fetch-failed', 'origin-unreadable', 'git-unavailable', 'ledger-locked'];
 
 function fault(code, message) { const e = new Error(message || code); e.publicCode = code; throw e; }
 

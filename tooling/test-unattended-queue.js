@@ -186,8 +186,17 @@ try {
     check('launch refuses a paid key in the env with code paid-key-refused, naming the variable and never its value',
         code(paid) === 'paid-key-refused' && /ANTHROPIC_API_KEY/.test(paid.json.error.message) && !(paid.stdout + paid.stderr).includes(CANARY), paid.stdout.slice(0, 200));
     check('and that refusal leaves the ledger byte-identical', fs.readFileSync(ledger, 'utf8') === before);
-    check('paid-key-refused is a transient launch code: a person clears it by fixing the env, so it is never counted against the task',
-        require(SUBJECT).TRANSIENT_LAUNCH_CODES.includes('paid-key-refused'));
+    check('paid-key-refused is not a transient launch code: only a person can clear the env, so it counts against the task',
+        !require(SUBJECT).TRANSIENT_LAUNCH_CODES.includes('paid-key-refused'));
+    cli(['enqueue', '--repo', repo, '--slug', 'guide-p', '--brief-file', briefFile, '--return', 'brain', '--ledger', ledger]);
+    const realPaid = ['launch', '--task-id', 'worker-guide-p', '--dev', '--claude-bin', fakeWorker, '--ledger', ledger];
+    const paidCodes = [1, 2, 3].map(() => code(cli(realPaid, { ANTHROPIC_API_KEY: CANARY })));
+    const paidRec = recOf('worker-guide-p');
+    const paidBlocked = val(cli(['ready', '--ledger', ledger])).blocked.find((b) => b.taskId === 'worker-guide-p');
+    check('three real launches refused for a paid key count three attempts, and ready then blocks the task for a person',
+        paidCodes.every((c) => c === 'paid-key-refused') && paidRec.state === 'queued' && paidRec.lastLaunchError.attempts === 3 && paidRec.lastLaunchError.transient === false
+        && paidBlocked && /refused 3 times, last: paid-key-refused/.test(paidBlocked.reason) && !JSON.stringify(paidRec).includes(CANARY), JSON.stringify(paidRec.lastLaunchError));
+    cli(['retire', '--task-id', 'worker-guide-p', '--ledger', ledger]);
     check('control: AUTODEV_ALLOW_PAID_KEY=1 lets the same launch through', cli(paidArgs, { ANTHROPIC_API_KEY: CANARY, AUTODEV_ALLOW_PAID_KEY: '1' }).status === 0);
     check('a flag a command never reads is refused as usage, never ignored: status --model',
         code(cli(['status', '--model', 'm', '--ledger', ledger])) === 'usage');
