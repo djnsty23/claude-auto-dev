@@ -30,8 +30,13 @@
  *     stripe, checkout, subscription, invoice, RLS, policy, a migrations
  *     directory or a .sql file, a .env file,
  *   - package.json is unchanged, since it names the commands the lane runs.
- * The patterns match anywhere in the lower-cased path, so `author` reads as
- * auth: a false ineligible costs one full gate, a false eligible skips one.
+ * The patterns are anchored to the start of a word inside a path segment. A
+ * word starts after a /, -, _, ., bracket, digit or lower-to-upper camelCase
+ * step, so `session-store.ts`, `useAuth.ts` and `(auth)/page.tsx` match while
+ * `author.js`, `authority-audit.js`, `blog-ingest.js` and `obsession.md` do not.
+ * A whole-segment match was measured and refused: over 26,780 tracked files in
+ * 42 local repos it missed 499 of 2,694 hits, including `admin-session/` and
+ * `BuilderAuth.tsx`, where a false eligible skips the gate and the opus pass.
  * A diff that cannot be read is INELIGIBLE, never eligible. Every ineligible
  * verdict lists its reasons.
  *
@@ -101,21 +106,23 @@ const PROFILE_STEPS = { fast: STEPS, preview: ['typecheck', 'build', 'test'] };
 const PROFILES = Object.keys(PROFILE_STEPS);
 
 /** The default sensitive patterns, each with the reason an ineligible verdict prints. */
+const wordStart = (alternatives) => new RegExp(`(?:^|[^a-z])(?:${alternatives})`);
 const DEFAULT_SENSITIVE = [
-    ['auth', /auth/],
-    ['login', /log-?in|log-?out/],
-    ['sign-in or sign-up', /sign-?in|sign-?up/],
-    ['password', /passw/],
-    ['session', /session/],
-    ['middleware', /middleware/],
-    ['payment', /payment/],
-    ['billing', /billing/],
-    ['stripe', /stripe/],
-    ['checkout', /checkout/],
-    ['subscription', /subscription/],
-    ['invoice', /invoice/],
+    // Every auth word, known or new, fails closed. Only the English words for a writer and a mandate are out.
+    ['auth', wordStart('(?:o|next|better|web|re|un|pre)?auth(?!or(?:s|ed|ing|ship)?(?![a-z])|orit(?:y|ies)(?![a-z]))')],
+    ['login', wordStart('login|logout|log[^a-z](?:in|out)(?![a-z])')],
+    ['sign-in or sign-up', wordStart('signin(?!g)|signup|sign[^a-z](?:in|up)(?![a-z])')],
+    ['password', wordStart('passw|pass[^a-z]word')],
+    ['session', wordStart('session')],
+    ['middleware', wordStart('middleware|middle[^a-z]ware(?![a-z])')],
+    ['payment', wordStart('(?:pre|re)?payment')],
+    ['billing', wordStart('billing')],
+    ['stripe', wordStart('stripe')],
+    ['checkout', wordStart('checkout|check[^a-z]out(?![a-z])')],
+    ['subscription', wordStart('subscription')],
+    ['invoice', wordStart('invoice')],
     ['RLS', /(^|[^a-z])rls([^a-z]|$)/],
-    ['policy', /polic(y|ies)/],
+    ['policy', wordStart('polic(?:y|ies)')],
     ['migration', /(^|\/)migrations?\//],
     ['SQL', /\.sql$/],
     ['env file', /(^|\/)\.env/],
@@ -124,6 +131,11 @@ const DEFAULT_SENSITIVE = [
 // ---------------------------------------------------------------------------
 // The classifier: a pure function over a list of changed files.
 // ---------------------------------------------------------------------------
+
+/** The path as DEFAULT_SENSITIVE reads it: lower-cased, with each camelCase step turned into a hyphen. */
+function wordedPath(slashed) {
+    return slashed.replace(/([a-z0-9])([A-Z])/g, '$1-$2').replace(/([A-Z])([A-Z][a-z])/g, '$1-$2').toLowerCase();
+}
 
 /**
  * The fast-lane config from a package.json text, read at the base. Throws on
@@ -212,7 +224,6 @@ function classify(files, config = parseConfig(null)) {
     const sizeOnly = [];
     const outside = [];
     if (!files.length) shared.push('the diff is empty, so there is nothing to merge');
-    const patterns = [...DEFAULT_SENSITIVE, ...config.sensitive];
     let changed = 0;
     for (const f of files) {
         if (!Number.isInteger(f.added) || !Number.isInteger(f.deleted)) {
@@ -223,7 +234,12 @@ function classify(files, config = parseConfig(null)) {
         for (const p of new Set([f.path, f.oldPath].filter(Boolean))) {
             const slashed = p.replace(/\\/g, '/');
             const lower = slashed.toLowerCase();
-            for (const [why, re] of patterns) {
+            const worded = wordedPath(slashed);
+            for (const [why, re] of DEFAULT_SENSITIVE) {
+                if (re.test(worded)) shared.push(`${p} matches the sensitive pattern ${why}`);
+            }
+            // A product's own patterns are its own anchors, read against the plain lower-cased path.
+            for (const [why, re] of config.sensitive) {
                 if (re.test(lower)) shared.push(`${p} matches the sensitive pattern ${why}`);
             }
             if (lower === 'package.json' || lower.endsWith('/package.json')) {
@@ -521,7 +537,8 @@ function help() {
     console.log(`A candidate is eligible when base..head changes at most ${DEFAULT_MAX_LINES} lines (package.json`);
     console.log(`"${CONFIG_KEY}.maxLines" at the base changes it), every file has a line count, package.json is`);
     console.log('unchanged and no path matches a sensitive pattern (auth, session, payment, billing, stripe,');
-    console.log('checkout, RLS, migrations, SQL and more). An unreadable diff is ineligible. run then executes');
+    console.log('checkout, RLS, migrations, SQL and more, each anchored to the start of a word in the path, so');
+    console.log('author.js and blog-ingest.js do not match). An unreadable diff is ineligible. run then executes');
     console.log('npm run lint, typecheck, test and build on the clean head and writes the receipt that');
     console.log('merge-lock.js merge --fast-lane-receipt FILE accepts. --base defaults to origin/main.');
     console.log('');
@@ -560,7 +577,7 @@ function main() {
 }
 
 module.exports = {
-    classify, parseConfig, globToRegExp, readDiff, classifyRepo, planSteps, run, receiptProblem, profileProblem,
+    classify, wordedPath, parseConfig, globToRegExp, readDiff, classifyRepo, planSteps, run, receiptProblem, profileProblem,
     filesFromCompare, parseArgs, DEFAULT_MAX_LINES, KIND, STEPS, PROFILE_STEPS,
 };
 
