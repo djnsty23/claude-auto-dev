@@ -28,8 +28,8 @@
  *       a different one does not
  *   G11 polling waits through building states and passes once READY
  *   G12 a PASS that cannot be written to the ledger is exit 2, not 0
- *   G13 --dry-run prints the plan (branch and refspec included) and changes nothing, and
- *       still exits 2 with no smoke command
+ *   G13 --dry-run prints the plan (branch and refspec included), changes nothing and exits
+ *       4 rather than the 0 of a PASS, and still exits 2 with no smoke command
  *   G14 bad arguments are exit 2
  *   G15 the push and gh guards refuse anything but the revert refspec and a draft PR
  *
@@ -356,7 +356,7 @@ expectTimeout('an empty object', run({ inspect: [{}] }));
 
 {
     const r = run({ args: ['--dry-run'] });
-    check('G13 dry run: exit 0 and prints the plan', r.status === 0 && /DRY RUN/.test(r.out), `${r.status}\n${r.out}`);
+    check('G13 dry run: exit 4, its own code, never the 0 of a PASS, and prints the plan', r.status === 4 && dg.EXIT_DRY_RUN === 4 && /DRY RUN/.test(r.out), `${r.status}\n${r.out}`);
     check('G13 dry run: names the branch, the only push and the draft PR', r.out.includes(`revert/${SHORT}`) && r.out.includes(`git push origin refs/heads/revert/${SHORT}:refs/heads/revert/${SHORT}`) && /gh pr create --draft/.test(r.out), r.out);
     check('G13 dry run: names the smoke command with the url filled in', r.out.includes(URL_PROD) && r.out.includes('smoke-stub.js'), r.out);
     check('G13 dry run: nothing ran, nothing was written', r.inspect.length === 0 && r.smoke.length === 0 && r.git.length === 0 && r.gh.length === 0 && r.ledger.length === 0 && r.notify.length === 0 && r.digest.length === 0 && !fs.existsSync(path.join(r.dir, 'ledger')) && !fs.existsSync(path.join(r.dir, 'notify')), JSON.stringify(fs.readdirSync(r.dir)));

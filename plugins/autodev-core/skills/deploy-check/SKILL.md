@@ -51,7 +51,8 @@ node "${CLAUDE_PLUGIN_ROOT}/scripts/deploy-gate.js" --repo-dir "$DIR" --sha "$SH
 
 Add `--timeout-ms N` to change the 15-minute wait. Add `--dry-run` to see what
 it would do (the revert it would open included) without touching git or GitHub;
-use it the first time on a product.
+use it the first time on a product. A dry run exits 4, never 0, since it checked
+nothing.
 
 It waits for the production deployment of `$SHA`, runs the smoke command, and
 appends PASS, FAIL or TIMEOUT to the deploy ledger. Read its printed verdict and

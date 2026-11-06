@@ -66,10 +66,12 @@
  * --dry-run prints the plan, with every command and the exact branch and
  * refspec, and runs, writes, pushes and sends nothing. It still exits 2 when
  * the smoke command is missing, because a plan without a check is not a plan.
+ * Its success is exit 4, never 0, because a caller reading the exit code must
+ * not take a plan that checked nothing for a PASS.
  *
  * EXIT. 0 PASS. 1 FAIL. 2 indeterminate: bad arguments, no smoke command, no
  * URL, or a PASS that could not be written to the ledger (an unrecorded PASS is
- * not reported as one). 3 TIMEOUT.
+ * not reported as one). 3 TIMEOUT. 4 DRY RUN: the plan printed, nothing checked.
  *
  * ENVIRONMENT. AUTODEV_GIT_BIN and AUTODEV_GH_BIN name another git or gh (a
  * .js file runs under this node), as merge-lock.js does for gh.
@@ -85,6 +87,8 @@ const deployLedger = require('./deploy-ledger.js');
 const notifyPolicy = require('./notify-policy.js');
 
 const MIN_POLL_MS = 15000;
+/** --dry-run's exit: not 0, so a plan that checked nothing never reads as PASS. */
+const EXIT_DRY_RUN = 4;
 const DEFAULT_TIMEOUT_MS = 15 * 60 * 1000;
 const DEFAULT_SMOKE_TIMEOUT_MS = 120 * 1000;
 const DEFAULT_INSPECT = 'vercel inspect {url} --json';
@@ -441,7 +445,7 @@ async function gate(argv, env = process.env) {
 
     if (a.dryRun) {
         for (const l of planLines({ a, url, smokeArgv, inspectArgv, short, base })) say(l);
-        return { code: 0, lines };
+        return { code: EXIT_DRY_RUN, lines };
     }
 
     const started = Date.now();
@@ -499,11 +503,11 @@ const USAGE = [
     '                      [--base BRANCH] [--repo OWNER/NAME] [--dry-run]',
     '',
     '  smoke command: package.json "autodevDeployGate": { "smoke": "cmd {url}", "url": "https://..." }',
-    '  Exit 0 PASS, 1 FAIL (draft revert PR), 2 indeterminate (no smoke command, bad input), 3 TIMEOUT.',
+    '  Exit 0 PASS, 1 FAIL (draft revert PR), 2 indeterminate (no smoke command, bad input), 3 TIMEOUT, 4 DRY RUN.',
     '  Never pushes the base branch, never merges, never promotes. --dry-run prints the plan only.',
 ].join('\n');
 
-module.exports = { parseArgs, splitArgv, withUrl, readConfig, judgeDeployment, shaOf, holderOf, makeRevert, assertPushSafe, assertGhSafe, gate };
+module.exports = { EXIT_DRY_RUN, parseArgs, splitArgv, withUrl, readConfig, judgeDeployment, shaOf, holderOf, makeRevert, assertPushSafe, assertGhSafe, gate };
 
 if (require.main === module) {
     gate(process.argv.slice(2)).then((r) => {
