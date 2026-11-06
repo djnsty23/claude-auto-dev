@@ -1,0 +1,102 @@
+# before: origin/main e1e32a8e with only the new checks, 2026-11-05T12:26:42Z, node tooling/test-unattended-queue.js
+PASS  enqueue accepts a free slug
+PASS  enqueue marks the record for the headless channel
+PASS  enqueue --pin stores the pinned blob at the base
+PASS  enqueue defaults the worker to dontAsk, never bypassPermissions
+PASS  enqueue refuses --permission-mode bypassPermissions as authority-refused
+PASS  enqueue copies the brief beside the report, so a later edit of the source cannot change a queued task
+PASS  enqueue writes no worktree and no branch
+PASS  enqueue records how many criteria the receipt gate will run
+PASS  enqueue refuses a brief whose acceptance the receipt gate cannot run, and queues nothing
+PASS  control: the same brief queues with --without-criteria, and the record keeps the reason
+PASS  control: the waived fixture task retires
+PASS  enqueue refuses a 25-character slug: it becomes the headless code, capped at 24
+PASS  control: a 24-character slug is accepted
+PASS  enqueue refuses an --after naming no record
+PASS  enqueue refuses a task that waits on itself
+PASS  enqueue refuses a slug a queued record already claims
+PASS  brief refuses a slug a queued record already claims
+PASS  control: --after naming a real record is accepted and stored
+PASS  retire accepts a queued record, freeing its slug
+PASS  ready lists the task with no dependency
+PASS  ready holds back the task whose dependency has not run
+PASS  ready with no concurrency slot readies nothing and says it is capped
+PASS  ready refuses a cap that is not a whole number
+PASS  launch --dry-run succeeds through headless-worker start --dry-run
+PASS  the headless code is the slug, so the RESULT line both scripts read is one line
+PASS  the worker gets dontAsk from the queued record
+PASS  launch --dry-run leaves the ledger byte-identical
+PASS  launch --model and --effort reach the headless argv, overriding the queued values
+PASS  and a dry run with them still leaves the ledger byte-identical
+PASS  control: every flag brain-judge passes to launch is accepted
+PASS  a brief naming no heavy tool starts its worker without the Artifact tools and Workflow
+PASS  launch passes the tool families the brief names: a brief naming ArtifactData keeps the Artifact tools
+PASS  a flag a command never reads is refused as usage, never ignored: status --model
+PASS  launch --repo is refused and names the flag, since the record already holds the repo
+PASS  ready --task-id and settle --dev are refused the same way
+PASS  the composed prompt opens with STEP 0 and carries the brief
+PASS  a headless prompt names no scheduled task to leave alone
+FAIL  a headless prompt tells the worker to write its report in its outbox  (<home>/AppData/Local/Temp/unattended-queue-McMN17/outbox/guide-a-3af89835/REPORT.md)
+FAIL    and never names the ledger report under the config dir, which the worker cannot write  (<home>/AppData/Local/Temp/unattended-queue-McMN17/<fixture-home>/.claude/autodev/reports/worker-guide-a/REPORT.md)
+PASS  control: the scheduled-task prompt still names its task
+PASS  launch refuses when the branch appeared after enqueue
+PASS  a refused launch stays queued with lastLaunchError and an attempt count
+PASS  a second refusal counts a second attempt
+PASS  a transient refusal is logged but never counted toward the attempt cap
+PASS  launch refuses a task whose dependency is unmet
+PASS  launch re-pins at the base the worker starts from, not the one enqueue saw
+PASS    and the launched prompt names the pinned test
+PASS  control: with the branch gone, launch starts the worker
+PASS  launch hands headless-worker the same outbox the prompt names
+PASS  a launched record names its headless run and clears the launch error
+PASS  launch stamps launchedAt, which the per-hour cap counts
+PASS  a live launch with --model records the model it ran on in the ledger
+PASS  the worker ran in the repo, where STEP 0 makes its worktree
+PASS  the worker read the full prompt through the pointer, STEP 0 first
+PASS  the worker wrote the RESULT line at the --report path the record names
+PASS  headless-worker settles the run from the same report
+PASS  launch refuses a record that is not queued, and writes no launch error onto it
+PASS  a started record holds a concurrency slot
+PASS  verdict refuses a record that has not finished
+PASS  settle on a headless record closes it
+PASS  deleted refuses a headless record: there is no scheduled task
+PASS  a second settle on a closed record is refused as already closed
+PASS  the dependent task waits on the verdict once its dependency closed
+PASS  a judge verdict is written when none stands
+PASS  a follow-up verdict blocks the dependent task for a person
+PASS  an accept on a pinned record with no result branch is refused as pin-unchecked
+PASS  a second judge verdict never replaces the first
+PASS  a Brain verdict replaces a judge one and returns what it replaced
+PASS  once accepted, the dependent task is ready
+PASS  verdict refuses an unknown decision
+PASS  verdict refuses a missing reason
+PASS  verdict refuses an unknown author
+PASS  a write waits on a fresh lock and then refuses
+PASS  a lock older than five minutes is a dead writer's, and is taken over
+PASS  a write removes its own lock
+PASS  a writer whose lock was taken over leaves the new holder's lock in place
+PASS  a timed-out start whose run is in the headless ledger counts as started
+PASS  control: no run of that code since the spawn means the timeout stands
+PASS  planStarts takes the oldest queued first
+PASS  planStarts caps the rest
+PASS  planStarts blocks on follow-up, failed, retired and missing dependencies
+PASS  planStarts blocks a task refused three times
+PASS  planStarts holds a dependency with no verdict as pending, not blocked
+PASS  one launch in the last hour leaves one slot
+PASS  a launch over an hour old, or stamped in the future, spends no slot
+PASS  dependencyState reads a queued dependency as pending
+PASS  dependencyState reads no record as blocked
+PASS  applyVerdict refuses a queued record
+PASS  pointerPrompt names the prompt file with forward slashes
+PASS  headlessArgs passes every launch option through
+PASS  headlessArgs passes the kept tool families as --keep-tools
+PASS  headlessArgs passes no --keep-tools when the brief names no family
+PASS  headlessArgs leaves out options the record does not set
+PASS  parseHeadless reads a timeout
+PASS  parseHeadless reads unparseable output
+PASS  parseHeadless reads a refusal
+PASS  parseHeadless reads a start
+PASS  decideSettle refuses a queued record
+
+96 passed, 2 failed, 0 could not check
+exit 1

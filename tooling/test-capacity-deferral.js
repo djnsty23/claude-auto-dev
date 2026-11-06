@@ -188,7 +188,22 @@ try {
     // ------------------------------------------------------------ D8
     const frontier = require(path.join(__dirname, 'frontier', 'run.js'));
     const capBase = capacity.defaultBase();
-    const sleeper = () => { const c = spawn(process.execPath, ['-e', 'setTimeout(() => {}, 60000)'], { stdio: 'ignore', windowsHide: true }); children.push(c); return c; };
+    // On POSIX the sleeper is an orphan that init reaps the moment it dies. A direct child stays a
+    // zombie while this synchronous test blocks the event loop, and kill(pid, 0) reads a zombie as
+    // alive, so both D8 checks failed on CI's Linux and macOS runners and passed on Windows.
+    const sleeper = () => {
+        if (process.platform === 'win32') {
+            const c = spawn(process.execPath, ['-e', 'setTimeout(() => {}, 60000)'], { stdio: 'ignore', windowsHide: true });
+            children.push(c);
+            return c;
+        }
+        const out = spawnSync('sh', ['-c', `"${process.execPath}" -e "setTimeout(() => {}, 60000)" >/dev/null 2>&1 & echo $!`], { encoding: 'utf8' });
+        const pid = Number(String(out.stdout || '').trim());
+        if (!(pid > 0)) throw new Error(`sleeper did not start: ${out.stderr || out.status}`);
+        const c = { pid, kill: () => { try { process.kill(pid, 'SIGTERM'); } catch { /* gone */ } } };
+        children.push(c);
+        return c;
+    };
     const plant = (pid) => write(capacity.ledgerPath(capBase), JSON.stringify({ schema: 1, reservations: [{ id: `r-${pid}`, pid, cls: 'worker', diskBytes: 1, commitBytes: 1, createdUtc: iso(Date.now()) }], classes: {} }));
     const gone = (pid) => { for (let i = 0; i < 80; i++) { try { process.kill(pid, 0); } catch { return true; } Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 100); } return false; };
     const a = sleeper();

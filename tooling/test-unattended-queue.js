@@ -29,6 +29,7 @@ const SCRIPTS = path.join(__dirname, '..', 'plugins', 'autodev-core', 'scripts')
 const SUBJECT = path.join(SCRIPTS, 'unattended-worker.js');
 const HEADLESS = path.join(SCRIPTS, 'headless-worker.js');
 const { planStarts, dependencyState, applyVerdict, pointerPrompt, headlessArgs, parseHeadless, decideSettle, recoverTimedOutStart, withLock } = require(SUBJECT);
+const { defaultOutbox } = require(HEADLESS);
 
 let pass = 0, fail = 0, unchecked = 0;
 function check(label, ok, detail) {
@@ -209,6 +210,12 @@ try {
     const prompt = fs.existsSync(promptFile) ? fs.readFileSync(promptFile, 'utf8') : '';
     check('the composed prompt opens with STEP 0 and carries the brief', prompt.startsWith('STEP 0') && prompt.includes('MISSION. Add a guide.'));
     check('a headless prompt names no scheduled task to leave alone', prompt.length > 0 && !prompt.includes('Do not delete scheduled task'));
+    // [measured 2026-11-05] clock-smoke-1105 followed PROMPT.md to the ledger REPORT.md under ~/.claude,
+    // which dontAsk refuses to Write or Bash-write, so it settled with no report. The worker's paths are its outbox.
+    const fwd = (p) => p.replace(/\\/g, '/');
+    const outboxReport = fwd(path.join(defaultOutbox('guide-a', r1.report, { AUTODEV_WORKER_OUTBOX: path.join(scratch, 'outbox') }), path.basename(r1.report)));
+    check('a headless prompt tells the worker to write its report in its outbox', prompt.includes(`write one report to ${outboxReport}`), outboxReport);
+    check('  and never names the ledger report under the config dir, which the worker cannot write', prompt.length > 0 && !prompt.includes(fwd(r1.report)), fwd(r1.report));
     check('control: the scheduled-task prompt still names its task', val(cli(['brief', '--slug', 'sched-a', ...base])).createScheduledTask.prompt.includes('Do not delete scheduled task worker-sched-a'));
 
     // =======================================================================
@@ -251,6 +258,9 @@ try {
     const livePrompt = lr ? fs.readFileSync(path.join(path.dirname(lr.report), 'PROMPT.md'), 'utf8') : '';
     check('  and the launched prompt names the pinned test', livePrompt.includes('PINNED ACCEPTANCE TESTS: README.md'));
     check('control: with the branch gone, launch starts the worker', live.status === 0 && lr && lr.state === 'started', live.stdout.slice(0, 300));
+    const hrun = lr && lr.headless && lr.headless.ledger ? (JSON.parse(fs.readFileSync(lr.headless.ledger, 'utf8')).records || []).filter((x) => x.code === 'guide-a').pop() : null;
+    check('launch hands headless-worker the same outbox the prompt names', !!hrun && fwd(path.join(hrun.outbox || '', path.basename(lr.report))) === outboxReport,
+        JSON.stringify(hrun && hrun.outbox));
     check('a launched record names its headless run and clears the launch error', lr && lr.headless && lr.headless.code === 'guide-a' && Number.isInteger(lr.headless.pid) && !lr.lastLaunchError);
     check('launch stamps launchedAt, which the per-hour cap counts', lr && typeof lr.launchedAt === 'string');
     check('a live launch with --model records the model it ran on in the ledger', lr && lr.launch && lr.launch.model === 'm-live' && recOf('worker-guide-a').launch.model === 'm-live', JSON.stringify(lr && lr.launch));

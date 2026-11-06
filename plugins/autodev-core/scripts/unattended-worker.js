@@ -140,7 +140,7 @@ const claudePaths = require('./claude-paths.js');
 const acceptance = require('./acceptance-receipt.js');
 const authority = require('./worker-authority.js');
 const paidKeys = require('./paid-key-guard.js');
-const { scriptPlacement, readLedger: readHeadlessLedger, namedTools } = require('./headless-worker.js');
+const { scriptPlacement, readLedger: readHeadlessLedger, namedTools, defaultOutbox, workerPaths } = require('./headless-worker.js');
 const crypto = require('node:crypto');
 const { spawnSync } = require('node:child_process');
 
@@ -745,6 +745,8 @@ function headlessArgs(rec, files, opts) {
     if (files.keepTools && files.keepTools.length) args.push('--keep-tools', files.keepTools.join(','));
     // The unattended attempt is the budget attempt: headless-worker reserves this id, and refuses one it has held before.
     if (files.attemptId) args.push('--attempt-id', files.attemptId);
+    // The outbox the prompt names, so the worker and its supervisor agree on where the report is.
+    if (files.outbox) args.push('--outbox', files.outbox);
     if (opts.dev) args.push('--dev');
     if (opts['dry-run']) args.push('--dry-run');
     return args;
@@ -814,11 +816,17 @@ function launch(opts) {
             }
             const body = readBrief(rec.briefFile);
             const scratch = path.dirname(rec.briefFile);
+            // [measured 2026-11-05] dontAsk refuses Write and Bash writes under the config dir, and no
+            // --add-dir or allow rule lifts it, so a prompt naming the ledger REPORT.md left the
+            // clock-smoke-1105 worker with nowhere to report. The worker writes in its outbox, the
+            // paths headless-worker's supervisor copies to the ledger, and launch passes that outbox.
+            const outbox = path.resolve(defaultOutbox(rec.slug, rec.report));
+            const own = workerPaths({ outbox, report: rec.report, code: rec.slug });
             // The base can have moved since enqueue: pin the blobs the worker's worktree will start from.
             const pinned = rec.pins && rec.pins.length ? resolvePins(rec.pins.map((p) => p.path).join(','), rec.repo, rec.base) : {};
             const prompt = composePrompt({ repo: rec.repo, worktree, branch, base: rec.base, taskId: rec.taskId, returnTo: rec.returnTo,
-                report: rec.report, slug: rec.slug, body, scratch, channel: 'headless', pins: pinned.pins });
-            const files = { prompt: path.join(scratch, 'PROMPT.md'), pointer: path.join(scratch, 'POINTER.md'), log: path.join(scratch, 'worker.log'), keepTools: namedTools(prompt), attemptId: crypto.randomUUID() };
+                report: own.report, slug: rec.slug, body, scratch: own.scratch, channel: 'headless', pins: pinned.pins });
+            const files = { prompt: path.join(scratch, 'PROMPT.md'), pointer: path.join(scratch, 'POINTER.md'), log: path.join(scratch, 'worker.log'), keepTools: namedTools(prompt), attemptId: crypto.randomUUID(), outbox };
             fs.writeFileSync(files.prompt, prompt);
             fs.writeFileSync(files.pointer, pointerPrompt(files.prompt));
             // --model and --effort on launch override the queued values, and the

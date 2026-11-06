@@ -10,7 +10,7 @@ const files = new Set([
     'hooks/peer-send-ledger.js', 'hooks/stop-brain-report.js', 'hooks/stop-intent-record.js',
     'hooks/stop-workflow-wall-note.js', 'scripts/headless-worker.js', 'scripts/keyed-ledger.js',
     'scripts/ledger-rotate.js', 'scripts/production-signals.js', 'scripts/radar-learning.js', 'scripts/unattended-worker.js',
-    'scripts/watch-panels.js',
+    'scripts/usage-digest.js', 'scripts/watch-panels.js',
 ].map((f) => CORE + f).concat('tooling/frontier/run.js'));
 const json = (file, value) => fs.writeFileSync(file, JSON.stringify(value));
 const readJson = (file) => JSON.parse(fs.readFileSync(file, 'utf8'));
@@ -81,6 +81,17 @@ function prepare(writer, cwd, count) {
         fixture.file = path.join(cwd, 'ledger.jsonl');
         fs.writeFileSync(fixture.file, ids(count).map((id) => JSON.stringify({ at: '2000-01-01T00:00:00Z', id: 'old' + id }) + '\n').join(''));
     }
+    if (name === 'usage-digest.js') {
+        // Placeholder lists, so the run is configured. Each writer owns one project
+        // directory holding one transcript too short to digest: it records "skipped"
+        // with no model call, and the ledger write is the only shared state.
+        json(path.join(cwd, 'digest-config.json'), { clientMarkers: ['fixture-client'], knownNames: ['Fixturename'] });
+        for (const id of ids(count)) {
+            const dir = path.join(cwd, 'projects', `p${id}-end`);
+            fs.mkdirSync(dir, { recursive: true });
+            fs.writeFileSync(path.join(dir, `s${id}.jsonl`), JSON.stringify({ type: 'user', message: { role: 'user', content: 'hi' } }) + '\n');
+        }
+    }
     return fixture;
 }
 
@@ -133,6 +144,14 @@ async function write(f, id) {
         // An unlocked append, as the ledger's own writers do, then a real rotation racing the others.
         fs.appendFileSync(f.file, JSON.stringify({ at: new Date().toISOString(), id }) + '\n');
         cli(f, ['--dir', f.cwd, '--file', 'ledger.jsonl', '--days', '30']);
+    } else if (name === 'usage-digest.js') {
+        // A topic function in place of the local model, so no server is needed. The
+        // fixture transcripts are skipped before it is ever asked.
+        process.env.AUTODEV_USAGE_DIR = f.cwd;
+        const r = await require(path.join(ROOT, f.writer)).run({
+            root: path.join(f.cwd, 'projects'), project: `p${id}-end`, askTopic: async () => ({ topic: 'fixture' }),
+        });
+        if (r.error || r.batch !== 1) throw new Error('usage-digest run: ' + JSON.stringify(r));
     } else if (f.writer === 'tooling/frontier/run.js') {
         // Missing tasks exercise the real error-record write without launching a worker.
         cli(f, ['plant', '--task', id, '--src', ROOT, '--tasks-dir', f.cwd, '--data', f.cwd, '--work', f.cwd]);
@@ -161,6 +180,8 @@ function read(f) {
         if (!ids(f.count).every((id) => seen['old' + id] === 1)) return [];
         return ids(f.count).filter((id) => seen[id] === 1);
     }
+    if (name === 'usage-digest.js') return Object.keys(readJson(path.join(f.cwd, 'digests', 'ledger.json')).files)
+        .map((file) => (/[\\/]p(\d+)-end[\\/]/.exec(file) || [])[1]).filter(Boolean);
     if (f.writer === 'tooling/frontier/run.js') return Object.keys(readJson(path.join(f.cwd, 'plant.json')).tasks);
     throw new Error('no readback for ' + f.writer);
 }
