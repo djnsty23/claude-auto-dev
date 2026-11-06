@@ -77,6 +77,9 @@ workflow). Spend `xhigh` on the one agent whose judgement decides the outcome,
 3. **Prefer sequential when order matters.** Parallel agents start without each
    other's unfinished findings; if agent 2 depends on agent 1, pass the verified
    artifact after completion rather than relying on simultaneous execution.
+4. **Read the first wave in full before widening.** A flaw in a shared brief
+   repeats in every agent that runs it. Run two or three first, read every
+   output, fix the brief, then fan out.
 
 ## What an agent RETURNS is the cost, not which model ran it
 

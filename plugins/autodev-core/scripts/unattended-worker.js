@@ -75,6 +75,22 @@
  *           record waits in `held`: not failed, not queued, not retried.
  *   release moves a held record back to queued once the login works again.
  *           worker-reconcile.js calls it only when brain-judge authHold clears.
+ *   defer   returns a started headless record to queued when the capacity gate
+ *           turned its launch away (CAPACITY_DEFERRED), so claude never ran.
+ *           The attempt moves to `attempts[]` with outcome capacity-deferred,
+ *           and `deferred.retryAfter` holds it back for a backoff (15 minutes,
+ *           doubling per deferral, at most 4 hours). Not failed, not held.
+ *   requeue repairs a record closed before `defer` existed: a closed headless
+ *           record whose run settled `deferred`, or `unreported` with a
+ *           CAPACITY_DEFERRED blocker, so claude never started. It moves the
+ *           attempt, its run status and its verdict into `attempts[]` and
+ *           returns the record to queued, ready at once. Any other record is
+ *           refused: a run that did start has a worktree and a result to read.
+ *
+ * DEPENDANTS. A queued task whose dependency is held, failed, retired or not
+ * accepted is `blocked` in ready and status, with the reason, so a chain behind
+ * a stalled stage says why it is not moving. A dependency that is queued or
+ * deferred keeps it `pending`, naming the retry time.
  *
  * PINS. `brief` and `enqueue` take `--pin <path>[,<path>...]`, repo-relative
  * acceptance tests the worker must not change. The record stores each path with
@@ -140,6 +156,8 @@ const USAGE = [
     '       node unattended-worker.js retire --task-id <id> [--reason <text>] [--ledger <file>]',
     '       node unattended-worker.js hold --task-id <id> --reason <text> [--ledger <file>]',
     '       node unattended-worker.js release --task-id <id> --reason <text> [--ledger <file>]',
+    '       node unattended-worker.js defer --task-id <id> --reason <text> [--ledger <file>]',
+    '       node unattended-worker.js requeue --task-id <id> --reason <text> [--ledger <file>]',
     '       node unattended-worker.js status [--task-id <id>] [--ledger <file>]',
     'brief: refuse a slug already claimed (worktree path, local branch, origin branch, active ledger record),',
     '       then print create_scheduled_task arguments whose prompt opens with git worktree add.',
@@ -155,6 +173,10 @@ const USAGE = [
     'retire: close a composed, queued or held record whose task never ran, freeing its slug and task id.',
     'hold: a started headless run was refused its login. The attempt is kept in attempts[] and the record waits in held,',
     '      counted as neither a failure nor a launch refusal. release returns it to queued once the login works.',
+    'defer: a started headless run was turned away by the capacity gate before claude started. The attempt is kept in',
+    '      attempts[] and the record returns to queued, ready again after a backoff of 15 minutes doubling to 4 hours.',
+    'requeue: return a closed headless record whose run the capacity gate turned away (settled deferred, or unreported',
+    '      with a CAPACITY_DEFERRED blocker) to queued. Its run status and verdict move to attempts[]. Refused otherwise.',
     'settle --run-status unknown: the run lost its supervisor (a reboot, a killed supervisor). It never reads as success.',
     'enqueue: queue a brief for the headless channel. The slug is at most 24 characters: it becomes the headless code.',
     'ready: queued tasks whose dependencies were accepted, within the concurrency and per-hour caps.',
@@ -198,6 +220,9 @@ const LOCK_STALE_MS = 5 * 60 * 1000;
 const LOCK_WAIT_MS = Number(process.env.AUTODEV_LEDGER_LOCK_WAIT_MS) || 10 * 1000;
 // A queued task whose launch was refused this many times stays queued for a person.
 const MAX_LAUNCH_ATTEMPTS = 3;
+// A capacity deferral waits this long before its next launch, doubling per deferral up to the cap.
+const DEFER_BASE_MS = 15 * 60 * 1000;
+const DEFER_MAX_MS = 4 * HOUR_MS;
 // Refusals a later tick can clear with no person. They are logged, never counted.
 const TRANSIENT_LAUNCH_CODES = ['fetch-failed', 'origin-unreadable', 'git-unavailable', 'ledger-locked', 'paid-key-refused'];
 
@@ -641,6 +666,11 @@ function enqueue(opts) {
 function dependencyState(dep) {
     if (!dep) return { state: 'blocked', reason: 'no ledger record' };
     if (dep.state === 'retired') return { state: 'blocked', reason: `${dep.taskId} was retired` };
+    // A held run waits on a person or a login, so its dependants say so instead of waiting silently.
+    if (dep.state === 'held') return { state: 'blocked', reason: `${dep.taskId} is held: ${(dep.held && dep.held.reason) || 'no reason recorded'}` };
+    if (dep.state === 'queued' && dep.deferred && dep.deferred.retryAfter) {
+        return { state: 'pending', reason: `${dep.taskId} is queued, deferred until ${dep.deferred.retryAfter}` };
+    }
     if (!FINISHED.includes(dep.state)) return { state: 'pending', reason: `${dep.taskId} is ${dep.state}` };
     if (dep.runStatus !== 'succeeded') return { state: 'blocked', reason: `${dep.taskId} ${dep.runStatus || 'ended with no run status'}` };
     if (!dep.verdict) return { state: 'pending', reason: `${dep.taskId} awaits a verdict` };
@@ -669,6 +699,11 @@ function planStarts(records, { now = Date.now(), maxConcurrent = 2, maxPerHour =
     for (const rec of queued) {
         const attempts = (rec.lastLaunchError && rec.lastLaunchError.attempts) || 0;
         if (attempts >= MAX_LAUNCH_ATTEMPTS) { blocked.push({ taskId: rec.taskId, reason: `launch refused ${attempts} times, last: ${rec.lastLaunchError.code}` }); continue; }
+        const retryAt = rec.deferred ? Date.parse(rec.deferred.retryAfter || '') : NaN;
+        if (Number.isFinite(retryAt) && retryAt > now) {
+            pending.push({ taskId: rec.taskId, reason: `deferred until ${rec.deferred.retryAfter}: ${String(rec.deferred.reason || '').slice(0, 200)}` });
+            continue;
+        }
         const deps = (rec.after || []).map((id) => ({ id, ...dependencyState(byId.get(id)) }));
         const stuck = deps.filter((d) => d.state === 'blocked');
         if (stuck.length) { blocked.push({ taskId: rec.taskId, reason: stuck.map((d) => `${d.id}: ${d.reason}`).join('; ') }); continue; }
@@ -806,6 +841,7 @@ function launch(opts) {
                     keepTools: files.keepTools || [] },
             });
             delete rec.lastLaunchError;
+            delete rec.deferred;
             writeLedger(ledgerFile, ledger);
             return { ledger: ledgerFile, record: rec, files };
         } catch (e) { return refuse(e); }
@@ -886,6 +922,8 @@ const COMMAND_FLAGS = {
     retire: ['task-id', 'reason', 'ledger'],
     hold: ['task-id', 'reason', 'ledger'],
     release: ['task-id', 'reason', 'ledger'],
+    defer: ['task-id', 'reason', 'ledger'],
+    requeue: ['task-id', 'reason', 'ledger'],
     verdict: ['task-id', 'decision', 'reason', 'by', 'head', 'allow-pin-change', 'accept-without-receipt', 'deferred-accept', 'deferred-reason', 'ledger'],
     ready: ['max-concurrent', 'max-per-hour', 'ledger'],
     status: ['task-id', 'ledger'],
@@ -966,6 +1004,55 @@ function run(argv) {
             return {};
         });
     }
+    if (cmd === 'defer') {
+        if (!opts.reason || !String(opts.reason).trim()) fault('usage', '--reason is required');
+        return mutate(opts, (rec) => {
+            if (rec.state !== 'started' || rec.channel !== 'headless') fault('bad-state', `task ${rec.taskId} is ${rec.state} on ${rec.channel || 'no'} channel; defer is only for a started headless run`);
+            const at = new Date().toISOString();
+            const history = Array.isArray(rec.attempts) ? rec.attempts : [];
+            // The attempt is history, not a result: claude never started, so the
+            // task keeps no runStatus and gets no verdict.
+            rec.attempts = [...history, {
+                attemptId: rec.attemptId || null, startedAt: rec.startedAt || null, launchedAt: rec.launchedAt || null,
+                headless: rec.headless || null, outcome: 'capacity-deferred', reason: String(opts.reason).slice(0, 500), at,
+            }];
+            const count = rec.attempts.filter((x) => x.outcome === 'capacity-deferred').length;
+            const wait = Math.min(DEFER_MAX_MS, DEFER_BASE_MS * 2 ** Math.min(count - 1, 10));
+            rec.deferred = { at, reason: String(opts.reason).slice(0, 500), count, retryAfter: new Date(Date.parse(at) + wait).toISOString() };
+            rec.state = 'queued';
+            delete rec.attemptId; delete rec.startedAt; delete rec.headless;
+            return { deferred: rec.deferred };
+        });
+    }
+    if (cmd === 'requeue') {
+        if (!opts.reason || !String(opts.reason).trim()) fault('usage', '--reason is required');
+        return mutate(opts, (rec) => {
+            if (rec.state !== 'closed' || rec.channel !== 'headless') fault('bad-state', `task ${rec.taskId} is ${rec.state} on ${rec.channel || 'no'} channel; requeue is only for a closed headless run`);
+            if (rec.runStatus === 'succeeded') fault('bad-state', `task ${rec.taskId} succeeded: there is nothing to retry`);
+            const h = rec.headless || {};
+            let run = null;
+            try {
+                const runs = readHeadlessLedger(h.ledger).records;
+                run = runs.find((r) => r.code === h.code && r.startedAt === h.startedAt) || null;
+            } catch (e) { fault('not-deferred', `the headless ledger ${h.ledger || '(none)'} could not be read (${e.publicCode || e.code || e.message})`); }
+            const blocker = run && run.blocker && typeof run.blocker.text === 'string' ? run.blocker.text : '';
+            const deferred = run && run.state === 'settled' && (run.result === 'deferred' || (run.result === 'unreported' && /^CAPACITY_DEFERRED=/.test(blocker)));
+            if (!deferred) {
+                fault('not-deferred', `task ${rec.taskId}'s run ${run ? `settled ${run.result}${blocker ? ` (${blocker.slice(0, 120)})` : ''}` : 'is not in its headless ledger'}: `
+                    + 'only a run the capacity gate turned away before claude started can be requeued');
+            }
+            const at = new Date().toISOString();
+            rec.attempts = [...(Array.isArray(rec.attempts) ? rec.attempts : []), {
+                attemptId: rec.attemptId || null, startedAt: rec.startedAt || null, launchedAt: rec.launchedAt || null, headless: rec.headless || null,
+                outcome: 'capacity-deferred', reason: blocker.slice(0, 500), at, requeued: String(opts.reason).slice(0, 500),
+                closed: { runStatus: rec.runStatus || null, settledAt: rec.settledAt || null, settleReason: rec.settleReason || null, verdict: rec.verdict || null },
+            }];
+            rec.state = 'queued';
+            rec.requeued = { at, reason: String(opts.reason).slice(0, 500) };
+            for (const k of ['attemptId', 'startedAt', 'headless', 'runStatus', 'settledAt', 'settledVersion', 'settledDev', 'settleReason', 'verdict', 'deferred']) delete rec[k];
+            return { requeued: rec.requeued };
+        });
+    }
     if (cmd === 'verdict') {
         return mutate(opts, (rec) => {
             // Shape errors first, so a malformed call never spends a fetch on the pin check.
@@ -999,7 +1086,12 @@ function run(argv) {
         // Only a record that started can say which release ran it.
         const ran = ledger.records.filter((r) => r.sessionId);
         const versioned = ran.filter((r) => typeof r.version === 'string' && r.version).length;
-        return { ledger: ledgerFile, recordsRead: ledger.records.length, counts, ran: ran.length, versioned, unversioned: ran.length - versioned, records };
+        // closed reads as finished; how it ended is the run status, counted apart so a failed close is not read as done.
+        const closedBy = {};
+        for (const r of ledger.records.filter((x) => x.state === 'closed')) closedBy[r.runStatus || 'none'] = (closedBy[r.runStatus || 'none'] || 0) + 1;
+        const plan = planStarts(ledger.records);
+        return { ledger: ledgerFile, recordsRead: ledger.records.length, counts, closedBy, blocked: plan.blocked, pending: plan.pending,
+            ran: ran.length, versioned, unversioned: ran.length - versioned, records };
     }
     fault('usage', cmd ? `unknown command ${cmd}` : 'a command is required');
 }

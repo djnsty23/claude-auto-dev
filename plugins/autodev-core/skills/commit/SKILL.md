@@ -38,6 +38,11 @@ running the commit. A file preserves literal backticks and newlines. Inspect
 `git diff --cached` before committing so another session's staged work is not
 absorbed into this task.
 
+A local model may draft the message first: write `git diff --cached` to a file
+and run `node "${CLAUDE_PLUGIN_ROOT}/scripts/local-model.js" commit <diff-file>`.
+Exit 0 prints a draft that you review and correct before using it. Exit 3 means
+no local model took it, so write the message yourself. It never blocks a commit.
+
 ## Evidence goes IN the commit
 
 If the change fixes a defect or moves a visible surface, the `prove` skill's

@@ -56,7 +56,7 @@
     { "id": "causalml-releases", "authority": "research-method", "kind": "atom", "category": "attribution-causal", "product": "CausalML", "url": "https://github.com/uber/causalml/releases.atom", "webUrl": "https://github.com/uber/causalml/releases", "maxEntries": 5, "excludePrereleases": true }
   ],
   "community": [
-    { "id": "search-engine-land", "kind": "rss", "category": "search-industry", "product": "Search Engine Land", "url": "https://searchengineland.com/feed", "webUrl": "https://searchengineland.com/", "maxEntries": 8 },
+    { "id": "marketing-dive", "kind": "rss", "category": "marketing-industry", "product": "Marketing Dive", "url": "https://www.marketingdive.com/feeds/news/", "webUrl": "https://www.marketingdive.com/", "maxEntries": 8 },
     { "id": "search-engine-journal", "kind": "rss", "category": "search-industry", "product": "Search Engine Journal", "url": "https://www.searchenginejournal.com/feed/", "webUrl": "https://www.searchenginejournal.com/", "maxEntries": 8 },
     { "id": "adexchanger", "kind": "rss", "category": "adtech-industry", "product": "AdExchanger", "url": "https://www.adexchanger.com/feed/", "webUrl": "https://www.adexchanger.com/", "maxEntries": 8 },
     { "id": "martech", "kind": "rss", "category": "marketing-ops", "product": "MarTech", "url": "https://martech.org/feed/", "webUrl": "https://martech.org/", "maxEntries": 8 },

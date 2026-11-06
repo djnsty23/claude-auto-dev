@@ -1201,6 +1201,32 @@ function sectionPlacement(repos) {
     say('');
 }
 
+/**
+ * Machine alarms: a capacity crash breaker tripped over an hour ago refuses
+ * every launch of its class, and no worker report can say so because none ran.
+ * [measured 2026-11-05] the worker breaker stood for two days while six
+ * Conveyor chains stalled behind it. Read-only: it reclaims nothing.
+ */
+function sectionAlarms() {
+    say(THIN);
+    say('MACHINE ALARMS - capacity crash breakers');
+    say(THIN);
+    try {
+        const capacity = require('./capacity.js');
+        const base = capacity.defaultBase();
+        const q = capacity.readLedgerQuiet(base);
+        if (!q.ledger) { say('  !! COULD NOT CHECK - ' + q.why); say(''); return; }
+        const classes = Object.keys(q.ledger.classes || {});
+        say('  population: ' + classes.length + ' class(es) in ' + capacity.ledgerPath(base));
+        const alarms = capacity.breakerAlarms(q.ledger, Date.now());
+        if (!alarms.length) say('  none: no breaker has stood over ' + (capacity.BREAKER_ALARM_MS / 3600000) + 'h');
+        for (const a of alarms) say('  !! ALARM ' + a.line);
+    } catch (e) {
+        say('  !! COULD NOT CHECK - ' + (e && e.message ? e.message : String(e)));
+    }
+    say('');
+}
+
 async function main() {
     const started = Date.now();
 
@@ -1215,6 +1241,7 @@ async function main() {
     }
 
     freshnessHeader();
+    sectionAlarms();
 
     // scanFleet is synchronous and reads every recent transcript. Run it first so
     // the child processes below are not competing with it for the event loop.

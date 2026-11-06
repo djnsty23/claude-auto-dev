@@ -476,6 +476,13 @@ async function main() {
     } else {
         console.log('\ngate:fast — the cheap steps of `npm run gate`, run independently\n');
         console.log(render(ran, deferred, steps.length, touched));
+        // Known flakes annotate a red; they never change it (known-flakes.js).
+        // Guarded: a matcher that cannot load is no reason for the gate to fail.
+        let gateNotes = () => [];
+        try { ({ gateNotes } = require('../plugins/autodev-core/scripts/known-flakes.js')); } catch { /* no notes */ }
+        for (const f of every.filter((r) => r.status === 'FAIL')) {
+            for (const note of gateNotes(f.tail && f.tail.text, { cwd: root })) console.log(`  ${f.name}: ${note}`);
+        }
     }
 
     if (inRepo) {

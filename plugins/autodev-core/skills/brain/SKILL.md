@@ -88,6 +88,14 @@ the next harness item, ahead of new product work: remove it, then check that
 its count falls in the following window. Each worker report ends with a
 `BLOCKER:` line, so an absent one is a prompt fault, not a clean run.
 
+Re-check what is already done. `scripts/recheck-passed.js sample` (daily as a
+brain-clock observer, one draw per ISO week) picks five stories at
+`passes: true` across repos into `recheck/ledger.jsonl`, flagging a shipped sha
+off the default branch and a story with no evidence field. Each week run
+`status`, re-verify each open sample in a fresh context, and record
+`verdict <repo>:<id> --agree|--disagree --note`. A disagreement is kept in
+`recheck/cases.jsonl` and its story reopens.
+
 ## 3. Start bounded workers with one owner per unit
 
 Load `isolate` and `rule-agent-concurrency`. Before dispatch, record story,
@@ -147,6 +155,8 @@ triage, not acceptance or deployment permission. Re-run integration checks after
 a rebase or changed base.
 
 Load `review`, or `adversarial-loop` for harness/security/verification changes.
+A red unit goes back alone, with the retry packet and its three-attempt cap
+from [dispatch-channels](references/dispatch-channels.md#sending-a-red-unit-back).
 Fix findings or record disconfirming evidence. Freeze acceptance scope after the
 audit pass and queue independent new scope. Repeated identical observations add
 no evidence. A score is not a completion condition. Set `passes: true` only when
@@ -184,6 +194,20 @@ first Stop may emit none. Keep dispatch records until results are acknowledged
 (`references/mission-records.md`). Before retrying, inspect commits, the working
 tree and journal: a timed-out worker may still be running. Never kill by command
 pattern or spawn blindly.
+
+**Cheap reads go to a local model first.** Triage an inbox item with
+`node "${CLAUDE_PLUGIN_ROOT}/scripts/local-model.js" triage <file>`, pull a fact
+from page text with `browse <file> <question>`, and find code with
+`locate <repo> <question>`. Exit 0 is the answer. Exit 3 means do the step
+yourself. `local-model.js routes` prints which steps go where. Copy, flake or
+real, status lines and coding stay with you, and a LEAD or ACTION item still
+gets your reply.
+
+**A red gate meets the known-flake list before anyone calls it.** Run
+`node "${CLAUDE_PLUGIN_ROOT}/scripts/known-flakes.js" match --repo <repo> <log>`.
+A match names the rerun that settles it: that suite alone, same tree, and a
+second red is real. No match means treat the red as real. A match never turns
+a red into a pass. Add an entry only after a rerun of the same tree passed.
 
 Use `workflow-run-triage.js`, then the workflow's resume mechanism for
 unfinished calls. Quota exhaustion needs a scheduler/reset event to run later; a

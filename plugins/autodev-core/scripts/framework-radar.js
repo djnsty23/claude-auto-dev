@@ -622,6 +622,13 @@ function creatorPromotion(text) {
   return hasLink && (hasCallToAction || hasOwnedCommercialOffer || hasResourcePrice);
 }
 
+function offPlatformPromotion(text) {
+  const explicitContact = /(?:t\.me\/|wa\.me\/|(?:contact|text|message|reach|dm)\s+(?:me|him|her|them|us)\b[^.\n]{0,80}(?:whats\s*app|telegram|https?:\/\/|www\.|@[a-z0-9_]{4,}|\+\d{6,})|(?:whats\s*app|telegram)\b[^.\n]{0,40}(?:\+\d{6,}|@[a-z0-9_]{4,}))/i.test(text);
+  const serviceSignal = /\b(?:video editor|designer|custom (?:re)?design|custom thumbnail|redesign|portfolio|samples?|reel|work with you|reasonable price|affordable rate|cro services?)\b/i.test(text);
+  const transferSignal = /\b(?:(?:can|could|may|would) i (?:send|share|email)|where can i (?:send|share|email)|what(?:'s| is) the (?:best|easiest) way (?:for me )?to (?:send|share|email)|what would be the (?:best|easiest) way for me to (?:send|share|email))\b/i.test(text);
+  return explicitContact || serviceSignal && transferSignal;
+}
+
 function filterCommentFeedback(comments) {
   const normalized = comments.filter(Boolean);
   const byText = new Map();
@@ -643,7 +650,7 @@ function filterCommentFeedback(comments) {
     else if (comment.is_creator && creatorPromotion(text)) reason = 'creator-promotion';
     else if (/(?:sub(?:scribe)?\s*(?:4|for)\s*sub|check out my channel|subscribe to my channel|like\s*(?:4|for)\s*like)/i.test(text)) {
       reason = 'engagement-manipulation';
-    } else if (/(?:t\.me\/|wa\.me\/|(?:contact|text|message|reach|dm)\s+(?:me|him|her|them|us)\b[^.\n]{0,80}(?:whats\s*app|telegram|https?:\/\/|www\.|@[a-z0-9_]{4,}|\+\d{6,})|(?:whats\s*app|telegram)\b[^.\n]{0,40}(?:\+\d{6,}|@[a-z0-9_]{4,}))/i.test(text)) {
+    } else if (offPlatformPromotion(text)) {
       reason = 'off-platform-promotion';
     } else if (fingerprint.length >= 30 && (byText.get(fingerprint) || new Set()).size >= 3) {
       reason = 'multi-author-duplicate';

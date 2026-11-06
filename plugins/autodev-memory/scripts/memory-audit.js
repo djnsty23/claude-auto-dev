@@ -27,9 +27,52 @@ const staleDays = Number((args.find((a) => a.startsWith('--stale-days=')) || '')
 const CONFIG_DIR = configDir();
 const PROJECTS = path.join(CONFIG_DIR, 'projects');
 
+// Names in the global store (<config>/memory), so a project memory's link to a
+// global memory resolves. A missing or unreadable store yields no names, which
+// only means fewer links resolve: every one of them is still reported.
+const GLOBAL_NAMES = (() => {
+    const dir = path.join(CONFIG_DIR, 'memory');
+    const out = new Set();
+    let files = [];
+    try { files = fs.readdirSync(dir).filter((f) => f.endsWith('.md')); } catch { return out; }
+    for (const f of files) {
+        out.add(f.replace(/\.md$/, ''));
+        try {
+            const { fm } = parseFrontmatter(fs.readFileSync(path.join(dir, f), 'utf8'));
+            if (fm.name) out.add(fm.name);
+            for (const a of aliasesOf(fm)) out.add(a);
+        } catch { /* unreadable file: its basename still counts */ }
+    }
+    return out;
+})();
+
+// A renamed memory keeps its old names, so links written before the rename
+// still resolve: `aliases: old-name, older-name` (or `[old-name]`), one line.
+// From the Second Brain OS study (2026-11, F11).
+function aliasesOf(fm) {
+    return String(fm.aliases || '').replace(/^\[|\]$/g, '').split(',')
+        .map((s) => s.trim().replace(/^["']|["']$/g, '')).filter(Boolean);
+}
+
+// Rule files (<config>/rules/*.md): memories cite a rule as [[backup-protocol]].
+const RULE_NAMES = (() => {
+    try {
+        return new Set(fs.readdirSync(path.join(CONFIG_DIR, 'rules'))
+            .filter((f) => f.endsWith('.md')).map((f) => f.slice(0, -3)));
+    } catch { return new Set(); }
+})();
+
 // MEMORY.md is loaded into context every session. Claude Code warns past these.
 const INDEX_MAX_LINES = 200;
 const INDEX_MAX_BYTES = 25 * 1024;
+
+// A second index page, linked from MEMORY.md (MEMORY-archive.md and the like).
+const SUB_INDEX = /^MEMORY-[^/\\]+\.md$/;
+
+// Markdown link targets ending in .md: `[Title](file.md)`.
+function linksIn(text) {
+    return [...text.matchAll(/\]\(([^)]+\.md)\)/g)].map((m) => m[1]);
+}
 
 function decodeProjectDir(slug) {
     // Claude encodes an absolute path by replacing separators with '-'. That is
@@ -92,63 +135,51 @@ function similarity(a, b) {
     return shared / Math.min(wa.size, wb.size);
 }
 
-if (!fs.existsSync(PROJECTS)) {
-    const msg = `No project memory found at ${PROJECTS}.`;
-    console.log(asJson ? JSON.stringify({ projects: [] }) : msg);
-    process.exit(0);
-}
-
-const report = [];
-
-for (const slug of fs.readdirSync(PROJECTS)) {
-    const memDir = path.join(PROJECTS, slug, 'memory');
-    if (!fs.existsSync(memDir)) continue;
-
-    const projectPath = decodeProjectDir(slug);
-    const projectExists = fs.existsSync(projectPath);
-
+// Audit one memory directory: index health, frontmatter, duplicates, index
+// drift and wiki links. Shared by the project stores and the global store.
+function auditStore(memDir) {
     const files = fs.readdirSync(memDir).filter((f) => f.endsWith('.md'));
-    const lastTouched = newestMtime(memDir);
-    const idleDays = lastTouched ? daysSince(lastTouched) : null;
-
-    // "Active" = memory touched recently, or the repo itself has recent commits.
-    let repoIdleDays = null;
-    if (projectExists) {
-        try {
-            const ts = execSync('git log -1 --format=%ct', {
-                cwd: projectPath, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'],
-            }).trim();
-            if (ts) repoIdleDays = daysSince(Number(ts) * 1000);
-        } catch { /* not a git repo */ }
-    }
-    const active = (idleDays !== null && idleDays <= staleDays) ||
-                   (repoIdleDays !== null && repoIdleDays <= staleDays);
-
-    if (!active && !includeAll) continue;
-
     const findings = [];
 
     // --- index health
     const indexPath = path.join(memDir, 'MEMORY.md');
     let indexLinks = [];
+    const indexSource = new Map(); // link -> sub-index it came from, when not MEMORY.md
     if (fs.existsSync(indexPath)) {
         const raw = fs.readFileSync(indexPath, 'utf8');
         const lines = raw.split('\n').length;
         const bytes = Buffer.byteLength(raw);
         if (lines > INDEX_MAX_LINES) findings.push({ kind: 'index-too-long', detail: `${lines} lines (max ${INDEX_MAX_LINES})` });
         if (bytes > INDEX_MAX_BYTES) findings.push({ kind: 'index-too-large', detail: `${(bytes / 1024).toFixed(1)}KB (max 25KB)` });
-        indexLinks = [...raw.matchAll(/\]\(([^)]+\.md)\)/g)].map((m) => m[1]);
+        indexLinks = linksIn(raw);
     } else if (files.length > 1) {
         findings.push({ kind: 'index-missing', detail: `${files.length} memories with no MEMORY.md index` });
+    }
+
+    // --- sub-indexes: a MEMORY-*.md that MEMORY.md links to is part of the index.
+    // Stores outgrow the 200-line budget and move old pointers into a second
+    // page (MEMORY-archive.md). Those memories are indexed, one hop down, so
+    // reading MEMORY.md alone reported every archived memory as unindexed.
+    // One hop only: an unlinked MEMORY-*.md is an ordinary memory.
+    const subIndexes = new Set();
+    for (const link of indexLinks) {
+        const base = path.basename(link);
+        if (SUB_INDEX.test(base) && files.includes(base)) subIndexes.add(base);
+    }
+    for (const sub of subIndexes) {
+        for (const link of linksIn(fs.readFileSync(path.join(memDir, sub), 'utf8'))) {
+            indexLinks.push(link);
+            indexSource.set(link, sub);
+        }
     }
 
     // --- per-file parse + duplicate detection
     const memories = [];
     for (const f of files) {
-        if (f === 'MEMORY.md') continue;
+        if (f === 'MEMORY.md' || subIndexes.has(f)) continue;
         const raw = fs.readFileSync(path.join(memDir, f), 'utf8');
         const { fm, body } = parseFrontmatter(raw);
-        memories.push({ file: f, name: fm.name || f.replace(/\.md$/, ''), type: fm.type || '(none)', body: body.trim() });
+        memories.push({ file: f, name: fm.name || f.replace(/\.md$/, ''), aliases: aliasesOf(fm), type: fm.type || '(none)', body: body.trim() });
         if (!fm.name) findings.push({ kind: 'missing-frontmatter', detail: `${f} has no name:` });
         if (!fm.description) findings.push({ kind: 'missing-frontmatter', detail: `${f} has no description:` });
     }
@@ -174,40 +205,102 @@ for (const slug of fs.readdirSync(PROJECTS)) {
     // --- index/file drift
     const fileSet = new Set(files);
     for (const link of indexLinks) {
-        if (!fileSet.has(path.basename(link))) findings.push({ kind: 'dead-index-link', detail: link });
+        // A link that leaves the store (../rules/x.md) is live if its file exists.
+        if (!fileSet.has(path.basename(link)) && !fs.existsSync(path.resolve(memDir, link))) {
+            const from = indexSource.get(link);
+            findings.push({ kind: 'dead-index-link', detail: from ? `${link} (in ${from})` : link });
+        }
     }
     const linked = new Set(indexLinks.map((l) => path.basename(l)));
     for (const m of memories) {
-        if (!linked.has(m.file)) findings.push({ kind: 'unindexed', detail: `${m.file} is not listed in MEMORY.md` });
+        if (!linked.has(m.file)) {
+            const where = subIndexes.size ? `MEMORY.md or ${[...subIndexes].join(', ')}` : 'MEMORY.md';
+            findings.push({ kind: 'unindexed', detail: `${m.file} is not listed in ${where}` });
+        }
     }
 
     // --- wiki links pointing at nothing
+    // A project memory may link a global one (~/.claude/memory), so a name
+    // found there resolves. What is left is a gap: a memory the store keeps
+    // referring to and nobody has written. Ranked by how many memories cite it,
+    // the gap list is the plan for what to write next, not a list to delete.
     const names = new Set(memories.map((m) => m.name));
     for (const m of memories) {
-        for (const l of [...m.body.matchAll(/\[\[([^\]]+)\]\]/g)].map((x) => x[1])) {
-            if (!names.has(l)) findings.push({ kind: 'dangling-link', detail: `${m.file} → [[${l}]]` });
+        for (const a of m.aliases) {
+            const owner = memories.find((o) => o !== m && o.name === a);
+            if (owner) findings.push({ kind: 'alias-collision', detail: `${m.file} aliases "${a}", the name of ${owner.file}` });
         }
     }
+    for (const m of memories) for (const a of m.aliases) names.add(a);
+    const gapRefs = new Map();
+    for (const m of memories) {
+        for (const l of [...m.body.matchAll(/\[\[([^\]]+)\]\]/g)].map((x) => x[1])) {
+            if (names.has(l) || GLOBAL_NAMES.has(l) || RULE_NAMES.has(l)) continue;
+            findings.push({ kind: 'dangling-link', detail: `${m.file} → [[${l}]]` });
+            if (!gapRefs.has(l)) gapRefs.set(l, new Set());
+            gapRefs.get(l).add(m.file);
+        }
+    }
+    const gaps = [...gapRefs]
+        .map(([name, from]) => ({ name, refs: from.size, from: [...from].sort() }))
+        .sort((a, b) => b.refs - a.refs || a.name.localeCompare(b.name));
+    return { findings, memoryCount: memories.length, subIndexes: [...subIndexes], gaps };
+}
+
+const report = [];
+
+for (const slug of fs.existsSync(PROJECTS) ? fs.readdirSync(PROJECTS) : []) {
+    const memDir = path.join(PROJECTS, slug, 'memory');
+    if (!fs.existsSync(memDir)) continue;
+
+    const projectPath = decodeProjectDir(slug);
+    const projectExists = fs.existsSync(projectPath);
+
+    const lastTouched = newestMtime(memDir);
+    const idleDays = lastTouched ? daysSince(lastTouched) : null;
+
+    // "Active" = memory touched recently, or the repo itself has recent commits.
+    let repoIdleDays = null;
+    if (projectExists) {
+        try {
+            const ts = execSync('git log -1 --format=%ct', {
+                cwd: projectPath, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'],
+            }).trim();
+            if (ts) repoIdleDays = daysSince(Number(ts) * 1000);
+        } catch { /* not a git repo */ }
+    }
+    const active = (idleDays !== null && idleDays <= staleDays) ||
+                   (repoIdleDays !== null && repoIdleDays <= staleDays);
+
+    if (!active && !includeAll) continue;
+
+    const { findings, memoryCount, subIndexes, gaps } = auditStore(memDir);
 
     if (!projectExists) findings.push({ kind: 'project-gone', detail: `${projectPath} no longer exists on disk` });
 
     report.push({
         slug, projectPath, projectExists, active,
-        memoryCount: memories.length,
+        memoryCount, subIndexes,
         idleDays, repoIdleDays,
         findings,
+        gaps,
     });
 }
 
+// The global store (<config>/memory) is loaded in every session, so it gets the
+// same audit as a project store. It has no project path and is always active.
+const GLOBAL_DIR = path.join(CONFIG_DIR, 'memory');
+const globalStore = fs.existsSync(GLOBAL_DIR) ? { path: GLOBAL_DIR, ...auditStore(GLOBAL_DIR) } : null;
+
 if (asJson) {
-    console.log(JSON.stringify({ configDir: CONFIG_DIR, staleDays, projects: report }, null, 2));
+    console.log(JSON.stringify({ configDir: CONFIG_DIR, staleDays, global: globalStore, projects: report }, null, 2));
     process.exit(0);
 }
 
-const needsWork = report.filter((r) => r.findings.length);
+const needsWork = [...(globalStore ? [globalStore] : []), ...report].filter((r) => r.findings.length);
 console.log(`\nMemory audit — ${report.length} ${includeAll ? '' : 'active '}project(s) under ${CONFIG_DIR}\n`);
 
-if (!report.length) {
+if (!report.length && !globalStore) {
     // "None found" and "could not look" print identically unless the config
     // directory is checked first. Only the second is a probe failure, and it
     // is the one that must not exit 0 and read as an all-clear.
@@ -220,11 +313,8 @@ if (!report.length) {
     process.exit(0);
 }
 
-for (const r of report) {
-    const idle = r.idleDays === null ? 'never written' : `${r.idleDays}d since last write`;
-    console.log(`  ${r.slug}`);
-    console.log(`    ${r.memoryCount} memories · ${idle}${r.repoIdleDays !== null ? ` · repo ${r.repoIdleDays}d idle` : ''}`);
-    if (!r.findings.length) { console.log('    ✓ clean\n'); continue; }
+function printFindings(r) {
+    if (!r.findings.length) { console.log('    ✓ clean\n'); return; }
     const grouped = {};
     for (const f of r.findings) (grouped[f.kind] = grouped[f.kind] || []).push(f.detail);
     for (const [kind, details] of Object.entries(grouped)) {
@@ -232,9 +322,26 @@ for (const r of report) {
         details.slice(0, 4).forEach((d) => console.log(`      · ${d}`));
         if (details.length > 4) console.log(`      · …and ${details.length - 4} more`);
     }
+    if (r.gaps.length) {
+        const top = r.gaps.slice(0, 5).map((g) => `[[${g.name}]] ×${g.refs}`).join(', ');
+        console.log(`    gaps to write, most cited first: ${top}${r.gaps.length > 5 ? `, …${r.gaps.length - 5} more` : ''}`);
+    }
     console.log('');
 }
 
+if (globalStore) {
+    console.log(`  global (${globalStore.path})`);
+    console.log(`    ${globalStore.memoryCount} memories`);
+    printFindings(globalStore);
+}
+
+for (const r of report) {
+    const idle = r.idleDays === null ? 'never written' : `${r.idleDays}d since last write`;
+    console.log(`  ${r.slug}`);
+    console.log(`    ${r.memoryCount} memories · ${idle}${r.repoIdleDays !== null ? ` · repo ${r.repoIdleDays}d idle` : ''}`);
+    printFindings(r);
+}
+
 console.log(needsWork.length
-    ? `${needsWork.length} project(s) need attention. Nothing was modified — this tool only reports.\n`
+    ? `${needsWork.length} store(s) need attention. Nothing was modified — this tool only reports.\n`
     : 'All memory stores are clean.\n');

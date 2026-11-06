@@ -30,6 +30,11 @@
  *            not failed, not queued, never retried blind. It returns to queued
  *            only once brain-judge authHold clears for its config dir (a later
  *            run on that login succeeded, or a probe passed).
+ *   DEFERRED the capacity gate turned the launch away (CAPACITY_DEFERRED: no
+ *            room, or a tripped crash breaker), so claude never started. The
+ *            attempt goes to the record's history (unattended-worker defer) and
+ *            the task returns to queued with a retry time: never a failure, never
+ *            a verdict, and its dependants wait for it instead of blocking.
  *   UNKNOWN  supervision was lost (a reboot, a dead or reused supervisor pid,
  *            no exit line). The headless record settles `lost` and the task
  *            closes with runStatus unknown. Never success, whatever the report says.
@@ -73,7 +78,7 @@ const { acquireLock } = require('./ledger-lock.js');
 const USAGE = [
     'Usage: node worker-reconcile.js tick [--live] [--wait] [--budget-sec 600] [--ledger <file>] [--headless-ledger <file>] [--state-dir <dir>] [--judge-state-dir <dir>]',
     '       node worker-reconcile.js verify [--budget-sec 600] [--task-id <id>] [--ledger <file>] [--state-dir <dir>]',
-    'tick:   settle and close every started headless attempt (PENDING, SETTLED, HELD, UNKNOWN, REJECT, ORPHAN),',
+    'tick:   settle and close every started headless attempt (PENDING, SETTLED, HELD, DEFERRED, UNKNOWN, REJECT, ORPHAN),',
     '        release held records whose login works again, and verify succeeded runs that have no receipt.',
     '        Without --live it writes nothing and says what it would do. A live tick runs verify in a detached',
     '        child unless --wait, so a clock pass stays bounded.',
@@ -199,6 +204,7 @@ function successEvidence(h, records = []) {
  */
 function closeDecision(h, records = []) {
     if (h.result === 'auth-refused') return { outcome: 'HELD', action: 'hold', why: `login refused: ${String(h.reason || '').slice(0, 200)}` };
+    if (h.result === 'deferred') return { outcome: 'DEFERRED', action: 'defer', why: String(h.reason || 'CAPACITY_DEFERRED').slice(0, 400) };
     if (h.result === 'lost') return { outcome: 'UNKNOWN', action: 'close', runStatus: 'unknown', why: `supervision lost: ${String(h.reason || 'no exit line').slice(0, 200)}` };
     return { action: 'close', ...successEvidence(h, records) };
 }
@@ -299,6 +305,7 @@ function reconcileStarted(rec, ctx) {
 function apply(rec, d, { p }) {
     try {
         if (d.action === 'hold') uw.run(['hold', '--task-id', rec.taskId, '--reason', d.why, '--ledger', p.ledger]);
+        else if (d.action === 'defer') uw.run(['defer', '--task-id', rec.taskId, '--reason', d.why, '--ledger', p.ledger]);
         else uw.run(['settle', '--task-id', rec.taskId, '--run-status', d.runStatus, '--report-read', '--reason', `${d.outcome}: ${d.why}`, '--ledger', p.ledger]);
         return { ...d, applied: true };
     } catch (e) {
@@ -389,7 +396,7 @@ function tick(opts) {
         const at = new Date().toISOString();
         for (const o of [...outcomes, ...released]) if (live && o.outcome !== 'PENDING') appendJsonl(path.join(p.state, 'events.jsonl'), { at, ...o });
         const count = (k) => outcomes.filter((o) => o.outcome === k).length;
-        const line = `reconcile (${live ? 'live' : 'dry'}): ${outcomes.length} started, ${count('SETTLED')} settled, ${count('HELD')} held, `
+        const line = `reconcile (${live ? 'live' : 'dry'}): ${outcomes.length} started, ${count('SETTLED')} settled, ${count('HELD')} held, ${count('DEFERRED')} deferred, `
             + `${count('UNKNOWN')} unknown, ${count('REJECT')} rejected, ${count('PENDING')} pending, ${count('ORPHAN')} orphan, ${count('STUCK')} stuck; `
             + `${released.filter((r) => r.outcome === 'RELEASE').length} released; ${verify.pending} to verify`;
         return { live, outcomes, released, verify, line };

@@ -179,6 +179,44 @@ const kinds = (p) => (p ? p.findings.map((f) => f.kind) : []);
         kinds(forProject(run(), 'unindexed')).includes('unindexed'));
 }
 
+// ─────────────── 7b. a sub-index linked from MEMORY.md is part of the index
+//
+// Stores past the 200-line budget move old pointers into MEMORY-archive.md.
+// On the real autodev store, 285 of 286 "unindexed" findings were memories
+// listed there. The negative half keeps the hop honest: a MEMORY-*.md that
+// MEMORY.md does NOT link is an ordinary memory and indexes nothing.
+{
+    const p = forProject((() => {
+        makeProject('subindex', {
+            'a.md': mem('current', 'x', 'Body about lighthouses.'),
+            'b.md': mem('archived', 'y', 'Body about orchards and grafting.'),
+            'MEMORY-archive.md': '# Archived memory index\n\n- [B](b.md) — y\n- [Gone](gone.md) — z\n',
+        }, '- [A](a.md) — x\n- [Older memories](MEMORY-archive.md) — aged out\n');
+        return run();
+    })(), 'subindex');
+    const details = (kind) => (p ? p.findings.filter((f) => f.kind === kind).map((f) => f.detail) : []);
+    check('a memory listed only in a linked MEMORY-archive.md is NOT unindexed',
+        !!p && !details('unindexed').some((d) => d.startsWith('b.md')));
+    check('  the sub-index itself is not audited as a memory',
+        !!p && p.memoryCount === 2 && !details('missing-frontmatter').length);
+    check('  a dead link inside the sub-index is still reported, naming the page',
+        details('dead-index-link').some((d) => d.includes('gone.md') && d.includes('MEMORY-archive.md')));
+    check('  and the sub-index is listed in the report', !!p && (p.subIndexes || []).includes('MEMORY-archive.md'));
+}
+
+{
+    const p = forProject((() => {
+        makeProject('unlinkedsub', {
+            'a.md': mem('current', 'x', 'Body about lighthouses.'),
+            'b.md': mem('stray', 'y', 'Body about orchards and grafting.'),
+            'MEMORY-notes.md': mem('notes', 'z', 'Mentions [B](b.md) in passing.'),
+        }, '- [A](a.md) — x\n');
+        return run();
+    })(), 'unlinkedsub');
+    check('  a MEMORY-*.md that MEMORY.md does not link indexes nothing',
+        !!p && p.findings.some((f) => f.kind === 'unindexed' && f.detail.startsWith('b.md')));
+}
+
 // ──────────────────────────────────────────────── 8. dangling wiki links
 {
     makeProject('dangling', { 'a.md': mem('solo', 'x', 'Body referencing [[nonexistent-memory]] here.') },
@@ -194,6 +232,90 @@ const kinds = (p) => (p ? p.findings.map((f) => f.kind) : []);
     }, '- [A](a.md) — x\n- [B](b.md) — y\n');
     check('  a [[link]] that DOES resolve is not flagged',
         !kinds(forProject(run(), 'goodlink')).includes('dangling-link'));
+}
+
+// ──────────── 8b. links into the global store resolve; the rest rank as gaps
+//
+// A project memory may link a global one (<config>/memory). The audit never
+// read that store, so those links were reported dangling. What does not
+// resolve anywhere is a gap, ranked by how many memories cite it.
+{
+    const globalDir = path.join(CONFIG, 'memory');
+    fs.mkdirSync(globalDir, { recursive: true });
+    fs.writeFileSync(path.join(globalDir, 'credentials-map.md'),
+        mem('credentials-map', 'where secrets live', 'Body about vaults.'));
+    makeProject('gaps', {
+        'a.md': mem('one', 'x', 'See [[credentials-map]] and [[write-me]] and [[later]].'),
+        'b.md': mem('two', 'y', 'Also [[write-me]], twice: [[write-me]].'),
+        'c.md': mem('three', 'z', 'Again [[write-me]].'),
+    }, '- [A](a.md) — x\n- [B](b.md) — y\n- [C](c.md) — z\n');
+    const p = forProject(run(), 'gaps');
+    const dangling = p ? p.findings.filter((f) => f.kind === 'dangling-link').map((f) => f.detail) : [];
+    check('a [[link]] to a GLOBAL memory is not dangling',
+        !!p && !dangling.some((d) => d.includes('credentials-map')));
+    check('  a link that resolves nowhere is still dangling', dangling.some((d) => d.includes('[[later]]')));
+    check('  gaps rank by citing memories, most first, each memory counted once',
+        !!p && Array.isArray(p.gaps) && p.gaps.length === 2 &&
+        p.gaps[0].name === 'write-me' && p.gaps[0].refs === 3 &&
+        p.gaps[1].name === 'later' && p.gaps[1].refs === 1);
+}
+
+// ──────── 8c. the global store is audited too, and rule names resolve
+//
+// <config>/memory loads in every session and was never audited. A memory that
+// cites a rule file (<config>/rules/x.md) by name is not dangling, and an
+// index link that leaves the store is live when its file exists.
+{
+    const rulesDir = path.join(CONFIG, 'rules');
+    fs.mkdirSync(rulesDir, { recursive: true });
+    fs.writeFileSync(path.join(rulesDir, 'backup-protocol.md'), '# Backup protocol\n');
+    const globalDir = path.join(CONFIG, 'memory');
+    fs.mkdirSync(globalDir, { recursive: true });
+    fs.writeFileSync(path.join(globalDir, 'stray.md'), mem('stray', 'not indexed', 'Body about kilns.'));
+    fs.writeFileSync(path.join(globalDir, 'MEMORY.md'),
+        '- [Map](credentials-map.md) — x\n- [Backup](../rules/backup-protocol.md) — rule\n- [Gone](../rules/nope.md) — dead\n');
+    makeProject('rulelink', { 'a.md': mem('cites', 'x', 'Follow [[backup-protocol]] and [[no-such-rule]].') },
+        '- [A](a.md) — x\n');
+    const r = spawnSync(process.execPath, [AUDIT, '--json'], {
+        encoding: 'utf8', env: { ...process.env, CLAUDE_CONFIG_DIR: CONFIG }, maxBuffer: 32 * 1024 * 1024,
+    });
+    let j = null;
+    try { j = JSON.parse(r.stdout); } catch { /* leave null */ }
+    const g = j && j.global;
+    const gd = (kind) => (g ? g.findings.filter((f) => f.kind === kind).map((f) => f.detail) : []);
+    check('the global store is audited', !!g && g.memoryCount === 2);
+    check('  an unindexed global memory is reported', gd('unindexed').some((d) => d.startsWith('stray.md')));
+    check('  an index link out of the store to an existing file is not dead',
+        !gd('dead-index-link').some((d) => d.includes('backup-protocol')));
+    check('  one to a missing file still is', gd('dead-index-link').some((d) => d.includes('nope.md')));
+    const p = j && forProject(j.projects, 'rulelink');
+    const dangling = p ? p.findings.filter((f) => f.kind === 'dangling-link').map((f) => f.detail) : [];
+    check('a [[link]] naming a rule file is not dangling', !!p && !dangling.some((d) => d.includes('backup-protocol')));
+    check('  a [[link]] naming no rule still is', dangling.some((d) => d.includes('no-such-rule')));
+}
+
+// ──────── 8d. a renamed memory keeps its old name as an alias
+//
+// `aliases: old-name, older` in a memory's frontmatter makes [[old-name]]
+// resolve, in its own store and from a project store citing a global memory.
+// An alias that is another memory's name is reported: one name, two files.
+{
+    const globalDir = path.join(CONFIG, 'memory');
+    fs.writeFileSync(path.join(globalDir, 'renamed-global.md'),
+        '---\nname: renamed-global\ndescription: x\naliases: [old-global]\n---\n\nBody about glazes.\n');
+    makeProject('aliases', {
+        'new.md': '---\nname: new-name\ndescription: x\naliases: old-name, "older-name"\n---\n\nBody about wheels.\n',
+        'b.md': mem('cites-old', 'x', 'See [[old-name]], [[older-name]], [[old-global]] and [[never-was]].'),
+        'c.md': '---\nname: clash\ndescription: x\naliases: cites-old\n---\n\nBody about clay.\n',
+    }, '- [N](new.md) — x\n- [B](b.md) — x\n- [C](c.md) — x\n');
+    const p = forProject(run(), 'aliases');
+    const of = (kind) => (p ? p.findings.filter((f) => f.kind === kind).map((f) => f.detail) : []);
+    check('an alias resolves a [[link]] to the old name', !!p && !of('dangling-link').some((d) => d.includes('[[old-name]]')));
+    check('  a quoted alias in the list resolves too', !!p && !of('dangling-link').some((d) => d.includes('[[older-name]]')));
+    check('  a global memory\'s alias resolves from a project', !!p && !of('dangling-link').some((d) => d.includes('[[old-global]]')));
+    check('  a name nobody carries is still dangling', of('dangling-link').some((d) => d.includes('[[never-was]]')));
+    check('  an alias that is another memory\'s name is reported',
+        of('alias-collision').some((d) => d.includes('cites-old') && d.includes('c.md')));
 }
 
 // ───────────────────────────────── 9. the active/stale filter and --all

@@ -701,6 +701,14 @@ try {
         check(`owner-window: ${mode} cannot meet the baseline total`, r.status === 1 && /short .*measured weeks at most 0.8/.test(r.out), r.out);
     }
 
+    // The cause line is git's fatal line, not a hint git prints after it. The Linux runner's
+    // /tmp is its own mount, so git ends with a filesystem-boundary line there.
+    const { gitCause } = require('./window-probe.js');
+    check('gate-window: the cause is git\'s fatal line even when a hint follows it',
+        gitCause('fatal: not a git repository (or any parent up to mount point /tmp)\nStopping at filesystem boundary (GIT_DISCOVERY_ACROSS_FILESYSTEM not set).\n')
+        === 'fatal: not a git repository (or any parent up to mount point /tmp)');
+    check('gate-window: with no fatal line the cause is the last line, and empty stderr says so',
+        gitCause('warning: one\nsomething else\n') === 'something else' && gitCause('') === 'no stderr');
     const noRepo = path.join(tmpRoot, 'not-a-repo');
     fs.mkdirSync(noRepo);
     const top = spawnSync('git', ['rev-parse', '--show-toplevel'], { cwd: noRepo, encoding: 'utf8', windowsHide: true });

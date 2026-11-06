@@ -126,6 +126,17 @@ function check(label, ok, detail) {
                 `before=${before + 1} ranked[0]=${ranked[0]}`);
         }
     }
+    // evals/ is a derivation tree too. test-qwen-eval.js names its subject as
+    // path.join(ROOT, 'evals', 'qwen', 'run.js') and derived nothing until rules
+    // 1-3 read evals/, which CI's sweep reported as a suite NOT verified.
+    {
+        const suite = 'test-qwen-eval.js';
+        if (fs.existsSync(path.join(TOOLING, suite))) {
+            const cands = [...ev.deriveCandidates(path.join(TOOLING, suite), ROOT).keys()];
+            check('test-qwen-eval.js derives its subject evals/qwen/run.js',
+                cands.includes('evals/qwen/run.js'), cands.join(',') || 'nothing derived');
+        }
+    }
 }
 
 // --- the wiring, which is how this change could silently stop applying -------
