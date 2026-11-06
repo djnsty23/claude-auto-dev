@@ -135,15 +135,21 @@ try {
     {
         const code = 'r1';
         const startedAt = iso(Date.now() - 60000);
+        // requeue reads the slug's branch on origin before it frees it, so this repo has a real one.
+        const r1Origin = path.join(dir, 'r1-origin.git');
+        const r1Repo = path.join(dir, 'r1-repo');
+        spawnSync('git', ['init', '-q', '--bare', r1Origin], { env, windowsHide: true });
+        spawnSync('git', ['init', '-q', r1Repo], { env, windowsHide: true });
+        spawnSync('git', ['-C', r1Repo, 'remote', 'add', 'origin', r1Origin], { env, windowsHide: true });
         const hl = readJson(headless);
         hl.records.push({ code, pid: deadPid(), startedAt, log: path.join(dir, code, 'worker.log'), report: path.join(dir, code, 'REPORT.md'), state: 'settled',
             result: 'unreported', exit: -1, blocker: { status: 'supervisor', text: `CAPACITY_DEFERRED=${BREAKER}` } });
         write(headless, JSON.stringify(hl, null, 2));
         const ul = readJson(ledger);
-        ul.records.push({ taskId: `worker-${code}`, slug: code, repo: dir, state: 'closed', channel: 'headless', queuedAt: iso(Date.now() - 120000), startedAt, launchedAt: startedAt,
+        ul.records.push({ taskId: `worker-${code}`, slug: code, repo: r1Repo, state: 'closed', channel: 'headless', queuedAt: iso(Date.now() - 120000), startedAt, launchedAt: startedAt,
             attemptId: 'a-r1', headless: { code, startedAt, ledger: headless }, runStatus: 'failed', settledAt: startedAt, settleReason: 'SETTLED: settled unreported',
             verdict: { decision: 'escalate', reason: 'the worker left no report', by: 'judge', at: startedAt } });
-        ul.records.push({ taskId: `worker-${code}-next`, slug: `${code}-next`, repo: dir, state: 'queued', channel: 'headless', queuedAt: iso(Date.now()), after: [`worker-${code}`] });
+        ul.records.push({ taskId: `worker-${code}-next`, slug: `${code}-next`, repo: r1Repo, state: 'queued', channel: 'headless', queuedAt: iso(Date.now()), after: [`worker-${code}`] });
         write(ledger, JSON.stringify(ul, null, 2));
     }
     const rq = cli(UW, ['requeue', '--task-id', 'worker-r1', '--reason', 'closed by the pre-fix deferral path', '--ledger', ledger]);

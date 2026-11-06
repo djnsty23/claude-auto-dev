@@ -58,11 +58,16 @@ work, what an unattended session cannot do, and what a queued brief carries.
   judges it (accept, follow-up or escalate) with a tool-less `claude -p`, and
   starts ready work through `unattended-worker.js launch`: at most 2 running,
   2 launched an hour, 6 judge runs an hour. A task with `--after` starts only
-  once each dependency is closed as succeeded with an `accept` or `follow-up`
-  verdict. `brain-judge.js switch --judge <mode> --start <mode>` is the kill
-  switch, with modes off, dry and live. A step is live only when the switch
-  says live AND the clock pass is live, and no switch file means dry. Three
-  failed clock passes stop judging and starting. When you read a closed
+  once each dependency is closed as succeeded with an `accept` verdict. A judge
+  cannot accept a `--without-criteria` stage, so a chain of them advances only on
+  your `verdict --by brain --accept-without-receipt "<reason>"`. `brain-judge.js
+  switch --judge <mode> --start <mode>` is the kill switch, with modes off, dry
+  and live. A step is live only when the switch says live AND the clock pass is
+  live, and no switch file means dry. `launch` obeys `--start` for every caller,
+  routines included; `--start-override "<reason>"` starts one task. Three failed
+  clock passes stop judging and starting. A run that settled unreported goes back
+  with `requeue --unreported` if it left nothing, and with `salvage` if its pushed
+  branch and report show it finished. When you read a closed
   record yourself, write your call with `unattended-worker.js verdict
   --task-id <id> --decision <d> --reason <why> --by brain`: a judge never
   overwrites it, and `brain-judge.js compare` grades the judge against it.
