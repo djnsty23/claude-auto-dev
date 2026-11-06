@@ -1,5 +1,11 @@
 # Changelog
 
+## [8.200.1]
+
+### Brain and workers
+
+- `salvage` and `requeue` read a run the headless ledger dropped after seven days from the settle reason the record kept, exactly `SETTLED: settled <result>`. Any other reason names no result and refuses.
+
 ## [8.200.0]
 
 ### Brain and workers
