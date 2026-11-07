@@ -92,6 +92,17 @@ try {
     r = run(['--root', mem, '--counts']);
     check('--counts prints counts only', r.status === 0 && /^Instructions: \d+\nIdentity: 1\nCareer: 1\nProjects: 2\nPreferences: 0\nExport: partial/.test(r.stdout) && !r.stdout.includes('habit'), r.stdout);
 
+    // Two roots each hold a dup.md; only root A's index dates it. Root B's must stay undated.
+    const rootA = path.join(root, 'roots', 'a');
+    const rootB = path.join(root, 'roots', 'b');
+    write(path.join(rootA, 'dup.md'), `${fm('dup', 'project', 'Indexed in A')}x\n`);
+    write(path.join(rootB, 'dup.md'), `${fm('dup', 'project', 'Not indexed in B')}x\n`);
+    write(path.join(rootA, 'MEMORY.md'), '- [Dup](dup.md) — 02-10 start\n');
+    fs.utimesSync(path.join(rootA, 'MEMORY.md'), new Date('2026-06-01T00:00:00Z'), new Date('2026-06-01T00:00:00Z'));
+    r = run(['--root', rootA, '--root', rootB]);
+    check('an index hook dates only the file it links, not a same-named file in another root',
+        r.stdout.includes('[2026-02-10] - dup: Indexed in A') && r.stdout.includes('[unknown] - dup: Not indexed in B'), r.stdout);
+
     // Default roots: <config>/memory plus <config>/projects/*/memory.
     write(path.join(env.CLAUDE_CONFIG_DIR, 'memory', 'g.md'), `${fm('g', 'project', 'Global project')}x\n`);
     write(path.join(env.CLAUDE_CONFIG_DIR, 'projects', 'p1', 'memory', 'p.md'), `${fm('p', 'project', 'Per-project memory')}x\n`);
