@@ -92,7 +92,8 @@ function gate(fx) {
 
 function mergeLock(receipt, head) {
     const r = spawnSync(process.execPath, [MERGE_LOCK, 'merge', '--repo', 'Acme/Widget', '--pr', '7', '--head', head,
-        '--gate-receipt', receipt, '--wait-timeout-ms', '5000'], {
+        '--gate-receipt', receipt, '--wait-timeout-ms', '5000',
+        '--review-override', 'gate-receipt fixture: this suite grades the gate receipt only'], {
         encoding: 'utf8', windowsHide: true, timeout: 60000,
         env: cleanEnv({ HOME, USERPROFILE: HOME, AUTODEV_GH_BIN: STUB, AUTODEV_MERGE_LOCK_READBACK_MS: '0' }),
     });

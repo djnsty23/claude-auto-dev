@@ -85,6 +85,7 @@ const hw = require('./headless-worker.js');
 const capacity = require('./capacity.js');
 const budget = require('./execution-budget.js');
 const profiles = require('./worker-profiles.js');
+const paidKeys = require('./paid-key-guard.js');
 const acceptance = require('./acceptance-receipt.js');
 
 const USAGE = [
@@ -589,6 +590,10 @@ function judgeRecord(rec, { judgeBin, model = JUDGE_MODEL, cwd, reportsDir, conf
     const { env } = hw.buildEnv(process.env, { code: 'brain-judge', configDir, kind: 'judge' });
     fs.mkdirSync(cwd, { recursive: true });
     const sizes = { model, promptBytes: Buffer.byteLength(prompt), reportBytes: report.size };
+    // A paid key in the judge's env bills per token: refuse like a deferral, spawn nothing, count nothing against the record.
+    try { paidKeys.assertSubscriptionEnv(env, { allow: paidKeys.allowedByEnv(process.env) }); } catch (e) {
+        return { ok: false, capacity: true, budget: 'paid-key-refused', error: `paid-key-refused: ${e.message}`, costUsd: 0, turns: 0, durationMs: 0, ...sizes };
+    }
     const c = capacity.admit({ cls: 'judge', path: cwd, note: String(rec.taskId || '') });
     if (!c.admitted) return { ok: false, capacity: true, error: `capacity-deferred: ${c.why}`, costUsd: 0, turns: 0, durationMs: 0, ...sizes };
     const attemptId = `judge-${String(rec.taskId || 'task').replace(/[^A-Za-z0-9._-]/g, '-').slice(0, 80)}-${Date.now()}-${crypto.randomBytes(3).toString('hex')}`;
@@ -971,6 +976,7 @@ function probe(opts) {
     const configDir = opts['config-dir'] ? hw.resolveConfigDir(opts['config-dir']) : null;
     const plan = hw.spawnPlan(probeArgv(hw.resolveClaudeBin(opts['worker-bin'] || 'claude')));
     const { env } = hw.buildEnv(process.env, { code: 'brain-judge-probe', configDir, kind: 'probe' });
+    paidKeys.assertSubscriptionEnv(env, { allow: paidKeys.allowedByEnv(process.env) });
     fs.mkdirSync(p.state, { recursive: true });
     const r = spawnSync(plan.command, plan.args, { input: PROBE_PROMPT, encoding: 'utf8', timeout: PROBE_TIMEOUT_MS, windowsHide: true, env, cwd: p.state });
     let doc = null;

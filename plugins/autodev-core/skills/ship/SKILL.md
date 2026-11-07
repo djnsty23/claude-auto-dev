@@ -60,6 +60,17 @@ work: write it to `prd.json` with `unslop-sweep.js stories`, and do not report
 item 3 as met while one stands. Vision findings are advisory and block nothing.
 A fix made for this step is proven by `unslop-sweep.js compare` saying COUNTS.
 
+## Step 1e: Review receipt, then merge
+
+A change reaches the production branch only through `merge-lock.js`, and that
+needs a review receipt for the exact head as well as the gate receipt. Run the
+`autoreview` skill first. It uses a cheap reviewer on every pull request and
+brings in the opus `code-reviewer` only on escalation, or for a money, auth or
+migration diff, where merge-lock also requires its escalation receipt. A review
+override (`--review-override`) is for a reviewer that could not run, needs a
+stated reason, and never replaces the escalation receipt. Do not report a change
+as ready to ship on a gate receipt alone.
+
 ## Step 2: Security Scan
 
 Run before every deploy (uses `security` skill). The gate is blocking: exit 1
@@ -166,6 +177,15 @@ node "${CLAUDE_PLUGIN_ROOT}/scripts/deploy-ledger.js" --verify --since "$previou
 once with five checked cells. Run it before calling a deploy verified, after
 loading [references/deploy-ledger.md](references/deploy-ledger.md) for
 regeneration, the first-deployment case and the baseline fallback.
+
+## Step 5c: The mechanical live check
+
+After a merge to the production branch, load `deploy-check`. It waits for the
+merged revision to be live, runs the product's own smoke command and records
+PASS, FAIL or TIMEOUT in the deploy ledger. On FAIL it opens a draft revert pull
+request and nothing more: it never pushes the production branch, merges or
+promotes. Its result is evidence for the table above, not a replacement for the
+entry-point and auth checks in it.
 
 ## Step 6: Rollback (if needed)
 

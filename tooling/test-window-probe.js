@@ -28,9 +28,10 @@ const DAYS = ['2026-11-06', '2026-11-07', '2026-11-08', '2026-11-09', '2026-11-1
     '2026-11-13', '2026-11-14', '2026-11-15', '2026-11-16', '2026-11-17', '2026-11-18', '2026-11-19'];
 // The shipped modules that require ledger-lock.js, by hand. The spec's own list and a grep of
 // the plugins must both equal it.
-const LOCK_INVENTORY = ['hooks~peer-send-ledger.js', 'scripts~ask-queue.js', 'scripts~brain-clock.js', 'scripts~delivery-outcomes.js', 'scripts~execution-budget.js',
-    'scripts~frontier-evidence.js', 'scripts~production-signals.js', 'scripts~radar-learning.js', 'scripts~usage-digest.js',
-    'scripts~watch-panels.js', 'scripts~worker-reconcile.js'];
+const LOCK_INVENTORY = ['hooks~peer-send-ledger.js', 'scripts~ask-queue.js', 'scripts~brain-clock.js', 'scripts~delivery-outcomes.js',
+    'scripts~deploy-ledger.js', 'scripts~execution-budget.js', 'scripts~frontier-evidence.js', 'scripts~ledger-rotate.js',
+    'scripts~production-signals.js', 'scripts~radar-learning.js', 'scripts~usage-digest.js', 'scripts~watch-panels.js',
+    'scripts~worker-reconcile.js'];
 const manifest = JSON.parse(fs.readFileSync(path.join(ROOT, 'docs', 'scorecard-criteria.json'), 'utf8'));
 const expectOf = (id) => new RegExp(manifest.aspects.flatMap((a) => a.criteria).find((c) => c.id === id).expect, 'm');
 

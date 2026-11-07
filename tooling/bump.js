@@ -73,7 +73,8 @@ console.log('  2. node tooling/validate.js');
 // gate-lock.js names the gated head in its own output, so the plain log is
 // the receipt: no wrapper around npm run gate.
 console.log('  3. on the PR candidate, rebased and committed: npm run gate > gate.log 2>&1');
-console.log('     then merge it: node plugins/autodev-core/scripts/merge-lock.js merge --repo djnsty23/claude-auto-dev --pr <N> --head <PR head sha> --gate-receipt gate.log');
+console.log('     review it: node plugins/autodev-core/scripts/cheap-review.js review --repo djnsty23/claude-auto-dev --pr <N> --head <PR head sha> --repo-dir . --out review.json');
+console.log('     then merge it: node plugins/autodev-core/scripts/merge-lock.js merge --repo djnsty23/claude-auto-dev --pr <N> --head <PR head sha> --gate-receipt gate.log --review-receipt review.json');
 // Annotated: a lightweight tag carries no date or tagger, and check-release-lag
 // reads one as red. 8.178.0 and 8.179.0 shipped lightweight from this line.
 console.log(`  4. on the merged release commit on origin/main: git tag -a v${version} -m "v${version}"`);

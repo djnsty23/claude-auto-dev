@@ -46,7 +46,8 @@ Decide reversible choices, log them, record irreducible ones as blocked, and
 end each turn with a recap. Never deny the question tool in settings: workers
 route their questions to Brain through it. Confirm role and return-address validity before workers rely on the coordinator.
 Report meaningful completions, failures and required user actions according to
-the user's notification preferences.
+the user's notification preferences, and ping the owner only as
+`rule-own-the-loop` says (the rest goes to the daily digest).
 
 Historical notes are not shipped with the plugin. They live in the autodev
 repository at `docs/history-auto-brain-2026-09-09.md`, for investigating an earlier

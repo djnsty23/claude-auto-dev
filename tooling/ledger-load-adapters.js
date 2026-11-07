@@ -2,13 +2,14 @@
 const fs = require('fs');
 const path = require('path');
 const cp = require('child_process');
+const zlib = require('zlib');
 const ROOT = path.resolve(__dirname, '..');
 const CORE = 'plugins/autodev-core/';
 const keyed = require('../plugins/autodev-core/scripts/keyed-ledger.js');
 const files = new Set([
     'hooks/peer-send-ledger.js', 'hooks/stop-brain-report.js', 'hooks/stop-intent-record.js',
     'hooks/stop-workflow-wall-note.js', 'scripts/headless-worker.js', 'scripts/keyed-ledger.js',
-    'scripts/production-signals.js', 'scripts/radar-learning.js', 'scripts/unattended-worker.js',
+    'scripts/ledger-rotate.js', 'scripts/production-signals.js', 'scripts/radar-learning.js', 'scripts/unattended-worker.js',
     'scripts/usage-digest.js', 'scripts/watch-panels.js',
 ].map((f) => CORE + f).concat('tooling/frontier/run.js'));
 const json = (file, value) => fs.writeFileSync(file, JSON.stringify(value));
@@ -75,6 +76,11 @@ function prepare(writer, cwd, count) {
         json(path.join(cwd, 'probe.json'), []);
     }
     if (name === 'watch-panels.js') json(path.join(cwd, 'watch-panels-seen.json'), []);
+    if (name === 'ledger-rotate.js') {
+        // Old lines every rotation must move exactly once, beside the hot lines the writers append.
+        fixture.file = path.join(cwd, 'ledger.jsonl');
+        fs.writeFileSync(fixture.file, ids(count).map((id) => JSON.stringify({ at: '2000-01-01T00:00:00Z', id: 'old' + id }) + '\n').join(''));
+    }
     if (name === 'usage-digest.js') {
         // Placeholder lists, so the run is configured. Each writer owns one project
         // directory holding one transcript too short to digest: it records "skipped"
@@ -134,6 +140,10 @@ async function write(f, id) {
         try {
             if (!require(path.join(ROOT, f.writer)).scan()) throw new Error('watch scan failed');
         } finally { cp.execFileSync = original; }
+    } else if (name === 'ledger-rotate.js') {
+        // An unlocked append, as the ledger's own writers do, then a real rotation racing the others.
+        fs.appendFileSync(f.file, JSON.stringify({ at: new Date().toISOString(), id }) + '\n');
+        cli(f, ['--dir', f.cwd, '--file', 'ledger.jsonl', '--days', '30']);
     } else if (name === 'usage-digest.js') {
         // A topic function in place of the local model, so no server is needed. The
         // fixture transcripts are skipped before it is ever asked.
@@ -160,6 +170,16 @@ function read(f) {
     if (name === 'radar-learning.js') return Object.entries(readJson(path.join(f.cwd, 'learning-ledger.json')).lifecycle).filter(([, e]) => e.status === 'shadow').map(([id]) => id);
     if (name === 'production-signals.js') return readJson(f.file).runs.map((r) => String(new Date(r.at).getUTCSeconds()));
     if (name === 'watch-panels.js') return readJson(path.join(f.cwd, 'watch-panels-seen.json')).map((key) => key.split('|')[0]);
+    if (name === 'ledger-rotate.js') {
+        // Every line, hot or archived, counted once: a lost or duplicated old line fails them all.
+        const lines = [fs.readFileSync(f.file, 'latin1')].concat(fs.readdirSync(f.cwd).filter((n) => n.endsWith('.jsonl.gz'))
+            .map((n) => zlib.gunzipSync(fs.readFileSync(path.join(f.cwd, n))).toString('latin1')))
+            .join('\n').split('\n').filter((l) => l.trim()).map((l) => JSON.parse(l).id);
+        const seen = {};
+        for (const id of lines) seen[id] = (seen[id] || 0) + 1;
+        if (!ids(f.count).every((id) => seen['old' + id] === 1)) return [];
+        return ids(f.count).filter((id) => seen[id] === 1);
+    }
     if (name === 'usage-digest.js') return Object.keys(readJson(path.join(f.cwd, 'digests', 'ledger.json')).files)
         .map((file) => (/[\\/]p(\d+)-end[\\/]/.exec(file) || [])[1]).filter(Boolean);
     if (f.writer === 'tooling/frontier/run.js') return Object.keys(readJson(path.join(f.cwd, 'plant.json')).tasks);

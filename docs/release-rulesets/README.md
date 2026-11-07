@@ -31,9 +31,18 @@ merge it through merge-lock. The plain gate log is the receipt: gate-lock prints
 `gate-lock: head <full sha>` first and again just before its verdict, so no
 wrapper around `npm run gate` is needed.
 
+merge-lock also requires a review of the same head: `--review-receipt`, the
+JSON that `cheap-review.js` writes (schema 1, this repo, PR and head exactly,
+verdict `approve`). `--review-override "<reason>"`, at least 10 characters,
+replaces it when review cannot run, and is recorded in the lock meta and the
+deploy ledger. A release that touches a sensitive path (the patterns in
+`fast-lane.js`) also needs `--escalation-receipt`, the JSON the opus
+`code-reviewer` agent prints; an override does not waive it.
+
 ```bash
 npm run gate > gate.log 2>&1
-node plugins/autodev-core/scripts/merge-lock.js merge --repo djnsty23/claude-auto-dev --pr <N> --head <PR head sha> --gate-receipt gate.log
+node plugins/autodev-core/scripts/cheap-review.js review --repo djnsty23/claude-auto-dev --pr <N> --head <PR head sha> --repo-dir . --out review.json
+node plugins/autodev-core/scripts/merge-lock.js merge --repo djnsty23/claude-auto-dev --pr <N> --head <PR head sha> --gate-receipt gate.log --review-receipt review.json
 git fetch origin
 git tag -a v8.193.0 -m "v8.193.0" <the merged release commit on origin/main>
 node tooling/publish-release.js --version 8.193.0 --gate-receipt gate.log --head <PR head sha> --dry-run

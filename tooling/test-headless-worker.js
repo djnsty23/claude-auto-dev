@@ -4,6 +4,8 @@
 // Capacity admission (capacity.js) would probe this machine and write its
 // machine-wide ledger. Its behaviour is test-capacity-admission.js's subject.
 process.env.AUTODEV_CAPACITY = 'off';
+// A paid key in the developer's shell would make every start refuse (case 34 is the subject). Case 34 sets its own.
+for (const k of ['ANTHROPIC_API_KEY', 'ANTHROPIC_AUTH_TOKEN', 'OPENAI_API_KEY', 'GEMINI_API_KEY', 'GOOGLE_API_KEY', 'CLAUDE_CODE_USE_BEDROCK', 'CLAUDE_CODE_USE_VERTEX', 'AWS_BEARER_TOKEN_BEDROCK', 'AUTODEV_ALLOW_PAID_KEY', 'AUTODEV_PAID_KEY_NAMES']) delete process.env[k];
 // Tests for plugins/autodev-core/scripts/headless-worker.js, the dispatcher of
 // a `claude -p` worker that outlives its caller.
 // Run: node tooling/test-headless-worker.js
@@ -1395,7 +1397,7 @@ try {
         const inst = path.join(ROOT, 'cfg', 'plugins', 'cache', 'autodev', 'autodev-core', '9.9.9');
         write(path.join(inst, '.claude-plugin', 'plugin.json'), JSON.stringify({ name: 'autodev-core', version: '9.9.9' }));
         fs.mkdirSync(path.join(inst, 'scripts'), { recursive: true });
-        for (const f of ['headless-worker.js', 'claude-paths.js', 'capacity.js', 'gate-records.js', 'plugin-integrity.js', 'execution-budget.js', 'worker-profiles.js', 'worker-authority.js', 'worker-authority.json', 'ledger-lock.js', 'gate-identity.js']) fs.copyFileSync(path.join(path.dirname(SCRIPT), f), path.join(inst, 'scripts', f));
+        for (const f of ['headless-worker.js', 'claude-paths.js', 'capacity.js', 'gate-records.js', 'plugin-integrity.js', 'execution-budget.js', 'worker-profiles.js', 'worker-authority.js', 'worker-authority.json', 'paid-key-guard.js', 'ledger-lock.js', 'gate-identity.js']) fs.copyFileSync(path.join(path.dirname(SCRIPT), f), path.join(inst, 'scripts', f));
         const instScript = path.join(inst, 'scripts', 'headless-worker.js');
         // A cache-shaped path alone is no longer enough: with no install record
         // and no marketplace commit to compare against, the copy is DENIED.
@@ -1688,6 +1690,31 @@ try {
             oldCopied.length === 0 && !fs.existsSync(old.report), JSON.stringify(oldCopied));
         check('33. control: the same report touched now is copied', (fs.utimesSync(oldReport, new Date(), new Date()), H.syncOutbox(old, Date.now() - 500, new Map())).length === 1);
     }
+    // 34. A paid key in the env the worker would receive bills per token, not the subscription.
+    // start refuses it, dry run included, naming the variable and never the value, with nothing
+    // reserved or spawned. AUTODEV_ALLOW_PAID_KEY=1 is the explicit opt-in.
+    {
+        const dir = path.join(ROOT, 'paid key');
+        const log = path.join(dir, 'w.log');
+        const ledger = path.join(dir, 'ledger.json');
+        const base = ['start', '--code', 'PAIDK', '--prompt-file', PROMPT, '--log', log, '--claude-bin', FAKE, '--ledger', ledger];
+        const CANARY = 'sk-ant-canary-value-for-the-suite';
+        const dry = hw([...base, '--dry-run'], { ANTHROPIC_API_KEY: CANARY });
+        check('34. a dry run with ANTHROPIC_API_KEY set is refused with code paid-key-refused, naming the variable',
+            dry.exit === 1 && dry.json && dry.json.ok === false && dry.json.error.code === 'paid-key-refused' && /ANTHROPIC_API_KEY/.test(dry.json.error.message), dry.stdout.slice(0, 200));
+        check('34. the refusal never prints the key value', !(dry.stdout + dry.stderr).includes(CANARY));
+        const bedrock = hw([...base, '--dry-run'], { CLAUDE_CODE_USE_BEDROCK: '1' });
+        check('34. CLAUDE_CODE_USE_BEDROCK=1 is refused too', bedrock.exit === 1 && bedrock.json && bedrock.json.error && bedrock.json.error.code === 'paid-key-refused' && /CLAUDE_CODE_USE_BEDROCK/.test(bedrock.json.error.message));
+        const real = hw(base, { ANTHROPIC_AUTH_TOKEN: CANARY });
+        check('34. a real start is refused before anything is reserved or spawned', real.exit === 1 && real.json && real.json.error && real.json.error.code === 'paid-key-refused' && !fs.existsSync(ledger) && read(log) === null, real.stdout.slice(0, 200));
+        const allowed = hw([...base, '--dry-run'], { ANTHROPIC_API_KEY: CANARY, AUTODEV_ALLOW_PAID_KEY: '1' });
+        check('34. AUTODEV_ALLOW_PAID_KEY=1 lets the dry run through, and the budget reads it as api billing',
+            allowed.exit === 0 && allowed.json && allowed.json.ok && allowed.json.value.budget.billing === 'api', allowed.stdout.slice(0, 200));
+        const off = hw([...base, '--dry-run'], { CLAUDE_CODE_USE_VERTEX: '0' });
+        check('34. a flag set to 0 is not a paid key', off.exit === 0 && off.json && off.json.ok, off.stdout.slice(0, 200));
+        const dropped = hw([...base, '--dry-run'], { OPENAI_API_KEY: CANARY });
+        check('34. a paid name the allowlist drops never reaches the child, so it does not block the start', dropped.exit === 0 && dropped.json && dropped.json.ok, dropped.stdout.slice(0, 200));
+    }
 } finally {
     // Kill by pid, never by pattern; a dead pid is the expected answer here.
     // The logs are scanned first so a supervisor that start never printed
@@ -1701,7 +1728,7 @@ try {
 }
 
 console.log(`\n${tally(pass, fail, infra)}`);
-console.log(`subject: ${path.relative(path.resolve(__dirname, '..'), SCRIPT)}, driven as a subprocess ${pass + fail} assertion(s) over 32 numbered cases; `
+console.log(`subject: ${path.relative(path.resolve(__dirname, '..'), SCRIPT)}, driven as a subprocess ${pass + fail} assertion(s) over 34 numbered cases; `
     + 'every worker ran through a fake binary under a temp root whose name carries a space.');
 if (fail) console.log(`failed: ${failures.join(' | ')}`);
 if (infra) console.log(`indeterminate: ${indeterminate.join(' | ')}`);

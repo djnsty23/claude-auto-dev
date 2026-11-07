@@ -16,6 +16,7 @@ const budgetLedger = path.join(root, 'state', 'execution-budget.json');
 // went red whenever commit headroom dipped. test-capacity-admission.js owns it.
 const env = { ...process.env, HOME: root, USERPROFILE: root, CLAUDE_CONFIG_DIR: home, AUTODEV_CAPACITY: 'off',
     AUTODEV_BUDGET_LEDGER: budgetLedger, AUTODEV_GATE_LOCK_PATH: path.join(root, 'state', 'locks', 'full-gate.lock') };
+for (const k of ['ANTHROPIC_API_KEY', 'ANTHROPIC_AUTH_TOKEN', 'OPENAI_API_KEY', 'GEMINI_API_KEY', 'GOOGLE_API_KEY', 'CLAUDE_CODE_USE_BEDROCK', 'CLAUDE_CODE_USE_VERTEX', 'AWS_BEARER_TOKEN_BEDROCK', 'AUTODEV_ALLOW_PAID_KEY', 'AUTODEV_PAID_KEY_NAMES']) delete env[k];
 let total = 0; let failed = 0;
 function check(name, ok, detail = '') { total++; if (!ok) failed++; console.log(`${ok ? 'ok' : 'FAIL'} ${name}${ok ? '' : `: ${detail}`}`); }
 
@@ -171,6 +172,19 @@ try {
     check('A1. a seeded pair set is marked non-blind', JSON.parse(fs.readFileSync(path.join(seeded, 'pairs.json'), 'utf8')).blind === false);
     r = panel(seeded);
     check('A1. the panel refuses a non-blind (seeded) pair set', r.status === 2 && /not blind/.test(r.stderr), `exit ${r.status} ${r.stdout}${r.stderr}`);
+
+    // A paid key in a judge's env bills per token: no judge is spawned, the error names the variable, never the value.
+    const CANARY = 'sk-ant-canary-value-for-the-suite';
+    const callsFile = path.join(root, 'bin', 'calls.log');
+    const callsBefore = fs.readFileSync(callsFile, 'utf8');
+    p = pairsDir('paid');
+    setModes(['good', 'good', 'good']);
+    r = spawnSync(process.execPath, [subject, 'run', p.dir, '--claude-bin', fake, '--batch', '4'], { env: { ...env, ANTHROPIC_API_KEY: CANARY }, encoding: 'utf8' });
+    check('a paid key in the env spawns no judge', fs.readFileSync(callsFile, 'utf8') === callsBefore, r.stdout + r.stderr);
+    check('and the run names paid-key-refused and ANTHROPIC_API_KEY, never the value, and does not keep the change',
+        /paid-key-refused/.test(r.stdout + r.stderr) && /ANTHROPIC_API_KEY/.test(r.stdout + r.stderr) && !(r.stdout + r.stderr).includes(CANARY) && r.status !== 0, `exit ${r.status} ${r.stdout}${r.stderr}`);
+    r = spawnSync(process.execPath, [subject, 'run', p.dir, '--claude-bin', fake, '--batch', '4'], { env: { ...env, ANTHROPIC_API_KEY: CANARY, AUTODEV_ALLOW_PAID_KEY: '1' }, encoding: 'utf8' });
+    check('control: AUTODEV_ALLOW_PAID_KEY=1 lets the same run judge', r.status === 0 && fs.readFileSync(callsFile, 'utf8') !== callsBefore, `exit ${r.status} ${r.stdout}${r.stderr}`);
 
     const booked = fs.existsSync(budgetLedger) ? fs.readFileSync(budgetLedger, 'utf8') : '';
     check('judge calls are booked in the shared execution budget', /judge-panel/.test(booked) && /"judge"/.test(booked), booked.slice(0, 200));

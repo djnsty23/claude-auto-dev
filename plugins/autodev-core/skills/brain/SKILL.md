@@ -123,8 +123,9 @@ for material risks; avoid nested fan-outs and duplicate assignments.
 queued with `unattended-worker.js enqueue` names its acceptance test (a command
 and the exact line or exit code that means done) in an `Acceptance criteria`
 section the receipt gate parses, or enqueue refuses it. It ends in a gated commit the
-worker leaves for you to land through `merge-lock.js`. The landing steps and
-the ASK split are in `references/dispatch-channels.md`. Leave a task out of the
+worker leaves for you to land through `merge-lock.js`, which also needs a review
+receipt (`autoreview`). The landing steps and the ASK split are in
+`references/dispatch-channels.md`. Leave a task out of the
 queue, rather than choosing a smaller one, when it cannot meet both.
 
 Workers implement with `auto` and the project's actual gate. Brain owns scope,
@@ -230,4 +231,6 @@ steps. Changes made carries commits, exact validation and deployed URLs; failed
 attempts carries every approach that did not work, so a successor does not retry
 it; next steps carries unresolved work and its owners.
 Artifact URLs belong in the durable repo record. Report completion only at the
-verified boundary; otherwise state exactly what remains.
+verified boundary; otherwise state exactly what remains. Ping the owner only as
+`rule-own-the-loop` says (blocked on the owner, ready to merge, deploy done or
+failed); everything else goes to the daily digest.

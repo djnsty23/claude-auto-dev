@@ -1059,7 +1059,8 @@ expectAsk('role held + push INSIDE the home repo with --no-verify still asks',
     const inHome = (command) => run({ roleFile: ABSENT, payload: bash(command), env: { HOME: mhome, USERPROFILE: mhome } });
     const expectMergeBlock = (label, res) => check(label,
         res.exit === 2 && /^Blocked: merge-lock enforcement is on/.test(res.stderr)
-        && /merge-lock\.js" merge --repo OWNER\/NAME --pr N --head SHA --gate-receipt FILE/.test(res.stderr)
+        && /merge-lock\.js" merge --repo OWNER\/NAME --pr N --head SHA --gate-receipt FILE --review-receipt FILE/.test(res.stderr)
+        && /--escalation-receipt FILE/.test(res.stderr)
         && res.stdout.length === 0,
         `exit ${res.exit}, stderr ${JSON.stringify(res.stderr.slice(0, 90))}`);
 
