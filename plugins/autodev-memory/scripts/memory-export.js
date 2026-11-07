@@ -128,8 +128,14 @@ function validDate(s) {
     return !Number.isNaN(d.getTime()) && d.toISOString().slice(0, 10) === s;
 }
 const earliest = (dates) => dates.filter(Boolean).sort()[0] || null;
+// win32 paths compare case-insensitively.
+const hookKey = (p) => (process.platform === 'win32' ? path.resolve(p).toLowerCase() : path.resolve(p));
 
-/** basename -> earliest YYYY-MM-DD derived from an MM-DD in its index hook. */
+/**
+ * Resolved file path -> earliest YYYY-MM-DD from an MM-DD in its index hook. Keyed by the
+ * link resolved against the index's own folder, so two projects' same-named memory files
+ * never share a date.
+ */
 function readIndexHooks(indexFiles) {
     const hooks = new Map();
     for (const file of indexFiles) {
@@ -139,7 +145,7 @@ function readIndexHooks(indexFiles) {
         for (const line of text.split(/\r?\n/)) {
             const link = /\]\(([^)]+\.md)\)(.*)$/.exec(line);
             if (!link) continue;
-            const base = path.basename(link[1]);
+            const target = hookKey(path.resolve(path.dirname(file), link[1]));
             const dates = [];
             for (const m of link[2].matchAll(/(?<![\d-])(\d{2})-(\d{2})(?![\d-])/g)) {
                 let year = mtime.getUTCFullYear();
@@ -149,7 +155,7 @@ function readIndexHooks(indexFiles) {
                 if (validDate(iso)) dates.push(iso);
             }
             const d = earliest(dates);
-            if (d) hooks.set(base, earliest([hooks.get(base), d]));
+            if (d) hooks.set(target, earliest([hooks.get(target), d]));
         }
     }
     return hooks;
@@ -188,7 +194,7 @@ function clean(text) {
 
 const CAREER_RE = /\b(role|company|works? at|working at|employer|employed|job|career|founder|co-?founder|agency|freelanc\w*|consultant|client work|position|title)\b/i;
 const PREFERENCE_RE = /\b(prefer\w*|likes?|dislikes?|wants?|style|tone|voice|taste|habit|working style|by default|always|never|favou?rite)\b/i;
-const RULE_START_RE = /^(always|never|do not|don't|use|run|keep|put|send|write|ask)\b/i;
+const RULE_START_RE = /^(always|never)\b/i;
 const INSTRUCTION_RE = /\b(always|never|must|do not|don't|only|instead of)\b/i;
 
 function firstBodyLine(body) {
@@ -211,7 +217,7 @@ function ruleLines(body) {
         if (!l || l.startsWith('#') || l.startsWith('|')) continue;
         const stated = /\[stated\s+\d{4}-\d{2}-\d{2}/.test(l);
         const bare = l.replace(/^`?\[[^\]]*\]`?\s*/, '');
-        if (RULE_START_RE.test(bare) && /^(always|never)\b/i.test(bare)) out.push(l);
+        if (RULE_START_RE.test(bare)) out.push(l);
         else if (stated && INSTRUCTION_RE.test(l)) out.push(l);
     }
     return out;
@@ -223,7 +229,7 @@ function classify(file, text, hooks) {
     const name = fm.name || path.basename(file, '.md');
     const description = fm.description || firstBodyLine(body);
     const fmDate = /^(\d{4}-\d{2}-\d{2})/.exec(fm.modified || fm.created || fm.date || '');
-    const fileDate = earliest(tagDates(text)) || hooks.get(path.basename(file))
+    const fileDate = earliest(tagDates(text)) || hooks.get(hookKey(file))
         || (fmDate && validDate(fmDate[1]) ? fmDate[1] : null);
     const entries = [];
     const source = path.basename(file);
