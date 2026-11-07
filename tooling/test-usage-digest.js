@@ -21,6 +21,7 @@ let pass = 0, fail = 0;
 function check(label, ok, detail) {
     if (ok) { pass++; console.log(`PASS  ${label}`); } else { fail++; console.log(`FAIL  ${label}${detail === undefined ? '' : `  (${detail})`}`); }
 }
+const readJson = (f, dflt) => { try { return JSON.parse(fs.readFileSync(f, 'utf8')); } catch { return dflt; } };
 
 const scratch = fs.realpathSync.native(fs.mkdtempSync(path.join(os.tmpdir(), 'usage-digest-')));
 const home = path.join(scratch, 'home');
@@ -205,7 +206,7 @@ const header = (body) => body.split('\n')[0];
             child.on('close', (code) => resolve({ code, out, err }));
         });
         try {
-            session('C--code-proj-live', 'dddd4444-0000-0000-0000-000000000000', 'C:/code/proj-live');
+            const liveTranscript = session('C--code-proj-live', 'dddd4444-0000-0000-0000-000000000000', 'C:/code/proj-live');
             let c = await cliRun('run', '--project', 'proj-live', '--dry-run');
             check('--dry-run counts the batch and calls no model', c.code === 0 && /1 transcript\(s\) need a digest, 1 in this batch \(dry run/.test(c.out) && asked.length === 0, c.out + c.err);
             c = await cliRun('run', '--limit', 'many');
@@ -220,6 +221,11 @@ const header = (body) => body.split('\n')[0];
             const liveFile = fs.existsSync(liveDir) ? fs.readdirSync(liveDir)[0] : null;
             const liveBody = liveFile ? fs.readFileSync(path.join(liveDir, liveFile), 'utf8') : '';
             check('the topic is parsed out of the surrounding prose, past the think block', /^# Fix parser failure in tests/.test(liveBody) && /topic by: 4B, checked/.test(liveBody), header(liveBody));
+            const ledgerFile = path.join(usage, 'digests', 'ledger.json');
+            const liveRec = (readJson(ledgerFile, { files: {} }).files || {})[liveTranscript];
+            const liveOut = liveFile ? path.join(liveDir, liveFile) : '';
+            check('CLI run writes the ledger record for the transcript', liveRec && liveRec.status === 'ok' && liveRec.topicOk === true
+                && liveRec.key && liveRec.out === liveOut, JSON.stringify(liveRec));
 
             const fp = session('C--code-proj-parse', 'eeee5555-0000-0000-0000-000000000000', 'C:/code/proj-parse');
             replies.push({ content: 'no json in this answer' });
@@ -229,10 +235,13 @@ const header = (body) => body.split('\n')[0];
             c = await cliRun('one', fp, '--print');
             check('an answer with malformed JSON falls back to a code topic', c.code === 0 && /refused: empty/.test(c.out), c.out + c.err);
 
-            session('C--code-proj-down', 'ffff6666-0000-0000-0000-000000000000', 'C:/code/proj-down');
+            const downTranscript = session('C--code-proj-down', 'ffff6666-0000-0000-0000-000000000000', 'C:/code/proj-down');
             replies.push({ status: 500, content: '' });
             c = await cliRun('run', '--project', 'proj-down');
             check('a model error is a retry and exit 1, not a clean run', c.code === 1 && /retry: 1/.test(c.out), c.out + c.err);
+            const downRec = (readJson(ledgerFile, { files: {} }).files || {})[downTranscript];
+            check('CLI run records a model failure as retry in the ledger', downRec && downRec.status === 'retry'
+                && /local model answered 500/.test(downRec.why || ''), JSON.stringify(downRec));
         } finally {
             await new Promise((resolve) => stub.close(resolve));
         }
