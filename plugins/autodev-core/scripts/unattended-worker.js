@@ -82,10 +82,24 @@
  *           doubling per deferral, at most 4 hours). Not failed, not held.
  *   requeue repairs a record closed before `defer` existed: a closed headless
  *           record whose run settled `deferred`, or `unreported` with a
- *           CAPACITY_DEFERRED blocker, so claude never started. It moves the
- *           attempt, its run status and its verdict into `attempts[]` and
- *           returns the record to queued, ready at once. Any other record is
+ *           CAPACITY_DEFERRED blocker or log line, so claude never started. It
+ *           moves the attempt, its run status and its verdict into `attempts[]`
+ *           and returns the record to queued, ready at once. Any other record is
  *           refused: a run that did start has a worktree and a result to read.
+ *           `--unreported` also takes a run that started and left no report, but
+ *           only when it left nothing: a live process, commits past the base or
+ *           any branch of its slug refuse, because launch would claim that slug.
+ *   salvage closes a run that settled unreported though its work is done: its
+ *           branch is pushed, its worktree is clean and its report ends in
+ *           `RESULT <slug> done`. The record keeps its task id and attempt, and
+ *           runs succeeded with no verdict, so nothing is run twice and the
+ *           coordinator still has to accept it.
+ *
+ * START SWITCH. `launch` reads brain-judge/switch.json beside its ledger, whoever
+ * calls it, so the board-requests routine obeys what the clock obeys. Anything but
+ * live refuses with start-not-live before it fetches or writes. An unreadable file
+ * counts as off. No switch file means nothing to obey, which keeps a private
+ * --ledger working. `--start-override "<reason>"` starts one task and stores why.
  *
  * DEPENDANTS. A queued task whose dependency is held, failed, retired or not
  * accepted is `blocked` in ready and status, with the reason, so a chain behind
@@ -128,7 +142,9 @@
  *        [--after <task id>[,<task id>]] [--pin <path>[,<path>]] [--base origin/main] [--task-id <id>] [--title <text>]
  *        [--model <id>] [--effort <level>] [--permission-mode <mode>] [--config-dir <dir>] [--ledger <file>]
  *   node unattended-worker.js ready [--max-concurrent 2] [--max-per-hour 2] [--ledger <file>]
- *   node unattended-worker.js launch --task-id <id> [--model <id>] [--effort <level>] [--dry-run] [--headless-worker <file>] [--claude-bin <path>] [--dev] [--ledger <file>]
+ *   node unattended-worker.js launch --task-id <id> [--model <id>] [--effort <level>] [--dry-run] [--start-override <reason>] [--headless-worker <file>] [--claude-bin <path>] [--dev] [--ledger <file>]
+ *   node unattended-worker.js requeue --task-id <id> --reason <text> [--unreported] [--ledger <file>]
+ *   node unattended-worker.js salvage --task-id <id> --reason <text> [--ledger <file>]
  *   node unattended-worker.js verdict --task-id <id> --decision accept|follow-up|escalate --reason <text> [--by judge|brain|operator]
  *        [--head <sha>] [--allow-pin-change <reason>] [--accept-without-receipt <reason>] [--ledger <file>]
  * Output: {"ok":true,"value":{...}} exit 0; {"ok":false,"error":{"code","message"}} exit 1.
@@ -157,7 +173,8 @@ const USAGE = [
     '       node unattended-worker.js hold --task-id <id> --reason <text> [--ledger <file>]',
     '       node unattended-worker.js release --task-id <id> --reason <text> [--ledger <file>]',
     '       node unattended-worker.js defer --task-id <id> --reason <text> [--ledger <file>]',
-    '       node unattended-worker.js requeue --task-id <id> --reason <text> [--ledger <file>]',
+    '       node unattended-worker.js requeue --task-id <id> --reason <text> [--unreported] [--ledger <file>]',
+    '       node unattended-worker.js salvage --task-id <id> --reason <text> [--ledger <file>]',
     '       node unattended-worker.js status [--task-id <id>] [--ledger <file>]',
     'brief: refuse a slug already claimed (worktree path, local branch, origin branch, active ledger record),',
     '       then print create_scheduled_task arguments whose prompt opens with git worktree add.',
@@ -167,7 +184,7 @@ const USAGE = [
     '            [--base origin/main] [--task-id <id>] [--title <text>] [--model <id>] [--effort <level>] [--permission-mode <mode>] [--config-dir <dir>]',
     '            [--without-criteria <reason>] [--ledger <file>]',
     '       node unattended-worker.js ready [--max-concurrent 2] [--max-per-hour 2] [--ledger <file>]',
-    '       node unattended-worker.js launch --task-id <id> [--model <id>] [--effort <level>] [--dry-run] [--headless-worker <file>] [--claude-bin <path>] [--dev] [--ledger <file>]',
+    '       node unattended-worker.js launch --task-id <id> [--model <id>] [--effort <level>] [--dry-run] [--start-override <reason>] [--headless-worker <file>] [--claude-bin <path>] [--dev] [--ledger <file>]',
     '       node unattended-worker.js verdict --task-id <id> --decision accept|follow-up|escalate --reason <text> [--by judge|brain|operator]',
     '            [--head <sha>] [--allow-pin-change <reason>] [--ledger <file>]',
     'retire: close a composed, queued or held record whose task never ran, freeing its slug and task id.',
@@ -176,11 +193,18 @@ const USAGE = [
     'defer: a started headless run was turned away by the capacity gate before claude started. The attempt is kept in',
     '      attempts[] and the record returns to queued, ready again after a backoff of 15 minutes doubling to 4 hours.',
     'requeue: return a closed headless record whose run the capacity gate turned away (settled deferred, or unreported',
-    '      with a CAPACITY_DEFERRED blocker) to queued. Its run status and verdict move to attempts[]. Refused otherwise.',
+    '      with a CAPACITY_DEFERRED blocker or worker.log) to queued. Its run status and verdict move to attempts[].',
+    '      --unreported also takes a run that ran and left no report. Both refuse a live process (live-process), commits',
+    '      past the base (unmerged-branch: salvage those) and any branch or worktree the slug still claims (branch-exists).',
+    'salvage: a closed headless run that left its work on a pushed branch but no report. Once its REPORT.md ends in',
+    '      RESULT <slug> done, the record reads succeeded with no verdict, its old close moves to attempts[], and the task',
+    '      id stays, so --after dependants still resolve. It never starts anything. A verdict comes next.',
     'settle --run-status unknown: the run lost its supervisor (a reboot, a killed supervisor). It never reads as success.',
     'enqueue: queue a brief for the headless channel. The slug is at most 24 characters: it becomes the headless code.',
     'ready: queued tasks whose dependencies were accepted, within the concurrency and per-hour caps.',
     'launch: the only command that starts anything. It re-runs the brief checks and calls headless-worker.js start.',
+    '        It refuses (start-not-live) while brain-judge.js switch beside the ledger says start dry or off, whoever calls it.',
+    '        --start-override "<reason>" starts one task anyway and stores the reason. With no switch file there is nothing to obey.',
     '        --model and --effort override the values enqueue stored, and the record keeps what ran. With neither,',
     '        a task queued without --model runs on the CLI default model.',
     'Every command refuses a flag it does not read, so a flag never goes silently unused.',
@@ -231,10 +255,10 @@ function fault(code, message) { const e = new Error(message || code); e.publicCo
 
 function parseArgs(argv) {
     const out = { _: [] };
-    const flags = ['help', 'report-read', 'dry-run', 'dev'];
+    const flags = ['help', 'report-read', 'dry-run', 'dev', 'unreported'];
     const known = ['_', ...flags, 'repo', 'slug', 'brief-file', 'return', 'report', 'base', 'task-id', 'title', 'ledger', 'session', 'run-status', 'reason',
         'after', 'model', 'effort', 'permission-mode', 'config-dir', 'headless-worker', 'claude-bin', 'decision', 'by', 'max-concurrent', 'max-per-hour',
-        'pin', 'allow-pin-change', 'head', 'accept-without-receipt', 'without-criteria', 'deferred-accept', 'deferred-reason'];
+        'pin', 'allow-pin-change', 'head', 'accept-without-receipt', 'without-criteria', 'deferred-accept', 'deferred-reason', 'start-override'];
     for (let i = 0; i < argv.length; i++) {
         const a = argv[i];
         if (a === '--help' || a === '-h' || a === 'help') { out.help = true; continue; }
@@ -779,6 +803,19 @@ function recoverTimedOutStart(code, spawnedAt, file = path.join(claudePaths.conf
  * A refusal anywhere leaves the record queued with lastLaunchError and an
  * attempt count, and is rethrown so the caller sees exit 1.
  */
+/**
+ * The start mode of the brain-judge switch beside this ledger, or null when none
+ * was ever written. brain-judge.js owns the file. The gate lives here, in the one
+ * command that starts anything, because a routine that called launch directly
+ * ran a real attempt while the switch said dry. An unreadable file reads off.
+ */
+function startSwitchOf(ledgerFile) {
+    const file = path.join(path.dirname(ledgerFile), 'brain-judge', 'switch.json');
+    let text;
+    try { text = fs.readFileSync(file, 'utf8'); } catch (e) { return e.code === 'ENOENT' ? null : 'off'; }
+    try { const raw = JSON.parse(text); return raw && ['off', 'dry', 'live'].includes(raw.start) ? raw.start : 'off'; } catch { return 'off'; }
+}
+
 function launch(opts) {
     if (!opts['task-id']) fault('usage', '--task-id is required');
     const ledgerFile = opts.ledger || defaultLedger();
@@ -786,6 +823,10 @@ function launch(opts) {
     const first = readLedger(ledgerFile);
     const pre = findRecord(first, opts['task-id']);
     if (pre.state !== 'queued') fault('bad-state', `task ${pre.taskId} is ${pre.state}, not queued`);
+    const startMode = startSwitchOf(ledgerFile);
+    if (!dry && startMode !== null && startMode !== 'live' && opts['start-override'] === undefined) {
+        fault('start-not-live', `the start switch says ${startMode}, so nothing starts. brain-judge.js switch --start live opens it; --start-override "<reason>" starts this one task`);
+    }
     const fetched = git(pre.repo, ['fetch', '--quiet', 'origin'], FETCH_TIMEOUT_MS);
     return withLock(ledgerFile, () => {
         const ledger = readLedger(ledgerFile);
@@ -849,6 +890,7 @@ function launch(opts) {
                     startedAt: (h.value.record && h.value.record.startedAt) || null, version: (h.value.record && h.value.record.version) || null,
                     keepTools: files.keepTools || [] },
             });
+            if (opts['start-override'] !== undefined) rec.startOverride = { at, reason: String(opts['start-override']).slice(0, 500), switch: startMode };
             delete rec.lastLaunchError;
             delete rec.deferred;
             writeLedger(ledgerFile, ledger);
@@ -863,6 +905,72 @@ function launch(opts) {
 function stamp(prefix) {
     const placement = scriptPlacement(__filename);
     return { [`${prefix}Version`]: placement.version, [`${prefix}Dev`]: !placement.installed };
+}
+
+/** The headless run a closed record points at, or null when its ledger has none. */
+function closedRunOf(rec, code) {
+    const h = rec.headless || {};
+    try {
+        return readHeadlessLedger(h.ledger).records.find((r) => r.code === h.code && r.startedAt === h.startedAt) || null;
+    } catch (e) { return fault(code, `the headless ledger ${h.ledger || '(none)'} could not be read (${e.publicCode || e.code || e.message})`); }
+}
+
+/**
+ * How a closed run settled, or null. The headless ledger drops a settled run after
+ * seven days, so an older one reads from what reconcile stored on the record, which
+ * is exactly `SETTLED: settled <result>`. Any other reason names no result.
+ */
+function settledResultOf(rec, run) {
+    if (run) return run.state === 'settled' ? run.result : null;
+    const stored = /^SETTLED: settled ([a-z-]+)$/.exec(rec.settleReason || '');
+    return stored ? stored[1] : null;
+}
+
+/**
+ * The capacity line a run's worker.log ends on, or ''. A run settled before its
+ * blocker was recorded keeps the evidence only there. A deferred run never started
+ * claude, so its log is a few lines: a real run's transcript is never read for this.
+ */
+function loggedDeferral(rec, run) {
+    const file = (run && run.log) || (rec.headless && rec.headless.log);
+    try {
+        if (!file || fs.statSync(file).size > 64 * 1024) return '';
+        const text = fs.readFileSync(file, 'utf8');
+        const line = text.match(/^CAPACITY_DEFERRED=.*$/m);
+        return line && /^CLAUDE_EXIT=-1\s*$/m.test(text) ? line[0] : '';
+    } catch { return ''; }
+}
+
+function livePid(rec, run) {
+    const alive = (pid) => {
+        if (!Number.isInteger(pid) || pid <= 0) return false;
+        try { process.kill(pid, 0); return true; } catch (e) { return e.code === 'EPERM'; }
+    };
+    return [run && run.pid, run && run.supervisorPid, rec.headless && rec.headless.pid].find(alive) || null;
+}
+
+/**
+ * What a closed run left that another attempt would collide with or orphan: its
+ * worktree, and its branch locally and on origin with the commits past its base.
+ * Only exit 2 from ls-remote means absent, so an unreachable origin refuses.
+ */
+function runLeftovers(rec) {
+    const branch = rec.branch || `claude/${rec.slug}`;
+    const worktree = rec.worktree || path.join(rec.repo, '.claude', 'worktrees', rec.slug);
+    const local = git(rec.repo, ['rev-parse', '--verify', '--quiet', `refs/heads/${branch}^{commit}`]);
+    const remote = git(rec.repo, ['ls-remote', '--exit-code', '--heads', 'origin', branch], FETCH_TIMEOUT_MS);
+    if (remote.status !== 0 && remote.status !== 2) fault('origin-unreadable', `ls-remote origin exited ${remote.status}: ${remote.stderr}`);
+    const localHead = local.status === 0 ? local.stdout : null;
+    const remoteHead = remote.status === 0 ? remote.stdout.split(/\s/)[0] : null;
+    const head = localHead || remoteHead;
+    const base = rec.base || 'origin/main';
+    let ahead = 0;
+    if (head) {
+        const count = git(rec.repo, ['rev-list', '--count', `${base}..${head}`]);
+        if (count.status !== 0) fault('branch-unreadable', `cannot count ${branch} past ${base}: ${count.stderr}`);
+        ahead = Number(count.stdout);
+    }
+    return { branch, base, worktree, worktreeExists: fs.existsSync(worktree), localHead, remoteHead, ahead };
 }
 
 function mutate(opts, fn) {
@@ -924,7 +1032,7 @@ const COMMAND_FLAGS = {
     brief: ['repo', 'slug', 'brief-file', 'return', 'report', 'pin', 'base', 'task-id', 'title', 'without-criteria', 'ledger'],
     enqueue: ['repo', 'slug', 'brief-file', 'return', 'after', 'pin', 'base', 'task-id', 'title', 'model', 'effort', 'permission-mode', 'config-dir',
         'without-criteria', 'ledger'],
-    launch: ['task-id', 'model', 'effort', 'dry-run', 'headless-worker', 'claude-bin', 'dev', 'ledger'],
+    launch: ['task-id', 'model', 'effort', 'dry-run', 'start-override', 'headless-worker', 'claude-bin', 'dev', 'ledger'],
     record: ['task-id', 'session', 'ledger'],
     settle: ['task-id', 'run-status', 'report-read', 'reason', 'ledger'],
     deleted: ['task-id', 'ledger'],
@@ -932,7 +1040,8 @@ const COMMAND_FLAGS = {
     hold: ['task-id', 'reason', 'ledger'],
     release: ['task-id', 'reason', 'ledger'],
     defer: ['task-id', 'reason', 'ledger'],
-    requeue: ['task-id', 'reason', 'ledger'],
+    requeue: ['task-id', 'reason', 'unreported', 'ledger'],
+    salvage: ['task-id', 'reason', 'ledger'],
     verdict: ['task-id', 'decision', 'reason', 'by', 'head', 'allow-pin-change', 'accept-without-receipt', 'deferred-accept', 'deferred-reason', 'ledger'],
     ready: ['max-concurrent', 'max-per-hour', 'ledger'],
     status: ['task-id', 'ledger'],
@@ -1038,28 +1147,65 @@ function run(argv) {
         return mutate(opts, (rec) => {
             if (rec.state !== 'closed' || rec.channel !== 'headless') fault('bad-state', `task ${rec.taskId} is ${rec.state} on ${rec.channel || 'no'} channel; requeue is only for a closed headless run`);
             if (rec.runStatus === 'succeeded') fault('bad-state', `task ${rec.taskId} succeeded: there is nothing to retry`);
-            const h = rec.headless || {};
-            let run = null;
-            try {
-                const runs = readHeadlessLedger(h.ledger).records;
-                run = runs.find((r) => r.code === h.code && r.startedAt === h.startedAt) || null;
-            } catch (e) { fault('not-deferred', `the headless ledger ${h.ledger || '(none)'} could not be read (${e.publicCode || e.code || e.message})`); }
-            const blocker = run && run.blocker && typeof run.blocker.text === 'string' ? run.blocker.text : '';
-            const deferred = run && run.state === 'settled' && (run.result === 'deferred' || (run.result === 'unreported' && /^CAPACITY_DEFERRED=/.test(blocker)));
-            if (!deferred) {
-                fault('not-deferred', `task ${rec.taskId}'s run ${run ? `settled ${run.result}${blocker ? ` (${blocker.slice(0, 120)})` : ''}` : 'is not in its headless ledger'}: `
-                    + 'only a run the capacity gate turned away before claude started can be requeued');
+            const run = closedRunOf(rec, 'not-deferred');
+            const recorded = run && run.blocker && typeof run.blocker.text === 'string' ? run.blocker.text : '';
+            const result = settledResultOf(rec, run);
+            const unreported = result === 'unreported';
+            const blocker = /^CAPACITY_DEFERRED=/.test(recorded) ? recorded : ((unreported && loggedDeferral(rec, run)) || recorded);
+            const deferred = result === 'deferred' || (unreported && /^CAPACITY_DEFERRED=/.test(blocker));
+            if (!deferred && !(unreported && opts.unreported === true)) {
+                fault('not-deferred', `task ${rec.taskId}'s run ${result ? `settled ${result}${blocker ? ` (${blocker.slice(0, 120)})` : ''}` : 'names no settled result'}: `
+                    + 'only a run the capacity gate turned away before claude started can be requeued, or with --unreported one that ran and left no report');
             }
+            const pid = livePid(rec, run);
+            if (pid) fault('live-process', `task ${rec.taskId}'s run still has live process ${pid}: stop it before another attempt`);
+            const left = runLeftovers(rec);
+            if (left.ahead > 0) fault('unmerged-branch', `${left.branch} holds ${left.ahead} commit(s) past ${left.base}: another attempt would orphan them, salvage this task instead`);
+            if (left.localHead || left.remoteHead || left.worktreeExists) fault('branch-exists', `${left.branch} or its worktree still exists with nothing past ${left.base}: remove them first, launch refuses a claimed slug`);
             const at = new Date().toISOString();
             rec.attempts = [...(Array.isArray(rec.attempts) ? rec.attempts : []), {
                 attemptId: rec.attemptId || null, startedAt: rec.startedAt || null, launchedAt: rec.launchedAt || null, headless: rec.headless || null,
-                outcome: 'capacity-deferred', reason: blocker.slice(0, 500), at, requeued: String(opts.reason).slice(0, 500),
+                outcome: deferred ? 'capacity-deferred' : 'unreported', reason: blocker.slice(0, 500), at, requeued: String(opts.reason).slice(0, 500),
                 closed: { runStatus: rec.runStatus || null, settledAt: rec.settledAt || null, settleReason: rec.settleReason || null, verdict: rec.verdict || null },
             }];
             rec.state = 'queued';
             rec.requeued = { at, reason: String(opts.reason).slice(0, 500) };
             for (const k of ['attemptId', 'startedAt', 'headless', 'runStatus', 'settledAt', 'settledVersion', 'settledDev', 'settleReason', 'verdict', 'deferred']) delete rec[k];
             return { requeued: rec.requeued };
+        });
+    }
+    if (cmd === 'salvage') {
+        if (!opts.reason || !String(opts.reason).trim()) fault('usage', '--reason is required');
+        return mutate(opts, (rec) => {
+            if (rec.state !== 'closed' || rec.channel !== 'headless') fault('bad-state', `task ${rec.taskId} is ${rec.state} on ${rec.channel || 'no'} channel; salvage is only for a closed headless run`);
+            if (rec.runStatus === 'succeeded') fault('bad-state', `task ${rec.taskId} succeeded: there is nothing to salvage`);
+            const run = closedRunOf(rec, 'not-salvageable');
+            const result = settledResultOf(rec, run);
+            if (result !== 'unreported') fault('not-salvageable', `task ${rec.taskId}'s run ${result ? `settled ${result}` : 'names no settled result'}: only an unreported run is salvaged`);
+            if (loggedDeferral(rec, run)) fault('not-salvageable', `task ${rec.taskId}'s run was turned away before claude started: requeue it`);
+            const pid = livePid(rec, run);
+            if (pid) fault('live-process', `task ${rec.taskId}'s run still has live process ${pid}: stop it before salvaging`);
+            const left = runLeftovers(rec);
+            if (left.ahead < 1) fault('no-commits', `${left.branch} holds nothing past ${left.base}: there is no work to salvage`);
+            if (!left.remoteHead) fault('branch-unpushed', `origin has no ${left.branch}: push it first, the next stage bases on it`);
+            if (left.localHead && left.localHead !== left.remoteHead) fault('branch-diverged', `${left.branch} is ${left.localHead} locally and ${left.remoteHead} on origin`);
+            if (left.worktreeExists) {
+                const dirty = git(left.worktree, ['status', '--porcelain']);
+                if (dirty.status !== 0 || dirty.stdout) fault('worktree-dirty', `${left.worktree} has uncommitted work: commit or discard it first`);
+            }
+            let last = '';
+            try { last = fs.readFileSync(rec.report, 'utf8').split(/\r?\n/).filter((l) => l.trim()).pop() || ''; } catch { /* no report reads as no result line */ }
+            if (!last.startsWith(`RESULT ${rec.slug} done`)) fault('report-missing', `${rec.report} must end in RESULT ${rec.slug} done: <one line>`);
+            const at = new Date().toISOString();
+            const reason = String(opts.reason).slice(0, 500);
+            rec.attempts = [...(Array.isArray(rec.attempts) ? rec.attempts : []), {
+                attemptId: rec.attemptId || null, startedAt: rec.startedAt || null, launchedAt: rec.launchedAt || null, headless: rec.headless || null,
+                outcome: 'salvaged', reason, at,
+                closed: { runStatus: rec.runStatus || null, settledAt: rec.settledAt || null, settleReason: rec.settleReason || null, verdict: rec.verdict || null },
+            }];
+            Object.assign(rec, { runStatus: 'succeeded', settledAt: at, settleReason: `SALVAGED: ${reason}`, salvaged: { at, reason, head: left.remoteHead }, ...stamp('settled') });
+            delete rec.verdict;
+            return { salvaged: rec.salvaged };
         });
     }
     if (cmd === 'verdict') {
@@ -1084,7 +1230,7 @@ function run(argv) {
         const ledgerFile = opts.ledger || defaultLedger();
         const ledger = readLedger(ledgerFile);
         const plan = planStarts(ledger.records, { maxConcurrent: capOpt(opts, 'max-concurrent', 2), maxPerHour: capOpt(opts, 'max-per-hour', 2) });
-        return { ledger: ledgerFile, ...plan };
+        return { ledger: ledgerFile, startSwitch: startSwitchOf(ledgerFile), ...plan };
     }
     if (cmd === 'status') {
         const ledgerFile = opts.ledger || defaultLedger();

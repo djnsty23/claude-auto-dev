@@ -69,6 +69,21 @@
   ledger-rotate, model-tiers and audit-diff. The merge-lock suite covers every
   new refusal path. Model, gh and git calls are stubbed throughout.
 
+## [8.200.1]
+
+### Brain and workers
+
+- `salvage` and `requeue` read a run the headless ledger dropped after seven days from the settle reason the record kept, exactly `SETTLED: settled <result>`. Any other reason names no result and refuses.
+
+## [8.200.0]
+
+### Brain and workers
+
+- `unattended-worker launch` obeys the `start` switch for every caller, so the board-requests routine stops when the clock stops. Anything but live refuses before it fetches or writes, and an unreadable switch counts as off. `--start-override "<reason>"` starts one task and stores why.
+- `requeue` reads a capacity deferral from `worker.log` when the run record has no blocker, bounded to 64 KB and only with `CLAUDE_EXIT=-1`.
+- `requeue --unreported` returns a run that started and left nothing. A live process, commits past the base or any branch of the slug refuse.
+- New verb `salvage` closes a run that settled unreported with its work done: pushed branch, clean worktree, report ending `RESULT <slug> done`. It keeps the task id and writes no verdict.
+
 ## [8.199.0]
 
 ### Brain and workers
