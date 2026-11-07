@@ -816,7 +816,8 @@ try {
                 const tool = path.join(__dirname, '..', 'scripts', 'merge-lock.js');
                 process.stderr.write(`Blocked: merge-lock enforcement is on (${marker}), and \`${hit}\` merges a PR `
                     + 'outside the per-repo merge lock.\n'
-                    + `Merge with: node "${tool}" merge --repo OWNER/NAME --pr N --head SHA --gate-receipt FILE\n`
+                    + `Merge with: node "${tool}" merge --repo OWNER/NAME --pr N --head SHA --gate-receipt FILE --review-receipt FILE\n`
+                    + 'A sensitive diff also needs --escalation-receipt FILE; --review-override "<reason>" replaces the review receipt only.\n'
                     + 'It refuses a head that is not the gated one or a base that moved, merges with '
                     + '--match-head-commit, and reads the merged tree back.\n'
                     + `To turn enforcement off, remove ${marker}.\n`);

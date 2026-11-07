@@ -73,7 +73,8 @@ receipt that `merge-lock.js` accepts:
 ```bash
 node "${CLAUDE_PLUGIN_ROOT}/scripts/fast-lane.js" classify --repo-dir . --head "$(git rev-parse HEAD)"
 node "${CLAUDE_PLUGIN_ROOT}/scripts/fast-lane.js" run --repo-dir . --head "$(git rev-parse HEAD)" --out "${TMPDIR:-/tmp}/fast-lane.json"
-node "${CLAUDE_PLUGIN_ROOT}/scripts/merge-lock.js" merge --repo OWNER/NAME --pr N --head "$(git rev-parse HEAD)" --fast-lane-receipt "${TMPDIR:-/tmp}/fast-lane.json"
+node "${CLAUDE_PLUGIN_ROOT}/scripts/cheap-review.js" review --repo OWNER/NAME --pr N --head "$(git rev-parse HEAD)" --repo-dir . --out "${TMPDIR:-/tmp}/review.json"
+node "${CLAUDE_PLUGIN_ROOT}/scripts/merge-lock.js" merge --repo OWNER/NAME --pr N --head "$(git rev-parse HEAD)" --fast-lane-receipt "${TMPDIR:-/tmp}/fast-lane.json" --review-receipt "${TMPDIR:-/tmp}/review.json"
 ```
 
 Write the receipt outside the checkout, or `run` refuses the next candidate as

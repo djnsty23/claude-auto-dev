@@ -1091,5 +1091,33 @@ function selftest() {
     process.exitCode = failed ? 1 : 0;
 }
 
+// ---------------------------------------------------------------- event lines
+//
+// The deploy ledger also takes machine-written EVENT LINES: one JSON object per
+// line in `<config dir>/autodev/deploy-ledger-events.jsonl` (AUTODEV_DEPLOY_EVENTS
+// names another file). deploy-gate.js records PASS, FAIL and TIMEOUT there, and
+// merge-lock.js records a review override. The markdown ledger above is a human
+// record about a candidate; these lines are the audit trail of decisions made
+// without a human in the loop. Appends take the ledger lock (ledger-lock.js) so
+// two writers never interleave a line. It never throws: { ok, file, why }.
+function eventsFile(env = process.env) {
+    if (env.AUTODEV_DEPLOY_EVENTS) return path.resolve(env.AUTODEV_DEPLOY_EVENTS);
+    return path.join(require('./claude-paths.js').configDir(env), 'autodev', 'deploy-ledger-events.jsonl');
+}
+
+function appendEvent(event, { env = process.env, file = eventsFile(env), now = Date.now() } = {}) {
+    try {
+        if (!event || typeof event !== 'object' || Array.isArray(event) || typeof event.kind !== 'string' || !event.kind) {
+            return { ok: false, file, why: 'an event needs a string "kind"' };
+        }
+        const line = JSON.stringify({ schema: 1, at: new Date(now).toISOString(), ...event }) + '\n';
+        fs.mkdirSync(path.dirname(file), { recursive: true });
+        require('./ledger-lock.js').withLedgerLock(file, () => fs.appendFileSync(file, line, 'utf8'));
+        return { ok: true, file, why: null };
+    } catch (e) {
+        return { ok: false, file, why: e.code || e.message };
+    }
+}
+
 if (require.main === module) main();
-else module.exports = { routeFor, WIDE, globToRegExp, sensitiveGlobsFrom, SCHEMA_DROP, SQL_RULES, stripSqlComments, parseRecord, validateRecord, FIELDS, gateScriptName, gateNameProblem };
+else module.exports = { eventsFile, appendEvent, routeFor, WIDE, globToRegExp, sensitiveGlobsFrom, SCHEMA_DROP, SQL_RULES, stripSqlComments, parseRecord, validateRecord, FIELDS, gateScriptName, gateNameProblem };

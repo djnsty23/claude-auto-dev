@@ -33,13 +33,12 @@ npm test && npm run check:suites && npm run check:probe-shapes
 ```
 
 When the first step fails, run the remaining twelve yourself.
-The chain's exit status is a verdict on one step, not on thirteen.
 
 - **`npm run gate` waits its turn** via `tooling/gate-lock.js` in the machine-wide `full-gate-queue.js`, behind product gates, then runs `scripts["gate:chain"]`. Remove a stopped waiter with `full-gate-queue.js leave --pid <pid>`.
 - **Exit 2 is INDETERMINATE**, never pass or fail. Read the conflict or `tooling/gate-recovery.js` machine evidence (unfinished chain, ENOSPC below the disk floor, occupied port, crash with event 2004). In `npm test`, evidence belongs in each failed suite's own log.
-- **`[stated 2026-10-17]` A PR merges on `gate:fast`, a release on the full gate.** Rebase onto `origin/main`, commit, then `{ git rev-parse HEAD; npm run gate:fast; echo "gate-receipt: exit $?"; } > r.log 2>&1` is the merge receipt. `publish-release.js` takes only a full `npm run gate` receipt of the release candidate. `check:suites` grades HEAD in a private worktree and refuses dirt. `plugins/autodev-core/scripts/merge-lock.js` does the per-repo lock, base check and merged-tree readback.
+- **`[stated 2026-10-17]` A PR merges on `gate:fast`, a release on the full gate.** Rebase onto `origin/main`, commit, then `{ git rev-parse HEAD; npm run gate:fast; echo "gate-receipt: exit $?"; } > r.log 2>&1` is the merge receipt. `publish-release.js` takes only a full `npm run gate` receipt of the release candidate. `check:suites` grades HEAD in a private worktree and refuses dirt. `plugins/autodev-core/scripts/merge-lock.js` does the per-repo lock, base check and tree readback, and needs `--review-receipt` (`cheap-review.js`) or `--review-override "<reason>"`, plus `--escalation-receipt` (opus `code-reviewer`) on a sensitive diff.
 - **Product fast lanes require operator policy.** `plugins/autodev-core/scripts/fast-lane.js run` classifies size and sensitive paths, runs lint/typecheck/test/build, and records a receipt. `merge-lock.js --fast-lane-receipt` reclassifies GitHub's diff.
-- **Do not touch the tree during a gate.** `test-all.js` fails `tree-inert` for changed `git status` under stable HEAD. Moved HEAD exits 2, or 1 if a suite also fails. Draft in a scratchpad. `check:coverage` refuses missing/stale/partial/red receipts with exit 2. `find-untested-functions.js --fresh` measures anew.
+- **Do not touch the tree during a gate.** `test-all.js` fails `tree-inert` for changed `git status` under stable HEAD. Moved HEAD exits 2, or 1 if a suite also fails. `check:coverage` refuses missing/stale/partial/red receipts with exit 2. `find-untested-functions.js --fresh` measures anew.
 - **The gate differs from CI.** `check:hook-parse` runs CI's `node --check` on `plugins/*/hooks/*.js`. Seven of CI's steps are `if: matrix.os == 'ubuntu-latest'`.
 - **Conflict markers in strings parse.** `check:conflict-markers` scans all tracked files. Doc examples need closed fences.
 
@@ -57,7 +56,7 @@ State no skill, agent or hook-event counts here: they go stale silently. Count o
 
 ### Skills are the unit of behaviour
 
-`plugins/<plugin>/skills/<name>/SKILL.md` is frontmatter-driven. Invocable names come from directories. **No `rule-*` skill is auto-loaded, and a `paths:` glob loads nothing.** Explicitly load `rule-diagnosis`, `rule-ab-testing` and `rule-gate-integrity` before proposing a cause, detector or gate. Put long references in the skill's `references/`.
+`plugins/<plugin>/skills/<name>/SKILL.md` is frontmatter-driven. Invocable names come from directories. **No `rule-*` skill is auto-loaded, and a `paths:` glob loads nothing.** Explicitly load `rule-diagnosis`, `rule-ab-testing` and `rule-gate-integrity` before proposing a cause, detector or gate.
 
 ### The prd.json sprint system
 

@@ -130,6 +130,35 @@ function main() {
     });
     check(`A3. each of ${planted.length} hand-written sensitive paths is ineligible with its own reason`,
         missed.length === 0, missed.map(([p]) => p).join(', '));
+    // Both directions of the anchor. Each list is real path shapes from this repo or a product repo.
+    const reasonsOf = (p) => fl.classify([f(p, 1)]).reasons;
+    const notSensitive = [
+        'plugins/autodev-core/scripts/authority-audit.js', 'tooling/test-worker-authority.js', 'evals/usage/checks/worker-prompt-authority.js',
+        'src/components/AuthorCard.tsx', 'content/authors/andrei.md', 'lib/author.ts', 'lib/authorship.ts', 'scripts/blog-ingest.js', 'src/BlogIndexPreview.tsx',
+        'docs/obsession.md', 'src/multisession.ts', 'lib/signing.ts', 'lib/design-input.ts', 'lib/log-info.ts', 'lib/log-ingest.ts', 'lib/check-output.js',
+        'src/pinstripe.svg', 'docs/police-report.md', 'src/assign-in-order.ts',
+    ];
+    const falseHits = notSensitive.filter((p) => reasonsOf(p).some((r) => /sensitive pattern/.test(r)));
+    check(`A3b. each of ${notSensitive.length} paths that only contain a sensitive word inside another word is eligible`,
+        falseHits.length === 0, falseHits.map((p) => `${p}: ${reasonsOf(p).join(', ')}`).join(' | '));
+    const stillSensitive = [
+        ['src/lib/admin-session/disconnect.ts', 'session'], ['src/session-store.ts', 'session'], ['src/useSession.ts', 'session'], ['src/sessionStorage.ts', 'session'],
+        ['src/builder/BuilderAuth.tsx', 'auth'], ['src/useAuth.ts', 'auth'], ['app/(auth)/page.tsx', 'auth'], ['app/api/auth/[...nextauth]/route.ts', 'auth'],
+        ['lib/auth.ts', 'auth'], ['lib/auth_helpers.ts', 'auth'], ['lib/authguard.ts', 'auth'], ['lib/authz.ts', 'auth'], ['lib/authorize.ts', 'auth'],
+        ['lib/authorization.ts', 'auth'], ['lib/authorisation.ts', 'auth'], ['lib/authenticity-token.ts', 'auth'], ['lib/unauthorized.ts', 'auth'], ['src/useOAuth.ts', 'auth'],
+        ['src/OAuthCallback.tsx', 'auth'], ['src/well-known/oauth-protected-resource/route.ts', 'auth'], ['src/WebAuthn.ts', 'auth'], ['lib/auth0.ts', 'auth'],
+        ['lib/dev-authorize-file.ts', 'auth'], ['src/LogIn.tsx', 'login'], ['src/log-out.ts', 'login'], ['src/logoutButton.tsx', 'login'],
+        ['src/SignIn.tsx', 'sign-in or sign-up'], ['src/sign_up.ts', 'sign-in or sign-up'], ['src/signin-banner.ts', 'sign-in or sign-up'], ['src/signup.ts', 'sign-in or sign-up'],
+        ['lib/PassWord.ts', 'password'], ['lib/reset-password.ts', 'password'], ['lib/passwd.ts', 'password'], ['src/MiddleWare.ts', 'middleware'],
+        ['src/PaymentIntent.ts', 'payment'], ['src/payment-paths.ts', 'payment'], ['src/prepayment.ts', 'payment'], ['src/supabase-billing.ts', 'billing'],
+        ['src/stripe-webhook.ts', 'stripe'], ['app/CheckOut.tsx', 'checkout'], ['app/checkout-form.tsx', 'checkout'], ['src/subscriptions.ts', 'subscription'],
+        ['src/invoice-form.tsx', 'invoice'], ['lib/step-policy.ts', 'policy'], ['lib/policies.ts', 'policy'], ['db/rls_dryrun.py', 'RLS'], ['db/RLSPolicy.ts', 'RLS'],
+    ];
+    const missedAnchored = stillSensitive.filter(([p, why]) => !reasonsOf(p).includes(`${p} matches the sensitive pattern ${why}`));
+    check(`A3c. each of ${stillSensitive.length} paths where the sensitive word starts a word in a segment stays ineligible with its own reason`,
+        missedAnchored.length === 0, missedAnchored.map(([p, why]) => `${p} (${why}): ${reasonsOf(p).join(', ')}`).join(' | '));
+    check('A3d. wordedPath lower-cases the path and makes each camelCase step a word start',
+        fl.wordedPath('src/OAuthCallback/useSession.ts') === 'src/o-auth-callback/use-session.ts' && fl.wordedPath('a/AUTHGuard.ts') === 'a/auth-guard.ts', fl.wordedPath('src/OAuthCallback/useSession.ts'));
     const renamed = fl.classify([f('src/lib/money.ts', 0, 0, 'src/billing/money.ts')]);
     check('A4. a rename is judged on its old path as well as its new one',
         renamed.eligible === false && renamed.reasons.includes('src/billing/money.ts matches the sensitive pattern billing'), JSON.stringify(renamed.reasons));

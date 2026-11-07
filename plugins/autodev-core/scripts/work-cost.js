@@ -52,6 +52,19 @@
  *
  * Prices come from quota-burn.js priceUsage, required, never copied.
  *
+ * COST PER MODEL TIER. `--tier-line` prints ONE line for a PR body: what the work cost by
+ * model tier (worker-profiles.js TIERS), at list price. A transcript names the model of each
+ * response, so cost is grouped by model family: sonnet is the builder tier, opus is the
+ * escalation, plan and ship tiers together (the transcript cannot say which of the three a
+ * response served), and any other model is "other". The reviewer tier runs an external
+ * command that leaves no transcript, so its cost is the `est_cost` of review receipts
+ * (cheap-review.js) found in `--receipts DIR`, or "n/a" when there are none or no cost rate
+ * was set. A cost that cannot be measured is never printed as $0.
+ *   --tier-line               every merged PR in the span, summed
+ *   --tier-line --pr O/N#NUM  one PR, merged or still open, by the sessions linked to it
+ *   --receipts DIR            review receipts (*.json) for the reviewer figure
+ * Exit 2 when the PR named by --pr has no linked session.
+ *
  *   node work-cost.js                   last 7 days, human summary
  *   node work-cost.js --days 14 --json
  *   node work-cost.js --top 20          how many PRs the summary lists
@@ -67,6 +80,7 @@ const os = require('os');
 const path = require('path');
 const { spawnSync } = require('child_process');
 const claudePaths = require('./claude-paths.js');
+const { TIERS } = require('./worker-profiles.js');
 const { priceUsage, transcripts } = require('./quota-burn.js');
 const { desktopSessionsDir, readSessions } = require('./delivery-outcomes.js');
 
@@ -85,6 +99,48 @@ const BRANCH = /^\w[\w./-]*$/;
 const KINDS = ['create', 'branch', 'checkout', 'merge'];
 // What an unattributed session was, in the order the first match wins.
 const UNATTRIBUTED = ['routine', 'branch', 'scratch', 'outside repo', 'repo trunk', 'no cwd'];
+
+/**
+ * The tier groups a transcript can tell apart: one per Claude model named in TIERS, labelled with
+ * every tier that uses it, plus "other". [{ id: 'sonnet', label: 'builder', tiers: ['builder'] }, ...]
+ */
+function tierGroups() {
+    const by = new Map();
+    for (const [tier, t] of Object.entries(TIERS)) {
+        if (!t.model) continue;
+        if (!by.has(t.model)) by.set(t.model, []);
+        by.get(t.model).push(tier);
+    }
+    return [...by].map(([id, tiers]) => ({ id, label: tiers.join('/'), tiers }));
+}
+
+/** The tier group id of a response's model: a family named in TIERS, else "other". */
+function familyOf(model) {
+    const m = String(model || '').toLowerCase();
+    for (const g of tierGroups()) if (m.includes(g.id)) return g.id;
+    return 'other';
+}
+
+const PR_KEY = /^([\w.-]+\/[\w.-]+)#(\d+)$/;
+
+/** { n, usd }: the review receipts in dir (for one PR when key is given) and the sum of their est_cost, null when none carries one. */
+function reviewerCost(dir, key) {
+    if (!dir) return { n: 0, usd: null, read: false };
+    let names;
+    try { names = fs.readdirSync(dir).filter((x) => x.endsWith('.json')); } catch { return { n: 0, usd: null, read: false }; }
+    const want = key ? PR_KEY.exec(key) : null;
+    let n = 0;
+    let usd = null;
+    for (const name of names) {
+        let j;
+        try { j = JSON.parse(fs.readFileSync(path.join(dir, name), 'utf8')); } catch { continue; }
+        if (!j || j.schema !== 1 || typeof j.repo !== 'string' || !('est_cost' in j) || !('verdict' in j)) continue;
+        if (want && !(String(j.repo).toLowerCase() === want[1].toLowerCase() && Number(j.pr) === Number(want[2]))) continue;
+        n++;
+        if (typeof j.est_cost === 'number' && Number.isFinite(j.est_cost) && j.est_cost >= 0) usd = (usd || 0) + j.est_cost;
+    }
+    return { n, usd, read: true };
+}
 
 function textOf(content) {
     if (typeof content === 'string') return content;
@@ -127,7 +183,7 @@ function mergeTarget(command) {
 function newSession(id) {
     return {
         id, cwd: null, created: new Set(), branches: new Set(), onBranch: new Set(), merges: [],
-        responses: 0, cost: 0, tokens: { input: 0, output: 0, cacheWrite: 0, cacheRead: 0 },
+        responses: 0, cost: 0, tokens: { input: 0, output: 0, cacheWrite: 0, cacheRead: 0 }, byTier: {},
     };
 }
 
@@ -193,6 +249,8 @@ function scan(projects, sinceMs) {
         if (!p.known) pop.fallbackPriced++;
         s.responses++;
         s.cost += p.cost;
+        const family = familyOf(model);
+        s.byTier[family] = (s.byTier[family] || 0) + p.cost;
         for (const k of Object.keys(s.tokens)) s.tokens[k] += p.tokens[k];
     }
     pop.responses = responses.size;
@@ -360,7 +418,7 @@ function measure(opts) {
             const pr = {
                 key, repo, number: p.number, title: String(p.title || ''), url: p.url || null,
                 headRefName: p.headRefName || null, mergedAt: p.mergedAt,
-                cost: 0, tokens: { input: 0, output: 0, cacheWrite: 0, cacheRead: 0 },
+                cost: 0, tokens: { input: 0, output: 0, cacheWrite: 0, cacheRead: 0 }, byTier: {},
                 sessions: new Set(), via: { create: 0, branch: 0, checkout: 0, merge: 0 },
             };
             prs.set(key, pr);
@@ -412,6 +470,7 @@ function measure(opts) {
             if (!pr) { totals.notMerged += s.cost * share; continue; }
             if (!strongest || KINDS.indexOf(kind) < KINDS.indexOf(strongest)) strongest = kind;
             pr.cost += s.cost * share;
+            for (const [fam, c] of Object.entries(s.byTier)) pr.byTier[fam] = (pr.byTier[fam] || 0) + c * share;
             for (const t of Object.keys(pr.tokens)) pr.tokens[t] += s.tokens[t] * share;
             pr.sessions.add(s.id);
             pr.via[kind]++;
@@ -427,8 +486,24 @@ function measure(opts) {
     if (bad.length) return { ok: false, reason: `the ${bad[0][0]} ledger does not parse: ${bad[0][1].detail}` };
 
     const list = [...prs.values()].sort((a, b) => b.cost - a.cost).map((p) => ({ ...p, sessions: p.sessions.size }));
+    // Cost by tier group: every merged PR summed, and one requested PR by the sessions linked to it.
+    const mergedByTier = {};
+    for (const p of list) for (const [fam, c] of Object.entries(p.byTier)) mergedByTier[fam] = (mergedByTier[fam] || 0) + c;
+    let requested = null;
+    if (opts.tierPr) {
+        const key = opts.tierPr.toLowerCase();
+        const byTier = {};
+        let linked = 0;
+        for (const s of sessions) {
+            if (!s.links.has(key)) continue;
+            linked++;
+            for (const [fam, c] of Object.entries(s.byTier)) byTier[fam] = (byTier[fam] || 0) + c / s.links.size;
+        }
+        requested = { key, sessions: linked, byTier };
+    }
     return {
         ok: true,
+        tiers: { groups: tierGroups(), merged: mergedByTier, pr: requested },
         window: { days: opts.days, since: new Date(opts.sinceMs).toISOString() },
         basis: 'list-price equivalent; NOT a subscription bill',
         population: {
@@ -514,6 +589,26 @@ function printHuman(r, top) {
     console.log(lines.join('\n'));
 }
 
+const money = (n) => '$' + (n >= 100 ? Math.round(n).toLocaleString('en-US') : n.toFixed(2));
+
+/**
+ * The one-line per-tier summary, or null when a requested PR has no linked session.
+ * Order: the model tiers as TIERS lists them, then other, then the reviewer.
+ */
+function tierLine(r, { receipts = null, days }) {
+    const req = r.tiers.pr;
+    if (req && req.sessions === 0) return null;
+    const costs = req ? req.byTier : r.tiers.merged;
+    const parts = r.tiers.groups.map((g) => `${g.label} (${g.id}) ${money(costs[g.id] || 0)}`);
+    parts.push(`other models ${money(costs.other || 0)}`);
+    const rev = reviewerCost(receipts, req ? req.key : null);
+    parts.push(rev.usd === null
+        ? `reviewer (external) n/a (${rev.read ? `${rev.n} receipt(s), none with a cost` : 'no receipts read'})`
+        : `reviewer (external) ${money(rev.usd)} over ${rev.n} review(s)`);
+    const scope = req ? `${req.key}, ${req.sessions} session(s)` : `${r.population.mergedPrs} merged PR(s), last ${days} day(s)`;
+    return `Cost by tier (list-price equivalent, not a bill; ${scope}): ${parts.join(', ')}`;
+}
+
 function main() {
     if (has('help') || argv.includes('-h')) {
         console.log([
@@ -524,6 +619,8 @@ function main() {
             '  node work-cost.js --top 20          how many PRs the summary lists (default 10)',
             '  node work-cost.js --repo owner/name also read this repo\'s merged PRs',
             '  node work-cost.js --sessions-dir D  read desktop session records from D',
+            '  node work-cost.js --tier-line       ONE line: cost by model tier, for a PR body',
+            '  node work-cost.js --tier-line --pr owner/name#N [--receipts DIR]   that PR only (merged or open)',
             '',
             'Exit 0 measured, 2 when transcripts, every merged-PR list, or a ledger could not be read.',
         ].join('\n'));
@@ -536,8 +633,14 @@ function main() {
         return;
     }
     const sessionsDir = val('sessions-dir', null);
+    const tierPr = val('pr', null);
+    if (tierPr !== null && !PR_KEY.test(tierPr)) {
+        console.error('--pr needs owner/name#NUMBER');
+        process.exitCode = 2;
+        return;
+    }
     const r = measure({
-        days, sinceMs: Date.now() - days * 86400000, repos: all('repo'),
+        days, sinceMs: Date.now() - days * 86400000, repos: all('repo').concat(tierPr ? [PR_KEY.exec(tierPr)[1]] : []), tierPr,
         sessionsDir: sessionsDir ? path.resolve(sessionsDir) : desktopSessionsDir(),
     });
     if (!r.ok) {
@@ -547,6 +650,16 @@ function main() {
         return;
     }
     if (has('json')) { console.log(JSON.stringify(r)); return; }
+    if (has('tier-line')) {
+        const line = tierLine(r, { receipts: val('receipts', null), days });
+        if (line === null) {
+            console.error(`work-cost: COULD NOT MEASURE: no session is linked to ${tierPr}`);
+            process.exitCode = 2;
+            return;
+        }
+        console.log(line);
+        return;
+    }
     printHuman(r, Math.max(1, Number(val('top', 10)) || 10));
 }
 

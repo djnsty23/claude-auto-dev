@@ -155,6 +155,7 @@ const os = require('node:os');
 const claudePaths = require('./claude-paths.js');
 const acceptance = require('./acceptance-receipt.js');
 const authority = require('./worker-authority.js');
+const paidKeys = require('./paid-key-guard.js');
 const { scriptPlacement, readLedger: readHeadlessLedger, namedTools, defaultOutbox, workerPaths } = require('./headless-worker.js');
 const crypto = require('node:crypto');
 const { spawnSync } = require('node:child_process');
@@ -247,6 +248,7 @@ const MAX_LAUNCH_ATTEMPTS = 3;
 const DEFER_BASE_MS = 15 * 60 * 1000;
 const DEFER_MAX_MS = 4 * HOUR_MS;
 // Refusals a later tick can clear with no person. They are logged, never counted.
+// paid-key-refused is not one: only a person can clear a key from the env, so it counts toward MAX_LAUNCH_ATTEMPTS.
 const TRANSIENT_LAUNCH_CODES = ['fetch-failed', 'origin-unreadable', 'git-unavailable', 'ledger-locked'];
 
 function fault(code, message) { const e = new Error(message || code); e.publicCode = code; throw e; }
@@ -843,6 +845,8 @@ function launch(opts) {
         };
         try {
             if (rec.state !== 'queued') fault('bad-state', `task ${rec.taskId} is ${rec.state}, not queued`);
+            // headless-worker refuses a paid key too; checking the env it would build here fails before any worktree, prompt file or child exists.
+            try { paidKeys.assertSubscriptionEnv(authority.childEnv(process.env, { kind: 'builder' }).env, { allow: paidKeys.allowedByEnv(process.env) }); } catch (e) { fault('paid-key-refused', e.message); }
             resolveRepo(rec.repo);
             if (fetched.status !== 0) fault('fetch-failed', `git fetch origin exited ${fetched.status}: ${fetched.stderr}`);
             if (git(rec.repo, ['rev-parse', '--verify', '--quiet', `${rec.base}^{commit}`]).status !== 0) fault('base-unresolved', `${rec.base} does not resolve in ${rec.repo}`);
