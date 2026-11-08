@@ -107,8 +107,12 @@ function loadDenylist(extraDigestsFile) {
         // A name inside a longer token, such as a domain, still names the client,
         // so every substring of a listed length is hashed. Two-letter names match
         // the whole token only: as substrings they would hit ordinary words.
-        isClient: (line) => lib.candidates(line).some((c) => {
-            if (CLIENT_DIGESTS.has(lookup(c)) || CLIENT_DIGESTS.has(lookup(c.replace(/\d+$/, '')))) return true;
+        // Lowercase n-grams of a two-letter name are noise, so one must be written
+        // in capitals or carry a work-item number.
+        isClient: (line) => line.split(/[^A-Za-z0-9]+/).some((t) => /^(?:[A-Z]{2}\d*|[a-z]{2}\d+)$/.test(t)
+            && CLIENT_DIGESTS.has(lookup(t.replace(/\d+$/, '')))) || lib.candidates(line).some((c) => {
+            const base = c.replace(/\d+$/, '');
+            if (base.length > 2 && (CLIENT_DIGESTS.has(lookup(c)) || CLIENT_DIGESTS.has(lookup(base)))) return true;
             for (const len of CLIENT_NAME_LENGTHS) {
                 for (let i = 0; i + len <= c.length; i++) {
                     if (CLIENT_DIGESTS.has(lookup(c.slice(i, i + len)))) return true;
