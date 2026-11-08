@@ -66,13 +66,13 @@ try {
 
     const dry = run('--dry-run', '--out', out, '--extra-digests', extra);
     check('dry run exits 0', dry.status === 0, dry.stderr);
-    check('dry run reports four files', (dry.stdout.match(/^\d\d-[a-z-]+\.md: [1-9]\d* entries/gm) || []).length === 4, dry.stdout);
+    check('dry run reports five files', (dry.stdout.match(/^\d\d-[a-z-]+\.md: [1-9]\d* entries/gm) || []).length === 5, dry.stdout);
     check('dry run writes nothing', !fs.existsSync(out));
 
     const res = run('--out', out, '--extra-digests', extra);
     check('real run exits 0', res.status === 0, res.stderr);
     const read = (f) => fs.readFileSync(path.join(out, f), 'utf8');
-    for (const f of ['00-README.md', '10-memory-export.md', '20-handoffs.md', '30-skills.md', '40-harness.md']) {
+    for (const f of ['00-README.md', '10-memory-export.md', '20-handoffs.md', '30-skills.md', '40-harness.md', '50-status.md']) {
         check(`${f} exists`, fs.existsSync(path.join(out, f)));
     }
 
@@ -112,6 +112,44 @@ try {
     check('README table lists the four files', ['10-memory-export.md', '20-handoffs.md', '30-skills.md', '40-harness.md'].every((f) => readme.includes(`| \`${f}\` |`)));
     check('README keeps both sections', readme.includes('## How it was made safe') && readme.includes('## How to read it'));
     check('README carries no withheld line', !readme.split('\n').includes(WITHHELD));
+
+    check('README table lists the status file', readme.includes('| `50-status.md` |'));
+    check('README names the file to read every round', readme.includes('`50-status.md` is the one file to read every round') && readme.includes('mail/shared/grok-status.md'));
+
+    check('missing status JSON yields the placeholder', read('50-status.md').includes('(file missing)'));
+
+    const statusFile = '.claude/autodev/grok-shared-status.json';
+    put(statusFile, '{ not json');
+    const brokenOut = path.join(root, 'out-broken');
+    const broken = run('--out', brokenOut, '--extra-digests', extra);
+    check('unparseable status JSON still exits 0', broken.status === 0, broken.stderr);
+    check('unparseable status JSON yields the placeholder', fs.readFileSync(path.join(brokenOut, '50-status.md'), 'utf8').includes('(file missing)'));
+
+    put(statusFile, JSON.stringify({
+        asOf: '2026-11-08T12:00Z',
+        writer: 'fixture',
+        weeklyUsagePct: { value: 41, source: 'get_usage', resetAt: '2026-11-10' },
+        claudeWorkersLive: 2,
+        claudeWorkers: ['one', 'two'],
+        readyQueueDepth: 3,
+        breakUntil: '2026-11-08T20:00Z',
+        waitingOnAndy: ['sign in'],
+        notes: Array.from({ length: 60 }, (_, i) => `note number ${i} ${'x'.repeat(100)}`),
+    }));
+    const statusOut = path.join(root, 'out-status');
+    const present = run('--out', statusOut, '--extra-digests', extra);
+    check('present status JSON exits 0', present.status === 0, present.stderr);
+    const status = fs.readFileSync(path.join(statusOut, '50-status.md'), 'utf8');
+    check('status renders the usage value', status.includes('| Weekly usage | 41% (source: get_usage, resetAt: 2026-11-10) |'), status.slice(0, 300));
+    check('status renders breakUntil', status.includes('| Break until | 2026-11-08T20:00Z |'));
+    check('status renders the lists', status.includes('## Waiting on Andy') && status.includes('- sign in'));
+    check('status stays under 2 KB', Buffer.byteLength(status) < 2048, String(Buffer.byteLength(status)));
+    check('status says what it cut', /\(\d+ more items not shown\)/.test(status));
+
+    put(statusFile, JSON.stringify({ breakUntil: null }));
+    const nullOut = path.join(root, 'out-null');
+    run('--out', nullOut, '--extra-digests', extra);
+    check('a null field renders as none', fs.readFileSync(path.join(nullOut, '50-status.md'), 'utf8').includes('| Break until | none |'));
 
     const emptyHome = path.join(root, 'empty');
     fs.mkdirSync(emptyHome);

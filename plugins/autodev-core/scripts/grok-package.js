@@ -457,6 +457,85 @@ function buildHarness(home) {
     return { text: lines.join('\n'), entries };
 }
 
+// ---- 50-status.md ----
+
+// The one file bots read every round, so it has a hard size budget.
+const STATUS_MAX_BYTES = 2000;
+const STATUS_CELL_CHARS = 200;
+const STATUS_MISSING = '# Fleet status\n\n(file missing)';
+const STATUS_LABELS = {
+    asOf: 'As of',
+    weeklyUsagePct: 'Weekly usage',
+    claudeWorkersLive: 'Claude workers live',
+    readyQueueDepth: 'Ready queue depth',
+    breakUntil: 'Break until',
+    claudeWorkers: 'Claude workers',
+    waitingOnAndy: 'Waiting on Andy',
+};
+
+function statusLabel(key) {
+    return STATUS_LABELS[key] || key.replace(/([a-z])([A-Z])/g, '$1 $2').replace(/^./, (c) => c.toUpperCase());
+}
+
+function statusValue(v) {
+    if (v === null || v === undefined) return 'none';
+    if (typeof v !== 'object') return String(v);
+    if (Array.isArray(v)) return v.map(statusValue).join(', ');
+    return Object.entries(v).map(([k, x]) => `${k}: ${statusValue(x)}`).join(', ');
+}
+
+function usageValue(v) {
+    if (v === null || typeof v !== 'object') return v === null || v === undefined ? 'none' : `${v}%`;
+    const { value, ...rest } = v;
+    const details = statusValue(rest);
+    return `${statusValue(value)}%${details ? ` (${details})` : ''}`;
+}
+
+function statusCell(text) {
+    const flat = collapse(text).replace(/\|/g, '\\|');
+    return flat.length > STATUS_CELL_CHARS ? `${flat.slice(0, STATUS_CELL_CHARS)}...` : flat;
+}
+
+function buildStatus(home) {
+    const src = safeRead(path.join(home, '.claude', 'autodev', 'grok-shared-status.json'));
+    let data = null;
+    try { data = src === null ? null : JSON.parse(src); } catch { data = null; }
+    if (data === null || typeof data !== 'object' || Array.isArray(data)) return { text: STATUS_MISSING, entries: 1 };
+
+    const rows = [];
+    const lists = [];
+    for (const [key, value] of Object.entries(data)) {
+        if (Array.isArray(value)) lists.push({ title: statusLabel(key), items: value.map(statusValue) });
+        else rows.push([statusLabel(key), key === 'weeklyUsagePct' ? usageValue(value) : statusValue(value)]);
+    }
+
+    const lines = ['# Fleet status', '', '| Field | Value |', '|---|---|'];
+    let bytes = Buffer.byteLength(lines.join('\n'));
+    let cut = 0;
+    const fits = (line) => {
+        const size = Buffer.byteLength(line) + 1;
+        if (bytes + size > STATUS_MAX_BYTES - 40) { cut++; return false; }
+        bytes += size;
+        return true;
+    };
+    for (const [label, value] of rows) {
+        const line = `| ${label} | ${statusCell(value)} |`;
+        if (fits(line)) lines.push(line);
+    }
+    for (const list of lists) {
+        if (list.items.length === 0) continue;
+        const heading = `\n## ${list.title}\n`;
+        if (!fits(heading)) { cut += list.items.length; continue; }
+        lines.push(heading);
+        for (const item of list.items) {
+            const line = `- ${statusCell(item)}`;
+            if (fits(line)) lines.push(line);
+        }
+    }
+    if (cut) lines.push('', `(${cut} more items not shown)`);
+    return { text: lines.join('\n'), entries: Object.keys(data).length };
+}
+
 // ---- 00-README.md ----
 
 function formatSize(bytes) {
@@ -469,6 +548,7 @@ function buildReadme(files, dropped, generatedAt) {
         '20-handoffs.md': 'Recent Brain and worker handoffs, and the RESULT line of every worker report from the last 3 days.',
         '30-skills.md': 'The skills any Claude thread on the Windows machine can load, and the routines with their model pins.',
         '40-harness.md': 'How the Claude fleet runs: the Brain start sequence, the always-loaded rules, the mailbox protocol and the fleet-tick routine.',
+        '50-status.md': 'The compact overview both fleets share: usage, live workers, the ready queue and what waits on Andy.',
     };
     const withheld = files.reduce((n, f) => n + f.withheld, 0);
     return [
@@ -481,6 +561,9 @@ function buildReadme(files, dropped, generatedAt) {
         `# Claude fleet package for the Grok fleet (generated ${generatedAt})`,
         '',
         'Regenerated from live sources. It replaces the dated 2026-11-08T0210Z package.',
+        '',
+        '`50-status.md` is the one file to read every round. The other files are reference. The Grok side is asked to',
+        'keep `mail/shared/grok-status.md` with the same fields.',
         '',
         '| File | What it is | Size | Lines withheld |',
         '|---|---|---|---|',
@@ -525,6 +608,7 @@ function main(argv) {
         ['20-handoffs.md', buildHandoffs(opts.home, opts.sinceDays, deny)],
         ['30-skills.md', buildSkills(opts.home)],
         ['40-harness.md', buildHarness(opts.home)],
+        ['50-status.md', buildStatus(opts.home)],
     ].map(([name, b]) => {
         const { text, withheld } = scrub(b.text);
         const final = `${text}\n`;
