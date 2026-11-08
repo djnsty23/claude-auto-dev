@@ -51,6 +51,7 @@ try {
     put('.claude/memory/token.md', memory('tokenplant', `the value is ${PLANT_SECRET} here`, 'project'));
     put('.claude/memory/name.md', memory('nameplant', `this concerns ${PLANT_NAME} directly`, 'reference'));
     put('.claude/memory/thread.md', memory('threadplant', 'see ~/.claude/comms/threads/one for it', 'reference'));
+    put('.claude/memory/he-is-fixture.md', memory('he-is-fixture identityentry', 'identitybody stays'));
     put('.claude/memory/MEMORY.md', 'indexline should not be exported\n');
     put(`.claude/projects/${path.basename(home)}/memory/long.md`, memory('longplant', Array.from({ length: 40 }, (_, i) => `longline ${i}`).join('\n'), 'project'));
     put('.claude/comms/threads/one.md', 'commsbody must never be read\n');
@@ -87,6 +88,7 @@ try {
     check('clean entry survives with its tag date', mem.includes('[2026-03-04] - keepme: [stated 2026-03-04] the keeper line stays readable'));
     check('description is exported', mem.includes('- keepme: keepme survives'));
     check('feedback lands under Instructions', mem.indexOf('## Instructions') < mem.indexOf('keepme') && mem.indexOf('keepme') < mem.indexOf('## Identity'));
+    check('identity slug lands under Identity', mem.indexOf('## Identity') < mem.indexOf('identitybody') && mem.indexOf('identitybody') < mem.indexOf('## Career'));
     check('index file is skipped', !mem.includes('indexline'));
     check('long memory is capped', mem.includes('longline 14') && !mem.includes('longline 15') && mem.includes('25 more lines not exported'));
     check('all five sections present', ['Instructions', 'Identity', 'Career', 'Projects', 'Preferences'].every((s) => mem.includes(`## ${s}`)));
