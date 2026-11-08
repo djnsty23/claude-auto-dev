@@ -447,6 +447,24 @@
     },
     {
       "plugin": "autodev-core",
+      "name": "role-chain",
+      "invocable": true,
+      "status": "proposed",
+      "evidence": {
+        "fires30d": {
+          "model": 0,
+          "typed": 0,
+          "preload": 0
+        },
+        "lastFired": null,
+        "listingBytes": null
+      },
+      "disposition": "retain",
+      "drill": false,
+      "reason": "New on 2026-11-08. Runs one story through separate PM, Spec, Eng, QA and Copy sessions with validated handoff files. auto and brain dispatch one worker per story, so no other skill owns an independent spec and check."
+    },
+    {
+      "plugin": "autodev-core",
       "name": "rule-ab-testing",
       "invocable": false,
       "status": "proposed",
@@ -948,6 +966,24 @@
       "disposition": "retain",
       "drill": false,
       "reason": "Fired 1 time(s) in the window, last on 2026-10-08. No overlap found that would justify a merge."
+    },
+    {
+      "plugin": "autodev-memory",
+      "name": "memory-export",
+      "invocable": true,
+      "status": "proposed",
+      "evidence": {
+        "fires30d": {
+          "model": 0,
+          "typed": 0,
+          "preload": 0
+        },
+        "lastFired": null,
+        "listingBytes": null
+      },
+      "disposition": "retain",
+      "drill": false,
+      "reason": "New on 2026-11-08. Prints every file-based memory as one paste-ready export with PII withheld by default. mem-search retrieves bounded results from the SQLite observation store and does not read these files."
     },
     {
       "plugin": "autodev-stack",
