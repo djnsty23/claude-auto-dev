@@ -234,10 +234,10 @@ function memoryFiles(home) {
 }
 
 function sectionFor(type, slug) {
-    if (type === 'feedback') return 'Instructions';
     if (type === 'project' || type === 'reference') return 'Projects';
     if (/identity|who-?is|he-is-/i.test(slug)) return 'Identity';
     if (/career|linkedin|-cv\b|\bcv-|\bjob\b/i.test(slug)) return 'Career';
+    if (type === 'feedback') return 'Instructions';
     return type === 'user' ? 'Preferences' : 'Projects';
 }
 
