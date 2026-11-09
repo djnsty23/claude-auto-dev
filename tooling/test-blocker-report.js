@@ -93,6 +93,34 @@ try {
             `exit ${r.status} ${r.stdout}${r.stderr}`);
     }
 
+    // A6: an unreported run names its cause from its own log. The log texts are
+    // hand-written literals in the shape real worker logs have.
+    const a6 = path.join(root, 'a6');
+    const resultEvent = (fields) => JSON.stringify({ type: 'result', subtype: 'success', ...fields });
+    const log = (name, text) => { const f = path.join(a6, 'logs', `${name}.log`); write(f, text); return f; };
+    const missing = path.join(root, 'REPORT.md');
+    const unreported = (code, logFile, report = missing) => ({ code, startedAt: '2026-11-07T09:00:00Z', state: 'settled', settledAt: at, result: 'unreported',
+        reason: `exited 1 and ${missing} does not exist`, report, log: logFile });
+    json(path.join(a6, 'unattended-workers.json'), { version: 1, records: [] });
+    json(path.join(a6, 'headless-workers.json'), { version: 1, records: [
+        unreported('limit', log('limit', 'x\n' + resultEvent({ is_error: true, result: "You've hit your weekly limit · resets Nov 11, 1am" }) + '\nCLAUDE_EXIT=1\n')),
+        unreported('refused-w', log('refused-w', resultEvent({ is_error: false, result: 'done', permission_denials: [{ tool_name: 'Write', tool_input: { file_path: 'C:\\x\\REPORT.md' } }] }) + '\n')),
+        unreported('refused-b', log('refused-b', resultEvent({ is_error: false, result: 'done', permission_denials: [{ tool_name: 'Bash', tool_input: { command: 'cat > "C:/x/REPORT.md"' } }] }) + '\n')),
+        unreported('deferred', log('deferred', 'CAPACITY_WAIT=breaker\nCAPACITY_DEFERRED=crash breaker tripped\nCLAUDE_EXIT=-1\n')),
+        unreported('ctl-plain', log('ctl-plain', resultEvent({ is_error: false, result: 'finished, no report' }) + '\n')),
+        unreported('ctl-quote', log('ctl-quote', resultEvent({ is_error: false, result: "You've hit your weekly limit, the docs say" }) + '\n')),
+        unreported('ctl-earlier', log('ctl-earlier', resultEvent({ is_error: true, result: "You've hit your weekly limit" }) + '\n' + resultEvent({ is_error: false, result: 'recovered' }) + '\n')),
+        unreported('ctl-other-denial', log('ctl-other-denial', resultEvent({ is_error: false, result: 'x', permission_denials: [{ tool_name: 'Write', tool_input: { file_path: 'C:\\x\\notes.md' } }] }) + '\n')),
+        unreported('later-report', log('later-report', resultEvent({ is_error: true, result: "You've hit your session limit · resets 5am" }) + '\n'), rep('later', 'Salvaged afterwards.\nRESULT later-report done: x\n')),
+    ] });
+    r = spawnSync(process.execPath, [subject, '--base', a6, '--now', NOW], { encoding: 'utf8' });
+    const a6l = JSON.parse(fs.readFileSync(path.join(a6, 'blockers/latest.json'), 'utf8'));
+    check('A6. a usage-limit ending is named from the last result event', cause(a6l, 'usage limit')?.runs === 2, JSON.stringify(a6l.ranked));
+    check('A6. a refused write of the report is named, by Write and by Bash', cause(a6l, 'report write refused')?.runs === 2, JSON.stringify(a6l.ranked));
+    check('A6. a deferred launch ranks as a pre-worker failure', cause(a6l, 'pre-worker failure (budget, capacity or spawn)')?.runs === 1, JSON.stringify(a6l.ranked));
+    check('A6. controls stay settled unreported: plain, quoted limit, recovered limit, other denial', cause(a6l, 'settled unreported')?.runs === 4, JSON.stringify(a6l.ranked));
+    check('A6. a run with a named failure is not also ranked as blocker not stated', !cause(a6l, 'blocker not stated'), JSON.stringify(a6l.ranked));
+
     write(path.join(base, 'unattended-workers.json'), '{not json');
     r = run();
     check('an unreadable ledger is exit 2, not a clean week', r.status === 2 && /could not read unattended-workers\.json/.test(r.stderr), r.stdout + r.stderr);

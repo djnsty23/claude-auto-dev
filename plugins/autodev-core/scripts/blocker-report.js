@@ -80,6 +80,31 @@ function minedLines(text) {
     return out;
 }
 
+// `[measured 2026-11-09]` Twelve runs ranked as "settled unreported", the top cause:
+// six had every write of REPORT.md refused, four hit the account's usage limit and
+// two never started. The cause is in each run's own log. Only the LAST result event
+// counts, so a limit met earlier or quoted by a worker does not name the run.
+const LIMIT_ENDING = /^You['’]ve hit your\b[^.\n]{0,40}\blimit\b/;
+
+/** The cause an unreported run's own log names, or null when it names none. */
+function unreportedCause(logText, reportFile) {
+    const text = String(logText || '');
+    if (/^CAPACITY_DEFERRED=/m.test(text)) return PRE_WORKER;
+    let last = null;
+    for (const line of text.split(/\r?\n/)) {
+        if (!line.includes('"result"')) continue;
+        let j;
+        try { j = JSON.parse(line); } catch { continue; }
+        if (j && j.type === 'result') last = j;
+    }
+    if (!last) return null;
+    if (last.is_error === true && typeof last.result === 'string' && LIMIT_ENDING.test(last.result.trim())) return 'usage limit';
+    const name = path.basename(String(reportFile || '').replace(/\\/g, '/'));
+    const denied = Array.isArray(last.permission_denials) ? last.permission_denials : [];
+    if (name && denied.some((d) => d && /^(Write|Edit|Bash)$/.test(d.tool_name) && JSON.stringify(d.tool_input || {}).includes(name))) return 'report write refused';
+    return null;
+}
+
 function inWindow(at, since, now) { const t = Date.parse(at); return Number.isFinite(t) && t >= since && t <= now; }
 
 const DONE = ['done', 'succeeded'];
@@ -118,11 +143,11 @@ function workerRuns(base, since, now, unread) {
         const hr = hk ? headless.get(hk) : null;
         runs.push({ id: `unattended:${r.taskId}@${r.startedAt}`, report: r.report,
             result: (hr && hr.result) || r.runStatus || null, reason: (hr && (hr.reason || hr.sentence)) || r.settleReason || null,
-            blocker: (hr && hr.blocker) || null });
+            blocker: (hr && hr.blocker) || null, log: (hr && hr.log) || null });
     }
     for (const [k, r] of headless) {
         if (owned.has(k) || r.state !== 'settled' || !inWindow(r.settledAt, since, now)) continue;
-        runs.push({ id: `headless:${k}`, report: r.report, result: r.result || null, reason: r.reason || r.sentence || null, blocker: r.blocker || null });
+        runs.push({ id: `headless:${k}`, report: r.report, result: r.result || null, reason: r.reason || r.sentence || null, blocker: r.blocker || null, log: r.log || null });
     }
     return runs;
 }
@@ -187,7 +212,11 @@ function build(base, { now, days, capacityBase = path.join(base, 'locks', 'full-
         // A run the supervisor ended before the model started names its own cause.
         if (b && b.status === 'supervisor' && b.text) add(PRE_WORKER, run, String(b.text), 'settled');
         else if (failedRun) {
-            const named = run.result === 'auth-refused' ? 'login refused' : classify(String(run.reason || ''));
+            let fromLog = null;
+            if (run.result === 'unreported' && run.log) {
+                try { fromLog = unreportedCause(fs.readFileSync(run.log, 'utf8'), run.report); } catch { fromLog = null; }
+            }
+            const named = run.result === 'auth-refused' ? 'login refused' : fromLog || classify(String(run.reason || ''));
             add(named === 'other' ? `settled ${run.result}` : named, run, run.reason, 'settled');
         }
         let text = null;
@@ -207,7 +236,9 @@ function build(base, { now, days, capacityBase = path.join(base, 'locks', 'full-
             else statedNone++;
             continue;
         }
-        add('blocker not stated', run, null, 'missing');
+        // A failed run already has its cause above. A report on its path was written
+        // afterwards, by a salvage, so its missing line says nothing about the worker.
+        if (!failedRun) add('blocker not stated', run, null, 'missing');
         const seen = new Set();
         for (const line of minedLines(text)) {
             const cls = classify(line);
@@ -293,7 +324,7 @@ function main(argv) {
     return 0;
 }
 
-module.exports = { classify, statedBlocker, minedLines, queueWaits, build, summaryLine, capacityAlarms, CLASSES };
+module.exports = { classify, statedBlocker, minedLines, unreportedCause, queueWaits, build, summaryLine, capacityAlarms, CLASSES };
 
 if (require.main === module) {
     try { process.exitCode = main(process.argv.slice(2)); }
