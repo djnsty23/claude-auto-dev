@@ -23,8 +23,8 @@
  *   node merge-lock.js --help
  *
  * EVERY merge needs a proof of the tree (a gate or fast-lane receipt) AND a
- * review of it (a review receipt, or a recorded override). A sensitive diff
- * also needs an escalation receipt. All three are below.
+ * review of it (a review receipt, or a recorded override). A sensitive or
+ * risk-class diff also needs an escalation receipt. All three are below.
  *
  * WHAT `merge` DOES, in order:
  *   1. Checks the gate receipt (below), then the review receipt or override.
@@ -48,10 +48,10 @@
  *      patterns (and the base's autodevFastLane.sensitive). A sensitive path,
  *      a file list that cannot be read, or a base config that cannot be read
  *      all count as sensitive, and then --escalation-receipt is required.
- *   4b2. Without an escalation receipt, reads GitHub's own diff for this
+ *   4b2. Without an escalation receipt, or with an override, reads GitHub's own diff for this
  *      compare and runs cheap-review.js's riskClasses on it: a paid call, a
  *      cron, queue or job, a link token or signature, or over 1000 lines. Any
- *      class, or a diff that cannot be read, needs --escalation-receipt. A
+ *      class, or a diff GitHub refuses or that overflows the read, needs --escalation-receipt. A
  *      receipt's risk_classes field is never read, because a receipt is text.
  *   4c. With --review-override, appends one event to the deploy ledger (below).
  *      A ledger that cannot be written refuses the merge.
@@ -118,8 +118,8 @@
  * unreviewed head by mistake, not a forgery.
  *
  * --review-override "<reason>" replaces the review receipt when review cannot
- * run (the reviewer is down, the diff is over its line cap and was read by a
- * person). The reason must hold at least 10 characters after whitespace is
+ * run (the reviewer is down, or a person read the diff). It does not clear a
+ * sensitive path or a risk class, and a diff over 1000 lines is one. The reason must hold at least 10 characters after whitespace is
  * collapsed. It is written into the lock's meta line, where `status` shows it,
  * and appended to the deploy ledger as one event line, kind "review-override",
  * through deploy-ledger.js's appendEvent: `<config dir>/autodev/deploy-ledger-events.jsonl`,
@@ -390,14 +390,18 @@ function sensitiveReasons(cmp, pkgText) {
 
 /**
  * The risk classes of the diff GitHub will merge, derived here and never read
- * from a receipt. A diff GitHub refuses or an answer that is not a diff counts
- * as a class: a failed read must not lower the bar. gh that could not run at
- * all is indeterminate.
+ * from a receipt. A diff GitHub refuses as too large, one that overflows the
+ * read, or an answer that is not a diff counts as a class: a failed read must
+ * not lower the bar. Any other gh failure is an outage, so it is indeterminate
+ * and names the cause. An empty diff is clean only when GitHub lists no files.
  */
-function riskClassesOnGitHub(repo, baseSha, head, env) {
+function riskClassesOnGitHub(repo, baseSha, head, cmp, env) {
     const r = runGh(['api', `repos/${repo}/compare/${baseSha}...${head}`, '-H', 'Accept: application/vnd.github.v3.diff'], env);
-    if (r.error && r.error !== 'ENOBUFS') throw unsure(`reading the diff of ${baseSha.slice(0, 12)}...${head.slice(0, 12)}: could not run gh (${r.error})`);
-    if (!r.ok) return [{ class: 'diff-unreadable', file: r.error || `gh exited ${r.status}` }];
+    if (!r.ok) {
+        if (r.error === 'ENOBUFS' || /HTTP 406/.test(r.stderr)) return [{ class: 'diff-unreadable', file: r.error || 'GitHub refused the diff as too large' }];
+        throw unsure(`reading the diff of ${baseSha.slice(0, 12)}...${head.slice(0, 12)}: ${r.error || r.stderr.split('\n')[0] || `gh exited ${r.status}`}`);
+    }
+    if (!r.stdout.trim() && Array.isArray(cmp.files) && cmp.files.length === 0) return [];
     if (!/^diff --git /m.test(r.stdout)) return [{ class: 'diff-unreadable', file: 'GitHub answered with no diff' }];
     return cheapReview.riskClasses(r.stdout);
 }
@@ -631,18 +635,16 @@ async function mergeHeld({ repo, pr, head, env, log, readbackMs, pollMs, fastRec
             + 'and needs --escalation-receipt FILE: dispatch the code-reviewer agent on opus and save the JSON it prints. A review override does not waive it');
     }
     if (sensitive.length) log(`${TAG} sensitive diff (${sensitive.length} reason(s)); the escalation receipt is on file`);
-    if (!escalation) {
-        const risks = riskClassesOnGitHub(repo, base.sha, head, env);
-        if (risks.length) {
-            const named = risks.slice(0, 4).map((x) => (x.file ? `${x.class} (${x.file})` : x.class)).join('; ');
-            throw refuse(`${repo}#${pr} is in a risk class (${named}${risks.length > 4 ? `; and ${risks.length - 4} more` : ''}), `
-                + 'and needs --escalation-receipt FILE: dispatch the code-reviewer agent on opus and save the JSON it prints. A review override does not waive it');
-        }
+    const risks = !escalation || override ? riskClassesOnGitHub(repo, base.sha, head, cmp, env) : [];
+    if (risks.length && !escalation) {
+        const named = risks.slice(0, 4).map((x) => (x.file ? `${x.class} (${x.file})` : x.class)).join('; ');
+        throw refuse(`${repo}#${pr} is in a risk class (${named}${risks.length > 4 ? `; and ${risks.length - 4} more` : ''}), `
+            + 'and needs --escalation-receipt FILE: dispatch the code-reviewer agent on opus and save the JSON it prints. A review override does not waive it');
     }
     if (override) {
         let file;
         try {
-            file = appendDeployEvent({ kind: 'review-override', repo, pr, head, reason: override, sensitive: sensitive.length > 0 }, env);
+            file = appendDeployEvent({ kind: 'review-override', repo, pr, head, reason: override, sensitive: sensitive.length > 0, risk_classes: [...new Set(risks.map((x) => x.class))] }, env);
         } catch (e) {
             throw refuse(`could not record the review override in the deploy ledger (${e.code || e.message}); an unrecorded override does not merge`);
         }

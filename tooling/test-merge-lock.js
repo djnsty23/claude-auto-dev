@@ -83,6 +83,8 @@ if (args[0] === 'api') {
     }
     if ((m = /\\/compare\\/([0-9a-f]{40})\\.\\.\\.([0-9a-f]{40})$/.exec(p)) && args.includes('Accept: application/vnd.github.v3.diff')) {
         if (st.diffRefused) { process.stderr.write('gh: Sorry, the diff exceeded the maximum number of lines (HTTP 406)\\n'); process.exitCode = 1; return; }
+        if (st.diffDown) { process.stderr.write('gh: Server Error (HTTP 502)\\n'); process.exitCode = 1; return; }
+        if (st.diffHuge) { process.stdout.write('x'.repeat(33 * 1024 * 1024)); return; }
         process.stdout.write(typeof st.diff === 'string' ? st.diff : 'diff --git a/src/components/Footer.tsx b/src/components/Footer.tsx\\n--- a/src/components/Footer.tsx\\n+++ b/src/components/Footer.tsx\\n@@ -1 +1 @@\\n+export const a = 1\\n');
         return;
     }
@@ -473,6 +475,10 @@ async function main() {
         check('F1. a green fast-lane receipt on an eligible GitHub diff merges through the lock',
             ok.exit === 0 && merges('fl-green') === 1 && /fast lane: 12 changed lines in 2 file\(s\)/.test(ok.out)
             && /matches the proved tree/.test(ok.out) && lockGone(), detail(ok));
+
+        const flCron = runFast(receipt({}), 'fl-cron', { diff: 'diff --git a/src/app/api/cron/n/route.ts b/src/app/api/cron/n/route.ts\n--- a/src/app/api/cron/n/route.ts\n+++ b/src/app/api/cron/n/route.ts\n@@ -0,0 +1 @@\n+export const a = 1\n' });
+        check('F1b. a fast-lane merge is not exempt from the risk classes',
+            flCron.exit === 1 && merges('fl-cron') === 0 && /risk class \(job .*needs --escalation-receipt/.test(flCron.err) && lockGone(), detail(flCron));
 
         const redSteps = green.steps.map((s) => (s.step === 'test' ? { ...s, exit: 1 } : s));
         const pre = [
@@ -913,10 +919,10 @@ async function main() {
         check('G16. a sensitive diff merges on an override plus an opus escalation receipt, and the ledger event says sensitive',
             happyOv.exit === 0 && mergedCount('happy-ov') === 1 && events().slice(-1)[0].sensitive === true, detail(happyOv));
 
-        // G16b-G16h. merge-lock derives the risk classes from GitHub's own diff and reads none from a receipt.
+        // G16b-G16m. merge-lock derives the risk classes from GitHub's own diff and reads none from a receipt.
         const hunk = (file, line) => `diff --git a/${file} b/${file}\n--- a/${file}\n+++ b/${file}\n@@ -0,0 +1 @@\n+${line}\n`;
         const CRON_DIFF = hunk('src/app/api/cron/n/route.ts', 'export const a = 1');
-        const asksDiff = (who) => calls(who).some((c) => c.what.includes('application/vnd.github.v3.diff'));
+        const asksDiff = (who) => calls(who).some((c) => c.what === `api repos/${REPO}/compare/${BASE0}...${HEAD} -H Accept: application/vnd.github.v3.diff`);
         const editedApprove = runG('risk-edited', ['--review-receipt', reviewOf({ risk_classes: [] })], { diff: CRON_DIFF });
         check('G16b. a hand-edited approve with an empty risk_classes on a cron diff is refused under the lock, before any merge',
             editedApprove.exit === 1 && mergedCount('risk-edited') === 0 && /risk class \(job \(src\/app\/api\/cron\/n\/route\.ts\)\).*needs --escalation-receipt/.test(editedApprove.err) && lockGone(), detail(editedApprove));
@@ -928,6 +934,8 @@ async function main() {
         check('G16d. a cron diff with an opus escalation receipt merges', riskEsc.exit === 0 && mergedCount('risk-esc') === 1 && lockGone(), detail(riskEsc));
         const riskOvEsc = runG('risk-ov-esc', ['--review-override', 'reviewer down; escalation done', '--escalation-receipt', escalationOf()], { diff: CRON_DIFF });
         check('G16e. an override plus an opus escalation receipt merges a cron diff', riskOvEsc.exit === 0 && mergedCount('risk-ov-esc') === 1, detail(riskOvEsc));
+        const lastEvent = events()[events().length - 1] || {};
+        check('G16e2. that override records the risk class in the deploy ledger', lastEvent.kind === 'review-override' && JSON.stringify(lastEvent.risk_classes) === '["job"]', JSON.stringify(lastEvent).slice(0, 300));
         const clean = runG('risk-clean', ['--review-receipt', REVIEW]);
         check('G16f. a diff in no risk class merges on the review receipt alone, and GitHub was asked for the diff',
             clean.exit === 0 && mergedCount('risk-clean') === 1 && asksDiff('risk-clean') && lockGone(), detail(clean));
@@ -939,6 +947,15 @@ async function main() {
         const unreadable = [['risk-406', { diffRefused: true }], ['risk-json', { diff: '{"behind_by":0}' }], ['risk-empty', { diff: '' }]].map(([who, st]) => ({ who, r: runG(who, ['--review-receipt', REVIEW], st) }));
         check('G16i. a diff GitHub refuses, or an answer that is not a diff, counts as a risk class and needs the escalation receipt',
             unreadable.every(({ who, r }) => r.exit === 1 && mergedCount(who) === 0 && /diff-unreadable.*needs --escalation-receipt/.test(r.err)), unreadable.map(({ r }) => detail(r)).join(' | '));
+
+        const riskDown = runG('risk-502', ['--review-receipt', REVIEW], { diffDown: true });
+        check('G16j. a GitHub outage on the diff read is indeterminate, names the cause, and does not merge',
+            riskDown.exit === 2 && mergedCount('risk-502') === 0 && /HTTP 502/.test(riskDown.err) && lockGone(), detail(riskDown));
+        const riskHuge = runG('risk-huge', ['--review-receipt', REVIEW], { diffHuge: true });
+        check('G16k. a diff larger than the read buffer counts as unreadable and needs the escalation receipt',
+            riskHuge.exit === 1 && mergedCount('risk-huge') === 0 && /diff-unreadable.*needs --escalation-receipt/.test(riskHuge.err) && lockGone(), detail(riskHuge));
+        const riskNone = runG('risk-none', ['--review-receipt', REVIEW], { diff: '', files: [] });
+        check('G16l. a PR with no changed files merges as before', riskNone.exit === 0 && mergedCount('risk-none') === 1, detail(riskNone));
 
         // G17. an unwritable ledger refuses the override rather than merging unrecorded.
         const blocked = path.join(root, 'ledger-is-a-dir');
