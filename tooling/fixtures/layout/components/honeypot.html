@@ -5,12 +5,14 @@
 <title>honeypot</title>
 <!--
   A form honeypot is a field that real visitors must never reach. A real
-  brochure site build tripped TAP-TARGET on one. Two honeypots sit here beside
-  five near misses, each missing one half of the exemption. The suite asserts
+  brochure site build tripped TAP-TARGET on one. Four honeypots sit here beside
+  seven near misses, each missing one part of the exemption. The suite asserts
   the exact set: the near misses fire and the honeypots do not.
 
     hp-self     aria-hidden="true" and tabindex="-1" on the input
     hp-wrap     tabindex="-1" on the input, aria-hidden="true" on its wrapper
+    hp-area     both on a textarea
+    hp-select   both on a select
 
     only-aria   aria-hidden="true" but still in the tab order
     only-tab    tabindex="-1" but still exposed to assistive technology
@@ -20,13 +22,16 @@
                 property alone would wrongly exempt it.
     bad-tab     the same span with an empty tabindex, which is invalid. Its
                 tabIndex property reads -1 too.
+    hp-link     both on a visible link, the duplicate card-link idiom. A finger
+                can still tap it, and it is not a form field.
+    hp-button   both on a visible button, for the same reason.
 -->
 <style>
   *,*::before,*::after{box-sizing:border-box}
   body{margin:0;font:16px/1.5 system-ui,sans-serif;color:#1a1a1a;background:#fff}
   main{padding:16px}
   .slot{margin:0 0 24px}
-  input{display:block;width:200px;height:20px;padding:0;border:1px solid #888;border-radius:0}
+  input,textarea,select,a,button{display:block;width:200px;height:20px;padding:0;border:1px solid #888;border-radius:0}
   [role=button]{display:block;width:200px;height:20px}
 </style>
 </head><body><main>
@@ -37,4 +42,8 @@
   <div class="slot"><input id="aria-false" name="c" aria-hidden="false" tabindex="-1" autocomplete="off"></div>
   <div class="slot"><span id="no-attr" role="button" aria-hidden="true">x</span></div>
   <div class="slot"><span id="bad-tab" role="button" aria-hidden="true" tabindex="">x</span></div>
+  <div class="slot"><textarea id="hp-area" name="notes" aria-hidden="true" tabindex="-1"></textarea></div>
+  <div class="slot"><select id="hp-select" name="kind" aria-hidden="true" tabindex="-1"><option>a</option></select></div>
+  <div class="slot"><a id="hp-link" href="/p" aria-hidden="true" tabindex="-1">x</a></div>
+  <div class="slot"><button id="hp-button" type="button" aria-hidden="true" tabindex="-1">x</button></div>
 </main></body></html>

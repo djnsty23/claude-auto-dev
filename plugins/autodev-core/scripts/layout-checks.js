@@ -927,9 +927,11 @@ function analyseComponents(snapshot, T) {
             if (!e.ia || !onScreen(e.box)) continue;
             population.tapCandidates++;
             if (e.dis) { exempt.disabled++; continue; }
-            // A form honeypot: hidden from assistive technology AND out of the
-            // tab order. Either half alone leaves it reachable by one of those.
-            if (e.ah === true && e.ti === -1) { exempt.honeypot++; continue; }
+            // A form honeypot: a form field hidden from assistive technology AND
+            // out of the tab order. Either half alone leaves it reachable by one
+            // of those. A visible link or button with both can still be tapped,
+            // so it stays judged.
+            if (e.ah === true && e.ti === -1 && /^input:|^(textarea|select)$/.test(e.ia)) { exempt.honeypot++; continue; }
             if (e.inl) { exempt.inlineLink++; continue; }
             let t = Object.assign({}, e.box);
             for (const ps of e.ps || []) {
