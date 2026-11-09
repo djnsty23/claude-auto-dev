@@ -108,10 +108,13 @@ enqueue` carries three things:
   "Make it work" or "tests pass" names no test. A worker that has to guess its
   endpoint is the run that comes back as a follow-up.
 - **The worker's order: review before the gate.** Build, own tests with a planted defect, independent review
-  (a `code-reviewer` subagent on model opus for a diff with a paid call, a
-  cron, queue or job, a link token or signature, or over 1000 lines, which are
-  the diffs `cheap-review.js` will not approve), fixes, then the one full gate.
-  A rebase onto a moved base is the only reason for a further gate. The
+  (a `code-reviewer` subagent, on model opus for a diff with a paid call, a
+  cron, queue or job, a link token or signature, or over 1000 lines, the classes
+  `cheap-review.js` escalates by pattern, so it catches their common shapes only),
+  fixes, then the repository's one merge-bar gate. A rebase onto a moved base is
+  the only reason for a further gate. This review does not replace the
+  `--escalation-receipt` at landing, which binds the PR and its final head, so a
+  risk-class diff is read by Opus twice. The
   `HEADLESS_NOTE` tells every headless worker the same order: on 2026-11-09 three
   product PRs took 22 findings from a review that ran after their full gates.
 - **A gated commit from the worker, and the landing by you.** A headless builder
