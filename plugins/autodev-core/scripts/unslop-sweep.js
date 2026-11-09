@@ -612,11 +612,20 @@ function mergeVision(captures, visionItems) {
 
 // ================================================================ browser
 
-/** Resolve a module from the product first, then from an explicit path. */
-function resolveFrom(root, name, explicit) {
+/**
+ * Load the browser driver: an explicit path, else the product's playwright,
+ * else its playwright-core. Only the resolve step falls through: a driver that
+ * is installed but fails to load reports its own error.
+ */
+function loadBrowserDriver(root, explicit) {
     if (explicit) return require(path.resolve(explicit));
     const paths = [root, process.cwd()].filter(Boolean);
-    return require(require.resolve(name, { paths }));
+    for (const name of ['playwright', 'playwright-core']) {
+        let resolved;
+        try { resolved = require.resolve(name, { paths }); } catch { continue; }
+        return require(resolved);
+    }
+    throw new Bail(2, `unslop-sweep: no browser driver resolves from ${paths.join(' or ')}. Install one in the product with: npm i -D playwright-core && npx playwright-core install chromium. Or pass --playwright <dir of a playwright package>.`);
 }
 
 function contextOptions(width) {
@@ -716,7 +725,7 @@ async function sweep(args) {
     const plan = await planFromArgs(args, root);
     if (!plan.routes.length) throw new Bail(2, 'no routes to sweep: pass --root with an app router, --sitemap or --routes-file');
 
-    const pw = resolveFrom(root, 'playwright', args.playwright);
+    const pw = loadBrowserDriver(root, args.playwright);
     let axeSource = null;
     if (!args['no-axe']) {
         try {
@@ -1174,7 +1183,7 @@ module.exports = {
     discoverAppRoutes, findAppDir, isDynamic, patternRegex, parseSitemap, readRouteList, planRoutes,
     isLocalBase, findLoginSources, slugOf, scoreOf, rankFindings, componentOf, groupStories, mergeIntoPrd,
     flattenScorecard, compareScorecards, scorecardOf, makePairs, scorePairs, rng, validateVision, mergeVision,
-    contextOptions, capture, pixelDiff, signIn, sweep, printReport, printCompare, briefText, parseArgs,
+    contextOptions, loadBrowserDriver, capture, pixelDiff, signIn, sweep, printReport, printCompare, briefText, parseArgs,
     RULE_WEIGHT, RUBRIC, RUBRIC_RULES, DEFAULT_WIDTHS,
 };
 
