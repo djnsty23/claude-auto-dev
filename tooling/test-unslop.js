@@ -464,6 +464,42 @@ async function sweepTests() {
     try { await SWEEP.sweep({ base: 'https://example.com', playwright: FAKE }); } catch (e) { refused = e; }
     check('sweep: a non-local base is refused with exit 2 before a browser starts', refused && refused.exitCode === 2 && /local/.test(refused.message));
 
+    // A product that installs only playwright-core still gets a browser. Each
+    // project is a real directory resolved through the CLI, the way a sweep
+    // runs, so the check reads the exit code and what the operator sees.
+    const project = (name, pkgs) => {
+        const dir = path.join(tmp, name);
+        fs.mkdirSync(dir, { recursive: true });
+        for (const [pkg, body] of Object.entries(pkgs)) {
+            fs.mkdirSync(path.join(dir, 'node_modules', pkg), { recursive: true });
+            fs.writeFileSync(path.join(dir, 'node_modules', pkg, 'index.js'), body);
+        }
+        return dir;
+    };
+    const sweepCli = (dir, out) => spawnSync(process.execPath, [SWEEP_CLI, 'sweep', '--base', 'http://localhost:3999', '--root', dir,
+        '--routes-file', listFile, '--out', out, '--no-axe', '--quiet', '--widths', '390'], { encoding: 'utf8', cwd: dir });
+    const coreOnly = project('core-only', { 'playwright-core': fs.readFileSync(FAKE, 'utf8') });
+    const coreOut = path.join(tmp, 'core-only-out');
+    const coreRun = sweepCli(coreOnly, coreOut);
+    const coreSnaps = fs.existsSync(path.join(coreOut, 'snapshots')) ? fs.readdirSync(path.join(coreOut, 'snapshots')).length : 0;
+    check('driver: a project with only playwright-core completes a sweep and writes its before state', coreRun.status === 0 && coreSnaps > 0, { status: coreRun.status, coreSnaps, stderr: coreRun.stderr.slice(0, 400) });
+
+    const both = project('both-drivers', { playwright: "module.exports = { which: 'playwright' };", 'playwright-core': "module.exports = { which: 'core' };" });
+    check('driver: playwright still wins when both are installed',
+        typeof SWEEP.loadBrowserDriver === 'function' && SWEEP.loadBrowserDriver(both).which === 'playwright');
+    // A broken install must say so, not fall through to the other driver.
+    const broken = project('broken-driver', { playwright: "require('a-dependency-that-is-missing');", 'playwright-core': "module.exports = { which: 'core' };" });
+    let brokenErr = null;
+    try { if (typeof SWEEP.loadBrowserDriver === 'function') SWEEP.loadBrowserDriver(broken); } catch (e) { brokenErr = e; }
+    check('driver: a playwright that fails to load is reported, not masked by playwright-core', brokenErr && /a-dependency-that-is-missing/.test(brokenErr.message), brokenErr && brokenErr.message);
+
+    const none = project('no-driver', {});
+    const noneRun = sweepCli(none, path.join(tmp, 'no-driver-out'));
+    check('driver: with neither installed the sweep exits 2', noneRun.status === 2, noneRun.status);
+    check('driver: and the message names the install command and --playwright', /npm i(nstall)? -D playwright-core/.test(noneRun.stderr) && /--playwright/.test(noneRun.stderr), noneRun.stderr.slice(0, 400));
+    check('driver: and it is not a stack trace', !/\n\s+at /.test(noneRun.stderr) && !/MODULE_NOT_FOUND|Require stack/.test(noneRun.stderr), noneRun.stderr.slice(0, 400));
+
+
     // Report, stories, compare, pairs, vision, through the CLI.
     const run = (args) => spawnSync(process.execPath, [SWEEP_CLI].concat(args), { encoding: 'utf8', cwd: tmp });
     const rep = run(['report', out1]);
