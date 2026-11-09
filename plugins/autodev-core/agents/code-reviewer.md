@@ -70,7 +70,9 @@ Check the diff against each class. A hit is a BLOCKER if it can spend money, los
 ## Escalation Receipt
 
 `merge-lock.js` refuses a sensitive diff (money, auth, migrations and the other
-paths `fast-lane.js` classifies sensitive) without an escalation receipt, and
+paths `fast-lane.js` classifies sensitive) or a diff in a risk class (a paid call,
+a cron, queue or job, a link token or signature, or over 1000 lines, derived with
+`cheap-review.js`) without an escalation receipt, and
 the `autoreview` skill dispatches you for it. You have no Write tool, so you
 cannot save a file: you PRINT the receipt and the caller saves it exactly as
 printed.

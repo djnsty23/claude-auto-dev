@@ -6,7 +6,8 @@
  * The receipt replaces the GATE only. merge-lock.js merge also requires
  * --review-receipt FILE (cheap-review.js's JSON) or --review-override
  * "<reason>" on every merge, and --escalation-receipt FILE when the diff is
- * sensitive or in a risk class. It reuses this file's classifier for that: classify() with the
+ * sensitive or in a risk class. The risk classes come from cheap-review.js.
+ * For a sensitive path it reuses this file's classifier: classify() with the
  * size limit and the preview rule taken out, keeping only the reasons that
  * read "matches the sensitive pattern". Keep that wording stable, or change
  * merge-lock.js (SENSITIVE_REASON_RE) in the same commit.
