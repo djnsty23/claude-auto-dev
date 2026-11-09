@@ -34,6 +34,7 @@ const LONG_WAIT_MIN = 10;
 
 // One cause per class, first match wins. Ordered from the most specific.
 const CLASSES = [
+    ['usage limit', /\bhit your\b[^.]{0,40}\blimit\b|\baccount usage limit\b/i],
     ['login refused', /\b(auth[- ]refused|invalid api key|oauth token|login (?:was )?refused|subscription access)\b/i],
     ['permission guard denied', /\b(guard|classifier|permission)\b[^.]{0,80}\b(denied|refused|blocked)\b|\b(denied|refused)\b[^.]{0,40}\b(guard|classifier|permission)\b/i],
     ['credential or env file', /\b(\.env|env file|credential|secret|doppler)\b[^.]{0,80}\b(missing|denied|refused|absent|not found|without)\b/i],
