@@ -290,6 +290,11 @@ try {
         // `[measured 2026-10-29]` five briefs asked headless workers for a push and a pull request the sandbox refuses.
         check('3b. the HEADLESS_NOTE hands push, pull request and merge to the coordinator, even when the brief asks',
             /coordinator's steps even when the brief asks/.test(HEADLESS_NOTE) && /gated commit and put its head SHA and gate receipt in the report/.test(HEADLESS_NOTE));
+        // `[measured 2026-11-09]` three product PRs passed a full gate and then took 22 findings from a later review.
+        check('3c. the HEADLESS_NOTE orders the review before the one full gate',
+            /own tests with a planted defect, independent review/.test(HEADLESS_NOTE) && /then the one full gate/.test(HEADLESS_NOTE) && /only reason for a further gate/.test(HEADLESS_NOTE));
+        const channels = fs.readFileSync(path.resolve(__dirname, '..', 'plugins/autodev-core/skills/brain/references/dispatch-channels.md'), 'utf8');
+        check('3d. the dispatch doc states the same order', /own tests with a planted defect, independent review/.test(channels) && /only reason for a further gate/.test(channels));
         const noModel = hw(['start', '--code', 'DRY', '--prompt-file', PROMPT, '--log', log, '--claude-bin', FAKE, '--ledger', ledger, '--dry-run']);
         check('2. --model unset means no --model flag at all', noModel.json && !noModel.json.value.argv.includes('--model'));
         check('2. --plugin-dir unset means no --plugin-dir flag at all', noModel.json && !noModel.json.value.argv.includes('--plugin-dir'));

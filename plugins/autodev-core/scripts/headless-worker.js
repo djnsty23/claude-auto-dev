@@ -175,7 +175,9 @@ const HEADLESS_NOTE = 'HEADLESS: this process exits the moment the turn ends, so
     + 'command in the FOREGROUND with the Bash timeout at its maximum, background nothing, and do not end '
     + 'the turn until the report file is complete and carries its RESULT line. Pushing, opening a pull request and '
     + 'merging are refused here and are the coordinator\'s steps even when the brief asks for them: stop at a gated '
-    + 'commit and put its head SHA and gate receipt in the report.';
+    + 'commit and put its head SHA and gate receipt in the report. Work in this order: build, own tests with a planted defect, independent review (a code-reviewer subagent '
+    + 'on model opus when the diff adds a paid call, a cron, queue or job, a link token or signature, or is over 1000 lines), fixes, then the one full gate. '
+    + 'A rebase onto a moved base is the only reason for a further gate.';
 
 // `[measured 2026-10-29]` 72 worker runs in a week left no line saying what slowed them,
 // so the only blocker evidence was mined from free text. blocker-report.js ranks this
