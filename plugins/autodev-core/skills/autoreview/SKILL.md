@@ -111,7 +111,8 @@ node "${CLAUDE_PLUGIN_ROOT}/scripts/merge-lock.js" merge --repo "$REPO" --pr "$P
 Use `--fast-lane-receipt` instead of `--gate-receipt` when the fast lane was the
 bar. When the reviewer could not run and a person read the diff, the only
 substitute is `--review-override "<reason>"` with a reason of at least ten
-characters. It is recorded in the deploy ledger.
+characters. It is recorded in the deploy ledger. It does not clear a risk class,
+and a diff over 1000 lines is one: that takes the Opus escalation receipt.
 
 ## Step 4: escalate, and sensitive diffs
 

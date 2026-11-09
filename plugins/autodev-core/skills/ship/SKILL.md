@@ -66,7 +66,7 @@ A change reaches the production branch only through `merge-lock.js`, and that
 needs a review receipt for the exact head as well as the gate receipt. Run the
 `autoreview` skill first. It uses a cheap reviewer on every pull request and
 brings in the opus `code-reviewer` only on escalation, or for a money, auth or
-migration diff, where merge-lock also requires its escalation receipt. A review
+migration diff or a risk-class diff, where merge-lock also requires its escalation receipt. A review
 override (`--review-override`) is for a reviewer that could not run, needs a
 stated reason, and never replaces the escalation receipt. Do not report a change
 as ready to ship on a gate receipt alone.

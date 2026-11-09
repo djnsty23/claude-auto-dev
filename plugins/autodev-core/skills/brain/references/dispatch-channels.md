@@ -125,7 +125,8 @@ enqueue` carries three things:
   -u origin claude/<slug>`, `gh pr create`, review it with the `autoreview` skill
   (it writes the review receipt), then `merge-lock.js merge --pr <n> --head <sha>
   --gate-receipt <file> --review-receipt <file>`. A sensitive diff (money, auth,
-  migrations, anything `fast-lane.js` classifies sensitive) also takes
+  migrations, anything `fast-lane.js` classifies sensitive, or a risk class
+  that merge-lock derives from GitHub's diff) also takes
   `--escalation-receipt <file>`, the JSON an opus `code-reviewer` pass prints.
   `--review-override "<reason>"` replaces the review receipt only, is logged in
   the deploy ledger, and never waives the escalation.

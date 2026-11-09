@@ -36,7 +36,7 @@ JSON that `cheap-review.js` writes (schema 1, this repo, PR and head exactly,
 verdict `approve`). `--review-override "<reason>"`, at least 10 characters,
 replaces it when review cannot run, and is recorded in the lock meta and the
 deploy ledger. A release that touches a sensitive path (the patterns in
-`fast-lane.js`) also needs `--escalation-receipt`, the JSON the opus
+`fast-lane.js`) or falls in a risk class also needs `--escalation-receipt`, the JSON the opus
 `code-reviewer` agent prints; an override does not waive it.
 
 ```bash
