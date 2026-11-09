@@ -1117,13 +1117,35 @@ function matchAuthRefusal(text) {
  * parsed whole, and a result quoted inside a message string never counts.
  */
 function authRefusal(logText) {
+    const last = lastResultEvent(logText);
+    return last ? matchAuthRefusal(last.result) : null;
+}
+
+/** The last stream-json `result` event of a log, or null. */
+function lastResultEvent(logText) {
     let last = null;
     for (const line of String(logText || '').split(/\r?\n/)) {
         if (!line.startsWith('{') || !line.includes('"type":"result"')) continue;
         let j; try { j = JSON.parse(line); } catch { continue; }
         if (j && j.type === 'result') last = j;
     }
-    return last ? matchAuthRefusal(last.result) : null;
+    return last;
+}
+
+// `[measured 2026-11-09]` four runs in one night ended on "You've hit your weekly
+// limit" and settled as "exited 1 and REPORT.md does not exist", so the ranking
+// filed an account limit as a worker that left no report. One had run 96 turns and
+// two were launched after the wall. Only the last result event counts, it must be
+// an error event, and the text is anchored: a worker's closing message that quotes
+// a limit is neither. The result stays `unreported` so salvage and requeue still apply.
+const USAGE_LIMIT_RE = /^You['’]ve hit your\b[^.\n]{0,40}\blimit\b/;
+
+/** The text of a usage-limit ending, from the LAST result event of a log, or null. */
+function usageLimit(logText) {
+    const last = lastResultEvent(logText);
+    if (!last || last.is_error !== true || typeof last.result !== 'string') return null;
+    const t = last.result.trim();
+    return USAGE_LIMIT_RE.test(t) ? t.slice(0, AUTH_REASON_MAX) : null;
 }
 
 /** The LAST `RESULT <code> <state>: <sentence>` line for this exact code, or null. */
@@ -1483,15 +1505,18 @@ function settleUnreported(rec, code, exit, refusal = null, records = []) {
             + `Correct that line to RESULT ${code} done|stopped|failed: <sentence>, then settle again`);
     }
     if (refusal) return settleAuthRefused(rec, code, exit, refusal);
+    const logText = readText(rec.log);
+    const limit = retry ? null : usageLimit(logText);
+    const missing = reportText === null ? `${rec.report} does not exist` : `${rec.report} has no RESULT ${code} line`;
     const reason = retry
         ? `exited ${exit} with no RESULT ${code} line, and ${rec.report} was taken over by the later run ${retry.code} started ${retry.startedAt}`
-        : reportText === null
-        ? `exited ${exit} and ${rec.report} does not exist`
-        : `exited ${exit} and ${rec.report} has no RESULT ${code} line`;
+        : limit
+        ? `exited ${exit} at the account usage limit (${limit}), and ${missing}`
+        : `exited ${exit} and ${missing}`;
     const settledAt = new Date().toISOString();
     // A run the supervisor ended before the model started (BUDGET_DENIED,
     // CAPACITY_DEFERRED, CLAUDE_SPAWN_ERROR) keeps that line as its blocker.
-    const supervisor = supervisorBlocker(readText(rec.log));
+    const supervisor = supervisorBlocker(logText);
     // [measured 2026-11-05] a crash breaker stayed tripped for two days, and every
     // launch in that time ended CAPACITY_DEFERRED. Settled as unreported, each
     // closed as a failed task and stalled its whole chain, though claude never
@@ -1502,7 +1527,8 @@ function settleUnreported(rec, code, exit, refusal = null, records = []) {
         Object.assign(rec, { state: 'settled', result: 'deferred', reason, sentence: null, exit, settledAt, blocker: supervisor });
         return { code, state: 'deferred', reason, sentence: null, exit, report: rec.report, settledAt, blocker: supervisor };
     }
-    const blocker = supervisor || (reportText !== null && !retry && reportBlocker(reportText)) || { status: 'unknown' };
+    const blocker = supervisor || (limit && { status: 'usage-limit', text: limit })
+        || (reportText !== null && !retry && reportBlocker(reportText)) || { status: 'unknown' };
     Object.assign(rec, { state: 'settled', result: 'unreported', reason, sentence: null, exit, settledAt, blocker });
     return { code, state: 'unreported', reason, sentence: null, exit, report: rec.report, settledAt, blocker };
 }
