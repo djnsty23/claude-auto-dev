@@ -1,8 +1,25 @@
 # Changelog
 
-## [Unreleased]
+## [8.201.0]
 
 ### Review and merge
+
+- `merge-lock.js` derives risk classes from GitHub's own diff, using
+  `cheap-review.js`. A diff adding a paid call, a cron, queue or job, a link
+  token or signature, or over 1000 lines, and a diff it cannot read, needs an
+  opus `--escalation-receipt`. It never trusts a receipt's `risk_classes`.
+- `cheap-review.js` gives the reviewer a defect checklist and escalates an
+  approve on a diff in a risk class.
+- The Brain states the review order for code briefs and reviews before the one
+  full gate.
+- `unslop-sweep.js` falls back to `playwright-core`. With neither driver it
+  exits 2 and names the install command.
+- `TAP-TARGET` exempts a form honeypot: a form field that is `aria-hidden` and
+  declares `tabindex="-1"`.
+- The `design` skill gains an unattended path for the owner's pick, and
+  `rule-local-first` says how to get a clean build without deleting `.next`.
+- `blocker-report.js` names the cause of an unreported run from its own log and
+  salvages only an unreported run's report.
 
 - `cheap-review.js` reviews a PR with a cheap model. The reviewer is
   `AUTODEV_REVIEWER_CMD`, else `agy` on PATH, else
