@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="en"><head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>honeypot</title>
+<!--
+  A form honeypot is a field that real visitors must never reach. A real
+  brochure site build tripped TAP-TARGET on one. Two honeypots sit here beside
+  four near misses, each missing one half of the exemption. The suite asserts
+  the exact set: the near misses fire and the honeypots do not.
+
+    hp-self     aria-hidden="true" and tabindex="-1" on the input
+    hp-wrap     tabindex="-1" on the input, aria-hidden="true" on its wrapper
+
+    only-aria   aria-hidden="true" but still in the tab order
+    only-tab    tabindex="-1" but still exposed to assistive technology
+    aria-false  tabindex="-1" with aria-hidden="false", which hides nothing
+    no-attr     role="button" and aria-hidden="true" with NO tabindex. Its
+                tabIndex property still reads -1, so a rule reading the
+                property alone would wrongly exempt it.
+-->
+<style>
+  *,*::before,*::after{box-sizing:border-box}
+  body{margin:0;font:16px/1.5 system-ui,sans-serif;color:#1a1a1a;background:#fff}
+  main{padding:16px}
+  .slot{margin:0 0 24px}
+  input{display:block;width:200px;height:20px;padding:0;border:1px solid #888;border-radius:0}
+  [role=button]{display:block;width:200px;height:20px}
+</style>
+</head><body><main>
+  <div class="slot"><input id="hp-self" name="website" aria-hidden="true" tabindex="-1" autocomplete="off"></div>
+  <div class="slot" aria-hidden="true"><input id="hp-wrap" name="company" tabindex="-1" autocomplete="off"></div>
+  <div class="slot"><input id="only-aria" name="a" aria-hidden="true" autocomplete="off"></div>
+  <div class="slot"><input id="only-tab" name="b" tabindex="-1" autocomplete="off"></div>
+  <div class="slot"><input id="aria-false" name="c" aria-hidden="false" tabindex="-1" autocomplete="off"></div>
+  <div class="slot"><span id="no-attr" role="button" aria-hidden="true">x</span></div>
+</main></body></html>

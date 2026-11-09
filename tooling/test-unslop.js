@@ -64,7 +64,7 @@ const TOUCH_RULES = [CODES.NO_GUTTER, CODES.TAP_TARGET];
 // ------------------------------------------------------------ fixtures are real
 
 const files = fs.existsSync(SNAPS) ? fs.readdirSync(SNAPS).filter((f) => f.endsWith('.json')) : [];
-check('22 component snapshots are committed (3 pages x 3 widths + 12 plants + false-positives)', files.length === 22, files.length);
+check('23 component snapshots are committed (3 pages x 3 widths + 12 plants + false-positives + honeypot)', files.length === 23, files.length);
 const shas = new Set();
 const probeShas = new Set();
 for (const f of files) {
@@ -499,6 +499,27 @@ async function sweepTests() {
     check('driver: and the message names the install command and --playwright', /npm i(nstall)? -D playwright-core/.test(noneRun.stderr) && /--playwright/.test(noneRun.stderr), noneRun.stderr.slice(0, 400));
     check('driver: and it is not a stack trace', !/\n\s+at /.test(noneRun.stderr) && !/MODULE_NOT_FOUND|Require stack/.test(noneRun.stderr), noneRun.stderr.slice(0, 400));
 
+    // The honeypot page, through the gate CLI. Each near miss lacks one half
+    // of the exemption, so the expected set is written out by hand here.
+    {
+        const hpRun = spawnSync(process.execPath, [GATE, '--json', path.join(SNAPS, 'honeypot-390.json')], { encoding: 'utf8' });
+        let hp = null;
+        try { hp = JSON.parse(hpRun.stdout).pages[0].results[0]; } catch { /* asserted below */ }
+        check('honeypot: the gate CLI measured the page', hpRun.status === 0 && hp && hp.status === 'MEASURED', hpRun.stderr || hpRun.stdout.slice(0, 300));
+        const found = hp ? hp.findings : [];
+        const tapIds = found.filter((f) => f.code === CODES.TAP_TARGET).map((f) => (/#([\w-]+)$/.exec(f.sel) || [])[1]).sort();
+        check('honeypot: neither honeypot fires TAP-TARGET', !tapIds.includes('hp-self') && !tapIds.includes('hp-wrap'), tapIds);
+        check('honeypot: all four near misses still fire TAP-TARGET', ['aria-false', 'no-attr', 'only-aria', 'only-tab'].every((id) => tapIds.includes(id)), tapIds);
+        check('honeypot: nothing else fires on the page', found.length === tapIds.length && tapIds.length === 4, found.map((f) => `${f.code} ${f.sel}`));
+        const noAttr = load('honeypot-390').components.elements.find((e) => /#no-attr$/.test(e.sel));
+        check('honeypot: an element with no tabindex attribute records none', noAttr && noAttr.ah === true && noAttr.ti === null, noAttr && { ah: noAttr.ah, ti: noAttr.ti });
+        const hpResult = CHECKS.analyse(load('honeypot-390'));
+        check('honeypot: the exemption is counted for exactly the two honeypots', hpResult.counts.components.exempt.honeypot === 2, hpResult.counts.components.exempt);
+        // A snapshot from before the probe recorded these fields stays judged.
+        const old = JSON.parse(JSON.stringify(load('honeypot-390')));
+        for (const e of old.components.elements) { delete e.ah; delete e.ti; }
+        check('honeypot: a snapshot without the fields exempts nothing', CHECKS.analyse(old).findings.filter((f) => f.code === CODES.TAP_TARGET).length === 6, CHECKS.analyse(old).findings.map((f) => f.sel));
+    }
 
     // Report, stories, compare, pairs, vision, through the CLI.
     const run = (args) => spawnSync(process.execPath, [SWEEP_CLI].concat(args), { encoding: 'utf8', cwd: tmp });

@@ -679,7 +679,7 @@ function analyseComponents(snapshot, T) {
     const findings = [];
     const exempt = {
         markedOk: 0, consistentGroup: 0, selectedSegment: 0, pillRadius: 0, narrowAccent: 0, barTrack: 0,
-        rail: 0, fullBleed: 0, inlineLink: 0, wrappedByTarget: 0, disabled: 0, notInteractive: 0,
+        rail: 0, fullBleed: 0, inlineLink: 0, wrappedByTarget: 0, disabled: 0, notInteractive: 0, honeypot: 0,
     };
     const population = {
         recorded: comp.recorded, considered: comp.considered, droppedForCap: comp.droppedForCap,
@@ -927,6 +927,9 @@ function analyseComponents(snapshot, T) {
             if (!e.ia || !onScreen(e.box)) continue;
             population.tapCandidates++;
             if (e.dis) { exempt.disabled++; continue; }
+            // A form honeypot: hidden from assistive technology AND out of the
+            // tab order. Either half alone still leaves someone who can reach it.
+            if (e.ah === true && e.ti === -1) { exempt.honeypot++; continue; }
             if (e.inl) { exempt.inlineLink++; continue; }
             let t = Object.assign({}, e.box);
             for (const ps of e.ps || []) {
