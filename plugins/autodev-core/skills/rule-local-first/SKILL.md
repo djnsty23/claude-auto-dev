@@ -36,12 +36,7 @@ running. A later edit or base integration invalidates the earlier full-candidate
 result. If a chained stage fails, name the stages that did not run and execute
 them separately when useful; their results do not turn the failed chain green.
 
-Do not delete a Next.js `.next` folder as hygiene before a build or gate, and do
-not brief a worker to: `next build` rewrites it, and the permission layer refuses
-`rm -rf .next`, so the step only costs a retry. When stale output really does
-break a run, regenerate instead. Starting the dev server on the branch for a few
-seconds rewrites `.next/dev/types`. For a clean build, build in a fresh
-`git worktree add` or a `git archive` copy of the commit, which has no `.next`.
+**Never delete a Next.js `.next` folder as hygiene before a build or gate, or brief a worker to.** `next build` rewrites it, and a host permission layer can refuse `rm -rf .next`, so the step costs a retry. When stale output really breaks a run, regenerate instead. Starting the dev server on the branch for a few seconds rewrites `.next/dev/types`. For a clean build, use a fresh `git worktree add` or a `git archive` copy of the commit, which has no `.next`, then give it dependencies and any `.env.local` it needs before building.
 
 On a machine where several sessions share one full-gate lock, queue for it
 rather than polling it. A gate that takes the lock itself through this queue

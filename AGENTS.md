@@ -105,9 +105,9 @@ generation time over the rules on disk:
 
 | variant | bytes | dated claims kept |
 |---|---|---|
-| A  full body | 126,850 | 16 of 16 |
-| B  description + first paragraph + dated PARAGRAPHS + Never/Always ← emitted | 20,893 | 16 of 16 |
-| B′ same, but dated LINES instead of paragraphs | 15,321 | 0 of 16 |
+| A  full body | 126,910 | 16 of 16 |
+| B  description + first paragraph + dated PARAGRAPHS + Never/Always ← emitted | 21,428 | 16 of 16 |
+| B′ same, but dated LINES instead of paragraphs | 15,856 | 0 of 16 |
 | C  description only | 7,250 | 0 of 16 |
 
 ### rule-ab-testing
@@ -278,6 +278,8 @@ The current request and project policy determine publication, CI and batching.
 Read [historical notes](references/history-2026-09-09.md) only for earlier
 incidents. Their operator quotes, disabled schedulers and host-specific tool
 limits are not a present grant, prohibition or capability inventory.
+
+**Never delete a Next.js `.next` folder as hygiene before a build or gate, or brief a worker to.** `next build` rewrites it, and a host permission layer can refuse `rm -rf .next`, so the step costs a retry. When stale output really breaks a run, regenerate instead. Starting the dev server on the branch for a few seconds rewrites `.next/dev/types`. For a clean build, use a fresh `git worktree add` or a `git archive` copy of the commit, which has no `.next`, then give it dependencies and any `.env.local` it needs before building.
 
 Full text: `plugins/autodev-core/skills/rule-local-first/SKILL.md`
 
