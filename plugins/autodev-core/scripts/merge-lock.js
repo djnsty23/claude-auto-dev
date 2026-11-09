@@ -390,15 +390,16 @@ function sensitiveReasons(cmp, pkgText) {
 
 /**
  * The risk classes of the diff GitHub will merge, derived here and never read
- * from a receipt. A diff GitHub refuses as too large, one that overflows the
- * read, or an answer that is not a diff counts as a class: a failed read must
+ * from a receipt. A diff GitHub refuses as too large or too slow to generate
+ * (HTTP 406, 422), one that overflows the read, or an answer that is not a diff counts as a class: a failed read must
  * not lower the bar. Any other gh failure is an outage, so it is indeterminate
  * and names the cause. An empty diff is clean only when GitHub lists no files.
+ * `gh` is for tests only: a spawn failure cannot be staged through a stub.
  */
-function riskClassesOnGitHub(repo, baseSha, head, cmp, env) {
-    const r = runGh(['api', `repos/${repo}/compare/${baseSha}...${head}`, '-H', 'Accept: application/vnd.github.v3.diff'], env);
+function riskClassesOnGitHub(repo, baseSha, head, cmp, env, gh = runGh) {
+    const r = gh(['api', `repos/${repo}/compare/${baseSha}...${head}`, '-H', 'Accept: application/vnd.github.v3.diff'], env);
     if (!r.ok) {
-        if (r.error === 'ENOBUFS' || /HTTP 406/.test(r.stderr)) return [{ class: 'diff-unreadable', file: r.error || 'GitHub refused the diff as too large' }];
+        if (r.error === 'ENOBUFS' || /HTTP (?:406|422)\b/.test(r.stderr)) return [{ class: 'diff-unreadable', file: r.error || r.stderr.split('\n')[0].slice(0, 200) }];
         throw unsure(`reading the diff of ${baseSha.slice(0, 12)}...${head.slice(0, 12)}: ${r.error || r.stderr.split('\n')[0] || `gh exited ${r.status}`}`);
     }
     if (!r.stdout.trim() && Array.isArray(cmp.files) && cmp.files.length === 0) return [];
@@ -635,8 +636,20 @@ async function mergeHeld({ repo, pr, head, env, log, readbackMs, pollMs, fastRec
             + 'and needs --escalation-receipt FILE: dispatch the code-reviewer agent on opus and save the JSON it prints. A review override does not waive it');
     }
     if (sensitive.length) log(`${TAG} sensitive diff (${sensitive.length} reason(s)); the escalation receipt is on file`);
-    const risks = !escalation || override ? riskClassesOnGitHub(repo, base.sha, head, cmp, env) : [];
-    if (risks.length && !escalation) {
+    let risks = [];
+    if (!escalation) {
+        risks = riskClassesOnGitHub(repo, base.sha, head, cmp, env);
+    } else if (override) {
+        // The escalation receipt already meets the bar, so this read only feeds the ledger.
+        try {
+            risks = riskClassesOnGitHub(repo, base.sha, head, cmp, env);
+        } catch (e) {
+            if (!(e instanceof Stop)) throw e;
+            risks = null;
+            log(`${TAG} risk classes not recorded in the ledger: ${e.message}`);
+        }
+    }
+    if (!escalation && risks.length) {
         const named = risks.slice(0, 4).map((x) => (x.file ? `${x.class} (${x.file})` : x.class)).join('; ');
         throw refuse(`${repo}#${pr} is in a risk class (${named}${risks.length > 4 ? `; and ${risks.length - 4} more` : ''}), `
             + 'and needs --escalation-receipt FILE: dispatch the code-reviewer agent on opus and save the JSON it prints. A review override does not waive it');
@@ -644,7 +657,7 @@ async function mergeHeld({ repo, pr, head, env, log, readbackMs, pollMs, fastRec
     if (override) {
         let file;
         try {
-            file = appendDeployEvent({ kind: 'review-override', repo, pr, head, reason: override, sensitive: sensitive.length > 0, risk_classes: [...new Set(risks.map((x) => x.class))] }, env);
+            file = appendDeployEvent({ kind: 'review-override', repo, pr, head, reason: override, sensitive: sensitive.length > 0, risk_classes: risks ? [...new Set(risks.map((x) => x.class))] : null }, env);
         } catch (e) {
             throw refuse(`could not record the review override in the deploy ledger (${e.code || e.message}); an unrecorded override does not merge`);
         }
@@ -829,7 +842,7 @@ async function main() {
 
 module.exports = {
     lockPathFor, receiptProblem, reviewReceiptProblem, escalationReceiptProblem, normalizeOverride, sensitiveReasons,
-    appendDeployEvent, readText, parseArgs, ghCommand, signalHandler, acquire, PASS_LINE, EXIT_PASS,
+    riskClassesOnGitHub, appendDeployEvent, readText, parseArgs, ghCommand, signalHandler, acquire, PASS_LINE, EXIT_PASS,
 };
 
 if (require.main === module) {

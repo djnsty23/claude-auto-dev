@@ -83,6 +83,7 @@ if (args[0] === 'api') {
     }
     if ((m = /\\/compare\\/([0-9a-f]{40})\\.\\.\\.([0-9a-f]{40})$/.exec(p)) && args.includes('Accept: application/vnd.github.v3.diff')) {
         if (st.diffRefused) { process.stderr.write('gh: Sorry, the diff exceeded the maximum number of lines (HTTP 406)\\n'); process.exitCode = 1; return; }
+        if (st.diffSlow) { process.stderr.write('gh: The diff is taking too long to generate. (HTTP 422)\\n'); process.exitCode = 1; return; }
         if (st.diffDown) { process.stderr.write('gh: Server Error (HTTP 502)\\n'); process.exitCode = 1; return; }
         if (st.diffHuge) { process.stdout.write('x'.repeat(33 * 1024 * 1024)); return; }
         process.stdout.write(typeof st.diff === 'string' ? st.diff : 'diff --git a/src/components/Footer.tsx b/src/components/Footer.tsx\\n--- a/src/components/Footer.tsx\\n+++ b/src/components/Footer.tsx\\n@@ -1 +1 @@\\n+export const a = 1\\n');
@@ -919,7 +920,7 @@ async function main() {
         check('G16. a sensitive diff merges on an override plus an opus escalation receipt, and the ledger event says sensitive',
             happyOv.exit === 0 && mergedCount('happy-ov') === 1 && events().slice(-1)[0].sensitive === true, detail(happyOv));
 
-        // G16b-G16m. merge-lock derives the risk classes from GitHub's own diff and reads none from a receipt.
+        // G16b-G16q. merge-lock derives the risk classes from GitHub's own diff and reads none from a receipt.
         const hunk = (file, line) => `diff --git a/${file} b/${file}\n--- a/${file}\n+++ b/${file}\n@@ -0,0 +1 @@\n+${line}\n`;
         const CRON_DIFF = hunk('src/app/api/cron/n/route.ts', 'export const a = 1');
         const asksDiff = (who) => calls(who).some((c) => c.what === `api repos/${REPO}/compare/${BASE0}...${HEAD} -H Accept: application/vnd.github.v3.diff`);
@@ -956,6 +957,28 @@ async function main() {
             riskHuge.exit === 1 && mergedCount('risk-huge') === 0 && /diff-unreadable.*needs --escalation-receipt/.test(riskHuge.err) && lockGone(), detail(riskHuge));
         const riskNone = runG('risk-none', ['--review-receipt', REVIEW], { diff: '', files: [] });
         check('G16l. a PR with no changed files merges as before', riskNone.exit === 0 && mergedCount('risk-none') === 1, detail(riskNone));
+
+        const riskSlow = runG('risk-422', ['--review-receipt', REVIEW], { diffSlow: true });
+        check('G16m. a diff GitHub is too slow to generate (HTTP 422) counts as unreadable, names the cause and needs the escalation receipt',
+            riskSlow.exit === 1 && mergedCount('risk-422') === 0 && /diff-unreadable \(gh: The diff is taking too long.*needs --escalation-receipt/.test(riskSlow.err) && lockGone(), detail(riskSlow));
+        const outageWith = runG('risk-ov-esc-502', ['--review-override', 'reviewer down; escalation done', '--escalation-receipt', escalationOf()], { diffDown: true });
+        const outageEvent = events()[events().length - 1] || {};
+        check('G16n. an outage on the diff read does not stop a merge whose bar is met by override plus escalation, and the ledger records risk_classes null',
+            outageWith.exit === 0 && mergedCount('risk-ov-esc-502') === 1 && outageEvent.kind === 'review-override' && outageEvent.risk_classes === null && lockGone(), detail(outageWith));
+        const outageEvents = events().length;
+        const outageWithout = runG('risk-ov-502', ['--review-override', 'the reviewer was down for an hour'], { diffDown: true });
+        check('G16o. the same outage with an override and no escalation stays exit 2, no merge, no ledger event',
+            outageWithout.exit === 2 && mergedCount('risk-ov-502') === 0 && /HTTP 502/.test(outageWithout.err) && events().length === outageEvents && lockGone(), detail(outageWithout));
+        const spawned = (error) => {
+            try {
+                const got = ml.riskClassesOnGitHub(REPO, BASE0, HEAD, { files: [] }, process.env, () => ({ ok: false, status: null, stdout: '', stderr: '', error }));
+                return `returned ${JSON.stringify(got)}`;
+            } catch (e) { return `stop ${e.exit}: ${e.message}`; }
+        };
+        const spawnResults = ['ETIMEDOUT', 'ENOENT'].map((code) => [code, spawned(code)]);
+        check('G16p. gh that could not run (ETIMEDOUT, ENOENT) is exit 2 naming the code, not a class', spawnResults.every(([code, got]) => got.startsWith('stop 2:') && got.includes(code)), JSON.stringify(spawnResults));
+        const overflowRead = spawned('ENOBUFS');
+        check('G16q. control: an overflowing read through the same entry point is a class', overflowRead === 'returned [{"class":"diff-unreadable","file":"ENOBUFS"}]', overflowRead);
 
         // G17. an unwritable ledger refuses the override rather than merging unrecorded.
         const blocked = path.join(root, 'ledger-is-a-dir');

@@ -151,7 +151,8 @@ node "${CLAUDE_PLUGIN_ROOT}/scripts/merge-lock.js" merge --repo "$REPO" --pr "$P
 
 The same command lands an `escalate` review receipt: merge-lock accepts that
 verdict only beside an escalation receipt for the same repo, PR and head. A
-review override does not waive the escalation receipt on a sensitive diff.
+review override does not waive the escalation receipt on a sensitive or
+risk-class diff.
 
 ## After
 
