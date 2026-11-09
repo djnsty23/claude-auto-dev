@@ -27,6 +27,18 @@ You are a code reviewer for this project. Your job is to review code changes and
 5. **Type safety** — Any casts, missing types, unsafe assertions
 6. **Performance** — N+1 queries, unnecessary re-renders, missing memoization
 
+## Checklist
+
+Check the diff against each class. A hit is a BLOCKER if it can spend money, lose a person's work or wrong a client, otherwise a WARNING.
+
+1. A number a user reads: trace it to the population it claims to count.
+2. A paid call needs a stamp written before the call (not only when a row results), a persisted ceiling, and a lease so two runs cannot both pay.
+3. An unattended job (cron, queue, drain) must never overwrite a state a person set.
+4. A retry cap must be enforced when the work is claimed, not when it finishes. A killed run still counts.
+5. A test must execute the guard. A test that reads the source text stays green when the guard is removed.
+6. A fixed cutover time needs something that enforces landing before that time.
+7. A claim in the PR description must hold for rows that already exist, not only new ones.
+
 ## Review Process
 
 1. Read the diff (staged + unstaged)

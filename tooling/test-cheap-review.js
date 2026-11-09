@@ -375,6 +375,96 @@ check('decide: a P0 with request_changes stays request_changes', cr.decide({ ...
         && cr.spawnPlan(['/a/agy', '-p', 'q'], { platform: 'linux' }).command === '/a/agy');
 }
 
+// ---------------------------------------------------------------------------
+// Risk classes: an approve on a diff in a class the cheap reviewer misses goes
+// to the strong reviewer. The diffs are hand-written in the shape git prints,
+// so they cannot shrink when the subject's patterns shrink.
+// ---------------------------------------------------------------------------
+{
+    const diffOf = (file, ...added) => `diff --git a/${file} b/${file}\nindex 1..2 100644\n--- a/${file}\n+++ b/${file}\n@@ -1 +1,${added.length} @@\n${added.map((l) => '+' + l).join('\n')}\n`;
+    const classes = (d, o) => [...new Set(cr.riskClasses(d, o).map((r) => r.class))].join(',');
+    const positive = [
+        ['paid-call', diffOf('src/lib/search.ts', '  key: process.env.SERPAPI_API_KEY,')],
+        ['paid-call', diffOf('supabase/functions/x/index.ts', "const key = Deno.env.get('FIRECRAWL_API_KEY')")],
+        ['paid-call', diffOf('src/lib/x.ts', "const r = await fetch('https://api.openai.com/v1/responses', { method: 'POST' })")],
+        ['paid-call', diffOf('src/lib/x.ts', "import Anthropic from '@anthropic-ai/sdk'")],
+        ['paid-call', diffOf('src/lib/x.ts', 'const out = await generateText({ model, prompt })')],
+        ['job', diffOf('src/app/api/cron/nightly/route.ts', 'export async function GET() { return run() }')],
+        ['job', diffOf('vercel.json', '  "crons": [{ "path": "/api/x", "schedule": "0 3 * * *" }],')],
+        ['job', diffOf('supabase/migrations/0003_jobs.sql', "select cron.schedule('a', '0 * * * *', $$ select 1 $$);")],
+        ['job', diffOf('supabase/migrations/0004_jobs.sql', "select net.http_post(url := 'https://x.test');")],
+        ['job', diffOf('src/lib/q.ts', "export const mail = new Queue('mail', { connection })")],
+        ['link-token', diffOf('src/lib/link.ts', "const mac = createHmac('sha256', secret).update(id).digest('hex')")],
+        ['link-token', diffOf('src/lib/link.ts', 'return timingSafeEqual(a, b)')],
+        ['link-token', diffOf('src/lib/link.ts', 'export function signRequestLink(id: string) {')],
+        ['link-token', diffOf('src/lib/link.ts', "const s = await crypto.subtle.sign('HMAC', key, data)")],
+        ['link-token', diffOf('src/lib/link.ts', 'const t = jwt.sign({ id }, secret)')],
+        ['link-token', diffOf('src/app/r/[token]/page.tsx', 'export default function Page() { return null }')],
+    ];
+    for (const [want, d] of positive) check(`risk: ${want} fires on ${d.split('\n')[3].slice(6)} / ${d.split('\n')[5].slice(1, 40)}`, classes(d) === want, classes(d));
+    const negative = [
+        ['a test file', diffOf('src/lib/search.test.ts', 'const k = process.env.SERPAPI_API_KEY')],
+        ['a markdown doc', diffOf('docs/setup.md', "Run cron.schedule('a', x) and createHmac('sha256', k), set process.env.OPENAI_API_KEY.")],
+        ['a // comment', diffOf('src/lib/x.ts', "  // cron.schedule('a', x) is wired elsewhere, see createHmac('sha256', k)")],
+        ['a -- sql comment', diffOf('supabase/migrations/1.sql', "-- select net.http_post(url := 'x') runs elsewhere")],
+        ['a block comment line', diffOf('src/lib/x.ts', " * createHmac('sha256', k) signs it")],
+        ['a removed line', 'diff --git a/s.ts b/s.ts\n--- a/s.ts\n+++ b/s.ts\n@@ -1 +1 @@\n-  key: process.env.SERPAPI_API_KEY,\n+  key: null,\n'],
+        ['a context line', 'diff --git a/s.ts b/s.ts\n--- a/s.ts\n+++ b/s.ts\n@@ -1,2 +1,3 @@\n createHmac(a)\n+const b = 1\n'],
+        ['a deleted cron file', 'diff --git a/src/app/api/cron/x/route.ts b/src/app/api/cron/x/route.ts\ndeleted file mode 100644\n--- a/src/app/api/cron/x/route.ts\n+++ /dev/null\n@@ -1 +0,0 @@\n-export const a = 1\n'],
+        ['a rename with no added line', 'diff --git a/src/app/api/cron/a.ts b/src/app/api/cron/b.ts\nsimilarity index 100%\nrename from src/app/api/cron/a.ts\nrename to src/app/api/cron/b.ts\n'],
+        ['plain words', diffOf('src/lib/x.ts', 'const queue = []', "const token = cssVar('--token')", 'const signature = form.get("signature")', 'const site = process.env.NEXT_PUBLIC_SITE_URL')],
+    ];
+    for (const [name, d] of negative) check(`risk: silent on ${name}`, classes(d) === '', classes(d));
+    const lines = (n) => diffOf('src/lib/x.ts', ...Array.from({ length: n }, (_, i) => `const v${i} = ${i}`));
+    check('risk: a diff over the line limit is large-diff, naming no file', cr.riskClasses(lines(5000)).some((r) => r.class === 'large-diff' && r.file === null));
+    check('risk: a small plain diff is no class', classes(lines(100)) === '');
+    check('risk: --risk-lines moves the limit', classes(lines(100), { maxLines: 50 }) === 'large-diff' && classes(lines(100), { maxLines: 500 }) === '');
+    check('risk: an empty diff is no class and does not throw', classes('') === '');
+    check('risk: one entry per class and file', cr.riskClasses(diffOf('src/lib/x.ts', "createHmac('a', b)", "createHmac('c', d)")).length === 1);
+}
+{
+    const risky = (file, text, branch) => {
+        const dir = path.join(root, `risky-${++counter}`);
+        fs.mkdirSync(dir, { recursive: true });
+        git(dir, 'init', '-q');
+        git(dir, 'checkout', '-q', '-b', 'main');
+        fs.writeFileSync(path.join(dir, 'a.txt'), 'x\n');
+        git(dir, 'add', 'a.txt');
+        git(dir, 'commit', '-q', '-m', 'base');
+        git(dir, 'update-ref', 'refs/remotes/origin/main', 'HEAD');
+        git(dir, 'checkout', '-q', '-b', branch);
+        fs.mkdirSync(path.dirname(path.join(dir, file)), { recursive: true });
+        fs.writeFileSync(path.join(dir, file), text);
+        git(dir, 'add', file);
+        git(dir, 'commit', '-q', '-m', 'risk');
+        return { repoDir: dir, head: git(dir, 'rev-parse', 'HEAD').stdout.trim(), branch };
+    };
+    const job = risky('src/app/api/cron/nightly/route.ts', 'export async function GET() { return 1 }\n', 'feat/job');
+    const stateOf = (b) => ghState({ pr: { baseRefName: 'main', body: 'x', headRefName: b.branch, headRefOid: b.head } });
+    const a = run({ mode: 'approve', repoDir: job.repoDir, head: job.head, state: stateOf(job) });
+    escalated('risk: a reviewer approve on a cron route escalates, and the reviewer did run', a, /^risk-class: job \(src\/app\/api\/cron\/nightly\/route\.ts\)/, { reviewerCalled: true });
+    check('risk: the receipt lists the classes', a.receipt && Array.isArray(a.receipt.risk_classes) && a.receipt.risk_classes.length === 1 && a.receipt.risk_classes[0].class === 'job', JSON.stringify(a.receipt && a.receipt.risk_classes));
+    const b = run({ mode: 'request', repoDir: job.repoDir, head: job.head, state: stateOf(job) });
+    check('risk: request_changes stays request_changes, so the worker fixes it first', b.r.status === 1 && b.receipt && b.receipt.verdict === 'request_changes', `exit ${b.r.status}`);
+    const c = run({ mode: 'approve' });
+    check('risk: a plain diff still approves, with an empty list', c.r.status === 0 && c.receipt && c.receipt.verdict === 'approve' && Array.isArray(c.receipt.risk_classes) && c.receipt.risk_classes.length === 0, JSON.stringify(c.receipt && c.receipt.risk_classes));
+    const d = run({ mode: 'approve', repoDir: job.repoDir, head: job.head, state: stateOf(job), args: ['--risk-lines', 'x'] });
+    check('risk: a bad --risk-lines is exit 2', d.r.status === 2 && /--risk-lines/.test(d.r.stderr), `exit ${d.r.status} ${d.r.stderr}`);
+}
+
+// ---------------------------------------------------------------------------
+// The checklist. Pinned by hand-typed phrases, one per class, in both places
+// a reviewer reads it.
+// ---------------------------------------------------------------------------
+{
+    const phrases = [/population it claims to count/, /stamp written before the call/, /persisted ceiling/, /lease so two runs/, /never overwrite a state a person set/, /when the work is claimed/, /must execute the guard/, /cutover time needs something that enforces landing/, /rows that already exist/];
+    const p = cr.buildPrompt({ repo: REPO, pr: 1, head: HEAD, base: 'main', branch: 'b', prBody: '', story: null, rules: null, evidence: [], diff: '+x', diffLines: 1, nonce: 'abc' });
+    const agent = fs.readFileSync(path.resolve(__dirname, '..', 'plugins', 'autodev-core', 'agents', 'code-reviewer.md'), 'utf8');
+    phrases.forEach((re) => check(`checklist in the prompt: ${re.source}`, re.test(p)));
+    phrases.forEach((re) => check(`checklist in code-reviewer.md: ${re.source}`, re.test(agent)));
+    check('checklist sits before the data fences, so the PR cannot displace it', p.indexOf('population it claims') >= 0 && p.indexOf('population it claims') < p.indexOf('<<<DIFF-abc'));
+}
+
 try { fs.rmSync(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 }); } catch { /* best effort */ }
 console.log(`\n${pass} passed, ${fail} failed`);
 if (fail) { console.log('failed: ' + failures.join('; ')); process.exitCode = 1; }

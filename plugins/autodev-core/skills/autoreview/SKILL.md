@@ -62,8 +62,11 @@ verdict it reaches (exit 0, 1 and 3).
 Read `reason` and `findings` in the receipt. The script escalates, rather than
 approves, when the reviewer output is invalid or empty, the reviewer times out
 or exits non-zero, cannot be started, the diff is over the cap or empty (the reviewer is not called at all),
-any acceptance item is `met:false`, the reviewer approves with a P0 finding, or
-the PR head is not the `--head` you passed. Escalation is the safe direction.
+any acceptance item is `met:false`, the reviewer approves with a P0 finding, the
+PR head is not the `--head` you passed, or the diff falls in a risk class and
+the reviewer approved it (`risk-class: ...`): a new paid call, a cron, queue or
+job, a link token or signature, or a diff over 1000 lines (`--risk-lines`). The
+receipt lists them in `risk_classes`. Escalation is the safe direction.
 
 ### The reviewer
 

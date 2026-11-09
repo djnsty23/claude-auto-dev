@@ -10,7 +10,7 @@
  * `approve` receipt for the exact head it merges.
  *
  *   node cheap-review.js review --repo OWNER/NAME --pr N --head SHA --repo-dir DIR --out FILE
- *                        [--prd prd.json] [--max-lines 1500] [--comment] [--timeout-ms N]
+ *                        [--prd prd.json] [--max-lines 1500] [--risk-lines 1000] [--comment] [--timeout-ms N]
  *   node cheap-review.js --help
  *
  * WHAT `review` DOES, in order:
@@ -38,7 +38,7 @@
  *   6. The receipt is written to --out (temp file, then rename):
  *        { schema: 1, repo, pr, head, reviewer, model, verdict, reason,
  *          findings, acceptance, checked_clean, story, diff_lines,
- *          started_at, ms, est_cost }
+ *          risk_classes, started_at, ms, est_cost }
  *      `reviewer` is the reviewer's executable name (argv[0] without its
  *      directory or .exe/.cmd). `model` is AUTODEV_REVIEWER_MODEL or null.
  *      `story` is { id, title } or null. `est_cost` is
@@ -51,7 +51,9 @@
  * tree is killed), or prints nothing, too much, or output that fails the
  * validator; any acceptance item has met:false; a P0 finding comes with verdict
  * approve; the story has acceptance criteria and the reply covers fewer of
- * them; or the reviewer itself says escalate.
+ * them; the reviewer itself says escalate; or the reviewer approves a diff in
+ * a risk class (riskClasses: a paid call, a cron, queue or job, a link token or
+ * signature, a diff over --risk-lines).
  *
  * REVIEWER. In order: AUTODEV_REVIEWER_CMD (a command line split into argv
  * without a shell, quotes group words; the prompt goes on stdin); `agy` on
@@ -91,6 +93,7 @@ const { storiesOf } = require('./prd-states');
 
 const SCHEMA = 1;
 const DEFAULT_MAX_LINES = 1500;
+const DEFAULT_RISK_LINES = 1000;
 const DEFAULT_TIMEOUT_MS = 300000;
 const AGY_ARG_LIMIT = 24000;
 const MAX_REPLY_BYTES = 4 * 1024 * 1024;
@@ -99,6 +102,16 @@ const SEVERITIES = ['P0', 'P1', 'P2'];
 const BASE_ENV = ['PATH', 'HOME', 'USERPROFILE', 'APPDATA', 'LOCALAPPDATA', 'SystemRoot', 'TEMP', 'TMP', 'TMPDIR', 'LANG'];
 const NAME_RE = /^[A-Za-z_][A-Za-z0-9_]*$/;
 const GEMINI_INSTRUCTION = 'Follow the instructions on stdin and answer with the JSON object only.';
+const REVIEW_CHECKLIST = [
+    'Check the diff against each class below. A hit is a finding (P0 if it can spend money, lose a person\'s work or wrong a client; P1 otherwise).',
+    '1. A number a user reads: trace it to the population it claims to count. Navigations are not pages, requests are not measurement requests, an address that never loaded is not a page seen.',
+    '2. A paid call: needs a stamp written before the call (not only when a row results), a persisted ceiling, and a lease so two runs cannot both pay.',
+    '3. An unattended job (cron, queue, drain) must never overwrite a state a person set, such as approved or reviewed.',
+    '4. A retry cap must be enforced when the work is claimed, not when it finishes. A killed run still counts.',
+    '5. A test must execute the guard. A test that reads the source text of the guard stays green when the guard is removed.',
+    '6. A fixed cutover time needs something that enforces landing before that time.',
+    '7. A claim in the PR description must hold for rows that already exist, not only new ones.',
+].join('\n');
 
 function fault(code, message) { const e = new Error(message); e.publicCode = code; return e; }
 
@@ -169,6 +182,69 @@ function decide(review, { criteria = 0 } = {}) {
     if (review.verdict === 'request_changes') return { verdict: 'request_changes', reason: `${review.findings.length} finding(s)` };
     if (review.verdict === 'approve') return { verdict: 'approve', reason: 'approved' };
     return { verdict: 'escalate', reason: 'unknown-verdict' };
+}
+
+// ---------------------------------------------------------------------------
+// Risk classes. A replay of three product PRs showed the cheap reviewer
+// approving diffs with unbounded paid calls, unattended jobs and link tokens,
+// so its approve does not settle a diff in one of those classes.
+// ---------------------------------------------------------------------------
+
+const RISK_NOT_CODE = /(^|\/)(__tests__|tests?|e2e|docs?|fixtures?)\/|\.(test|spec)\.[a-z0-9]+$|\.(md|mdx|txt)$|(^|\/)tooling\/test-/i;
+const COMMENT_LINE = /^\s*(\/\/|\/\*|\*|#|--\s|<!--)/;
+const PROVIDERS = 'SERP_?API|DATAFORSEO|OPENAI|ANTHROPIC|GEMINI|GOOGLE_GENERATIVE_AI|PERPLEXITY|FIRECRAWL|BRIGHT_?DATA|ELEVENLABS|REPLICATE|FAL|TAVILY|EXA|APIFY|SCRAPINGBEE';
+const RISK_RULES = [
+    { class: 'paid-call', line: [
+        new RegExp(`(?:process\\.env\\.|\\benv\\.get\\(['"]|\\bgetenv\\(['"])(?:[A-Z0-9_]*_)?(?:${PROVIDERS})(?:_[A-Z0-9_]*)?(?:KEY|TOKEN)\\b`),
+        /\b(?:api\.openai\.com|api\.anthropic\.com|generativelanguage\.googleapis\.com|serpapi\.com|api\.dataforseo\.com|api\.perplexity\.ai|api\.firecrawl\.dev|api\.elevenlabs\.io|api\.replicate\.com|fal\.run|api\.tavily\.com|api\.exa\.ai|api\.apify\.com|api\.brightdata\.com)\b/,
+        /(?:\bfrom\s+|\brequire\(\s*)['"](?:openai|@anthropic-ai\/sdk|@google\/generative-ai|@google\/genai|replicate|@fal-ai\/[\w-]+|@ai-sdk\/[\w-]+|@mendable\/firecrawl-js)['"]/,
+        /\b(?:generateText|streamText|generateObject|streamObject)\s*\(/,
+    ] },
+    { class: 'job', path: /(^|[/_-])crons?([/_.-])/i, line: [
+        /\bcron\.schedule\s*\(/, /\bnet\.http_post\s*\(/, /"crons"\s*:/, /\bnew\s+Queue\s*\(/, /\binngest\.createFunction\s*\(/,
+    ] },
+    { class: 'link-token', path: /\[(?:token|signature)\]/i, line: [
+        /\bcreateHmac\s*\(/, /\btimingSafeEqual\s*\(/, /\bsubtle\.sign\s*\(/, /\bjwt\.sign\s*\(/, /\bnew\s+SignJWT\b/,
+        /\b(?:sign|verify)[A-Z]\w*(?:Link|Token|Url|Signature)\s*[(<]/,
+    ] },
+];
+
+/**
+ * The risk classes this diff falls in: [{ class, file }], one per class and
+ * file, file null for large-diff. Reads added code lines only, so a removed
+ * call, a comment, a test or a doc never counts. Pure.
+ */
+function riskClasses(diff, { maxLines = DEFAULT_RISK_LINES } = {}) {
+    const text = String(diff || '');
+    const found = new Map();
+    let file = null;
+    const hit = (cls) => found.set(`${cls}\n${file}`, { class: cls, file });
+    let scan = false;
+    for (const raw of text.split('\n')) {
+        if (raw.startsWith('diff --git ')) { file = null; scan = false; continue; }
+        if (file === null && raw.startsWith('+++ ')) {
+            const name = raw.slice(4).trim();
+            if (name.startsWith('b/') && !RISK_NOT_CODE.test(name.slice(2))) { file = name.slice(2); scan = true; }
+            continue;
+        }
+        if (!scan || !raw.startsWith('+')) continue;
+        const line = raw.slice(1);
+        if (!line.trim() || COMMENT_LINE.test(line)) continue;
+        for (const rule of RISK_RULES) {
+            if ((rule.path && rule.path.test(file)) || rule.line.some((re) => re.test(line))) hit(rule.class);
+        }
+    }
+    const out = [...found.values()];
+    if (countLines(text) > maxLines) out.push({ class: 'large-diff', file: null });
+    return out;
+}
+
+/** An approve on a risky diff becomes an escalate; every other decision stands. Pure. */
+function applyRisk(decision, risks) {
+    if (decision.verdict !== 'approve' || !risks.length) return decision;
+    const named = risks.slice(0, 6).map((r) => (r.file ? `${r.class} (${r.file})` : r.class)).join(', ');
+    const rest = risks.length > 6 ? `, and ${risks.length - 6} more` : '';
+    return { verdict: 'escalate', reason: `risk-class: ${named}${rest}`.slice(0, 400) };
 }
 
 // ---------------------------------------------------------------------------
@@ -335,6 +411,8 @@ function buildPrompt({ repo, pr, head, base, branch, prBody, story, rules, evide
         'Give one acceptance item per acceptance criterion below, in order. If there is no story, answer with an empty acceptance array.',
         'Judge only what the diff shows. Do not invent files, lines or test results.',
         '',
+        REVIEW_CHECKLIST,
+        '',
         `Repository: ${repo}  PR: #${pr}  Head: ${head}  Base: ${base}  Branch: ${branch || '(unknown)'}  Diff lines: ${diffLines}`,
         '',
     ];
@@ -431,7 +509,7 @@ function atomicWrite(file, text) {
 function parseArgs(argv) {
     const o = { _: [] };
     const bools = ['comment', 'help'];
-    const vals = ['repo', 'pr', 'head', 'repo-dir', 'out', 'prd', 'max-lines', 'timeout-ms'];
+    const vals = ['repo', 'pr', 'head', 'repo-dir', 'out', 'prd', 'max-lines', 'risk-lines', 'timeout-ms'];
     for (let i = 0; i < argv.length; i++) {
         const a = argv[i];
         if (a === '-h') { o.help = true; continue; }
@@ -502,6 +580,7 @@ async function review(o, env = process.env) {
     const pr = posInt(o.pr, '--pr');
     const maxLines = o['max-lines'] ? posInt(o['max-lines'], '--max-lines') : DEFAULT_MAX_LINES;
     const timeoutMs = o['timeout-ms'] ? posInt(o['timeout-ms'], '--timeout-ms') : DEFAULT_TIMEOUT_MS;
+    const riskLines = o['risk-lines'] ? posInt(o['risk-lines'], '--risk-lines') : DEFAULT_RISK_LINES;
     try { fs.unlinkSync(o.out); } catch { /* none to remove */ }
 
     const reviewer = resolveReviewer({ env });
@@ -519,7 +598,7 @@ async function review(o, env = process.env) {
 
     const receipt = {
         schema: SCHEMA, repo: o.repo, pr, head: o.head, reviewer: reviewerName(reviewer), model, verdict: 'escalate', reason: '',
-        findings: [], acceptance: [], checked_clean: [], story: null, diff_lines: 0, started_at: startedAt.toISOString(), ms: 0, est_cost: null,
+        findings: [], acceptance: [], checked_clean: [], story: null, diff_lines: 0, risk_classes: [], started_at: startedAt.toISOString(), ms: 0, est_cost: null,
     };
     let chars = 0;
     const seal = (verdict, reason) => {
@@ -541,6 +620,7 @@ async function review(o, env = process.env) {
     if (d.error) throw fault('git-failed', `git diff failed: ${d.error}`);
     if (d.tooBig) return seal('escalate', 'diff-too-large: the diff overflowed the read buffer');
     receipt.diff_lines = countLines(d.diff);
+    receipt.risk_classes = riskClasses(d.diff, { maxLines: riskLines });
     if (receipt.diff_lines > maxLines) return seal('escalate', `diff-too-large: ${receipt.diff_lines} lines, over --max-lines ${maxLines}`);
     if (receipt.diff_lines === 0) return seal('escalate', `empty-diff: origin/${view.baseRefName}...${o.head.slice(0, 12)} has no changes`);
 
@@ -575,17 +655,18 @@ async function review(o, env = process.env) {
     if (!v.ok) return seal('escalate', `invalid-output: ${v.errors.slice(0, 3).join('; ')}`.slice(0, 400));
 
     Object.assign(receipt, { findings: v.value.findings, acceptance: v.value.acceptance, checked_clean: v.value.checked_clean });
-    const dec = decide(v.value, { criteria });
+    const dec = applyRisk(decide(v.value, { criteria }), receipt.risk_classes);
     return seal(dec.verdict, dec.reason);
 }
 
 const HELP = `usage: node cheap-review.js review --repo OWNER/NAME --pr N --head SHA --repo-dir DIR --out FILE
-                                 [--prd prd.json] [--max-lines 1500] [--comment] [--timeout-ms N]
+                                 [--prd prd.json] [--max-lines 1500] [--risk-lines 1000] [--comment] [--timeout-ms N]
 
 A cheap-model review of one PR head, written as a receipt merge-lock.js can require.
 Exit 0 approve, 1 request_changes, 3 escalate, 2 indeterminate (no receipt written).
 Fails closed to escalate: head mismatch, diff over --max-lines or empty, reviewer spawn failure,
-non-zero exit, timeout, invalid output, an unmet acceptance item, a P0 finding with approve.
+non-zero exit, timeout, invalid output, an unmet acceptance item, a P0 finding with approve,
+or an approve on a risk-class diff (paid call, cron, queue or job, link token or signature, over --risk-lines).
 
 Reviewer, in order: AUTODEV_REVIEWER_CMD, agy on PATH, %LOCALAPPDATA%\\agy\\bin\\agy.exe (win32), gemini on PATH.
 Environment:
@@ -614,7 +695,7 @@ async function main(argv) {
 }
 
 module.exports = {
-    validateReview, extractJson, buildPrompt, decide, childEnv, resolveReviewer, buildInvocation, splitArgv, spawnPlan, evidenceLinks, findStory, review, SCHEMA,
+    validateReview, extractJson, buildPrompt, decide, riskClasses, applyRisk, childEnv, resolveReviewer, buildInvocation, splitArgv, spawnPlan, evidenceLinks, findStory, review, SCHEMA,
 };
 
 if (require.main === module) main(process.argv.slice(2));
