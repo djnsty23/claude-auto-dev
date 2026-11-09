@@ -100,13 +100,20 @@ The judge accepts a run only when nothing is left but your landing step: a
 gated, committed branch the brief told the worker to leave for you counts as
 done. A run that ends ungated, red or on an owner's pick is a follow-up or an
 escalation, correctly. So every brief you queue with `unattended-worker.js
-enqueue` carries two things:
+enqueue` carries three things:
 
 - **Its acceptance test, by name.** Name a command that exists at the base SHA,
   or one the brief tells the worker to write first, and the exact line or exit
   code that means done (`node tooling/test-x.js` prints `x: 9/9 checks passed`).
   "Make it work" or "tests pass" names no test. A worker that has to guess its
   endpoint is the run that comes back as a follow-up.
+- **The worker's order: review before the gate.** Build, own tests with a planted defect, independent review
+  (a `code-reviewer` subagent on model opus for a diff with a paid call, a
+  cron, queue or job, a link token or signature, or over 1000 lines, which are
+  the diffs `cheap-review.js` will not approve), fixes, then the one full gate.
+  A rebase onto a moved base is the only reason for a further gate. The
+  `HEADLESS_NOTE` tells every headless worker the same order: on 2026-11-09 three
+  product PRs took 22 findings from a review that ran after their full gates.
 - **A gated commit from the worker, and the landing by you.** A headless builder
   may not push or write through `gh` (`worker-authority.js`). The worker rebases
   onto `origin/main`, commits on its branch, runs the repository's merge-bar gate
