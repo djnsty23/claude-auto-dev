@@ -14,7 +14,7 @@
 //   - gate and merge queue waits, from the arrival and admission every released
 //     lock records (full-gate-queue.js, merge-lock.js)
 //   - missing evidence, ranked as its own cause: a report with no BLOCKER line
-//     ("blocker not stated"), a done run with no report ("report missing"), and
+//     ("blocker not stated", except on an unreported run, whose report is a salvage), a done run with no report ("report missing"), and
 //     the supervisor's line for a run that ended before the model started
 //   - machine alarms: a capacity crash breaker tripped over an hour ago, which
 //     refuses every launch of its class until an operator clears it. It leads
@@ -236,9 +236,11 @@ function build(base, { now, days, capacityBase = path.join(base, 'locks', 'full-
             else statedNone++;
             continue;
         }
-        // A failed run already has its cause above. A report on its path was written
-        // afterwards, by a salvage, so its missing line says nothing about the worker.
-        if (!failedRun) add('blocker not stated', run, null, 'missing');
+        // An unreported run already has its cause above, and a report on its path was
+        // written afterwards by a salvage, so it says nothing about the worker. A lost or
+        // stopped run can write its own report, which is graded like any other.
+        if (run.result === 'unreported') continue;
+        add('blocker not stated', run, null, 'missing');
         const seen = new Set();
         for (const line of minedLines(text)) {
             const cls = classify(line);

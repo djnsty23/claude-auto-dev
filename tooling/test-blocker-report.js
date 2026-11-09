@@ -115,6 +115,17 @@ try {
     ] });
     r = spawnSync(process.execPath, [subject, '--base', a6, '--now', NOW], { encoding: 'utf8' });
     const a6l = JSON.parse(fs.readFileSync(path.join(a6, 'blockers/latest.json'), 'utf8'));
+    // A7: only an unreported run's report is a salvage. A lost run wrote its own.
+    const a7 = path.join(root, 'a7');
+    json(path.join(a7, 'unattended-workers.json'), { version: 1, records: [] });
+    json(path.join(a7, 'headless-workers.json'), { version: 1, records: [
+        { code: 'lost-own', startedAt: '2026-11-07T09:00:00Z', state: 'settled', settledAt: at, result: 'lost', reason: 'x', report: rep('lost-own', 'Worked.\nRESULT lost-own done: x\n') },
+        { code: 'salvage', startedAt: '2026-11-07T09:01:00Z', state: 'settled', settledAt: at, result: 'unreported', reason: 'exited 1', report: rep('salvage', 'Salvaged.\nThe permission classifier refused rm -rf .next.\nRESULT salvage done: x\n') },
+    ] });
+    spawnSync(process.execPath, [subject, '--base', a7, '--now', NOW], { encoding: 'utf8' });
+    const a7l = JSON.parse(fs.readFileSync(path.join(a7, 'blockers/latest.json'), 'utf8'));
+    check('A7. a lost run with its own report and no BLOCKER line ranks as blocker not stated', a7l.ranked.find((c) => c.cause === 'blocker not stated')?.runs === 1, JSON.stringify(a7l.ranked));
+    check('A7. a salvaged report on an unreported run adds no mined line', a7l.ranked.every((c) => c.mined === 0), JSON.stringify(a7l.ranked));
     check('A6. a usage-limit ending is named from the last result event', cause(a6l, 'usage limit')?.runs === 2, JSON.stringify(a6l.ranked));
     check('A6. a refused write of the report is named, by Write and by Bash', cause(a6l, 'report write refused')?.runs === 2, JSON.stringify(a6l.ranked));
     check('A6. a deferred launch ranks as a pre-worker failure', cause(a6l, 'pre-worker failure (budget, capacity or spawn)')?.runs === 1, JSON.stringify(a6l.ranked));
