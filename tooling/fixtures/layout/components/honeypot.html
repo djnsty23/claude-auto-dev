@@ -6,7 +6,7 @@
 <!--
   A form honeypot is a field that real visitors must never reach. A real
   brochure site build tripped TAP-TARGET on one. Two honeypots sit here beside
-  four near misses, each missing one half of the exemption. The suite asserts
+  five near misses, each missing one half of the exemption. The suite asserts
   the exact set: the near misses fire and the honeypots do not.
 
     hp-self     aria-hidden="true" and tabindex="-1" on the input
@@ -18,6 +18,8 @@
     no-attr     role="button" and aria-hidden="true" with NO tabindex. Its
                 tabIndex property still reads -1, so a rule reading the
                 property alone would wrongly exempt it.
+    bad-tab     the same span with an empty tabindex, which is invalid. Its
+                tabIndex property reads -1 too.
 -->
 <style>
   *,*::before,*::after{box-sizing:border-box}
@@ -34,4 +36,5 @@
   <div class="slot"><input id="only-tab" name="b" tabindex="-1" autocomplete="off"></div>
   <div class="slot"><input id="aria-false" name="c" aria-hidden="false" tabindex="-1" autocomplete="off"></div>
   <div class="slot"><span id="no-attr" role="button" aria-hidden="true">x</span></div>
+  <div class="slot"><span id="bad-tab" role="button" aria-hidden="true" tabindex="">x</span></div>
 </main></body></html>

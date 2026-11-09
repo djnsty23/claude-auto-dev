@@ -509,8 +509,8 @@ async function sweepTests() {
         const found = hp ? hp.findings : [];
         const tapIds = found.filter((f) => f.code === CODES.TAP_TARGET).map((f) => (/#([\w-]+)$/.exec(f.sel) || [])[1]).sort();
         check('honeypot: neither honeypot fires TAP-TARGET', !tapIds.includes('hp-self') && !tapIds.includes('hp-wrap'), tapIds);
-        check('honeypot: all four near misses still fire TAP-TARGET', ['aria-false', 'no-attr', 'only-aria', 'only-tab'].every((id) => tapIds.includes(id)), tapIds);
-        check('honeypot: nothing else fires on the page', found.length === tapIds.length && tapIds.length === 4, found.map((f) => `${f.code} ${f.sel}`));
+        check('honeypot: all five near misses still fire TAP-TARGET', ['aria-false', 'bad-tab', 'no-attr', 'only-aria', 'only-tab'].every((id) => tapIds.includes(id)), tapIds);
+        check('honeypot: nothing else fires on the page', found.length === tapIds.length && tapIds.length === 5, found.map((f) => `${f.code} ${f.sel}`));
         const noAttr = load('honeypot-390').components.elements.find((e) => /#no-attr$/.test(e.sel));
         check('honeypot: an element with no tabindex attribute records none', noAttr && noAttr.ah === true && noAttr.ti === null, noAttr && { ah: noAttr.ah, ti: noAttr.ti });
         const hpResult = CHECKS.analyse(load('honeypot-390'));
@@ -518,7 +518,7 @@ async function sweepTests() {
         // A snapshot from before the probe recorded these fields stays judged.
         const old = JSON.parse(JSON.stringify(load('honeypot-390')));
         for (const e of old.components.elements) { delete e.ah; delete e.ti; }
-        check('honeypot: a snapshot without the fields exempts nothing', CHECKS.analyse(old).findings.filter((f) => f.code === CODES.TAP_TARGET).length === 6, CHECKS.analyse(old).findings.map((f) => f.sel));
+        check('honeypot: a snapshot without the fields exempts nothing', CHECKS.analyse(old).findings.filter((f) => f.code === CODES.TAP_TARGET).length === 7, CHECKS.analyse(old).findings.map((f) => f.sel));
     }
 
     // Report, stories, compare, pairs, vision, through the CLI.

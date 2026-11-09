@@ -749,12 +749,12 @@ function harvestComponents(opt) {
             ol: ol,
             ia: interactiveKind(el),
             dis: !!(el.disabled || el.getAttribute('aria-disabled') === 'true'),
-            // Both halves of "nobody can reach it". aria-hidden is inherited,
-            // so a wrapper counts. tabindex is read from the attribute: the
-            // tabIndex property is also -1 on any element that never declared
-            // one, such as a span with a button role.
+            // The two halves of the honeypot exemption. aria-hidden is
+            // inherited, so a wrapper counts. tabindex is read from the
+            // attribute: the tabIndex property is also -1 on an element that
+            // never declared one or declared an invalid value.
             ah: !!(el.closest && el.closest('[aria-hidden="true"]')),
-            ti: el.hasAttribute('tabindex') ? el.tabIndex : null,
+            ti: el.hasAttribute('tabindex') ? Number(el.getAttribute('tabindex')) : null,
             txt: txt.slice(0, 60),
             tb: txt ? textBox(el) : null,
             // Display inline inside a run of text: the WCAG target-size
