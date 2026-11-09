@@ -48,6 +48,11 @@
  *      patterns (and the base's autodevFastLane.sensitive). A sensitive path,
  *      a file list that cannot be read, or a base config that cannot be read
  *      all count as sensitive, and then --escalation-receipt is required.
+ *   4b2. Without an escalation receipt, reads GitHub's own diff for this
+ *      compare and runs cheap-review.js's riskClasses on it: a paid call, a
+ *      cron, queue or job, a link token or signature, or over 1000 lines. Any
+ *      class, or a diff that cannot be read, needs --escalation-receipt. A
+ *      receipt's risk_classes field is never read, because a receipt is text.
  *   4c. With --review-override, appends one event to the deploy ledger (below).
  *      A ledger that cannot be written refuses the merge.
  *   5. `gh pr merge N --repo R --rebase --match-head-commit <head>`.
@@ -124,8 +129,8 @@
  * SENSITIVE DIFFS. `--escalation-receipt FILE` is {schema:1, repo, pr, head,
  * reviewer:"code-reviewer", model, verdict:"approve"} where model contains
  * "opus": the code-reviewer agent's printed JSON, saved by its caller. It is
- * required when the diff is sensitive and checked whenever it is given. A
- * review override does NOT waive it.
+ * required when the diff is sensitive or in a risk class (step 4b2), and
+ * checked whenever it is given. A review override does NOT waive it.
  *
  * EXIT. 0 merged and the merged tree matches the proved tree. 1 refused (bad
  * arguments, receipt, PR state, head or base mismatch, GitHub refused the
@@ -159,6 +164,7 @@ const { spawnSync } = require('child_process');
 
 const queue = require(path.join(__dirname, 'full-gate-queue.js'));
 const fastLane = require(path.join(__dirname, 'fast-lane.js'));
+const cheapReview = require(path.join(__dirname, 'cheap-review.js'));
 
 const TAG = 'merge-lock:';
 const SHA_RE = /^[0-9a-f]{40}$/;
@@ -380,6 +386,20 @@ function sensitiveReasons(cmp, pkgText) {
     if (!files) return ['GitHub gave no usable changed-file list (missing, or 300 files or more)'];
     const v = fastLane.classify(files, { ...config, maxLines: Number.MAX_SAFE_INTEGER, previewPaths: null, previewTest: null });
     return v.reasons.filter((r) => SENSITIVE_REASON_RE.test(r));
+}
+
+/**
+ * The risk classes of the diff GitHub will merge, derived here and never read
+ * from a receipt. A diff GitHub refuses or an answer that is not a diff counts
+ * as a class: a failed read must not lower the bar. gh that could not run at
+ * all is indeterminate.
+ */
+function riskClassesOnGitHub(repo, baseSha, head, env) {
+    const r = runGh(['api', `repos/${repo}/compare/${baseSha}...${head}`, '-H', 'Accept: application/vnd.github.v3.diff'], env);
+    if (r.error && r.error !== 'ENOBUFS') throw unsure(`reading the diff of ${baseSha.slice(0, 12)}...${head.slice(0, 12)}: could not run gh (${r.error})`);
+    if (!r.ok) return [{ class: 'diff-unreadable', file: r.error || `gh exited ${r.status}` }];
+    if (!/^diff --git /m.test(r.stdout)) return [{ class: 'diff-unreadable', file: 'GitHub answered with no diff' }];
+    return cheapReview.riskClasses(r.stdout);
 }
 
 /**
@@ -611,6 +631,14 @@ async function mergeHeld({ repo, pr, head, env, log, readbackMs, pollMs, fastRec
             + 'and needs --escalation-receipt FILE: dispatch the code-reviewer agent on opus and save the JSON it prints. A review override does not waive it');
     }
     if (sensitive.length) log(`${TAG} sensitive diff (${sensitive.length} reason(s)); the escalation receipt is on file`);
+    if (!escalation) {
+        const risks = riskClassesOnGitHub(repo, base.sha, head, env);
+        if (risks.length) {
+            const named = risks.slice(0, 4).map((x) => (x.file ? `${x.class} (${x.file})` : x.class)).join('; ');
+            throw refuse(`${repo}#${pr} is in a risk class (${named}${risks.length > 4 ? `; and ${risks.length - 4} more` : ''}), `
+                + 'and needs --escalation-receipt FILE: dispatch the code-reviewer agent on opus and save the JSON it prints. A review override does not waive it');
+        }
+    }
     if (override) {
         let file;
         try {
@@ -718,7 +746,8 @@ function help() {
     console.log('A sensitive diff (fast-lane.js sensitive patterns on GitHub\'s file list, or a list or config that');
     console.log('cannot be read) also needs --escalation-receipt FILE: {schema:1, repo, pr, head, reviewer:"code-reviewer",');
     console.log('model containing "opus", verdict:"approve"}, which the code-reviewer agent prints. An override does not');
-    console.log('waive it.');
+    console.log('waive it. The same holds for a diff in a risk class, which merge-lock derives from GitHub\'s own diff with');
+    console.log('cheap-review.js (paid call, job, link token, over 1000 lines, or a diff it cannot read). It never reads a receipt\'s risk_classes.');
     console.log('Exit 0 merged with the proved tree, 1 refused or a different tree, 2 indeterminate.');
     console.log('env: AUTODEV_GH_BIN (default gh), AUTODEV_MERGE_LOCK_POLL_MS, AUTODEV_MERGE_LOCK_READBACK_MS, AUTODEV_DEPLOY_EVENTS');
 }
