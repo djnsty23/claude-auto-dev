@@ -411,10 +411,48 @@ check('decide: a P0 with request_changes stays request_changes', cr.decide({ ...
         ['a removed line', 'diff --git a/s.ts b/s.ts\n--- a/s.ts\n+++ b/s.ts\n@@ -1 +1 @@\n-  key: process.env.SERPAPI_API_KEY,\n+  key: null,\n'],
         ['a context line', 'diff --git a/s.ts b/s.ts\n--- a/s.ts\n+++ b/s.ts\n@@ -1,2 +1,3 @@\n createHmac(a)\n+const b = 1\n'],
         ['a deleted cron file', 'diff --git a/src/app/api/cron/x/route.ts b/src/app/api/cron/x/route.ts\ndeleted file mode 100644\n--- a/src/app/api/cron/x/route.ts\n+++ /dev/null\n@@ -1 +0,0 @@\n-export const a = 1\n'],
-        ['a rename with no added line', 'diff --git a/src/app/api/cron/a.ts b/src/app/api/cron/b.ts\nsimilarity index 100%\nrename from src/app/api/cron/a.ts\nrename to src/app/api/cron/b.ts\n'],
+        ['a rename with no added line to a plain path', 'diff --git a/src/app/api/cron/a.ts b/src/lib/b.ts\nsimilarity index 100%\nrename from src/app/api/cron/a.ts\nrename to src/lib/b.ts\n'],
         ['plain words', diffOf('src/lib/x.ts', 'const queue = []', "const token = cssVar('--token')", 'const signature = form.get("signature")', 'const site = process.env.NEXT_PUBLIC_SITE_URL')],
+        ['a root docs script', diffOf('docs/gen.ts', 'const k = process.env.OPENAI_API_KEY')],
+        ['a root tests helper', diffOf('tests/helper.ts', "const mac = createHmac('sha256', k)")],
+        ['a __tests__ file under app', diffOf('src/app/__tests__/x.ts', "const mac = createHmac('sha256', k)")],
+        ['a # line in a python file', diffOf('tools/a.py', "# createHmac('sha256', k) is elsewhere")],
+        ['a # line in a yaml file', diffOf('.github/x.yml', "# cron.schedule('a', x)")],
+        ['a comment closed on its line', diffOf('src/lib/x.ts', "/* createHmac('sha256', k) */")],
+        ['a browser Worker', diffOf('src/lib/x.ts', "const w = new Worker('w.js', { type: 'module' })")],
+        ['a +++ content line in a skipped doc', "diff --git a/docs/a.md b/docs/a.md\n--- a/docs/a.md\n+++ b/docs/a.md\n@@ -1 +1,2 @@\n+++ b/src/app/api/cron/x.ts\n+createHmac('a', b)\n"],
     ];
     for (const [name, d] of negative) check(`risk: silent on ${name}`, classes(d) === '', classes(d));
+    // `[measured 2026-11-09]` an independent review of the first version ran these shapes and each one was silent.
+    const shapes = [
+        ['link-token', diffOf('src/lib/a.ts', 'const ok = verifyToken(t)')],
+        ['link-token', diffOf('src/lib/a.ts', 'const t = signToken(id)')],
+        ['link-token', diffOf('src/lib/a.ts', 'verifySignature(body, sig)')],
+        ['link-token', diffOf('src/lib/a.ts', 'const u = signUrl(path)')],
+        ['link-token', diffOf('src/lib/a.ts', 'const u = signLink(id)')],
+        ['paid-call', diffOf('src/app/api/docs/route.ts', 'const k = process.env.OPENAI_API_KEY')],
+        ['link-token', diffOf('src/app/docs/[token]/page.tsx', 'export default function P() { return null }')],
+        ['paid-call', diffOf('src/lib/test/pay.ts', "await fetch('https://api.openai.com/v1/x')")],
+        ['paid-call', diffOf('src/lib/a.ts', 'for (const x of xs) await anthropic.messages.create({ model })')],
+        ['paid-call', diffOf('src/lib/a.ts', 'await openai.chat.completions.create({ model })')],
+        ['paid-call', diffOf('src/lib/a.ts', 'const r = await model.generateContent(prompt)')],
+        ['paid-call', diffOf('src/lib/a.ts', 'const k = env.OPENAI_API_KEY')],
+        ['paid-call', diffOf('src/lib/a.ts', 'const { OPENAI_API_KEY } = process.env')],
+        ['paid-call', diffOf('src/lib/a.ts', 'const k = process.env["OPENAI_API_KEY"]')],
+        ['paid-call', diffOf('tools/a.py', 'k = os.environ["OPENAI_API_KEY"]')],
+        ['paid-call', diffOf('src/lib/a.ts', 'const m = await import("openai")')],
+        ['job', diffOf('supabase/functions/a/index.ts', "Deno.cron('a', '0 * * * *', run)")],
+        ['job', diffOf('supabase/migrations/5.sql', "select cron.schedule_in_database('a', '0 * * * *', 'x', 'db');")],
+        ['job', diffOf('.github/workflows/a.yml', "    - cron: '0 3 * * *'")],
+        ['job', diffOf('src/lib/q.ts', "const w = new Worker('mail', async (j) => send(j))")],
+        ['link-token', diffOf('src/lib/a.ts', "#mac = createHmac('sha256', k)")],
+        ['paid-call', diffOf('src/lib/a.ts', '#k = process.env.OPENAI_API_KEY')],
+        ['link-token', diffOf('src/lib/a.ts', "/* mac */ const m = createHmac('sha256', k)")],
+        ['link-token', 'diff --git a/src/lib/x.ts b/src/app/r/[token]/page.tsx\nsimilarity index 100%\nrename from src/lib/x.ts\nrename to src/app/r/[token]/page.tsx\n'],
+        ['link-token', 'diff --git "a/src/a.ts" "b/src/a\\"b.ts"\n--- "a/src/a\\"b.ts"\n+++ "b/src/a\\"b.ts"\n@@ -1 +1 @@\n+createHmac(a, b)\n'],
+        ['unparsed-path', "diff --git src/a.ts src/a.ts\n--- src/a.ts\n+++ src/a.ts\n@@ -1 +1 @@\n+const a = 1\n"],
+    ];
+    for (const [want, d] of shapes) check(`risk shape: ${want} fires on ${d.split('\n').filter((l) => l.startsWith('+') || l.startsWith('rename to')).pop().slice(0, 60)}`, classes(d) === want, classes(d));
     const lines = (n) => diffOf('src/lib/x.ts', ...Array.from({ length: n }, (_, i) => `const v${i} = ${i}`));
     check('risk: a diff over the line limit is large-diff, naming no file', cr.riskClasses(lines(5000)).some((r) => r.class === 'large-diff' && r.file === null));
     check('risk: a small plain diff is no class', classes(lines(100)) === '');
@@ -443,6 +481,11 @@ check('decide: a P0 with request_changes stays request_changes', cr.decide({ ...
     const stateOf = (b) => ghState({ pr: { baseRefName: 'main', body: 'x', headRefName: b.branch, headRefOid: b.head } });
     const a = run({ mode: 'approve', repoDir: job.repoDir, head: job.head, state: stateOf(job) });
     escalated('risk: a reviewer approve on a cron route escalates, and the reviewer did run', a, /^risk-class: job \(src\/app\/api\/cron\/nightly\/route\.ts\)/, { reviewerCalled: true });
+    // A person's git config must not switch the scan off: the diff is read with pinned prefixes.
+    const noprefix = risky('src/app/api/cron/other/route.ts', 'export async function GET() { return 2 }\n', 'feat/noprefix');
+    git(noprefix.repoDir, 'config', 'diff.noprefix', 'true');
+    const np = run({ mode: 'approve', repoDir: noprefix.repoDir, head: noprefix.head, state: stateOf(noprefix) });
+    escalated('risk: diff.noprefix in the repo config does not hide a cron route', np, /^risk-class: job \(src\/app\/api\/cron\/other\/route\.ts\)/, { reviewerCalled: true });
     check('risk: the receipt lists the classes', a.receipt && Array.isArray(a.receipt.risk_classes) && a.receipt.risk_classes.length === 1 && a.receipt.risk_classes[0].class === 'job', JSON.stringify(a.receipt && a.receipt.risk_classes));
     const b = run({ mode: 'request', repoDir: job.repoDir, head: job.head, state: stateOf(job) });
     check('risk: request_changes stays request_changes, so the worker fixes it first', b.r.status === 1 && b.receipt && b.receipt.verdict === 'request_changes', `exit ${b.r.status}`);
