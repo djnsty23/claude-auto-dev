@@ -928,7 +928,7 @@ function analyseComponents(snapshot, T) {
             population.tapCandidates++;
             if (e.dis) { exempt.disabled++; continue; }
             // A form honeypot: hidden from assistive technology AND out of the
-            // tab order. Either half alone still leaves someone who can reach it.
+            // tab order. Either half alone leaves it reachable by one of those.
             if (e.ah === true && e.ti === -1) { exempt.honeypot++; continue; }
             if (e.inl) { exempt.inlineLink++; continue; }
             let t = Object.assign({}, e.box);
