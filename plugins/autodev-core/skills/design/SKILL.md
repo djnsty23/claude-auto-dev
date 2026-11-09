@@ -75,10 +75,10 @@ Then, for a site build:
 - **Ship the options artifact first**: two or three real variants of the
   direction, with real content, so the owner picks before the build starts.
   **On an unattended run** (scheduled or dispatched, nobody can answer before it
-  ends), build and score the variants the same way, then decide: ship the one you
-  would recommend as its own revertible commit. Log the decision, each alternative
-  and why it lost in the project's design or motion doc, keep the losing variants
-  at a named commit, and open the run's report with a review item linking the
+  ends), build the variants the same way, then decide: ship the one you would
+  recommend as its own revertible commit. Log the decision, each alternative and
+  why it lost as a `DYn` row with the artifact link, keep the losing variants at
+  a named commit, and open the run's report with a review item linking the
   options artifact. The owner reviews afterwards and can revert or swap.
 - **Before publish**, run the `unslop` sweep, which includes the pinned
   `impeccable detect` probe for template tells.
