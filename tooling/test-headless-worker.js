@@ -292,7 +292,7 @@ try {
             /coordinator's steps even when the brief asks/.test(HEADLESS_NOTE) && /gated commit and put its head SHA and gate receipt in the report/.test(HEADLESS_NOTE));
         // `[measured 2026-11-09]` three product PRs passed a full gate and then took 22 findings from a later review.
         check('3c. the HEADLESS_NOTE orders the review before the one full gate',
-            /own tests with a planted defect, independent review/.test(HEADLESS_NOTE) && /then the one full gate/.test(HEADLESS_NOTE) && /only reason for a further gate/.test(HEADLESS_NOTE));
+            /When the brief changes code/.test(HEADLESS_NOTE) && /own tests with a planted defect, independent review/.test(HEADLESS_NOTE) && /then the repository's one merge-bar gate/.test(HEADLESS_NOTE) && /only reason for a further gate/.test(HEADLESS_NOTE));
         const channels = fs.readFileSync(path.resolve(__dirname, '..', 'plugins/autodev-core/skills/brain/references/dispatch-channels.md'), 'utf8');
         check('3d. the dispatch doc states the same order', /own tests with a planted defect, independent review/.test(channels) && /only reason for a further gate/.test(channels));
         const noModel = hw(['start', '--code', 'DRY', '--prompt-file', PROMPT, '--log', log, '--claude-bin', FAKE, '--ledger', ledger, '--dry-run']);
