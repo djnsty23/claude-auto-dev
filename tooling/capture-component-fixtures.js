@@ -55,6 +55,8 @@ function plan(layout) {
     for (const p of PLANTS) list.push([`plant-${p}-390`, `/components-clean.html?plant=${p}`, 390]);
     // Three measured false-positive classes, each beside its true positive.
     list.push(['false-positives-390', '/false-positives.html', 390]);
+    // Two honeypots beside four near misses of the TAP-TARGET exemption.
+    list.push(['honeypot-390', '/honeypot.html', 390]);
     return list;
 }
 
