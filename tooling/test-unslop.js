@@ -508,17 +508,17 @@ async function sweepTests() {
         check('honeypot: the gate CLI measured the page', hpRun.status === 0 && hp && hp.status === 'MEASURED', hpRun.stderr || hpRun.stdout.slice(0, 300));
         const found = hp ? hp.findings : [];
         const tapIds = found.filter((f) => f.code === CODES.TAP_TARGET).map((f) => (/#([\w-]+)$/.exec(f.sel) || [])[1]).sort();
-        check('honeypot: neither honeypot fires TAP-TARGET', !tapIds.includes('hp-self') && !tapIds.includes('hp-wrap'), tapIds);
-        check('honeypot: all five near misses still fire TAP-TARGET', ['aria-false', 'bad-tab', 'no-attr', 'only-aria', 'only-tab'].every((id) => tapIds.includes(id)), tapIds);
-        check('honeypot: nothing else fires on the page', found.length === tapIds.length && tapIds.length === 5, found.map((f) => `${f.code} ${f.sel}`));
+        check('honeypot: no form-field honeypot fires TAP-TARGET', ['hp-self', 'hp-wrap', 'hp-area', 'hp-select'].every((id) => !tapIds.includes(id)), tapIds);
+        check('honeypot: all seven near misses still fire TAP-TARGET', ['aria-false', 'bad-tab', 'hp-button', 'hp-link', 'no-attr', 'only-aria', 'only-tab'].every((id) => tapIds.includes(id)), tapIds);
+        check('honeypot: nothing else fires on the page', found.length === tapIds.length && tapIds.length === 7, found.map((f) => `${f.code} ${f.sel}`));
         const noAttr = load('honeypot-390').components.elements.find((e) => /#no-attr$/.test(e.sel));
         check('honeypot: an element with no tabindex attribute records none', noAttr && noAttr.ah === true && noAttr.ti === null, noAttr && { ah: noAttr.ah, ti: noAttr.ti });
         const hpResult = CHECKS.analyse(load('honeypot-390'));
-        check('honeypot: the exemption is counted for exactly the two honeypots', hpResult.counts.components.exempt.honeypot === 2, hpResult.counts.components.exempt);
+        check('honeypot: the exemption is counted for exactly the four honeypots', hpResult.counts.components.exempt.honeypot === 4, hpResult.counts.components.exempt);
         // A snapshot from before the probe recorded these fields stays judged.
         const old = JSON.parse(JSON.stringify(load('honeypot-390')));
         for (const e of old.components.elements) { delete e.ah; delete e.ti; }
-        check('honeypot: a snapshot without the fields exempts nothing', CHECKS.analyse(old).findings.filter((f) => f.code === CODES.TAP_TARGET).length === 7, CHECKS.analyse(old).findings.map((f) => f.sel));
+        check('honeypot: a snapshot without the fields exempts nothing', CHECKS.analyse(old).findings.filter((f) => f.code === CODES.TAP_TARGET).length === 11, CHECKS.analyse(old).findings.map((f) => f.sel));
     }
 
     // Report, stories, compare, pairs, vision, through the CLI.

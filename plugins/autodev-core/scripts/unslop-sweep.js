@@ -613,9 +613,11 @@ function mergeVision(captures, visionItems) {
 // ================================================================ browser
 
 /**
- * Load the browser driver: an explicit path, else the product's playwright,
- * else its playwright-core. Only the resolve step falls through: a driver that
- * is installed but fails to load reports its own error.
+ * Load the browser driver: an explicit path, else playwright, else
+ * playwright-core. Each package name is looked up from the product root and
+ * then the cwd, so playwright in the cwd beats playwright-core in the product.
+ * Only the resolve step falls through: a driver that is installed but fails to
+ * load reports its own error.
  */
 function loadBrowserDriver(root, explicit) {
     if (explicit) return require(path.resolve(explicit));
