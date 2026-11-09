@@ -190,29 +190,44 @@ function decide(review, { criteria = 0 } = {}) {
 // so its approve does not settle a diff in one of those classes.
 // ---------------------------------------------------------------------------
 
-const RISK_NOT_CODE = /(^|\/)(__tests__|tests?|e2e|docs?|fixtures?)\/|\.(test|spec)\.[a-z0-9]+$|\.(md|mdx|txt)$|(^|\/)tooling\/test-/i;
-const COMMENT_LINE = /^\s*(\/\/|\/\*|\*|#|--\s|<!--)/;
+// A docs or test folder is non-code only at the repo root: src/app/docs/ is a public route.
+const RISK_NOT_CODE = /^(tests?|e2e|docs?|fixtures?)\/|(^|\/)__tests__\/|\.(test|spec)\.[a-z0-9]+$|\.(md|mdx|txt)$|(^|\/)tooling\/test-/i;
+const COMMENT_LINE = /^\s*(\/\/|\*|--\s|<!--)/;
+const HASH_COMMENT_FILE = /\.(py|rb|sh|bash|zsh|ya?ml|toml|tf|ini|conf)$|(^|\/)(Dockerfile|Makefile)$/i;
 const PROVIDERS = 'SERP_?API|DATAFORSEO|OPENAI|ANTHROPIC|GEMINI|GOOGLE_GENERATIVE_AI|PERPLEXITY|FIRECRAWL|BRIGHT_?DATA|ELEVENLABS|REPLICATE|FAL|TAVILY|EXA|APIFY|SCRAPINGBEE';
 const RISK_RULES = [
     { class: 'paid-call', line: [
-        new RegExp(`(?:process\\.env\\.|\\benv\\.get\\(['"]|\\bgetenv\\(['"])(?:[A-Z0-9_]*_)?(?:${PROVIDERS})(?:_[A-Z0-9_]*)?(?:KEY|TOKEN)\\b`),
+        new RegExp(`(?:\\benv\\.|\\benv\\[['"]|\\benv\\.get\\(['"]|\\bgetenv\\(['"]|\\benviron(?:\\.get\\(|\\[)['"])(?:[A-Z0-9_]*_)?(?:${PROVIDERS})(?:_[A-Z0-9_]*)?(?:KEY|TOKEN)\\b`),
+        new RegExp(`\\b(?:[A-Z0-9_]*_)?(?:${PROVIDERS})(?:_[A-Z0-9_]*)?(?:KEY|TOKEN)\\b[^}]*\\}\\s*=\\s*(?:[\\w.]+\\.)?env\\b`),
         /\b(?:api\.openai\.com|api\.anthropic\.com|generativelanguage\.googleapis\.com|serpapi\.com|api\.dataforseo\.com|api\.perplexity\.ai|api\.firecrawl\.dev|api\.elevenlabs\.io|api\.replicate\.com|fal\.run|api\.tavily\.com|api\.exa\.ai|api\.apify\.com|api\.brightdata\.com)\b/,
-        /(?:\bfrom\s+|\brequire\(\s*)['"](?:openai|@anthropic-ai\/sdk|@google\/generative-ai|@google\/genai|replicate|@fal-ai\/[\w-]+|@ai-sdk\/[\w-]+|@mendable\/firecrawl-js)['"]/,
+        /(?:\bfrom\s+|\brequire\(\s*|\bimport\(\s*)['"](?:openai|@anthropic-ai\/sdk|@google\/generative-ai|@google\/genai|replicate|@fal-ai\/[\w-]+|@ai-sdk\/[\w-]+|@mendable\/firecrawl-js)['"]/,
         /\b(?:generateText|streamText|generateObject|streamObject)\s*\(/,
+        /\.messages\.(?:create|stream)\s*\(/, /\.chat\.completions\.(?:create|parse)\s*\(/, /\.responses\.create\s*\(/, /\.generateContent(?:Stream)?\s*\(/,
     ] },
     { class: 'job', path: /(^|[/_-])crons?([/_.-])/i, line: [
-        /\bcron\.schedule\s*\(/, /\bnet\.http_post\s*\(/, /"crons"\s*:/, /\bnew\s+Queue\s*\(/, /\binngest\.createFunction\s*\(/,
+        /\bcron\.schedule(?:_in_database)?\s*\(/, /\bDeno\.cron\s*\(/, /^\s*-\s*cron\s*:/, /\bnet\.http_post\s*\(/, /"crons"\s*:/, /\bnew\s+Queue\s*\(/, /\binngest\.createFunction\s*\(/,
+        /(?:\bfrom\s+|\brequire\(\s*)['"]bullmq['"]/, /\bnew\s+Worker\s*\(\s*['"`\w.-]+\s*,\s*(?:async\b|function\b|\(|\w+\s*=>)/,
     ] },
     { class: 'link-token', path: /\[(?:token|signature)\]/i, line: [
         /\bcreateHmac\s*\(/, /\btimingSafeEqual\s*\(/, /\bsubtle\.sign\s*\(/, /\bjwt\.sign\s*\(/, /\bnew\s+SignJWT\b/,
-        /\b(?:sign|verify)[A-Z]\w*(?:Link|Token|Url|Signature)\s*[(<]/,
+        /\b(?:sign|verify)(?:[A-Z]\w*)?(?:Link|Token|Url|Signature)\s*[(<]/,
     ] },
 ];
+
+/** A path as git prints it: a C-quoted name loses its quotes and escapes. */
+function unquotePath(raw) {
+    const name = raw.trim();
+    if (!name.startsWith('"') || !name.endsWith('"')) return name;
+    return name.slice(1, -1).replace(/\\(.)/g, '$1');
+}
 
 /**
  * The risk classes this diff falls in: [{ class, file }], one per class and
  * file, file null for large-diff. Reads added code lines only, so a removed
- * call, a comment, a test or a doc never counts. Pure.
+ * call, a comment, a test or a doc never counts towards a class, though
+ * large-diff counts every line of the diff. A rename is read by its new path.
+ * A header this parser cannot read is the class unparsed-path, never a silent
+ * skip. Pure.
  */
 function riskClasses(diff, { maxLines = DEFAULT_RISK_LINES } = {}) {
     const text = String(diff || '');
@@ -220,16 +235,28 @@ function riskClasses(diff, { maxLines = DEFAULT_RISK_LINES } = {}) {
     let file = null;
     const hit = (cls) => found.set(`${cls}\n${file}`, { class: cls, file });
     let scan = false;
+    let header = true;
     for (const raw of text.split('\n')) {
-        if (raw.startsWith('diff --git ')) { file = null; scan = false; continue; }
-        if (file === null && raw.startsWith('+++ ')) {
-            const name = raw.slice(4).trim();
-            if (name.startsWith('b/') && !RISK_NOT_CODE.test(name.slice(2))) { file = name.slice(2); scan = true; }
+        if (raw.startsWith('diff --git ')) { file = null; scan = false; header = true; continue; }
+        if (header && raw.startsWith('@@')) { header = false; continue; }
+        if (header && raw.startsWith('rename to ')) {
+            const name = unquotePath(raw.slice(10));
+            if (RISK_NOT_CODE.test(name)) continue;
+            file = name;
+            for (const rule of RISK_RULES) if (rule.path && rule.path.test(file)) hit(rule.class);
+            continue;
+        }
+        if (header && raw.startsWith('+++ ')) {
+            const name = unquotePath(raw.slice(4));
+            if (name === '/dev/null') continue;
+            if (!name.startsWith('b/')) { file = name.slice(0, 200); hit('unparsed-path'); continue; }
+            if (!RISK_NOT_CODE.test(name.slice(2))) { file = name.slice(2); scan = true; }
             continue;
         }
         if (!scan || !raw.startsWith('+')) continue;
-        const line = raw.slice(1);
-        if (!line.trim() || COMMENT_LINE.test(line)) continue;
+        const line = raw.slice(1).replace(/^\s*\/\*.*?\*\/\s*/, '');
+        if (!line.trim() || line.trimStart().startsWith('/*') || COMMENT_LINE.test(line)) continue;
+        if (HASH_COMMENT_FILE.test(file) && line.trimStart().startsWith('#')) continue;
         for (const rule of RISK_RULES) {
             if ((rule.path && rule.path.test(file)) || rule.line.some((re) => re.test(line))) hit(rule.class);
         }
@@ -409,7 +436,7 @@ function buildPrompt({ repo, pr, head, base, branch, prBody, story, rules, evide
         '',
         'Rules: P0 is a defect that must not merge (data loss, security hole, broken build, wrong behaviour). P1 is a likely bug or a missing test. P2 is a nit. Use "approve" only with no P0 finding. Use "escalate" when the change touches money, auth, migrations or secrets and you are not certain, or when you cannot judge it.',
         'Give one acceptance item per acceptance criterion below, in order. If there is no story, answer with an empty acceptance array.',
-        'Judge only what the diff shows. Do not invent files, lines or test results.',
+        'Judge only what the diff shows. Do not invent files, lines or test results. If a guard the checklist asks for could sit outside the diff, answer "escalate", not "request_changes".',
         '',
         REVIEW_CHECKLIST,
         '',
@@ -550,7 +577,7 @@ function readRules(dir) {
 }
 
 function gitDiff(dir, base, head) {
-    const r = spawnSync('git', ['-C', dir, '-c', 'core.quotepath=off', 'diff', '--no-color', '--no-ext-diff', `origin/${base}...${head}`, '--'], {
+    const r = spawnSync('git', ['-C', dir, '-c', 'core.quotepath=off', 'diff', '--no-color', '--no-ext-diff', '--src-prefix=a/', '--dst-prefix=b/', `origin/${base}...${head}`, '--'], {
         encoding: 'utf8', windowsHide: true, timeout: 120000, maxBuffer: 64 * 1024 * 1024,
     });
     if (r.error && r.error.code === 'ENOBUFS') return { tooBig: true };
