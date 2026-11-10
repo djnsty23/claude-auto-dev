@@ -1402,7 +1402,7 @@ try {
         const inst = path.join(ROOT, 'cfg', 'plugins', 'cache', 'autodev', 'autodev-core', '9.9.9');
         write(path.join(inst, '.claude-plugin', 'plugin.json'), JSON.stringify({ name: 'autodev-core', version: '9.9.9' }));
         fs.mkdirSync(path.join(inst, 'scripts'), { recursive: true });
-        for (const f of ['headless-worker.js', 'claude-paths.js', 'capacity.js', 'gate-records.js', 'plugin-integrity.js', 'execution-budget.js', 'worker-profiles.js', 'worker-authority.js', 'worker-authority.json', 'paid-key-guard.js', 'ledger-lock.js', 'gate-identity.js']) fs.copyFileSync(path.join(path.dirname(SCRIPT), f), path.join(inst, 'scripts', f));
+        for (const f of ['headless-worker.js', 'claude-paths.js', 'capacity.js', 'gate-records.js', 'plugin-integrity.js', 'execution-budget.js', 'worker-profiles.js', 'worker-authority.js', 'worker-authority.json', 'paid-key-guard.js', 'usage-limit-hold.js', 'ledger-lock.js', 'gate-identity.js']) fs.copyFileSync(path.join(path.dirname(SCRIPT), f), path.join(inst, 'scripts', f));
         const instScript = path.join(inst, 'scripts', 'headless-worker.js');
         // A cache-shaped path alone is no longer enough: with no install record
         // and no marketplace commit to compare against, the copy is DENIED.
