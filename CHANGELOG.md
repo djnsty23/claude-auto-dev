@@ -1,5 +1,17 @@
 # Changelog
 
+## [8.202.0]
+
+### Headless workers
+
+- `headless-worker.js` names a usage-limit ending in the run's report instead
+  of "no report".
+- `usage-limit-hold.js` holds unattended launches after a usage-limit ending.
+  `headless-worker start`, the unattended queue and the tick's judge all honour
+  it. A refused launch reserves nothing and keeps its task queued.
+- The hold is derived from the ledger and each run's own log. It lifts 2 minutes
+  after the stated reset, or 60 minutes after the ending when none can be read.
+
 ## [8.201.0]
 
 ### Review and merge
