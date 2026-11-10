@@ -132,7 +132,7 @@ try {
     const status = s.cli(HW, ['status', '--ledger', s.ledger]);
     check('H3. status prints the hold line once', HOLD_LINE.test(status.stdout) && status.stdout.match(/launch hold/g).length === 1, status.stdout.slice(0, 400));
     const statusJson = s.cli(HW, ['status', '--ledger', s.ledger, '--json']);
-    check('H3. status --json carries the hold', statusJson.value && statusJson.value.launchHolds.length === 1 && statusJson.value.launchHolds[0].code === 'hit-1', statusJson.stdout.slice(0, 300));
+    check('H3. status --json carries the hold', statusJson.value?.launchHolds?.length === 1 && statusJson.value.launchHolds[0].code === 'hit-1', statusJson.stdout.slice(0, 300));
 
     // The 60 minute rule, from both sides, by moving the ending and nothing else.
     s.editLedger((r) => { r.find((x) => x.code === 'hit-1').usageLimit.endedAt = ago(58); });
@@ -216,7 +216,7 @@ try {
     check('H1. four refused launches started no process', u.runs() === 0, u.runs());
     const heldRec = uwRec('worker-launch-a');
     check('H1. a held task is left queued', heldRec.state === 'queued', heldRec.state);
-    check('H1. a held launch counts no attempt, four times over', heldRec.lastLaunchError.attempts === 0 && heldRec.lastLaunchError.transient === true, JSON.stringify(heldRec.lastLaunchError));
+    check('H1. a held launch counts no attempt, four times over', heldRec.lastLaunchError?.attempts === 0 && heldRec.lastLaunchError?.transient === true, JSON.stringify(heldRec.lastLaunchError));
     u.editLedger((r) => { r[0].usageLimit.endedAt = ago(61); });
     const uAfter = u.cli(UW, launchArgs);
     check('H1. the same task launches after the hold, one process', uAfter.status === 0 && uAfter.value.record.state === 'started' && waitLog(uAfter.value.record.headless.log) && u.runs() === 1, uAfter.stdout + uAfter.stderr);
