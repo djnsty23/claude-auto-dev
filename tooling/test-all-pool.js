@@ -47,7 +47,7 @@ const path = require('path');
 const crypto = require('crypto');
 
 const ENV = 'AUTODEV_TEST_POOL';
-const MAX_WORKERS = 8;
+const MAX_WORKERS = 24;
 const MANIFEST_FILE = 'suite-isolation.json';
 const SCHEMA = 1;
 const TOOLING = __dirname;
@@ -66,6 +66,14 @@ function poolSize(env) {
     if (n <= 1) return { size: 1, warning: null };
     if (n > MAX_WORKERS) return { size: MAX_WORKERS, warning: `${ENV}=${n} is above the cap; running at most ${MAX_WORKERS} at once` };
     return { size: n, warning: null };
+}
+
+// The value of --pool as a size: a number stays one, auto is half the logical
+// CPUs, and 1 under CI, whose small runners have nothing to gain from it.
+function resolveSize(value, env, cpus) {
+    if (value !== 'auto') return String(value);
+    if ((env || {}).CI) return '1';
+    return String(Math.floor((cpus === undefined ? require('os').cpus().length : cpus) / 2));
 }
 
 // The reviewed manifest as a Map of suite file -> entry. Never throws: an
@@ -240,7 +248,12 @@ async function runSuites(items, runOne, opts) {
         try { store(item.label, await runOne(item)); } catch (e) { failures.push(`${item.label}: ${e && e.message}`); }
     };
 
-    for (const p of planned) {
+    // Parallel suites first, the serial group after them. Taken in discovery
+    // order, every serial suite between two parallel ones drains the pool, so
+    // the workers sit idle for most of the run. Results still come back in
+    // discovery order, below, and a serial suite still runs with nothing else.
+    const ordered = planned.filter((p) => p.mode === 'parallel').concat(planned.filter((p) => p.mode !== 'parallel'));
+    for (const p of ordered) {
         // Wait for a slot first: a suite that ends while this one waits can
         // turn logsWork off, and the decision below must see that.
         if (p.mode === 'parallel') while (active.size >= size) await Promise.race(active);
@@ -470,7 +483,7 @@ function main(argv, dir) {
 }
 
 module.exports = {
-    ENV, MAX_WORKERS, MANIFEST_FILE, SCHEMA, poolSize, loadManifest, hashFile, classify, findRunDir,
+    ENV, MAX_WORKERS, MANIFEST_FILE, SCHEMA, poolSize, resolveSize, loadManifest, hashFile, classify, findRunDir,
     printLog, runSuites, auditSource, anchoredNames, stripComments, gitVerbs, main,
 };
 

@@ -22,6 +22,10 @@
 //
 // Usage: node tooling/check-suites-can-fail.js [--verbose] [--all-subjects]
 //        [--cache | --cache-shadow | --no-cache] [--cache-report <file>]
+//        [--workers=<N|auto>]
+//
+// --workers runs the sweep in N child processes, each with its OWN private
+// worktree, so a stub installed by one is invisible to the rest. See WORKERS below.
 //
 // The pair cache (suite-pair-cache.js) runs in SHADOW mode by default: every
 // pair runs fresh and the summary says what the cache would have answered.
@@ -62,6 +66,7 @@ if (process.argv.includes('--help') || process.argv.includes('-h')) {
         '--cache: reuse a stub run whose cache entry is still valid (AUTODEV_SUITE_CACHE=on).\n' +
         '--cache-shadow: the default; run every pair and report what the cache would have said.\n' +
         '--no-cache: no tracing, no lookups (AUTODEV_SUITE_CACHE=off). --cache-report <file>: JSON per pair.\n' +
+        '--workers=<N|auto>: N concurrent workers, each in its own worktree. auto is half the logical CPUs, 1 under CI.\n' +
         'Exit: 0 every suite verified, 1 at least one NOT verified, 2 indeterminate\n' +
         '      (dirty tree, no worktree, or a mid-sweep conflict).');
     process.exitCode = 0;
@@ -75,6 +80,52 @@ const VERBOSE = process.argv.includes('--verbose');
 // wants the complete kill set rather than the one that decided it, and it is what
 // the sweep did unconditionally until 2026-09-10.
 const ALL_SUBJECTS = process.argv.includes('--all-subjects');
+
+// WORKERS. `[measured 2026-11-10]` the sweep ran one suite at a time at 11% CPU
+// on a 32-thread machine and spent over an hour of every full gate.
+//
+// Stubs are written into a worktree, so workers cannot share one. Each worker is
+// this same script in its own private worktree, running the unchanged loop below.
+// Which suite goes to which worker is decided by an exclusive create of a claim
+// file, so a slow suite never holds a queue behind it and no suite runs twice.
+//
+// A worktree isolates the repo, not the machine, so the suites
+// tooling/suite-isolation.json holds serial run afterwards with one worker alone.
+//
+// The parent only launches and merges. It counts the population itself and
+// requires exactly one row per suite: a worker that dies, or a suite nobody
+// claimed, is a conflict and the sweep exits 2, never a smaller sweep that passes.
+const MAX_SWEEP_WORKERS = 24;
+function sweepWorkers(argv, env, cpus) {
+    if (argv.includes('--cache-report')) return 1;   // one report file, one writer
+    const arg = argv.find((a) => a.startsWith('--workers='));
+    if (!arg) return 1;
+    const v = arg.slice('--workers='.length);
+    if (v === 'auto') return env.CI ? 1 : Math.max(1, Math.min(MAX_SWEEP_WORKERS, Math.floor(cpus / 2)));
+    return /^\d+$/.test(v) ? Math.max(1, Math.min(MAX_SWEEP_WORKERS, Number(v))) : 1;
+}
+const WORKERS = sweepWorkers(process.argv.slice(2), process.env, require('os').cpus().length);
+const argValue = (name) => {
+    const a = process.argv.find((x) => x.startsWith(name + '='));
+    return a ? a.slice(name.length + 1) : null;
+};
+const WORKER = (() => {
+    const dir = argValue('--worker-dir');
+    if (!dir) return null;
+    const meta = JSON.parse(fs.readFileSync(path.join(dir, 'meta.json'), 'utf8'));
+    return { dir, id: argValue('--worker-id'), phase: argValue('--worker-phase'), head: meta.head, held: new Set(meta.held) };
+})();
+// True for the one worker that gets this suite. Without workers, always true.
+function claim(name) {
+    if (!WORKER) return true;
+    try {
+        fs.writeFileSync(path.join(WORKER.dir, 'claims', name), String(process.pid), { flag: 'wx' });
+        return true;
+    } catch (e) {
+        if (e.code === 'EEXIST') return false;
+        throw e;
+    }
+}
 
 // DERIVED, not declared. The first version of this file hand-listed which source
 // each suite tests, and got it wrong for three of twelve — twice producing a
@@ -399,7 +450,7 @@ const evidenceDir = process.env.AUTODEV_SWEEP_EVIDENCE_DIR || path.join(require(
 let evidenceSeq = 0;
 function retainEvidence(label, phase, r, invocation) {
     fs.mkdirSync(evidenceDir, { recursive: true });
-    const file = path.join(evidenceDir, `${String(++evidenceSeq).padStart(5, '0')}.json`);
+    const file = path.join(evidenceDir, `${String(++evidenceSeq).padStart(5, '0')}${WORKER ? '-' + WORKER.id : ''}.json`);
     fs.writeFileSync(file, JSON.stringify({ label, phase, ...invocation, status: r.status, signal: r.signal || null,
         error: r.error ? { code: r.error.code || null, message: r.error.message } : null,
         stdout: String(r.stdout || ''), stderr: String(r.stderr || '') }, null, 2) + '\n', { flag: 'wx' });
@@ -544,6 +595,67 @@ const canonPath = (p) => {
         }
     }
     try { gitArgv(['worktree', 'prune'], ROOT); } catch { /* best effort */ }
+}
+
+// THE PARENT OF A CONCURRENT SWEEP launches, waits and merges. It stubs nothing.
+if (WORKERS > 1 && !WORKER) {
+    runWorkers().catch((e) => {
+        console.error('\nINDETERMINATE: the concurrent sweep itself failed: ' + (e && e.stack || e));
+        process.exit(2);
+    });
+    return;
+}
+if (WORKER && WORKER.head !== HEAD_SHA) conflict(`worker ${WORKER.id} is at ${HEAD_SHA.slice(0, 8)}, its parent at ${WORKER.head.slice(0, 8)}`);
+
+async function runWorkers() {
+    const { spawn } = require('child_process');
+    const pool = require('./test-all-pool.js');
+    const toolingDir = path.join(ROOT, 'tooling');
+    const population = receipts.discoverSuites(toolingDir)
+        .concat(fs.existsSync(path.join(toolingDir, 'test-all.js')) ? ['test-all.js'] : []);
+    const loaded = pool.loadManifest(path.join(toolingDir, pool.MANIFEST_FILE));
+    if (loaded.error) console.error('[workers] ' + loaded.error);
+    const held = pool.classify(population.map((f) => ({ label: f.replace(/\.js$/, '') })), loaded.suites, toolingDir)
+        .filter((p) => p.mode === 'serial').map((p) => p.item.label + '.js');
+    const expected = ['validate.js', ...population.slice().sort()];
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'check-suites-run-'));
+    fs.mkdirSync(path.join(dir, 'claims'));
+    fs.writeFileSync(path.join(dir, 'meta.json'), JSON.stringify({ head: HEAD_SHA, held }));
+    console.error(`[workers] ${WORKERS} at once over ${expected.length - held.length} suites, then ${held.length} held serial`);
+
+    const pass = process.argv.slice(2).filter((a) => !a.startsWith('--workers='));
+    const launch = (phase, id, delay) => new Promise((resolve) => setTimeout(() => {
+        const c = spawn(process.execPath, [__filename, ...pass, '--worker-dir=' + dir, '--worker-id=' + id, '--worker-phase=' + phase], {
+            cwd: ROOT, stdio: ['ignore', 'inherit', 'inherit'], windowsHide: true,
+        });
+        c.on('error', (e) => resolve({ id, status: null, error: e.message }));
+        c.on('close', (status, signal) => resolve({ id, status, signal }));
+    }, delay));
+    // Started a moment apart: git worktree add takes locks in the shared .git.
+    const first = await Promise.all(Array.from({ length: WORKERS }, (_, i) => launch('parallel', 'p' + i, i * 400)));
+    const ended = first.concat(held.length ? [await launch('serial', 's0', 0)] : []);
+
+    const rows = new Map();
+    const cacheLines = [];
+    for (const w of ended) {
+        const f = path.join(dir, 'result-' + w.id + '.json');
+        let res = null;
+        try { res = JSON.parse(fs.readFileSync(f, 'utf8')); } catch { /* no result is the conflict below */ }
+        if (!res || w.status !== 0) {
+            conflict(`worker ${w.id} ended with status ${w.status}${w.signal ? ' signal ' + w.signal : ''}${w.error ? ' (' + w.error + ')' : ''} and ${res ? 'a' : 'no'} result file`);
+            if (!res) continue;
+        }
+        for (const c of res.conflicts) conflict(`[${w.id}] ${c}`);
+        for (const r of res.rows) {
+            if (rows.has(r.suite)) conflict(`${r.suite} has more than one row`);
+            rows.set(r.suite, r);
+        }
+        for (const l of res.cacheLines) cacheLines.push(`[${w.id}] ${l}`);
+    }
+    for (const name of expected) if (!rows.has(name)) conflict(`${name} has no row: no worker reported it`);
+    for (const name of rows.keys()) if (!expected.includes(name)) conflict(`${name} has a row but is not in the population`);
+    try { fs.rmSync(dir, { recursive: true, force: true }); } catch { /* a temp directory */ }
+    finishReport(expected.filter((n) => rows.has(n)).map((n) => rows.get(n)), cacheLines, null);
 }
 
 const SWEEP_ROOT = (() => {
@@ -767,9 +879,10 @@ function checkValidator() {
     }
 }
 
-rows.push(checkValidator());
+if (!WORKER || (WORKER.phase === 'parallel' && claim('validate.js'))) rows.push(checkValidator());
 
 for (const suite of suites) {
+    if (WORKER && (WORKER.held.has(suite) !== (WORKER.phase === 'serial') || !claim(suite))) continue;
     if (suite === 'test-all.js') { rows.push(checkRunner(suite)); continue; }
 
     // A non-JavaScript subject, and the claim is CHECKED rather than believed.
@@ -1029,73 +1142,82 @@ if (after) {
 // tree checks above, and only when none of them raised a conflict.
 pairCache.flush(conflicts.length === 0);
 
-console.log('\nCan each suite fail?\n');
-const sum = sv.summarise(rows);
-for (const r of rows) {
-    // Anything that is not 'ok' means this script did not establish that the
-    // suite can fail. There is no third category: a skip is an absence of
-    // evidence, and printing it beside the passes is how it gets read as one.
-    // NOT-JS is the ONE status that is neither a pass nor a deficiency, and the
-    // rule above still holds for it: this script did not establish that the
-    // suite can fail, so it is NOT counted among the verified. It is counted and
-    // named on its own, because the coverage does exist and is proven by a
-    // canary this same run checks — see NOT_JAVASCRIPT, where the exemption is
-    // refused outright unless that canary is present and among the suites run.
-    // Marked '~' rather than '✓' so it can never be skimmed as a pass.
-    const mark = r.status === 'ok' ? '✓' : (r.status === 'NOT-JS' ? '~' : '✗');
-    console.log(`  ${mark} ${r.suite.padEnd(30)} ${r.status.padEnd(9)} ${VERBOSE || r.status !== 'ok' ? r.note : ''}`);
+if (WORKER) {
+    // A worker reports to its parent and prints no summary of its own.
+    fs.writeFileSync(path.join(WORKER.dir, 'result-' + WORKER.id + '.json'),
+        JSON.stringify({ rows, conflicts, cacheLines: pairCache.summary({ verbose: VERBOSE }) }));
+    process.exit(0);
 }
-// SPLIT BY CAUSE, in suite-verdict-summary.js, because one filter over both
-// statuses was one number with two meanings. Until 2026-09-10 this line said
-// `(N with no derivable subject)` over every UNCHECKED row, and MOST of the
-// producers above are the SWEEP failing to measure — a killed baseline, a canary
-// that could not be installed, a stub run that hit the budget. `[measured
-// 2026-09-10]` a sweep produced four such rows, all from baseline/canary
-// timeouts, all with subjects that derived perfectly well, and this line called
-// all four "with no derivable subject": a transient contention failure reported
-// as a static property of the suite, sending the reader to fix four suites that
-// had nothing wrong with them. That is the failure the comment above — about a
-// skip labelled reassuringly — exists to prevent, and a confident WRONG label is
-// the costlier half of it, because it does not merely fail to inform, it directs
-// work. Every RUN_INCOMPLETE row is accompanied by a conflict, so the run exits 2
-// INDETERMINATE below; the bug was never the exit code, it was the sentence.
-const notJs = sum.notJs;
-console.log(`\n${rows.length} suite(s) · ${sum.verified} verified able to fail · ${sum.bad} NOT verified` +
-            (sum.family ? ` (${sv.renderCauses(sum)})` : '') +
-            (notJs ? ` · ${notJs} canaried elsewhere, not stubbable here` : '') +
-            // "tree restored clean" was measured with gitW, in the PRIVATE sweep
-            // worktree that is deleted moments later. It reads as reassurance
-            // about the tree you are standing in and was never about it. Say
-            // which tree, and say that the source tree's refs were checked too,
-            // since that is the part a reader actually wants and the part
-            // `git status` cannot answer.
-            (conflicts.length ? '' : ' · sweep worktree clean, source tree refs unmoved') + '\n');
+finishReport(rows, pairCache.summary({ verbose: VERBOSE }), pairCache.writeReport(rows));
 
-// The cache's populations, in every mode, so a reader can see what it skipped
-// (--cache), what it would have skipped (shadow), or that it was off.
-for (const line of pairCache.summary({ verbose: VERBOSE })) console.log(line);
-const reportFile = pairCache.writeReport(rows);
-if (reportFile) console.log('[pair-cache] report: ' + reportFile);
-console.log('');
+function finishReport(rows, cacheLines, reportFile) {
+    console.log('\nCan each suite fail?\n');
+    const sum = sv.summarise(rows);
+    for (const r of rows) {
+        // Anything that is not 'ok' means this script did not establish that the
+        // suite can fail. There is no third category: a skip is an absence of
+        // evidence, and printing it beside the passes is how it gets read as one.
+        // NOT-JS is the ONE status that is neither a pass nor a deficiency, and the
+        // rule above still holds for it: this script did not establish that the
+        // suite can fail, so it is NOT counted among the verified. It is counted and
+        // named on its own, because the coverage does exist and is proven by a
+        // canary this same run checks — see NOT_JAVASCRIPT, where the exemption is
+        // refused outright unless that canary is present and among the suites run.
+        // Marked '~' rather than '✓' so it can never be skimmed as a pass.
+        const mark = r.status === 'ok' ? '✓' : (r.status === 'NOT-JS' ? '~' : '✗');
+        console.log(`  ${mark} ${r.suite.padEnd(30)} ${r.status.padEnd(9)} ${VERBOSE || r.status !== 'ok' ? r.note : ''}`);
+    }
+    // SPLIT BY CAUSE, in suite-verdict-summary.js, because one filter over both
+    // statuses was one number with two meanings. Until 2026-09-10 this line said
+    // `(N with no derivable subject)` over every UNCHECKED row, and MOST of the
+    // producers above are the SWEEP failing to measure — a killed baseline, a canary
+    // that could not be installed, a stub run that hit the budget. `[measured
+    // 2026-09-10]` a sweep produced four such rows, all from baseline/canary
+    // timeouts, all with subjects that derived perfectly well, and this line called
+    // all four "with no derivable subject": a transient contention failure reported
+    // as a static property of the suite, sending the reader to fix four suites that
+    // had nothing wrong with them. That is the failure the comment above — about a
+    // skip labelled reassuringly — exists to prevent, and a confident WRONG label is
+    // the costlier half of it, because it does not merely fail to inform, it directs
+    // work. Every RUN_INCOMPLETE row is accompanied by a conflict, so the run exits 2
+    // INDETERMINATE below; the bug was never the exit code, it was the sentence.
+    const notJs = sum.notJs;
+    console.log(`\n${rows.length} suite(s) · ${sum.verified} verified able to fail · ${sum.bad} NOT verified` +
+                (sum.family ? ` (${sv.renderCauses(sum)})` : '') +
+                (notJs ? ` · ${notJs} canaried elsewhere, not stubbable here` : '') +
+                // "tree restored clean" was measured with gitW, in the PRIVATE sweep
+                // worktree that is deleted moments later. It reads as reassurance
+                // about the tree you are standing in and was never about it. Say
+                // which tree, and say that the source tree's refs were checked too,
+                // since that is the part a reader actually wants and the part
+                // `git status` cannot answer.
+                (conflicts.length ? '' : ' · sweep worktree clean, source tree refs unmoved') + '\n');
 
-// A detected mid-sweep conflict poisons every verdict above: suites that ran
-// after the tree changed were measured against a tree this script knows it
-// did not control. Indeterminate (2) outranks findings (1), because a finding
-// from a contaminated run is not a finding.
-if (conflicts.length) {
-    console.log('INDETERMINATE — ' + conflicts.length + ' mid-sweep conflict(s) detected:');
-    for (const c of conflicts) console.log('  · ' + c);
-    console.log('The verdicts above were measured on a tree that changed under this sweep.');
-    // NOT "re-run when the machine is quiet". That was the advice here and in
-    // CLAUDE.md until 2026-09-10, and `[measured 2026-09-10]` the quietest of
-    // three runs was the slowest and carried the most conflicts: the suites that
-    // blow the budget cost 15-20 s through this exact invocation, so a timeout
-    // needs a 45x blowup and CONTENTION_MAX is 20. A reader acts on this line,
-    // so it names what to look at — the conflicts above now carry the child's
-    // own last output — rather than sending them to wait for an idle box.
-    console.log('Each conflict above names what the child was doing when it ended. A timeout');
-    console.log('is NOT evidence of load: see docs/evidence-check-suites-budget-2026-09-10.md.');
-    console.log('A moved source HEAD, however, IS a reason to re-run on a quiet tree.\n');
-    process.exit(2);
+    // The cache's populations, in every mode, so a reader can see what it skipped
+    // (--cache), what it would have skipped (shadow), or that it was off.
+    for (const line of cacheLines) console.log(line);
+    if (reportFile) console.log('[pair-cache] report: ' + reportFile);
+    console.log('');
+
+    // A detected mid-sweep conflict poisons every verdict above: suites that ran
+    // after the tree changed were measured against a tree this script knows it
+    // did not control. Indeterminate (2) outranks findings (1), because a finding
+    // from a contaminated run is not a finding.
+    if (conflicts.length) {
+        console.log('INDETERMINATE — ' + conflicts.length + ' mid-sweep conflict(s) detected:');
+        for (const c of conflicts) console.log('  · ' + c);
+        console.log('The verdicts above were measured on a tree that changed under this sweep.');
+        // NOT "re-run when the machine is quiet". That was the advice here and in
+        // CLAUDE.md until 2026-09-10, and `[measured 2026-09-10]` the quietest of
+        // three runs was the slowest and carried the most conflicts: the suites that
+        // blow the budget cost 15-20 s through this exact invocation, so a timeout
+        // needs a 45x blowup and CONTENTION_MAX is 20. A reader acts on this line,
+        // so it names what to look at — the conflicts above now carry the child's
+        // own last output — rather than sending them to wait for an idle box.
+        console.log('Each conflict above names what the child was doing when it ended. A timeout');
+        console.log('is NOT evidence of load: see docs/evidence-check-suites-budget-2026-09-10.md.');
+        console.log('A moved source HEAD, however, IS a reason to re-run on a quiet tree.\n');
+        process.exit(2);
+    }
+    process.exit(sum.bad ? 1 : 0);
 }
-process.exit(sum.bad ? 1 : 0);

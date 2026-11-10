@@ -171,9 +171,9 @@ const sweepDirsFor = (pid) => fs.readdirSync(os.tmpdir())
 // directory, never the operator's home cache: fixture pairs are not real ones.
 const PAIR_CACHE_DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'suites-red-evidence-cache-'));
 let evidenceRun = 0;
-function runSweep(dir, exit2IsVerdict, extraEnv = {}) {
+function runSweep(dir, exit2IsVerdict, extraEnv = {}, extraArgs = []) {
     const evidenceDir = path.join(PAIR_CACHE_DIR, 'evidence-' + (++evidenceRun));
-    const r = sb.runBudgeted(process.execPath, [path.join(dir, 'tooling', path.basename(SWEEP))], {
+    const r = sb.runBudgeted(process.execPath, [path.join(dir, 'tooling', path.basename(SWEEP)), ...extraArgs], {
         cwd: dir, encoding: 'utf8', timeout: BUDGET_MS, windowsHide: true, input: '',
         env: Object.assign({}, process.env, { AUTODEV_SUITE_CACHE_DIR: PAIR_CACHE_DIR, AUTODEV_SWEEP_EVIDENCE_DIR: evidenceDir }, extraEnv),
     });
@@ -257,6 +257,47 @@ try {
         const leaked = ['G-PASS.', 'G-FAIL.', 'V-BASELINE.', 'V-CANARY-FIRED.'].filter((s) => c.all.includes(s));
         check('control: no child output is printed, not even the red a stubbed subject provokes',
             leaked.length === 0, 'printed: ' + leaked.join(', '));
+    }
+
+    // ---- WORKERS: the same rows and verdict, and no smaller sweep ------------
+    // The real sweep's bytes with one defect each, read from disk here.
+    const SWEEP_SRC = fs.readFileSync(SWEEP, 'utf8');
+    const workerRepo = (label, source) => {
+        const files = {
+            'VERSION': '1.0.0\n',
+            'tooling/validate.js': GREEN_VALIDATE,
+            'plugins/demo/subject.js': SUBJECT,
+            'tooling/test-planted-a.js': GREEN_SUITE,
+            'tooling/test-planted-b.js': GREEN_SUITE,
+            'tooling/test-planted-c.js': GREEN_SUITE,
+            'tooling/test-planted-d.js': GREEN_SUITE,
+        };
+        if (source) files['tooling/check-suites-can-fail.js'] = source;
+        const dir = makeRepo(label, files);
+        dirs.push(dir);
+        return dir;
+    };
+    const verdictRows = (run) => (run.all.match(/^ {2}[✓✗~] \S+\s+\S+/gm) || []).map((l) => l.trim().replace(/\s+/g, ' '));
+    const OFF = { AUTODEV_SUITE_CACHE: 'off' };
+    const serialRun = runSweep(workerRepo('workers-serial'), false, OFF);
+    const workerRun = runSweep(workerRepo('workers'), false, OFF, ['--workers=3']);
+    if (serialRun && workerRun) {
+        check('workers: five rows were produced, so the comparison has a population', verdictRows(workerRun).length === 5, verdictRows(workerRun));
+        check('workers: the same rows in the same order as the serial sweep',
+            verdictRows(workerRun).join('|') === verdictRows(serialRun).join('|'), verdictRows(workerRun).join('|') + ' VS ' + verdictRows(serialRun).join('|'));
+        check('workers: exit 0, like the serial sweep', workerRun.code === 0 && serialRun.code === 0, `${workerRun.code} ${serialRun.code}`);
+        check('workers: more than one worker reported', /\[workers\] 3 at once/.test(workerRun.all), workerRun.all.slice(-400));
+    }
+    for (const [name, from, to] of [
+        ['a worker that loses its result', "    fs.writeFileSync(path.join(WORKER.dir, 'result-' + WORKER.id + '.json'),", "    if (WORKER.id !== 'p0') fs.writeFileSync(path.join(WORKER.dir, 'result-' + WORKER.id + '.json'),"],
+        ['a suite no worker claims', "(WORKER.held.has(suite) !== (WORKER.phase === 'serial') || !claim(suite))", "(suite === 'test-planted-b.js' || WORKER.held.has(suite) !== (WORKER.phase === 'serial') || !claim(suite))"],
+    ]) {
+        const count = SWEEP_SRC.split(from).length - 1;
+        check(`workers mutant "${name}": its anchor matches the real sweep once`, count === 1, 'matched ' + count);
+        if (count !== 1) continue;
+        const m = runSweep(workerRepo('workers-mutant', SWEEP_SRC.replace(from, () => to)), true, OFF, ['--workers=3']);
+        if (!m) continue;
+        check(`workers mutant "${name}": the sweep exits 2, never a smaller pass`, m.code === 2 && /INDETERMINATE/.test(m.all), `exit ${m.code} ${m.all.slice(-400)}`);
     }
 
     // ---- RUNNER CANARY: the real test-all.js, through --canary-only -----------

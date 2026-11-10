@@ -82,6 +82,7 @@ const CANARY_ONLY = '--canary-only=';
 const USAGE = 'usage: node tooling/test-all.js [--serial] [--no-receipt]\n'
   + 'Runs every tooling/test-*.js suite, then validate.js, and checks the run left the tree alone.\n'
   + '--serial      ignore tooling/test-all-pool.js and run one suite at a time\n'
+  + '--pool=<N|auto>  run suites N at a time (auto: half the logical CPUs, 1 under CI). AUTODEV_TEST_POOL wins over it\n'
   + '--no-receipt  collect no coverage and publish no receipt (an inherited NODE_V8_COVERAGE is kept)\n'
   + '--canary-only=<suite>  the check:suites runner canary: run that one suite (test-foo, no .js) and validate,\n'
   + '              publish no receipt, and exit 1 if anything failed, otherwise 2. It never exits 0\n'
@@ -313,7 +314,7 @@ async function main() {
     return 2;
   }
   if (argv.includes('--help')) { console.log(USAGE); return 0; }
-  const unknown = argv.filter((a) => !['--serial', '--no-receipt'].includes(a) && !a.startsWith(CANARY_ONLY));
+  const unknown = argv.filter((a) => !['--serial', '--no-receipt'].includes(a) && !a.startsWith(CANARY_ONLY) && !/^--pool=(auto|\d+)$/.test(a));
   if (unknown.length) { console.error('unknown argument(s): ' + unknown.join(' ') + '\n' + USAGE); return 2; }
   const canaryArgs = argv.filter((a) => a.startsWith(CANARY_ONLY));
   if (canaryArgs.length > 1) { console.error(`${CANARY_ONLY.slice(0, -1)} names one suite, and it was given ${canaryArgs.length} times. No suite ran.`); return 2; }
@@ -355,7 +356,10 @@ async function main() {
   } else if (pool) {
     let got = [];
     try {
-      got = await pool.runSuites(items.slice(), runOne);
+      const poolArg = argv.find((a) => a.startsWith('--pool='));
+      // The environment wins, so AUTODEV_TEST_POOL=1 still forces a serial run.
+      const asked = poolArg && process.env[pool.ENV] === undefined ? { env: { ...process.env, [pool.ENV]: pool.resolveSize(poolArg.slice('--pool='.length), process.env) } } : undefined;
+      got = await pool.runSuites(items.slice(), runOne, asked);
     } catch (e) {
       const why = 'runSuites rejected: ' + (e && e.message);
       console.error(`\n[test-all-pool] FAILED: ${why}`);

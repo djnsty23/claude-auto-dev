@@ -85,7 +85,10 @@ async function main() {
     check('unset means serial (size 1)', pool.poolSize({}).size === 1);
     check('AUTODEV_TEST_POOL=4 means 4', pool.poolSize({ AUTODEV_TEST_POOL: '4' }).size === 4);
     const big = pool.poolSize({ AUTODEV_TEST_POOL: '32' });
-    check('a size above 8 is held to 8, with a warning', big.size === 8 && /cap/.test(big.warning || ''), big);
+    check('a size above 24 is held to 24, with a warning', big.size === 24 && /cap/.test(big.warning || ''), big);
+    check('--pool=auto is half the logical CPUs', pool.resolveSize('auto', {}, 32) === '16');
+    check('--pool=auto is 1 under CI', pool.resolveSize('auto', { CI: 'true' }, 32) === '1');
+    check('--pool=6 stays 6', pool.resolveSize('6', {}, 32) === '6');
     const junk = pool.poolSize({ AUTODEV_TEST_POOL: 'eight' });
     check('a non-number is serial, with a warning', junk.size === 1 && !!junk.warning, junk);
     check('0 is serial', pool.poolSize({ AUTODEV_TEST_POOL: '0' }).size === 1);
@@ -120,7 +123,7 @@ async function main() {
         const rec32 = recorder();
         await pool.runSuites(labels.map((label) => ({ label, ms: 30 })), rec32.runOne,
             { env: { AUTODEV_TEST_POOL: '32' }, manifest, dir, out: sink(), err: sink(), noLogs: false, runDir: LOGS });
-        check('pool 32 asked: still never more than 8 at once', rec32.max === 8, rec32.max);
+        check('pool 32 asked on 20 suites: all 20 overlap, the cap of 24 not reached', rec32.max === 20, rec32.max);
     }
 
     // ---- serial barrier, population, settle, aggregation --------------------
@@ -142,6 +145,8 @@ async function main() {
             before.every((l) => ev.findIndex((e) => e.t === 'end' && e.label === l) < sStart), ev.map((e) => e.t + ':' + e.label));
         check('barrier: nothing after it starts until it ends',
             ev.slice(sStart + 1, sEnd).every((e) => e.t !== 'start'), ev.map((e) => e.t + ':' + e.label));
+        check('barrier: the parallel suites listed after it run before it, so it does not drain the pool twice',
+            ['test-d', 'test-e', 'test-f'].every((l) => ev.findIndex((e) => e.t === 'end' && e.label === l) < sStart), ev.map((e) => e.t + ':' + e.label));
         check('barrier: the serial suite runs with its output echoed live', ev[sStart] && ev[sStart].echo === true);
         check('barrier: parallel suites run with echo off (their log is printed whole)', ev.filter((e) => e.t === 'start' && e.label !== 'test-s').every((e) => !e.echo));
         check('barrier: parallel suites before it did overlap each other', rec.max >= 2, rec.max);
