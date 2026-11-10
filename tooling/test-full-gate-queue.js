@@ -71,11 +71,9 @@ function sleeper() {
     return c.pid;
 }
 
-/** A pid that existed and has exited. */
-function deadPid() {
-    const r = spawnSync(process.execPath, ['-e', 'console.log(process.pid)'], { encoding: 'utf8', windowsHide: true });
-    return Number(r.stdout.trim());
-}
+// Above every pid an OS hands out. The pid of an exited child can be reissued to
+// another process while the suite pool runs, and then "dead" reads as alive.
+function deadPid() { return 2147483644; }
 
 function killAll() {
     // A sleeper has no children, so killing it directly is enough and costs

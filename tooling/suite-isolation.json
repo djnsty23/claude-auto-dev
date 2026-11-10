@@ -249,8 +249,11 @@
       "sha256": "f75f00101aed40f5f0cfeac96298741fec3437e6c404f0a38b0e4ce9123b0aa9"
     },
     "test-check-brain-role.js": {
-      "isolation": "serial",
-      "reason": "serial, measured 2026-11-10: it takes the pid of an exited child as a dead process, and under the pool another suite can be handed that pid. test-requeue-salvage failed that way at 16 workers",
+      "isolation": "parallel",
+      "reason": "measured 2026-11-10: passed with every other suite overlapping at 16 and 8 workers, its verdict matching the serial run",
+      "accepted": [
+        "profile: runs plugin code without overriding HOME, USERPROFILE or CLAUDE_CONFIG_DIR"
+      ],
       "sha256": "09debb9d3feca2568a6a79bd02b362597f251cd579305577d4940a0c46e7a2a2"
     },
     "test-check-branch-landed.js": {
@@ -711,13 +714,9 @@
       "sha256": "cfc1cd7f36a7e333b200674bd6a28de89ea832a71e537e1da03446b35a77fb2d"
     },
     "test-full-gate-queue.js": {
-      "isolation": "parallel",
-      "reason": "measured 2026-11-10: passed with every other suite overlapping at 16 and 8 workers, its verdict matching the serial run",
-      "accepted": [
-        "repo-write: writeFileSync, utimesSync, copyFileSync on a path built from the repo root",
-        "nested-runner: drives full-gate-queue"
-      ],
-      "sha256": "b61f3c155388ccc1657e41f3b3fb7825052f295074c332a1e74ce2f026357a0b"
+      "isolation": "serial",
+      "reason": "serial, measured 2026-11-10: a live fixture ticket read as dead once beside four other heavy suites, and it passes alone",
+      "sha256": "3c35dcc74e5f8582125752070c78c78909d58151387f28de6d5fdb19c7c85475"
     },
     "test-function-json-exit.js": {
       "isolation": "parallel",
@@ -766,7 +765,7 @@
         "repo-write: renameSync, rmSync on a path built from the repo root",
         "nested-runner: drives gate-lock"
       ],
-      "sha256": "6a923e16d15d99bcfb2f312892128e7410b3d0b4f94cfe87af465ab085282a14"
+      "sha256": "09379e6e58630ee9e8d2cd64dc136b9ed14b16e857ed1bfce20c6a303d8fc9f8"
     },
     "test-gate-ownership.js": {
       "isolation": "parallel",
@@ -777,7 +776,7 @@
         "profile: runs plugin code without overriding HOME, USERPROFILE or CLAUDE_CONFIG_DIR",
         "nested-runner: drives full-gate-queue"
       ],
-      "sha256": "fe1e47b911a0f622e4c1b981a133be019e3caf8dac25a988f5c8a101ef0230f6"
+      "sha256": "807dfe09839b8a1035f26455582f83cdbb0e5a56f444727683787ef168385d08"
     },
     "test-gate-receipt-head.js": {
       "isolation": "parallel",
@@ -808,7 +807,7 @@
         "nested-runner: drives gate-lock, coverage-receipt, full-gate-queue",
         "npm: spawns npm"
       ],
-      "sha256": "b6def848b93b977b7360b8028948f143a067a1a1f48d37e75d6d54fd53bd548a"
+      "sha256": "42c1d67bc04c133d197accee55a2cd4dfd13bbdbde54b4e0574911ad9072b9d0"
     },
     "test-generate-agents-md.js": {
       "isolation": "parallel",
@@ -1132,7 +1131,7 @@
         "nested-runner: drives gate-lock, gate-fast, full-gate-queue",
         "npm: spawns npm"
       ],
-      "sha256": "be9a405dc476e935dcda0349e2f4c2ae9e54f0352fc1f9001584a52fc600b59c"
+      "sha256": "de8dbb6fc6a910b9272b16e3f475f09a8bee57055d0ffda51f44fd42c8a80d9d"
     },
     "test-merged-skills.js": {
       "isolation": "parallel",

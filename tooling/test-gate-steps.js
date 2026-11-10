@@ -219,8 +219,9 @@ async function t5SettleLost(subject) {
     await finished(run, 10000);
     // A worker record whose supervisor is dead (a finished node pid) and
     // whose log has no exit line: the shape settle --lost settles.
-    const dead = spawnSync(process.execPath, ['-e', 'console.log(process.pid)'], { encoding: 'utf8' });
-    const deadPid = Number(String(dead.stdout).trim());
+    // Above every pid an OS hands out: an exited child's pid can be reissued
+    // to another process while the suite pool runs.
+    const deadPid = 2147483644;
     const wdir = mkTemp('gate-steps-worker-');
     const log = path.join(wdir, 'worker.log');
     const report = path.join(wdir, 'worker.report.md');

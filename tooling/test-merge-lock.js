@@ -651,7 +651,9 @@ async function main() {
     // D. Liveness: a dead holder is reclaimed, a live holder is not.
     // -----------------------------------------------------------------------
     {
-        const dead = spawnSync(process.execPath, ['-e', ''], { windowsHide: true }).pid;
+        // Above every pid an OS hands out: an exited child's pid can be reissued
+        // to another process while the suite pool runs.
+        const dead = 2147483644;
         fs.mkdirSync(path.dirname(LOCK), { recursive: true });
         fs.writeFileSync(LOCK, `${dead}\nmerge-lock.js merge ${REPO}#6 head x, started earlier\n`);
         const before = asides('stale').length;

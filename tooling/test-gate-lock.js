@@ -256,7 +256,9 @@ async function main() {
     {
         const fx = fixture('node probe.js 0');
         fs.mkdirSync(fx.lockDir, { recursive: true });
-        const dead = spawnSync(process.execPath, ['-e', ''], { windowsHide: true }).pid;
+        // Above every pid an OS hands out: an exited child's pid can be reissued
+        // to another process while the suite pool runs.
+        const dead = 2147483644;
         const old = `${dead}\nan abandoned gate, head 1234567, worktrees/gone, started 03:00Z\n`;
         fs.writeFileSync(fx.lockPath, old);
         const run = start(fx);

@@ -118,10 +118,9 @@ async function sleeperWithChild() {
     return { pid: p.pid, child };
 }
 
-function deadPid() {
-    const r = spawnSync(process.execPath, ['-e', 'console.log(process.pid)'], { encoding: 'utf8', windowsHide: true });
-    return Number(r.stdout.trim());
-}
+// Above every pid an OS hands out. The pid of an exited child can be reissued to
+// another process while the suite pool runs, and then "dead" reads as alive.
+function deadPid() { return 2147483644; }
 
 function killPid(pid) {
     if (WIN) spawnSync('taskkill', ['/F', '/T', '/PID', String(pid)], { stdio: 'ignore', windowsHide: true });
@@ -680,7 +679,7 @@ function s12Library(subject) {
 const attempt = (fn) => { try { return fn(); } catch (e) { return `threw ${e.code || e.message}`; } };
 
 /** A pid whose process has already exited. */
-function exitedPid() { return spawnSync(process.execPath, ['-e', ''], { windowsHide: true }).pid; }
+function exitedPid() { return deadPid(); }
 
 /**
  * S13a: the defaults a caller gets by leaving an option out. Without `isDead`
