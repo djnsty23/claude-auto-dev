@@ -610,7 +610,7 @@ async function canaryOnly() {
 
     // The repo's own scripts: a gate that passed the flag would grade one suite.
     const scripts = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'package.json'), 'utf8')).scripts;
-    check('9. npm test is the bare runner', scripts.test === 'node tooling/test-all.js', scripts.test);
+    check('9. npm test is the whole runner, pooled and with no suite filter', scripts.test === 'node tooling/test-all.js --pool=auto', scripts.test);
     const using = Object.keys(scripts).filter((k) => scripts[k].includes('canary-only'));
     check('9. no package.json script passes --canary-only', using.length === 0, using);
 }

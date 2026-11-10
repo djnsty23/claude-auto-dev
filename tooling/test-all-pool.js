@@ -5,19 +5,18 @@
 // runs after this resolves, the tree check and the verdict. This module decides
 // only WHEN each runOne starts.
 //
-// OFF BY DEFAULT. Without AUTODEV_TEST_POOL, or with a value of 0 or 1, every
-// suite runs one at a time in discovery order and prints exactly what the
-// serial runner prints. AUTODEV_TEST_POOL=N (2..8) runs at most N suites at
-// once; a larger N is held to 8. The pool stays opt-in until ten serial versus
-// pooled comparisons on unchanged trees agree on populations, verdicts, tree
-// integrity and coverage lists.
+// `npm test` ASKS FOR IT with --pool=auto: half the logical CPUs, and serial when
+// CI is set. A bare `node tooling/test-all.js` stays serial. So does
+// AUTODEV_TEST_POOL=1 or 0, which wins over the flag: every suite runs one at a
+// time in discovery order and prints exactly what the serial runner prints.
+// AUTODEV_TEST_POOL=N (2..24) runs at most N suites at once.
 //
 // WHICH SUITES MAY OVERLAP is a reviewed decision, recorded per suite in
 // tooling/suite-isolation.json with the reason and the sha256 of the bytes that
 // were reviewed. A suite runs in parallel only when its entry says "parallel"
 // AND its bytes still hash to the reviewed value. Anything else runs serial:
-// no entry, a changed suite, an unreadable or malformed manifest. A serial suite
-// runs ALONE: the pool drains every running suite first, runs it, then resumes.
+// no entry, a changed suite, an unreadable or malformed manifest. Every parallel
+// suite runs first, then the serial group one at a time with nothing beside it.
 // That covers both sides of a shared resource: a suite that writes into the
 // repo, touches the shared .git, the real profile, a lock or a fixed port never
 // overlaps anything, so no reader of those things ever sees it mid-write.

@@ -1,50 +1,128 @@
 {
   "schema": 1,
-  "note": "Which tooling/test-*.js suites test-all-pool.js may overlap. A suite runs in parallel only when it is \"parallel\" here AND its bytes still hash to sha256; anything else runs alone. Evidence: node tooling/test-all-pool.js --audit. A parallel suite carries no audit signal except the ones listed in \"accepted\", each read by hand; test-suite-pool.js enforces that.",
+  "note": "Which tooling/test-*.js suites test-all-pool.js may overlap. A suite runs in parallel only when it is \"parallel\" here AND its bytes still hash to sha256. Anything else runs in the serial group, after the parallel ones, one at a time. Evidence: node tooling/test-all-pool.js --audit. A parallel suite carries no audit signal except the ones listed in \"accepted\", which test-suite-pool.js enforces. Entries that say \"measured 2026-11-10\" rest on full runs at 16 and 8 workers with every verdict matching the serial run, not on a reading of the source.",
   "suites": {
+    "test-acceptance-audit.js": {
+      "isolation": "parallel",
+      "reason": "measured 2026-11-10: passed with every other suite overlapping at 16 and 8 workers, its verdict matching the serial run",
+      "sha256": "6e900c9e05af5feb64d6c53a95937ef0a84ab58f8a3d1ae31af9528339531a4e"
+    },
+    "test-acceptance-receipt.js": {
+      "isolation": "parallel",
+      "reason": "measured 2026-11-10: passed with every other suite overlapping at 16 and 8 workers, its verdict matching the serial run",
+      "accepted": [
+        "repo-write: writeFileSync on a path built from the repo root"
+      ],
+      "sha256": "d5eb9f01d72674bebd716fb0deff91ece2ce3eb7cb88834d1d7b2c027713bd38"
+    },
+    "test-account-switch-drill.js": {
+      "isolation": "parallel",
+      "reason": "measured 2026-11-10: passed with every other suite overlapping at 16 and 8 workers, its verdict matching the serial run",
+      "sha256": "2fb789446f85d11794831ba36809746f66dbb410e2ed2e283109cc45dfd58309"
+    },
     "test-agent-browser-cleanup.js": {
       "isolation": "parallel",
-      "reason": "reviewed 2026-10-02: writes only under its own mkdtemp fixtures; any profile, config or HOME it touches is pointed into them; no git outside temp repos; no fixed port",
-      "sha256": "beee9f45e8d3fec1eab6aba600cf34ebc569a58488e26bd85c0614fe42979f87"
+      "reason": "measured 2026-11-10: passed with every other suite overlapping at 16 and 8 workers, its verdict matching the serial run",
+      "sha256": "b3cb7fe5a677da6a762b03797b501ce955fce50db4dbb8bdafb8a6b6c9e60c63"
+    },
+    "test-agents-loading-contract.js": {
+      "isolation": "parallel",
+      "reason": "measured 2026-11-10: passed with every other suite overlapping at 16 and 8 workers, its verdict matching the serial run",
+      "accepted": [
+        "profile: runs plugin code without overriding HOME, USERPROFILE or CLAUDE_CONFIG_DIR"
+      ],
+      "sha256": "5eb7c2b40c89edc9d4416d848e64a20ca89165ef16fe2ea29f4afc245898934b"
     },
     "test-archive-keeplist-prose.js": {
       "isolation": "parallel",
-      "reason": "reviewed 2026-10-02: writes only under its own mkdtemp fixtures; any profile, config or HOME it touches is pointed into them; no git outside temp repos; no fixed port",
-      "sha256": "5ea1c3b8a085abada4fe03b2180f65e3fb037dc14058d97bea03095562139181"
+      "reason": "measured 2026-11-10: passed with every other suite overlapping at 16 and 8 workers, its verdict matching the serial run",
+      "sha256": "2bbb1fcc10243568560889a3e982fd8d5d37201db2842d5700d5a565b9561cf8"
     },
     "test-archive-path-durability.js": {
-      "isolation": "serial",
-      "reason": "audit 2026-10-02: git-write: git init, add (a fixture repo is initialised; every call must target it); profile: runs plugin code without overriding HOME, USERPROFILE or CLAUDE_CONFIG_DIR. Ambiguous or shared side effects run alone",
-      "sha256": "36d34aa64c94285541253d213329e9e0ad4bcec7ce75e56854f3aca9fa4d9169"
+      "isolation": "parallel",
+      "reason": "measured 2026-11-10: passed with every other suite overlapping at 16 and 8 workers, its verdict matching the serial run",
+      "accepted": [
+        "git-write: git init, add (a fixture repo is initialised; every call must target it)",
+        "profile: runs plugin code without overriding HOME, USERPROFILE or CLAUDE_CONFIG_DIR"
+      ],
+      "sha256": "4aceac5c5c9d73b1a374944f09c9d0bb2b97602894cc612f264ef5dbb3a32e01"
     },
     "test-archive-prd.js": {
-      "isolation": "serial",
-      "reason": "audit 2026-10-02: profile: loads plugin code in-process without overriding the profile. Ambiguous or shared side effects run alone",
-      "sha256": "efa49f4d7714837fd71dae37d5d1c53d4bcbe42e0fe62aa2a42c3559498fff5b"
+      "isolation": "parallel",
+      "reason": "measured 2026-11-10: passed with every other suite overlapping at 16 and 8 workers, its verdict matching the serial run",
+      "accepted": [
+        "profile: loads plugin code in-process without overriding the profile"
+      ],
+      "sha256": "86f9d6f3eac80173353cb54e4bca59288acae0284e5b90cae60538feddfafcd7"
     },
     "test-argv-injection.js": {
-      "isolation": "serial",
-      "reason": "audit 2026-10-02: git-write: git init, branch, update-ref (a fixture repo is initialised; every call must target it); profile: runs plugin code without overriding HOME, USERPROFILE or CLAUDE_CONFIG_DIR. Ambiguous or shared side effects run alone",
+      "isolation": "parallel",
+      "reason": "measured 2026-11-10: passed with every other suite overlapping at 16 and 8 workers, its verdict matching the serial run",
+      "accepted": [
+        "git-write: git init, branch, update-ref (a fixture repo is initialised; every call must target it)",
+        "profile: runs plugin code without overriding HOME, USERPROFILE or CLAUDE_CONFIG_DIR"
+      ],
       "sha256": "60cb6f15178e3ac9a5ff1e17efc5f7d87c30250b368b1d58029745114e92118d"
     },
     "test-artifact-write-guard.js": {
-      "isolation": "serial",
-      "reason": "audit 2026-10-02: profile: runs plugin code without overriding HOME, USERPROFILE or CLAUDE_CONFIG_DIR. Ambiguous or shared side effects run alone",
+      "isolation": "parallel",
+      "reason": "measured 2026-11-10: passed with every other suite overlapping at 16 and 8 workers, its verdict matching the serial run",
+      "accepted": [
+        "profile: runs plugin code without overriding HOME, USERPROFILE or CLAUDE_CONFIG_DIR"
+      ],
       "sha256": "2065bb4fc811b04ab57b750bcf2d311b41139b2cc3550e67e8c8c8135ffc09de"
     },
+    "test-assert-transcripts.js": {
+      "isolation": "parallel",
+      "reason": "measured 2026-11-10: passed with every other suite overlapping at 16 and 8 workers, its verdict matching the serial run",
+      "accepted": [
+        "git-write: git add, commit, push, reset",
+        "profile: runs plugin code without overriding HOME, USERPROFILE or CLAUDE_CONFIG_DIR",
+        "npm: spawns npm"
+      ],
+      "sha256": "dd707a8be91ef1bf325491b14067676737c3a92c2b3fe9249211ee40553a7c38"
+    },
     "test-assertion-targets.js": {
-      "isolation": "serial",
-      "reason": "audit 2026-10-02: repo-write: writeFileSync on a path built from the repo root; git-write: git init, add (a fixture repo is initialised; every call must target it). Ambiguous or shared side effects run alone",
+      "isolation": "parallel",
+      "reason": "measured 2026-11-10: passed with every other suite overlapping at 16 and 8 workers, its verdict matching the serial run",
+      "accepted": [
+        "repo-write: writeFileSync on a path built from the repo root",
+        "git-write: git init, add (a fixture repo is initialised; every call must target it)"
+      ],
       "sha256": "7064882fcc3ba06e69a71aa6342a4578a739bd0596ae2c00d8ff219b488e876d"
     },
+    "test-audit-diff.js": {
+      "isolation": "parallel",
+      "reason": "measured 2026-11-10: passed with every other suite overlapping at 16 and 8 workers, its verdict matching the serial run",
+      "accepted": [
+        "profile: runs plugin code without overriding HOME, USERPROFILE or CLAUDE_CONFIG_DIR"
+      ],
+      "sha256": "f0814457f072660c2f76111e892b7d5d7209dd18a02976c7d3ffba8f476f9ef6"
+    },
     "test-auth-matrix.js": {
-      "isolation": "serial",
-      "reason": "audit 2026-10-02: repo-write: writeFileSync on a path built from the repo root; profile: runs plugin code without overriding HOME, USERPROFILE or CLAUDE_CONFIG_DIR. Ambiguous or shared side effects run alone",
-      "sha256": "2f07453df9e1b79ba9c12380ab494f1733315184bca56caf1591a3ace7956f25"
+      "isolation": "parallel",
+      "reason": "measured 2026-11-10: passed with every other suite overlapping at 16 and 8 workers, its verdict matching the serial run",
+      "accepted": [
+        "repo-write: writeFileSync on a path built from the repo root",
+        "profile: runs plugin code without overriding HOME, USERPROFILE or CLAUDE_CONFIG_DIR"
+      ],
+      "sha256": "ec817ae2e912020c7dfc07d0595bfe8fa3c8b755e4e1abe1649e67ce05bf3658"
+    },
+    "test-authority-audit.js": {
+      "isolation": "parallel",
+      "reason": "measured 2026-11-10: passed with every other suite overlapping at 16 and 8 workers, its verdict matching the serial run",
+      "accepted": [
+        "git-write: git push"
+      ],
+      "sha256": "e4302232d390df8398f8ead9ee9852180fc7a7db1c549ce07cd6e502304524b6"
     },
     "test-auto-brain-survey.js": {
-      "isolation": "serial",
-      "reason": "audit 2026-10-02: git-write: git clone, init (a fixture repo is initialised; every call must target it); profile: runs plugin code without overriding HOME, USERPROFILE or CLAUDE_CONFIG_DIR. Ambiguous or shared side effects run alone",
+      "isolation": "parallel",
+      "reason": "measured 2026-11-10: passed with every other suite overlapping at 16 and 8 workers, its verdict matching the serial run",
+      "accepted": [
+        "git-write: git clone, init (a fixture repo is initialised; every call must target it)",
+        "profile: runs plugin code without overriding HOME, USERPROFILE or CLAUDE_CONFIG_DIR"
+      ],
       "sha256": "ef4ee85b600df55b7f58c6e93a143ff3cb400b8bc939e839b846dbf2e79b05ee"
     },
     "test-away-state.js": {
@@ -52,95 +130,269 @@
       "reason": "reviewed 2026-10-02: writes only under its own mkdtemp fixtures; any profile, config or HOME it touches is pointed into them; no git outside temp repos; no fixed port",
       "sha256": "78261bac942fef54d2fce7229cc27a2e7afaf6294903e08007100514c8483135"
     },
+    "test-blocker-report.js": {
+      "isolation": "parallel",
+      "reason": "measured 2026-11-10: passed with every other suite overlapping at 16 and 8 workers, its verdict matching the serial run",
+      "accepted": [
+        "profile: runs plugin code without overriding HOME, USERPROFILE or CLAUDE_CONFIG_DIR"
+      ],
+      "sha256": "ce1c08e9803b5375c596e64d1e444b9c627176f3fd9d9482c150ec21c8192ead"
+    },
+    "test-board-sync.js": {
+      "isolation": "parallel",
+      "reason": "measured 2026-11-10: passed with every other suite overlapping at 16 and 8 workers, its verdict matching the serial run",
+      "accepted": [
+        "repo-write: writeFileSync, mkdirSync, rmSync, utimesSync on a path built from the repo root"
+      ],
+      "sha256": "1b5bfc686405509d37010321bbabda80267327434943b4d52efd3ed3263d49fc"
+    },
     "test-brain-brief.js": {
-      "isolation": "serial",
-      "reason": "audit 2026-10-02: repo-write: copyFileSync, writeFileSync on a path built from the repo root. Ambiguous or shared side effects run alone",
+      "isolation": "parallel",
+      "reason": "measured 2026-11-10: passed with every other suite overlapping at 16 and 8 workers, its verdict matching the serial run",
+      "accepted": [
+        "repo-write: copyFileSync, writeFileSync on a path built from the repo root"
+      ],
       "sha256": "938ce7335719ff9742a4fafa8fb8be5880516d322ed2b97bb2a180441c9af01f"
     },
+    "test-brain-clock-observers.js": {
+      "isolation": "parallel",
+      "reason": "measured 2026-11-10: passed with every other suite overlapping at 16 and 8 workers, its verdict matching the serial run",
+      "accepted": [
+        "profile: runs plugin code without overriding HOME, USERPROFILE or CLAUDE_CONFIG_DIR"
+      ],
+      "sha256": "a0de7e8b85bf0e7f0f7272105d3eb1e3313a4545d493a1bf0efbc00b24229416"
+    },
+    "test-brain-clock.js": {
+      "isolation": "parallel",
+      "reason": "measured 2026-11-10: passed with every other suite overlapping at 16 and 8 workers, its verdict matching the serial run",
+      "accepted": [
+        "repo-write: copyFileSync on a path built from the repo root",
+        "profile: runs plugin code without overriding HOME, USERPROFILE or CLAUDE_CONFIG_DIR"
+      ],
+      "sha256": "a4c752188dcdeedaa97bfe49730ab39834dcf4bfe97da1179a6af872e2843c5d"
+    },
+    "test-brain-close-truth.js": {
+      "isolation": "parallel",
+      "reason": "measured 2026-11-10: passed with every other suite overlapping at 16 and 8 workers, its verdict matching the serial run",
+      "sha256": "7a49390292f00eff39dd285f0dfe951b973a3a72efb747fc93c5cc75fb9f774c"
+    },
     "test-brain-judge.js": {
-      "isolation": "serial",
-      "reason": "audit 2026-10-02: repo-write: writeFileSync, mkdirSync, appendFileSync, unlinkSync on a path built from the repo root. Ambiguous or shared side effects run alone",
-      "sha256": "909431d5d1810f3126b21da01103719bb38b22869b6b03b9d176ca8c60600faf"
+      "isolation": "parallel",
+      "reason": "measured 2026-11-10: passed with every other suite overlapping at 16 and 8 workers, its verdict matching the serial run",
+      "accepted": [
+        "repo-write: writeFileSync, mkdirSync, appendFileSync, rmSync, unlinkSync on a path built from the repo root"
+      ],
+      "sha256": "4d14d13e1a30b6657a7970925b026f3ba277400fffe000503b6620c6e13eab09"
+    },
+    "test-brain-lock-owner.js": {
+      "isolation": "parallel",
+      "reason": "measured 2026-11-10: passed with every other suite overlapping at 16 and 8 workers, its verdict matching the serial run",
+      "sha256": "4cee7907f7299855925460c0a4ae40fdc8cbc786b7158be55840f14e5a5ede59"
     },
     "test-brain-panels.js": {
-      "isolation": "serial",
-      "reason": "audit 2026-10-02: repo-write: copyFileSync on a path built from the repo root. Ambiguous or shared side effects run alone",
+      "isolation": "parallel",
+      "reason": "measured 2026-11-10: passed with every other suite overlapping at 16 and 8 workers, its verdict matching the serial run",
+      "accepted": [
+        "repo-write: copyFileSync on a path built from the repo root"
+      ],
       "sha256": "47790d176a2843a38d3190aa4464ea487c0f6b44c5335b1f6582278d3f4d7003"
     },
+    "test-capacity-admission.js": {
+      "isolation": "parallel",
+      "reason": "measured 2026-11-10: passed with every other suite overlapping at 16 and 8 workers, its verdict matching the serial run",
+      "accepted": [
+        "profile: runs plugin code without overriding HOME, USERPROFILE or CLAUDE_CONFIG_DIR",
+        "nested-runner: drives full-gate-queue"
+      ],
+      "sha256": "47f299ec7f7e63877f9bf640c6a9fecd05bbef48c8b8a6fd20ad0b424607bcb9"
+    },
+    "test-capacity-deferral.js": {
+      "isolation": "parallel",
+      "reason": "measured 2026-11-10: passed with every other suite overlapping at 16 and 8 workers, its verdict matching the serial run",
+      "accepted": [
+        "git-write: git init, add (a fixture repo is initialised; every call must target it)"
+      ],
+      "sha256": "d26ee8266ffa98fe11a92943193c35a81141346e4d36d09515db4110641e4bae"
+    },
+    "test-capacity-lifecycle.js": {
+      "isolation": "parallel",
+      "reason": "measured 2026-11-10: passed with every other suite overlapping at 16 and 8 workers, its verdict matching the serial run",
+      "accepted": [
+        "repo-write: utimesSync, linkSync on a path built from the repo root",
+        "git-write: git init (a fixture repo is initialised; every call must target it)"
+      ],
+      "sha256": "ebb0d161c34b536a3321380d70e4cc491cba550de84f7f0937766a8622f60a52"
+    },
+    "test-capacity-liveness.js": {
+      "isolation": "parallel",
+      "reason": "measured 2026-11-10: passed with every other suite overlapping at 16 and 8 workers, its verdict matching the serial run",
+      "accepted": [
+        "repo-write: writeFileSync on a path built from the repo root",
+        "profile: runs plugin code without overriding HOME, USERPROFILE or CLAUDE_CONFIG_DIR",
+        "nested-runner: drives full-gate-queue"
+      ],
+      "sha256": "fed6677793572129757f176ca94a6ec54a686b122b2dd282f459fa6ce7647358"
+    },
+    "test-capacity-observe.js": {
+      "isolation": "parallel",
+      "reason": "measured 2026-11-10: passed with every other suite overlapping at 16 and 8 workers, its verdict matching the serial run",
+      "accepted": [
+        "repo-write: rmSync, mkdirSync on a path built from the repo root"
+      ],
+      "sha256": "370d5398bab9eed4c4eb7248901192a83adfb1820368725f69059d71a5d90827"
+    },
+    "test-cheap-review.js": {
+      "isolation": "parallel",
+      "reason": "measured 2026-11-10: passed with every other suite overlapping at 16 and 8 workers, its verdict matching the serial run",
+      "accepted": [
+        "repo-write: writeFileSync on a path built from the repo root"
+      ],
+      "sha256": "04fc83969e7ec029df61d64165cdc98ad0d1a5bc54eb9729f46e4b09f6693859"
+    },
     "test-check-assignment.js": {
-      "isolation": "serial",
-      "reason": "audit 2026-10-02: profile: runs plugin code without overriding HOME, USERPROFILE or CLAUDE_CONFIG_DIR. Ambiguous or shared side effects run alone",
+      "isolation": "parallel",
+      "reason": "measured 2026-11-10: passed with every other suite overlapping at 16 and 8 workers, its verdict matching the serial run",
+      "accepted": [
+        "profile: runs plugin code without overriding HOME, USERPROFILE or CLAUDE_CONFIG_DIR"
+      ],
       "sha256": "f75f00101aed40f5f0cfeac96298741fec3437e6c404f0a38b0e4ce9123b0aa9"
     },
     "test-check-brain-role.js": {
-      "isolation": "serial",
-      "reason": "audit 2026-10-02: profile: runs plugin code without overriding HOME, USERPROFILE or CLAUDE_CONFIG_DIR. Ambiguous or shared side effects run alone",
-      "sha256": "251fdfd53b3e9c247604a31786d9989d55fecffa3a4be03d8504322dfd209b5f"
+      "isolation": "parallel",
+      "reason": "measured 2026-11-10: passed with every other suite overlapping at 16 and 8 workers, its verdict matching the serial run",
+      "accepted": [
+        "profile: runs plugin code without overriding HOME, USERPROFILE or CLAUDE_CONFIG_DIR"
+      ],
+      "sha256": "09debb9d3feca2568a6a79bd02b362597f251cd579305577d4940a0c46e7a2a2"
     },
     "test-check-branch-landed.js": {
-      "isolation": "serial",
-      "reason": "audit 2026-10-02: profile: runs plugin code without overriding HOME, USERPROFILE or CLAUDE_CONFIG_DIR. Ambiguous or shared side effects run alone",
+      "isolation": "parallel",
+      "reason": "measured 2026-11-10: passed with every other suite overlapping at 16 and 8 workers, its verdict matching the serial run",
+      "accepted": [
+        "profile: runs plugin code without overriding HOME, USERPROFILE or CLAUDE_CONFIG_DIR"
+      ],
       "sha256": "bbfc5040a73b3c5d403731dcd78ec2c435843c65712adc72d87579ec2ceec3e3"
     },
     "test-check-ci-freshness.js": {
-      "isolation": "serial",
-      "reason": "audit 2026-10-02: profile: runs plugin code without overriding HOME, USERPROFILE or CLAUDE_CONFIG_DIR. Ambiguous or shared side effects run alone",
+      "isolation": "parallel",
+      "reason": "measured 2026-11-10: passed with every other suite overlapping at 16 and 8 workers, its verdict matching the serial run",
+      "accepted": [
+        "profile: runs plugin code without overriding HOME, USERPROFILE or CLAUDE_CONFIG_DIR"
+      ],
       "sha256": "46f7fb8a2c75bd6c6aafa3996c02d4c1153bd10ccd0a3472f96daa8983f7b410"
     },
     "test-check-claude-md.js": {
-      "isolation": "serial",
-      "reason": "audit 2026-10-02: repo-write: copyFileSync, cpSync on a path built from the repo root; profile: runs plugin code without overriding HOME, USERPROFILE or CLAUDE_CONFIG_DIR. Ambiguous or shared side effects run alone",
-      "sha256": "465566fe907c04d3857179eeb88c405a602a19a77ca506aaca65581050af0ac0"
+      "isolation": "parallel",
+      "reason": "measured 2026-11-10: passed with every other suite overlapping at 16 and 8 workers, its verdict matching the serial run",
+      "accepted": [
+        "repo-write: copyFileSync, cpSync on a path built from the repo root",
+        "profile: runs plugin code without overriding HOME, USERPROFILE or CLAUDE_CONFIG_DIR"
+      ],
+      "sha256": "34a17036f3424d0fd6bceb83d00cf01fdfa003efbcabce91cd2beedc0ca2cd40"
     },
     "test-check-conflict-markers.js": {
-      "isolation": "serial",
-      "reason": "audit 2026-10-02: repo-write: rmSync, mkdirSync on a path built from the repo root; git-write: git init, add (a fixture repo is initialised; every call must target it); profile: runs plugin code without overriding HOME, USERPROFILE or CLAUDE_CONFIG_DIR. Ambiguous or shared side effects run alone",
+      "isolation": "parallel",
+      "reason": "measured 2026-11-10: passed with every other suite overlapping at 16 and 8 workers, its verdict matching the serial run",
+      "accepted": [
+        "repo-write: rmSync, mkdirSync on a path built from the repo root",
+        "git-write: git init, add (a fixture repo is initialised; every call must target it)",
+        "profile: runs plugin code without overriding HOME, USERPROFILE or CLAUDE_CONFIG_DIR"
+      ],
       "sha256": "65a563f0dcc68b2fc06f4c0fba40a3fb5b82dcfb9665fd04c77e05625ec90b6e"
     },
     "test-check-coverage.js": {
-      "isolation": "serial",
-      "reason": "audit 2026-10-02: profile: runs plugin code without overriding HOME, USERPROFILE or CLAUDE_CONFIG_DIR; nested-runner: drives find-untested-functions, test-all.js. Ambiguous or shared side effects run alone",
+      "isolation": "parallel",
+      "reason": "measured 2026-11-10: passed with every other suite overlapping at 16 and 8 workers, its verdict matching the serial run",
+      "accepted": [
+        "profile: runs plugin code without overriding HOME, USERPROFILE or CLAUDE_CONFIG_DIR",
+        "nested-runner: drives find-untested-functions, test-all.js"
+      ],
       "sha256": "14408e50148001ffc8fe33912a3e1990275754226dd5431a1f447d6ec92f44fc"
     },
     "test-check-deploy-target.js": {
-      "isolation": "serial",
-      "reason": "audit 2026-10-02: profile: runs plugin code without overriding HOME, USERPROFILE or CLAUDE_CONFIG_DIR. Ambiguous or shared side effects run alone",
+      "isolation": "parallel",
+      "reason": "measured 2026-11-10: passed with every other suite overlapping at 16 and 8 workers, its verdict matching the serial run",
+      "accepted": [
+        "profile: runs plugin code without overriding HOME, USERPROFILE or CLAUDE_CONFIG_DIR"
+      ],
       "sha256": "55394686a7f3dec79547e457c236eeb0f64ef6409878ff12aad07b6581e7f99e"
     },
     "test-check-doc-staleness.js": {
-      "isolation": "serial",
-      "reason": "audit 2026-10-02: profile: runs plugin code without overriding HOME, USERPROFILE or CLAUDE_CONFIG_DIR. Ambiguous or shared side effects run alone",
-      "sha256": "bf027efcbaba0eee5a5d1146bf329a2ef991cdb4a19e5d31da92509b16b21d4f"
+      "isolation": "parallel",
+      "reason": "measured 2026-11-10: passed with every other suite overlapping at 16 and 8 workers, its verdict matching the serial run",
+      "accepted": [
+        "profile: runs plugin code without overriding HOME, USERPROFILE or CLAUDE_CONFIG_DIR"
+      ],
+      "sha256": "cc292588c50233e20417132a99ac2c700dd3184f529c7c55b08d9a4c4f02b065"
+    },
+    "test-check-grill-ledger.js": {
+      "isolation": "parallel",
+      "reason": "measured 2026-11-10: passed with every other suite overlapping at 16 and 8 workers, its verdict matching the serial run",
+      "accepted": [
+        "profile: runs plugin code without overriding HOME, USERPROFILE or CLAUDE_CONFIG_DIR"
+      ],
+      "sha256": "419d3ab9be01fb407f28dd2cbeb7ccb587010dba1b6a50a43b1dae9166bee1ac"
     },
     "test-check-hook-parse.js": {
-      "isolation": "serial",
-      "reason": "audit 2026-10-02: profile: runs plugin code without overriding HOME, USERPROFILE or CLAUDE_CONFIG_DIR. Ambiguous or shared side effects run alone",
+      "isolation": "parallel",
+      "reason": "measured 2026-11-10: passed with every other suite overlapping at 16 and 8 workers, its verdict matching the serial run",
+      "accepted": [
+        "profile: runs plugin code without overriding HOME, USERPROFILE or CLAUDE_CONFIG_DIR"
+      ],
       "sha256": "0713613646d3471af54af541e32c15de28524fe9eee10b61766191a165cae376"
     },
+    "test-check-pr-ready-test-edits.js": {
+      "isolation": "parallel",
+      "reason": "measured 2026-11-10: passed with every other suite overlapping at 16 and 8 workers, its verdict matching the serial run",
+      "accepted": [
+        "profile: runs plugin code without overriding HOME, USERPROFILE or CLAUDE_CONFIG_DIR"
+      ],
+      "sha256": "fe7f6e847cb6c198cb1180a968574670e4fc93d9e3d29915d3f00794c3830f41"
+    },
     "test-check-pr-ready.js": {
-      "isolation": "serial",
-      "reason": "audit 2026-10-02: profile: runs plugin code without overriding HOME, USERPROFILE or CLAUDE_CONFIG_DIR. Ambiguous or shared side effects run alone",
+      "isolation": "parallel",
+      "reason": "measured 2026-11-10: passed with every other suite overlapping at 16 and 8 workers, its verdict matching the serial run",
+      "accepted": [
+        "profile: runs plugin code without overriding HOME, USERPROFILE or CLAUDE_CONFIG_DIR"
+      ],
       "sha256": "774c9e6c8488b5d192f86b9213c1b931727c203f65705aec323fac6ab1587fc9"
     },
     "test-check-queue-freshness.js": {
-      "isolation": "serial",
-      "reason": "audit 2026-10-02: git-write: git init (a fixture repo is initialised; every call must target it); profile: runs plugin code without overriding HOME, USERPROFILE or CLAUDE_CONFIG_DIR. Ambiguous or shared side effects run alone",
+      "isolation": "parallel",
+      "reason": "measured 2026-11-10: passed with every other suite overlapping at 16 and 8 workers, its verdict matching the serial run",
+      "accepted": [
+        "git-write: git init (a fixture repo is initialised; every call must target it)",
+        "profile: runs plugin code without overriding HOME, USERPROFILE or CLAUDE_CONFIG_DIR"
+      ],
       "sha256": "2742df2a52d9dcb9c07dbb477e3ab7e1a8b8ca16391fa4fd38acb3af5c8cf124"
     },
     "test-check-release-lag.js": {
-      "isolation": "serial",
-      "reason": "audit 2026-10-02: repo-write: mkdirSync, writeFileSync, appendFileSync on a path built from the repo root; profile: runs plugin code without overriding HOME, USERPROFILE or CLAUDE_CONFIG_DIR. Ambiguous or shared side effects run alone",
+      "isolation": "parallel",
+      "reason": "measured 2026-11-10: passed with every other suite overlapping at 16 and 8 workers, its verdict matching the serial run",
+      "accepted": [
+        "repo-write: mkdirSync, writeFileSync, appendFileSync on a path built from the repo root",
+        "profile: runs plugin code without overriding HOME, USERPROFILE or CLAUDE_CONFIG_DIR"
+      ],
       "sha256": "4ccf4aac38c47ba174101ecedd8deb8864bad24fabddaf68c2c16ff1d4d2be93"
     },
     "test-check-spec-output.js": {
-      "isolation": "serial",
-      "reason": "audit 2026-10-02: profile: runs plugin code without overriding HOME, USERPROFILE or CLAUDE_CONFIG_DIR. Ambiguous or shared side effects run alone",
+      "isolation": "parallel",
+      "reason": "measured 2026-11-10: passed with every other suite overlapping at 16 and 8 workers, its verdict matching the serial run",
+      "accepted": [
+        "profile: runs plugin code without overriding HOME, USERPROFILE or CLAUDE_CONFIG_DIR"
+      ],
       "sha256": "38459509f13128ff1351acfc441dbe99912410be5f152390090392a15cf6462d"
     },
     "test-check-suites-can-fail.js": {
-      "isolation": "serial",
-      "reason": "audit 2026-10-02: repo-write: copyFileSync on a path built from the repo root; git-write: git worktree; profile: runs plugin code without overriding HOME, USERPROFILE or CLAUDE_CONFIG_DIR; nested-runner: drives check-suites-can-fail. Ambiguous or shared side effects run alone",
-      "sha256": "7254cdc6f3430bd6d2dc7942cce68407b4c3402782c609fb61ff4f6794d250bb"
+      "isolation": "parallel",
+      "reason": "measured 2026-11-10: passed with every other suite overlapping at 16 and 8 workers, its verdict matching the serial run",
+      "accepted": [
+        "repo-write: copyFileSync on a path built from the repo root",
+        "git-write: git worktree",
+        "profile: runs plugin code without overriding HOME, USERPROFILE or CLAUDE_CONFIG_DIR",
+        "nested-runner: drives check-suites-can-fail, test-all.js"
+      ],
+      "sha256": "fc366b3b155ce9cfeb50ed25149b847182b5e75bb0832618be1bd254265f2eff"
     },
     "test-claude-paths.js": {
       "isolation": "parallel",
@@ -148,13 +400,27 @@
       "sha256": "48fb8328752c136a33eeae0c4f20e2b7cfe18ec3c7a4cbd75eb1c709399de6d6"
     },
     "test-claudemd-audit.js": {
-      "isolation": "serial",
-      "reason": "audit 2026-10-02: profile: runs plugin code without overriding HOME, USERPROFILE or CLAUDE_CONFIG_DIR. Ambiguous or shared side effects run alone",
+      "isolation": "parallel",
+      "reason": "measured 2026-11-10: passed with every other suite overlapping at 16 and 8 workers, its verdict matching the serial run",
+      "accepted": [
+        "profile: runs plugin code without overriding HOME, USERPROFILE or CLAUDE_CONFIG_DIR"
+      ],
       "sha256": "dec0a5f60756775c45acbf3ee808dcf3fbf2a11e1a3301640a491dd0ddbb4140"
     },
+    "test-claudemd-claim-scope.js": {
+      "isolation": "parallel",
+      "reason": "measured 2026-11-10: passed with every other suite overlapping at 16 and 8 workers, its verdict matching the serial run",
+      "accepted": [
+        "profile: runs plugin code without overriding HOME, USERPROFILE or CLAUDE_CONFIG_DIR"
+      ],
+      "sha256": "b0566f44d5728c66167abc35eba38af7ebb4df817b7cd8210f1543bc22248cde"
+    },
     "test-compact-hooks.js": {
-      "isolation": "serial",
-      "reason": "audit 2026-10-02: profile: runs plugin code without overriding HOME, USERPROFILE or CLAUDE_CONFIG_DIR. Ambiguous or shared side effects run alone",
+      "isolation": "parallel",
+      "reason": "measured 2026-11-10: passed with every other suite overlapping at 16 and 8 workers, its verdict matching the serial run",
+      "accepted": [
+        "profile: runs plugin code without overriding HOME, USERPROFILE or CLAUDE_CONFIG_DIR"
+      ],
       "sha256": "080c5ffebd4c111c355b745d5cdf4b3e7094c3ca6a3e14f47ae99bcec2d12574"
     },
     "test-config-dir-isolation.js": {
@@ -167,32 +433,96 @@
     },
     "test-context-depth-nudge.js": {
       "isolation": "parallel",
-      "reason": "reviewed 2026-10-02: writes only under its own mkdtemp fixtures; any profile, config or HOME it touches is pointed into them; no git outside temp repos; no fixed port",
-      "sha256": "72e6313ebfc5501fa23ea72c774bdc7d5f88dfc7a131b74c7c884c23e537d18c"
+      "reason": "measured 2026-11-10: passed with every other suite overlapping at 16 and 8 workers, its verdict matching the serial run",
+      "sha256": "c24628e491fbe736d09be6f1c7db43e2c582016f7136e737429600bf525cf1ea"
+    },
+    "test-coordinator-ledger-push.js": {
+      "isolation": "parallel",
+      "reason": "measured 2026-11-10: passed with every other suite overlapping at 16 and 8 workers, its verdict matching the serial run",
+      "accepted": [
+        "git-write: git push, commit"
+      ],
+      "sha256": "d039b11f01e482a73cbe055418bf0c37e1452a5cc246f96d727db42328d15f91"
     },
     "test-coordinator-write-guard.js": {
-      "isolation": "serial",
-      "reason": "audit 2026-10-02: git-write: git init, commit, push, fetch, worktree, merge, rebase, cherry-pick, checkout, am (a fixture repo is initialised; every call must target it); npm: spawns npm. Ambiguous or shared side effects run alone",
-      "sha256": "2075ca8b71b93d4209b5d313c57bf3dfa57ff46b1995a1cb4913f6f7fb4ff443"
+      "isolation": "parallel",
+      "reason": "measured 2026-11-10: passed with every other suite overlapping at 16 and 8 workers, its verdict matching the serial run",
+      "accepted": [
+        "git-write: git init, commit, push, fetch, worktree, merge, rebase, cherry-pick, checkout, am (a fixture repo is initialised; every call must target it)",
+        "npm: spawns npm"
+      ],
+      "sha256": "225ff523b565e2e91a14d6683e46d7cdd386eb86b1741936063fde875ecde975"
+    },
+    "test-cost-repeats.js": {
+      "isolation": "parallel",
+      "reason": "measured 2026-11-10: passed with every other suite overlapping at 16 and 8 workers, its verdict matching the serial run",
+      "sha256": "25ab300ef31ff4d0232ebdaaf7d6f7b519f58cb156f9ca9d485ae917980c4ea5"
     },
     "test-cpu-telemetry.js": {
       "isolation": "parallel",
       "reason": "reviewed 2026-10-02: writes only under its own mkdtemp fixtures; any profile, config or HOME it touches is pointed into them; no git outside temp repos; no fixed port",
       "sha256": "cbbb397e015ff720ef1d6f932aae9c9b0f8bf53b09b1c51772d1aa0e1ee56666"
     },
+    "test-delivery-outcomes.js": {
+      "isolation": "parallel",
+      "reason": "measured 2026-11-10: passed with every other suite overlapping at 16 and 8 workers, its verdict matching the serial run",
+      "accepted": [
+        "repo-write: cpSync, copyFileSync, unlinkSync, mkdirSync, writeFileSync on a path built from the repo root"
+      ],
+      "sha256": "134b1408c575cfde4d70703c19f53dcd7eea44031dc69c3975b8a0e1aae1a951"
+    },
+    "test-deploy-gate.js": {
+      "isolation": "parallel",
+      "reason": "measured 2026-11-10: passed with every other suite overlapping at 16 and 8 workers, its verdict matching the serial run",
+      "accepted": [
+        "repo-write: mkdirSync, writeFileSync on a path built from the repo root",
+        "git-write: git push",
+        "profile: runs plugin code without overriding HOME, USERPROFILE or CLAUDE_CONFIG_DIR"
+      ],
+      "sha256": "3adfda2e2376a29aa14243a50132e3a09be996f88fc2a581be9c6001d1e91ac7"
+    },
     "test-deploy-ledger.js": {
-      "isolation": "serial",
-      "reason": "audit 2026-10-02: repo-write: mkdirSync, writeFileSync on a path built from the repo root; git-write: git checkout; profile: runs plugin code without overriding HOME, USERPROFILE or CLAUDE_CONFIG_DIR; npm: spawns npm. Ambiguous or shared side effects run alone",
+      "isolation": "parallel",
+      "reason": "measured 2026-11-10: passed with every other suite overlapping at 16 and 8 workers, its verdict matching the serial run",
+      "accepted": [
+        "repo-write: mkdirSync, writeFileSync on a path built from the repo root",
+        "git-write: git checkout",
+        "profile: runs plugin code without overriding HOME, USERPROFILE or CLAUDE_CONFIG_DIR",
+        "npm: spawns npm"
+      ],
       "sha256": "b0c4179c7e065c83618a4f3d5d38e3bac9ad13971597523699e2c1e4c1f5730b"
     },
+    "test-design-review.js": {
+      "isolation": "parallel",
+      "reason": "measured 2026-11-10: passed with every other suite overlapping at 16 and 8 workers, its verdict matching the serial run",
+      "accepted": [
+        "profile: runs plugin code without overriding HOME, USERPROFILE or CLAUDE_CONFIG_DIR"
+      ],
+      "sha256": "69ff1ab53cc10d223f7ff4a81f0ee3a9e2c52367040d0a3df66140487fdaa75e"
+    },
+    "test-detached-spawns.js": {
+      "isolation": "parallel",
+      "reason": "measured 2026-11-10: passed with every other suite overlapping at 16 and 8 workers, its verdict matching the serial run",
+      "accepted": [
+        "profile: runs plugin code without overriding HOME, USERPROFILE or CLAUDE_CONFIG_DIR"
+      ],
+      "sha256": "e6bc7c45290db274c1965064c00728651f3c4eedaafeb74179a93513202aef1b"
+    },
     "test-dispatch-readiness.js": {
-      "isolation": "serial",
-      "reason": "audit 2026-10-02: git-write: git init, clone (a fixture repo is initialised; every call must target it); profile: runs plugin code without overriding HOME, USERPROFILE or CLAUDE_CONFIG_DIR. Ambiguous or shared side effects run alone",
+      "isolation": "parallel",
+      "reason": "measured 2026-11-10: passed with every other suite overlapping at 16 and 8 workers, its verdict matching the serial run",
+      "accepted": [
+        "git-write: git init, clone (a fixture repo is initialised; every call must target it)",
+        "profile: runs plugin code without overriding HOME, USERPROFILE or CLAUDE_CONFIG_DIR"
+      ],
       "sha256": "e787efe61d97d339c9f3da4773aafe07f217a5ee132754d3400e9d94929e45f3"
     },
     "test-draft-skip-guard.js": {
-      "isolation": "serial",
-      "reason": "audit 2026-10-02: repo-write: mkdirSync, writeFileSync on a path built from the repo root. Ambiguous or shared side effects run alone",
+      "isolation": "parallel",
+      "reason": "measured 2026-11-10: passed with every other suite overlapping at 16 and 8 workers, its verdict matching the serial run",
+      "accepted": [
+        "repo-write: mkdirSync, writeFileSync on a path built from the repo root"
+      ],
       "sha256": "1b0aff97822f407c457b2a0f2dddae35dbbeefd6722f309aed342b9186bbe1ef"
     },
     "test-drift-audit-config.js": {
@@ -210,10 +540,33 @@
       "reason": "reviewed 2026-10-02: writes only under its own mkdtemp fixtures; any profile, config or HOME it touches is pointed into them; no git outside temp repos; no fixed port",
       "sha256": "5a41beb5e1ca00cc9580e05086c3afbc8af61c91b22c9fbc30fba3842fd33c91"
     },
+    "test-execution-budget.js": {
+      "isolation": "parallel",
+      "reason": "measured 2026-11-10: passed with every other suite overlapping at 16 and 8 workers, its verdict matching the serial run",
+      "accepted": [
+        "repo-write: appendFileSync, mkdirSync on a path built from the repo root"
+      ],
+      "sha256": "beb321ed17b31ec5632be62ca1413d95cc656b088109e7230eb70e0837ac3d68"
+    },
+    "test-fast-lane.js": {
+      "isolation": "parallel",
+      "reason": "measured 2026-11-10: passed with every other suite overlapping at 16 and 8 workers, its verdict matching the serial run",
+      "accepted": [
+        "git-write: git init (a fixture repo is initialised; every call must target it)",
+        "profile: runs plugin code without overriding HOME, USERPROFILE or CLAUDE_CONFIG_DIR",
+        "npm: spawns npm"
+      ],
+      "sha256": "ffe8ae0c37b7ef54811aad3f9919389dbb3b040c80b90a6c194c7f8801e0877c"
+    },
     "test-find-shared-rmw.js": {
-      "isolation": "serial",
-      "reason": "audit 2026-10-02: repo-write: unlinkSync on a path built from the repo root; profile: reads the home directory without overriding HOME or USERPROFILE; profile: runs plugin code without overriding HOME, USERPROFILE or CLAUDE_CONFIG_DIR. Ambiguous or shared side effects run alone",
-      "sha256": "5f756ac89c1c0fe8bf17e393ab1bfba91de65997af0df76a48fec0b0b253f6b8"
+      "isolation": "parallel",
+      "reason": "measured 2026-11-10: passed with every other suite overlapping at 16 and 8 workers, its verdict matching the serial run",
+      "accepted": [
+        "repo-write: unlinkSync on a path built from the repo root",
+        "profile: reads the home directory without overriding HOME or USERPROFILE",
+        "profile: runs plugin code without overriding HOME, USERPROFILE or CLAUDE_CONFIG_DIR"
+      ],
+      "sha256": "c0dc4d92e2342bf360378de98addab0b943efd7006bef698400ecc2e7e3a29d6"
     },
     "test-fleet-board-entrypoints.js": {
       "isolation": "parallel",
@@ -221,8 +574,11 @@
       "sha256": "5f35cd059786dcb48017ca7bd7f2406b5c1ac6171e18642fd0392030475afe8b"
     },
     "test-fleet-board.js": {
-      "isolation": "serial",
-      "reason": "audit 2026-10-02: repo-write: copyFileSync on a path built from the repo root. Ambiguous or shared side effects run alone",
+      "isolation": "parallel",
+      "reason": "measured 2026-11-10: passed with every other suite overlapping at 16 and 8 workers, its verdict matching the serial run",
+      "accepted": [
+        "repo-write: copyFileSync on a path built from the repo root"
+      ],
       "sha256": "b231cdda61f4c9f65aadccbc486a383491a67bf22decf5e8fd9cdf4c5b5e0837"
     },
     "test-fleet-brief.js": {
@@ -232,27 +588,41 @@
     },
     "test-fleet-decisions.js": {
       "isolation": "parallel",
-      "reason": "reviewed 2026-10-02: writes only under its own mkdtemp fixtures; any profile, config or HOME it touches is pointed into them; no git outside temp repos; no fixed port",
-      "sha256": "20d008a88476ac46b302238bd5fcdd2a8202ff6c8cccb959bc70fd7423f16ddf"
+      "reason": "measured 2026-11-10: passed with every other suite overlapping at 16 and 8 workers, its verdict matching the serial run",
+      "sha256": "150c1ae1a9325b3ed30a71bf673a309b7437fc6d703161e9bb2361e2cb603a23"
     },
     "test-fleet-heartbeat.js": {
-      "isolation": "serial",
-      "reason": "audit 2026-10-02: repo-write: writeFileSync on a path built from the repo root. Ambiguous or shared side effects run alone",
+      "isolation": "parallel",
+      "reason": "measured 2026-11-10: passed with every other suite overlapping at 16 and 8 workers, its verdict matching the serial run",
+      "accepted": [
+        "repo-write: writeFileSync on a path built from the repo root"
+      ],
       "sha256": "522c1ed4e819c3cc006a1b36b3a2a093d17ddb6c5f1538e9c1c7b8c14bdf59a8"
     },
     "test-fleet-intent.js": {
-      "isolation": "serial",
-      "reason": "audit 2026-10-02: repo-write: writeFileSync, rmSync on a path built from the repo root; profile: runs plugin code without overriding HOME, USERPROFILE or CLAUDE_CONFIG_DIR; npm: spawns npm. Ambiguous or shared side effects run alone",
+      "isolation": "parallel",
+      "reason": "measured 2026-11-10: passed with every other suite overlapping at 16 and 8 workers, its verdict matching the serial run",
+      "accepted": [
+        "repo-write: writeFileSync, rmSync on a path built from the repo root",
+        "profile: runs plugin code without overriding HOME, USERPROFILE or CLAUDE_CONFIG_DIR",
+        "npm: spawns npm"
+      ],
       "sha256": "1c8c40b999dc0a1365a67345030ed2e02abcb0030ac1db23ff7f8bcad6de550e"
     },
     "test-fleet-notify.js": {
-      "isolation": "serial",
-      "reason": "audit 2026-10-02: repo-write: appendFileSync on a path built from the repo root. Ambiguous or shared side effects run alone",
-      "sha256": "b43c508e7dd14465bb7aabf30e50b41bc247fa37051ea140d58a766a7675d12c"
+      "isolation": "parallel",
+      "reason": "measured 2026-11-10: passed with every other suite overlapping at 16 and 8 workers, its verdict matching the serial run",
+      "accepted": [
+        "repo-write: appendFileSync on a path built from the repo root"
+      ],
+      "sha256": "a929457f3f4bbdb0a17322e04450f17591c11049e7b39a1d03c2486ef42ffa9d"
     },
     "test-fleet-overlap.js": {
-      "isolation": "serial",
-      "reason": "audit 2026-10-02: repo-write: copyFileSync on a path built from the repo root. Ambiguous or shared side effects run alone",
+      "isolation": "parallel",
+      "reason": "measured 2026-11-10: passed with every other suite overlapping at 16 and 8 workers, its verdict matching the serial run",
+      "accepted": [
+        "repo-write: copyFileSync on a path built from the repo root"
+      ],
       "sha256": "40d7552f60c53219036be8e673378eb70bba7c43b1e36e16ba7bbb88b04aef3b"
     },
     "test-fleet-publish.js": {
@@ -261,13 +631,19 @@
       "sha256": "1b6648861a27c39f1a26c5b7a73e5e9dd980ec24a60f5acdf09d625f99cd230b"
     },
     "test-fleet-redispatch.js": {
-      "isolation": "serial",
-      "reason": "audit 2026-10-02: repo-write: writeFileSync on a path built from the repo root. Ambiguous or shared side effects run alone",
+      "isolation": "parallel",
+      "reason": "measured 2026-11-10: passed with every other suite overlapping at 16 and 8 workers, its verdict matching the serial run",
+      "accepted": [
+        "repo-write: writeFileSync on a path built from the repo root"
+      ],
       "sha256": "fe09b0d9d8611a36976588579fd297b069f37da0b9ecab6b5e1885739020ab8e"
     },
     "test-fleet-registry.js": {
-      "isolation": "serial",
-      "reason": "audit 2026-10-02: profile: runs plugin code without overriding HOME, USERPROFILE or CLAUDE_CONFIG_DIR. Ambiguous or shared side effects run alone",
+      "isolation": "parallel",
+      "reason": "measured 2026-11-10: passed with every other suite overlapping at 16 and 8 workers, its verdict matching the serial run",
+      "accepted": [
+        "profile: runs plugin code without overriding HOME, USERPROFILE or CLAUDE_CONFIG_DIR"
+      ],
       "sha256": "2a17b04cdadb8f0f34f626107eb00bee43a74480cdf1b702f5bbe3c2617aef86"
     },
     "test-fleet-snapshot.js": {
@@ -287,57 +663,180 @@
     },
     "test-fleet-view.js": {
       "isolation": "parallel",
-      "reason": "reviewed 2026-10-02: writes only under its own mkdtemp fixtures; any profile, config or HOME it touches is pointed into them; no git outside temp repos; no fixed port",
-      "sha256": "a154a85addee2ce1bf7f86004b18d5395703a7284b2900dcac326a76cc82f70f"
+      "reason": "measured 2026-11-10: passed with every other suite overlapping at 16 and 8 workers, its verdict matching the serial run",
+      "sha256": "fe0ff0ccf6728880889079102c35da2d7133d9bc2eff77eabaefca1ca78ecd5c"
     },
     "test-flow-evidence.js": {
-      "isolation": "serial",
-      "reason": "audit 2026-10-02: profile: runs plugin code without overriding HOME, USERPROFILE or CLAUDE_CONFIG_DIR. Ambiguous or shared side effects run alone",
+      "isolation": "parallel",
+      "reason": "measured 2026-11-10: passed with every other suite overlapping at 16 and 8 workers, its verdict matching the serial run",
+      "accepted": [
+        "profile: runs plugin code without overriding HOME, USERPROFILE or CLAUDE_CONFIG_DIR"
+      ],
       "sha256": "f746e4bcf00a4acf24329b04869334930fabaa2586947122b327a164a4b88364"
     },
     "test-framework-radar-guidance.js": {
       "isolation": "parallel",
-      "reason": "reviewed 2026-10-02: writes only under its own mkdtemp fixtures; any profile, config or HOME it touches is pointed into them; no git outside temp repos; no fixed port",
-      "sha256": "a780ac2aee599ad239846f476b3a4ec3e329c883a1a73b6742aad3c303372aa1"
+      "reason": "measured 2026-11-10: passed with every other suite overlapping at 16 and 8 workers, its verdict matching the serial run",
+      "sha256": "bb29006c23fa13faaa134a27e4b10acb366e095a5c8b47667b3a83da2869322d"
     },
     "test-framework-radar.js": {
-      "isolation": "serial",
-      "reason": "audit 2026-10-02: repo-write: mkdirSync on a path built from the repo root; profile: runs plugin code without overriding HOME, USERPROFILE or CLAUDE_CONFIG_DIR. Ambiguous or shared side effects run alone",
+      "isolation": "parallel",
+      "reason": "measured 2026-11-10: passed with every other suite overlapping at 16 and 8 workers, its verdict matching the serial run",
+      "accepted": [
+        "repo-write: mkdirSync on a path built from the repo root",
+        "profile: runs plugin code without overriding HOME, USERPROFILE or CLAUDE_CONFIG_DIR"
+      ],
       "sha256": "23c5d9bd275c40ecf0b33cbe5881fb3e2bedb4762f5c5bb2ca3d110757db3913"
+    },
+    "test-frontier-atomic.js": {
+      "isolation": "parallel",
+      "reason": "measured 2026-11-10: passed with every other suite overlapping at 16 and 8 workers, its verdict matching the serial run",
+      "sha256": "ae0a532e98105f3af31e51e7e529859dc1dfb89da901b507c7f02ff60f4516b0"
+    },
+    "test-frontier-compare.js": {
+      "isolation": "parallel",
+      "reason": "measured 2026-11-10: passed with every other suite overlapping at 16 and 8 workers, its verdict matching the serial run",
+      "accepted": [
+        "repo-write: mkdirSync, writeFileSync on a path built from the repo root",
+        "profile: runs plugin code without overriding HOME, USERPROFILE or CLAUDE_CONFIG_DIR"
+      ],
+      "sha256": "3bafd753594f4910fcbee9772dd7baafb0ef6a3ca087e8bf953be9f1cecdd902"
+    },
+    "test-frontier-evidence.js": {
+      "isolation": "parallel",
+      "reason": "measured 2026-11-10: passed with every other suite overlapping at 16 and 8 workers, its verdict matching the serial run",
+      "sha256": "78abd2851d60ba7d101e31381827de49cff077bdbb7607aeb239025d4b10dece"
+    },
+    "test-frontier-seal.js": {
+      "isolation": "parallel",
+      "reason": "measured 2026-11-10: passed with every other suite overlapping at 16 and 8 workers, its verdict matching the serial run",
+      "sha256": "dcef2af542cf0cc42487c27451d6c9c2f90280ead4628a080487a5c744f2527b"
+    },
+    "test-frontier-wait.js": {
+      "isolation": "parallel",
+      "reason": "measured 2026-11-10: passed with every other suite overlapping at 16 and 8 workers, its verdict matching the serial run",
+      "sha256": "b682f96d5539af6365e428de9cec381e33ea68e84d201086b90c9b83e691dc05"
     },
     "test-frontier.js": {
       "isolation": "serial",
-      "reason": "audit 2026-10-02: repo-write: copyFileSync on a path built from the repo root; nested-runner: drives test-all.js, find-untested-functions; npm: spawns npm. Ambiguous or shared side effects run alone",
-      "sha256": "c5868a11d247940f7979346ada0e1d5e05347c6cf948dff20f7bf8e0bb107c41"
+      "reason": "serial, measured 2026-11-10: its fake runtime wait timed out at 16 workers, and it passes alone",
+      "sha256": "cfc1cd7f36a7e333b200674bd6a28de89ea832a71e537e1da03446b35a77fb2d"
     },
     "test-full-gate-queue.js": {
-      "isolation": "serial",
-      "reason": "audit 2026-10-02: repo-write: writeFileSync, utimesSync on a path built from the repo root; nested-runner: drives full-gate-queue. Ambiguous or shared side effects run alone",
-      "sha256": "d6e810977ac2b2e823c3b5e1d53982ce162ab0e1d349f8fd60bb037f99a59fd1"
+      "isolation": "parallel",
+      "reason": "measured 2026-11-10: passed with every other suite overlapping at 16 and 8 workers, its verdict matching the serial run",
+      "accepted": [
+        "repo-write: writeFileSync, utimesSync, copyFileSync on a path built from the repo root",
+        "nested-runner: drives full-gate-queue"
+      ],
+      "sha256": "b61f3c155388ccc1657e41f3b3fb7825052f295074c332a1e74ce2f026357a0b"
     },
     "test-function-json-exit.js": {
-      "isolation": "serial",
-      "reason": "audit 2026-10-02: repo-write: cpSync on a path built from the repo root; nested-runner: drives test-all.js, find-untested-functions. Ambiguous or shared side effects run alone",
+      "isolation": "parallel",
+      "reason": "measured 2026-11-10: passed with every other suite overlapping at 16 and 8 workers, its verdict matching the serial run",
+      "accepted": [
+        "repo-write: cpSync on a path built from the repo root",
+        "nested-runner: drives test-all.js, find-untested-functions"
+      ],
       "sha256": "96b26e49332ae4dd8b002b135389c97f25483e98fbb16ed7715d82baa00d9da8"
     },
+    "test-gate-cost.js": {
+      "isolation": "parallel",
+      "reason": "measured 2026-11-10: passed with every other suite overlapping at 16 and 8 workers, its verdict matching the serial run",
+      "accepted": [
+        "profile: runs plugin code without overriding HOME, USERPROFILE or CLAUDE_CONFIG_DIR",
+        "nested-runner: drives gate-lock",
+        "npm: spawns npm"
+      ],
+      "sha256": "977a4223f9814591d93d0f14a5aec255249328880d1b58c52513c14a8c6b674f"
+    },
+    "test-gate-evidence.js": {
+      "isolation": "parallel",
+      "reason": "measured 2026-11-10: passed with every other suite overlapping at 16 and 8 workers, its verdict matching the serial run",
+      "accepted": [
+        "repo-write: writeFileSync, mkdirSync, cpSync, copyFileSync on a path built from the repo root",
+        "git-write: git init (a fixture repo is initialised; every call must target it)",
+        "profile: runs plugin code without overriding HOME, USERPROFILE or CLAUDE_CONFIG_DIR",
+        "nested-runner: drives gate-lock, full-gate-queue, coverage-receipt",
+        "npm: spawns npm"
+      ],
+      "sha256": "27195399b678d6e8bd45ac76c052bd7494840571ebd8db9f405b86b2fa271d0a"
+    },
     "test-gate-fast.js": {
-      "isolation": "serial",
-      "reason": "audit 2026-10-02: nested-runner: drives gate-fast; npm: spawns npm. Ambiguous or shared side effects run alone",
+      "isolation": "parallel",
+      "reason": "measured 2026-11-10: passed with every other suite overlapping at 16 and 8 workers, its verdict matching the serial run",
+      "accepted": [
+        "nested-runner: drives gate-fast",
+        "npm: spawns npm"
+      ],
       "sha256": "6830996138da3160b3f5c570a8edea940a1fd2e9ad0c3071873acad7eef21105"
     },
     "test-gate-lock.js": {
-      "isolation": "serial",
-      "reason": "audit 2026-10-02: repo-write: renameSync, rmSync on a path built from the repo root; nested-runner: drives gate-lock. Ambiguous or shared side effects run alone",
-      "sha256": "53956a0d0c669d60c1ffa443eed0a38bbcacc75d9a73d403ec75773f2a7415de"
+      "isolation": "parallel",
+      "reason": "measured 2026-11-10: passed with every other suite overlapping at 16 and 8 workers, its verdict matching the serial run",
+      "accepted": [
+        "repo-write: renameSync, rmSync on a path built from the repo root",
+        "nested-runner: drives gate-lock"
+      ],
+      "sha256": "6a923e16d15d99bcfb2f312892128e7410b3d0b4f94cfe87af465ab085282a14"
+    },
+    "test-gate-ownership.js": {
+      "isolation": "parallel",
+      "reason": "measured 2026-11-10: passed with every other suite overlapping at 16 and 8 workers, its verdict matching the serial run",
+      "accepted": [
+        "repo-write: writeFileSync, mkdirSync, utimesSync, copyFileSync on a path built from the repo root",
+        "git-write: git add",
+        "profile: runs plugin code without overriding HOME, USERPROFILE or CLAUDE_CONFIG_DIR",
+        "nested-runner: drives full-gate-queue"
+      ],
+      "sha256": "fe1e47b911a0f622e4c1b981a133be019e3caf8dac25a988f5c8a101ef0230f6"
+    },
+    "test-gate-receipt-head.js": {
+      "isolation": "parallel",
+      "reason": "measured 2026-11-10: passed with every other suite overlapping at 16 and 8 workers, its verdict matching the serial run",
+      "accepted": [
+        "repo-write: writeFileSync on a path built from the repo root",
+        "git-write: git commit",
+        "nested-runner: drives gate-lock"
+      ],
+      "sha256": "ddcde1eac1b61d988fe2d26068bacf058b4bb7c63d78ecf058d999f3c1925146"
+    },
+    "test-gate-recovery.js": {
+      "isolation": "parallel",
+      "reason": "measured 2026-11-10: passed with every other suite overlapping at 16 and 8 workers, its verdict matching the serial run",
+      "accepted": [
+        "repo-write: writeFileSync, mkdirSync, utimesSync, copyFileSync on a path built from the repo root",
+        "profile: runs plugin code without overriding HOME, USERPROFILE or CLAUDE_CONFIG_DIR",
+        "nested-runner: drives gate-lock, full-gate-queue, coverage-receipt, test-all.js",
+        "npm: spawns npm"
+      ],
+      "sha256": "54479be98e6bc67cffdd20dd18100b9d7443debb9514aef48a078c500057566a"
+    },
+    "test-gate-steps.js": {
+      "isolation": "parallel",
+      "reason": "measured 2026-11-10: passed with every other suite overlapping at 16 and 8 workers, its verdict matching the serial run",
+      "accepted": [
+        "repo-write: copyFileSync on a path built from the repo root",
+        "nested-runner: drives gate-lock, coverage-receipt, full-gate-queue",
+        "npm: spawns npm"
+      ],
+      "sha256": "b6def848b93b977b7360b8028948f143a067a1a1f48d37e75d6d54fd53bd548a"
     },
     "test-generate-agents-md.js": {
-      "isolation": "serial",
-      "reason": "audit 2026-10-02: repo-write: writeFileSync on a path built from the repo root; profile: runs plugin code without overriding HOME, USERPROFILE or CLAUDE_CONFIG_DIR. Ambiguous or shared side effects run alone",
+      "isolation": "parallel",
+      "reason": "measured 2026-11-10: passed with every other suite overlapping at 16 and 8 workers, its verdict matching the serial run",
+      "accepted": [
+        "repo-write: writeFileSync on a path built from the repo root",
+        "profile: runs plugin code without overriding HOME, USERPROFILE or CLAUDE_CONFIG_DIR"
+      ],
       "sha256": "48b08bba7d60b09c2b169c6fbf716d85b379adf8dd95ea2361d68584f20dfbbb"
     },
     "test-generate-decisions.js": {
-      "isolation": "serial",
-      "reason": "audit 2026-10-02: repo-write: writeFileSync, rmSync on a path built from the repo root. Ambiguous or shared side effects run alone",
+      "isolation": "parallel",
+      "reason": "measured 2026-11-10: passed with every other suite overlapping at 16 and 8 workers, its verdict matching the serial run",
+      "accepted": [
+        "repo-write: writeFileSync, rmSync on a path built from the repo root"
+      ],
       "sha256": "19f7fd52af18873aae9b5c5fdf64bdfd9a84a95cbd63f7ad498ecccd9e599561"
     },
     "test-githooks.js": {
@@ -348,75 +847,257 @@
       ],
       "sha256": "eeb9450ec1fc522c69999782040b699dd1225142dae64af1f63e64932fd358f5"
     },
+    "test-grok-package.js": {
+      "isolation": "parallel",
+      "reason": "measured 2026-11-10: passed with every other suite overlapping at 16 and 8 workers, its verdict matching the serial run",
+      "accepted": [
+        "profile: runs plugin code without overriding HOME, USERPROFILE or CLAUDE_CONFIG_DIR"
+      ],
+      "sha256": "c3c11705c791352733c24c39fbc863dfc07aa0a0032737485c2dcc32f6533583"
+    },
     "test-handoff-cohesion.js": {
-      "isolation": "serial",
-      "reason": "audit 2026-10-02: git-write: git add; profile: runs plugin code without overriding HOME, USERPROFILE or CLAUDE_CONFIG_DIR. Ambiguous or shared side effects run alone",
+      "isolation": "parallel",
+      "reason": "measured 2026-11-10: passed with every other suite overlapping at 16 and 8 workers, its verdict matching the serial run",
+      "accepted": [
+        "git-write: git add",
+        "profile: runs plugin code without overriding HOME, USERPROFILE or CLAUDE_CONFIG_DIR"
+      ],
       "sha256": "99dec78c4f9f9b16dd712ed429829c820849870ac2cff4cd150fce4d0ab7e353"
     },
     "test-headless-guard.js": {
-      "isolation": "serial",
-      "reason": "audit 2026-10-02: npm: spawns npm. Ambiguous or shared side effects run alone",
+      "isolation": "parallel",
+      "reason": "measured 2026-11-10: passed with every other suite overlapping at 16 and 8 workers, its verdict matching the serial run",
+      "accepted": [
+        "npm: spawns npm"
+      ],
       "sha256": "3a744af2b05e7a5017bffb6684cf0c4860d34780916acb787aea9feb731524c6"
     },
+    "test-headless-probe-truth.js": {
+      "isolation": "parallel",
+      "reason": "measured 2026-11-10: passed with every other suite overlapping at 16 and 8 workers, its verdict matching the serial run",
+      "accepted": [
+        "profile: runs plugin code without overriding HOME, USERPROFILE or CLAUDE_CONFIG_DIR"
+      ],
+      "sha256": "95aa0cfbbaa2b3535400430e7ec897881b913b746c262de4c15eb93f15ac66ff"
+    },
     "test-headless-worker.js": {
-      "isolation": "serial",
-      "reason": "audit 2026-10-02: repo-write: copyFileSync on a path built from the repo root. Ambiguous or shared side effects run alone",
-      "sha256": "774e4e0b164285fa9f97e88e3acffb2b1a62999b26d39f3a67eb2259aedfccf4"
+      "isolation": "parallel",
+      "reason": "measured 2026-11-10: passed with every other suite overlapping at 16 and 8 workers, its verdict matching the serial run",
+      "accepted": [
+        "repo-write: mkdirSync, writeFileSync, linkSync, unlinkSync, utimesSync, renameSync, rmSync, copyFileSync on a path built from the repo root"
+      ],
+      "sha256": "c5c3a6a9775841c47377820dc442801a59294cec300c99c9cc238d8b087dbcf6"
     },
     "test-hook-budget.js": {
-      "isolation": "serial",
-      "reason": "reviewed 2026-10-13: writes only under its mkdtemp sandbox and a temp git project, as before. It now also judges wall time per hook and per event, and overlapping suites inflate wall time past what the interleaved floor and the capped scale absorb, so it runs alone",
-      "sha256": "0988d89be4cc73700d547da5baa3e602c9b8e9493f20611ec04266edb9cfd38e"
+      "isolation": "parallel",
+      "reason": "measured 2026-11-10: passed with every other suite overlapping at 16 and 8 workers, its verdict matching the serial run",
+      "accepted": [
+        "git-write: git init, add, commit (a fixture repo is initialised; every call must target it)"
+      ],
+      "sha256": "51a226ab51a5eae37ffa3db9c986cc20035fd16a9e4d9c42da8a42d807995706"
     },
     "test-hook-execution-evidence.js": {
-      "isolation": "serial",
-      "reason": "audit 2026-10-02: repo-write: cpSync on a path built from the repo root. Ambiguous or shared side effects run alone",
-      "sha256": "b23e9a8b0f0c116e9103ed13d8361d7cab7ba3b5507d7e9f46a83963eb0e969b"
+      "isolation": "parallel",
+      "reason": "measured 2026-11-10: passed with every other suite overlapping at 16 and 8 workers, its verdict matching the serial run",
+      "accepted": [
+        "repo-write: cpSync on a path built from the repo root"
+      ],
+      "sha256": "d8813d7d9b764b5dfdc2007d8df8444d23a48075e4a24b97cc75de0576785d73"
+    },
+    "test-hook-wall.js": {
+      "isolation": "parallel",
+      "reason": "measured 2026-11-10: passed with every other suite overlapping at 16 and 8 workers, its verdict matching the serial run",
+      "sha256": "cbad1578a7ff28bd101536b04cfa513185db8b8d7ec86514d6c8c895edce6232"
     },
     "test-hooks-module.js": {
-      "isolation": "serial",
-      "reason": "audit 2026-10-02: git-write: git commit, add, worktree; profile: runs plugin code without overriding HOME, USERPROFILE or CLAUDE_CONFIG_DIR. Ambiguous or shared side effects run alone",
+      "isolation": "parallel",
+      "reason": "measured 2026-11-10: passed with every other suite overlapping at 16 and 8 workers, its verdict matching the serial run",
+      "accepted": [
+        "git-write: git commit, add, worktree",
+        "profile: runs plugin code without overriding HOME, USERPROFILE or CLAUDE_CONFIG_DIR"
+      ],
       "sha256": "6ac2284da0d321dac2d7d0d22c17ab945789883fdca2d42c26a71873ca592362"
     },
     "test-hooks-profile.js": {
-      "isolation": "serial",
-      "reason": "audit 2026-10-02: profile: runs plugin code without overriding HOME, USERPROFILE or CLAUDE_CONFIG_DIR. Ambiguous or shared side effects run alone",
-      "sha256": "ab5128644d8689f9bd94f794ee388e2d1c380078f7308fe35ace3ac64f606cc4"
+      "isolation": "parallel",
+      "reason": "measured 2026-11-10: passed with every other suite overlapping at 16 and 8 workers, its verdict matching the serial run",
+      "accepted": [
+        "profile: runs plugin code without overriding HOME, USERPROFILE or CLAUDE_CONFIG_DIR"
+      ],
+      "sha256": "edc66ae432bb888886c1e3c03b473ad82f247c4acdc686824746ab9658197c14"
+    },
+    "test-host-uptime.js": {
+      "isolation": "parallel",
+      "reason": "measured 2026-11-10: passed with every other suite overlapping at 16 and 8 workers, its verdict matching the serial run",
+      "accepted": [
+        "profile: runs plugin code without overriding HOME, USERPROFILE or CLAUDE_CONFIG_DIR"
+      ],
+      "sha256": "41df71257d050240d4b1e2ce075668697d70fc19cb4d07ffc7178761970728fd"
+    },
+    "test-idea-conveyor.js": {
+      "isolation": "parallel",
+      "reason": "measured 2026-11-10: passed with every other suite overlapping at 16 and 8 workers, its verdict matching the serial run",
+      "accepted": [
+        "repo-write: writeFileSync on a path built from the repo root",
+        "npm: spawns npm"
+      ],
+      "sha256": "438999f0c0f1d7bace720f556a0529a701a228b8ffc224e62b0dacb3fc02fa16"
     },
     "test-idle-with-queue.js": {
       "isolation": "parallel",
       "reason": "reviewed 2026-10-02: writes only under its own mkdtemp fixtures; any profile, config or HOME it touches is pointed into them; no git outside temp repos; no fixed port",
       "sha256": "7fb94f4d0d071820dede162eb53e4b42091dd4863abf26955c59f2cabf511d36"
     },
+    "test-image-records.js": {
+      "isolation": "parallel",
+      "reason": "measured 2026-11-10: passed with every other suite overlapping at 16 and 8 workers, its verdict matching the serial run",
+      "accepted": [
+        "profile: runs plugin code without overriding HOME, USERPROFILE or CLAUDE_CONFIG_DIR"
+      ],
+      "sha256": "be56da073c1265cd85d4f8cbec87bd3c2fc71b0d0c44a44449326ca55312d9e1"
+    },
     "test-image-scan-hook.js": {
-      "isolation": "serial",
-      "reason": "audit 2026-10-02: profile: runs plugin code without overriding HOME, USERPROFILE or CLAUDE_CONFIG_DIR. Ambiguous or shared side effects run alone",
+      "isolation": "parallel",
+      "reason": "measured 2026-11-10: passed with every other suite overlapping at 16 and 8 workers, its verdict matching the serial run",
+      "accepted": [
+        "profile: runs plugin code without overriding HOME, USERPROFILE or CLAUDE_CONFIG_DIR"
+      ],
       "sha256": "0359e769ad0235e4eaa93cc31b9f78a391747e8a37ee4b542dcaee5e4f9a7a4d"
     },
+    "test-impeccable-probe.js": {
+      "isolation": "parallel",
+      "reason": "measured 2026-11-10: passed with every other suite overlapping at 16 and 8 workers, its verdict matching the serial run",
+      "accepted": [
+        "profile: runs plugin code without overriding HOME, USERPROFILE or CLAUDE_CONFIG_DIR"
+      ],
+      "sha256": "a0f6632da3f43c35bff6970d3dabd7ea5b0063c0a2cec706607e806defd15627"
+    },
     "test-inbox.js": {
-      "isolation": "serial",
-      "reason": "audit 2026-10-02: profile: runs plugin code without overriding HOME, USERPROFILE or CLAUDE_CONFIG_DIR. Ambiguous or shared side effects run alone",
+      "isolation": "parallel",
+      "reason": "measured 2026-11-10: passed with every other suite overlapping at 16 and 8 workers, its verdict matching the serial run",
+      "accepted": [
+        "profile: runs plugin code without overriding HOME, USERPROFILE or CLAUDE_CONFIG_DIR"
+      ],
       "sha256": "e99e774a7cbc3f560b38e74a6e1d6b2edce46b86142914d9700ad0cc24ec2e0d"
+    },
+    "test-instruction-envelope-ledger.js": {
+      "isolation": "parallel",
+      "reason": "measured 2026-11-10: passed with every other suite overlapping at 16 and 8 workers, its verdict matching the serial run",
+      "sha256": "9314579aca4ff395e82d5976ebe06756e9329e6dae0220fee506957c1db12284"
+    },
+    "test-instruction-envelope.js": {
+      "isolation": "parallel",
+      "reason": "measured 2026-11-10: passed with every other suite overlapping at 16 and 8 workers, its verdict matching the serial run",
+      "sha256": "58fd250e07369f55f64d089b2f7f878870a275c91467421291c33645959cef65"
     },
     "test-instructions-loaded.js": {
       "isolation": "parallel",
       "reason": "reviewed 2026-10-02: writes only under its own mkdtemp fixtures; any profile, config or HOME it touches is pointed into them; no git outside temp repos; no fixed port",
       "sha256": "eb6ca415ae013004a293c972365bfaf2f87dc9284e9b86bf71efc5f7df5b5f0d"
     },
+    "test-judge-panel.js": {
+      "isolation": "parallel",
+      "reason": "measured 2026-11-10: passed with every other suite overlapping at 16 and 8 workers, its verdict matching the serial run",
+      "accepted": [
+        "repo-write: appendFileSync on a path built from the repo root"
+      ],
+      "sha256": "dfdcaf5f853333e36835205507adeb53cbb8a37663cb11cb48e59da0ae973356"
+    },
     "test-knowledge-injection.js": {
-      "isolation": "serial",
-      "reason": "audit 2026-10-02: repo-write: cpSync on a path built from the repo root; npm: spawns npm. Ambiguous or shared side effects run alone",
-      "sha256": "9ba78f700535839e1cc534c8df5b61ba8696b750ac2a393239d4a154812cf6cb"
+      "isolation": "parallel",
+      "reason": "measured 2026-11-10: passed with every other suite overlapping at 16 and 8 workers, its verdict matching the serial run",
+      "accepted": [
+        "repo-write: cpSync on a path built from the repo root",
+        "npm: spawns npm"
+      ],
+      "sha256": "dbe69a2ef24f0827caf5ca31f0e5a1b7a46240df05e19cb6da43ac490deaba78"
     },
     "test-knowledge.js": {
       "isolation": "parallel",
       "reason": "reviewed 2026-10-02: writes only under its own mkdtemp fixtures; any profile, config or HOME it touches is pointed into them; no git outside temp repos; no fixed port",
       "sha256": "3a33d5b4f0d52a09eff49259599f08b252e98508ca79c1ef95864f8cf9f5d972"
     },
+    "test-known-flakes.js": {
+      "isolation": "parallel",
+      "reason": "measured 2026-11-10: passed with every other suite overlapping at 16 and 8 workers, its verdict matching the serial run",
+      "accepted": [
+        "profile: runs plugin code without overriding HOME, USERPROFILE or CLAUDE_CONFIG_DIR",
+        "nested-runner: drives gate-fast",
+        "npm: spawns npm"
+      ],
+      "sha256": "e8b85ece7728ad6f8b0704a58d6f953414ef5c4b5eaee981c6a2dfe7841e1538"
+    },
+    "test-ledger-contention.js": {
+      "isolation": "parallel",
+      "reason": "measured 2026-11-10: passed with every other suite overlapping at 16 and 8 workers, its verdict matching the serial run",
+      "accepted": [
+        "profile: runs plugin code without overriding HOME, USERPROFILE or CLAUDE_CONFIG_DIR"
+      ],
+      "sha256": "d0b12ec4d116d676b9355dca79c9b774c7ee8a68981dafa364ddf2c24da74b82"
+    },
+    "test-ledger-load.js": {
+      "isolation": "parallel",
+      "reason": "measured 2026-11-10: passed with every other suite overlapping at 16 and 8 workers, its verdict matching the serial run",
+      "sha256": "76c90867e03a01de34b9179f6584b00bf0fa3e3b9a7cafc81dee7e63150c71d5"
+    },
+    "test-ledger-lock-mark.js": {
+      "isolation": "parallel",
+      "reason": "measured 2026-11-10: passed with every other suite overlapping at 16 and 8 workers, its verdict matching the serial run",
+      "accepted": [
+        "repo-write: copyFileSync on a path built from the repo root"
+      ],
+      "sha256": "4bbf4404899c3b513b51f71c7af3e9a4831683570e8ae9a271b4c99ec52b61e3"
+    },
+    "test-ledger-lock.js": {
+      "isolation": "parallel",
+      "reason": "measured 2026-11-10: passed with every other suite overlapping at 16 and 8 workers, its verdict matching the serial run",
+      "accepted": [
+        "profile: runs plugin code without overriding HOME, USERPROFILE or CLAUDE_CONFIG_DIR"
+      ],
+      "sha256": "2722d7cc6a0f41e67ac31e29f207af62dbe32f1e56cb32feba9b7628a5d1bd75"
+    },
+    "test-ledger-rotate.js": {
+      "isolation": "parallel",
+      "reason": "measured 2026-11-10: passed with every other suite overlapping at 16 and 8 workers, its verdict matching the serial run",
+      "accepted": [
+        "repo-write: mkdirSync, writeFileSync, appendFileSync, unlinkSync on a path built from the repo root",
+        "profile: runs plugin code without overriding HOME, USERPROFILE or CLAUDE_CONFIG_DIR"
+      ],
+      "sha256": "cf56d92066ac21a459e7a8a5906b71e94856dffcee65038149b12de8a9ab8527"
+    },
+    "test-ledger-temp-sweep.js": {
+      "isolation": "parallel",
+      "reason": "measured 2026-11-10: passed with every other suite overlapping at 16 and 8 workers, its verdict matching the serial run",
+      "accepted": [
+        "profile: runs plugin code without overriding HOME, USERPROFILE or CLAUDE_CONFIG_DIR"
+      ],
+      "sha256": "0267bcb4e92e3813e7bab16966db6ea25405280c510e64e1ce628f7b08f98e92"
+    },
+    "test-ledger-writers.js": {
+      "isolation": "parallel",
+      "reason": "measured 2026-11-10: passed with every other suite overlapping at 16 and 8 workers, its verdict matching the serial run",
+      "sha256": "df68a2b097be76d9908cf0992b6dbc5a6b3b5a80e68ff33b6ff2f71725b6ea56"
+    },
+    "test-limit-launch-hold.js": {
+      "isolation": "parallel",
+      "reason": "measured 2026-11-10: passed with every other suite overlapping at 16 and 8 workers, its verdict matching the serial run",
+      "accepted": [
+        "repo-write: mkdirSync, writeFileSync on a path built from the repo root"
+      ],
+      "sha256": "492ea06f540d4e9ec26a0b875d6e68bdc1b22c583283ae967c992b1707e02470"
+    },
+    "test-local-model.js": {
+      "isolation": "parallel",
+      "reason": "measured 2026-11-10: passed with every other suite overlapping at 16 and 8 workers, its verdict matching the serial run",
+      "sha256": "6dd0b6f43d020b2e200b807105b0ef6bd90d5035dc5c5d32fee5471e9a182798"
+    },
     "test-marketing-radar.js": {
-      "isolation": "serial",
-      "reason": "audit 2026-10-02: profile: runs plugin code without overriding HOME, USERPROFILE or CLAUDE_CONFIG_DIR. Ambiguous or shared side effects run alone",
-      "sha256": "e1a81a92b5df975ccf1dfa8a8bbf03b734751d32c353f0380d51ebc0942efc03"
+      "isolation": "parallel",
+      "reason": "measured 2026-11-10: passed with every other suite overlapping at 16 and 8 workers, its verdict matching the serial run",
+      "accepted": [
+        "profile: runs plugin code without overriding HOME, USERPROFILE or CLAUDE_CONFIG_DIR"
+      ],
+      "sha256": "2d8234e13d71745f4d3cf18ca8df81ab0862634aca47d162634511b5a53e340e"
     },
     "test-mem-dashboard.js": {
       "isolation": "parallel",
@@ -425,18 +1106,23 @@
     },
     "test-memory-audit.js": {
       "isolation": "parallel",
-      "reason": "reviewed 2026-10-02: writes only under its own mkdtemp fixtures; any profile, config or HOME it touches is pointed into them; no git outside temp repos; no fixed port",
-      "sha256": "9252e35afda27f8e859e80e779c824efcd1922c80285dfc41b755cb86b1f3e03"
+      "reason": "measured 2026-11-10: passed with every other suite overlapping at 16 and 8 workers, its verdict matching the serial run",
+      "sha256": "e4ca7d724cadbd5d72beba2b79f122040173f4f9b298f1067e91273c5d262de3"
     },
     "test-memory-db-cli.js": {
       "isolation": "parallel",
-      "reason": "reviewed 2026-10-02: writes only under its own mkdtemp fixtures; any profile, config or HOME it touches is pointed into them; no git outside temp repos; no fixed port",
-      "sha256": "ac053e42a6cd14ed65b683c52187f6950590a663cf9b5c5f8d25e3f1a17649a5"
+      "reason": "measured 2026-11-10: passed with every other suite overlapping at 16 and 8 workers, its verdict matching the serial run",
+      "sha256": "4346636ad3bb2eafd2640a90ceb247e491dc21dd5cbb52e867990f31e1e30c82"
     },
     "test-memory-db-contention.js": {
       "isolation": "parallel",
       "reason": "reviewed 2026-10-02: writes only under its own mkdtemp fixtures; any profile, config or HOME it touches is pointed into them; no git outside temp repos; no fixed port",
       "sha256": "7458553236015accd0982d369e1e7c23ff4e88c83b77837e04d6e87b9ce2cc61"
+    },
+    "test-memory-export.js": {
+      "isolation": "parallel",
+      "reason": "measured 2026-11-10: passed with every other suite overlapping at 16 and 8 workers, its verdict matching the serial run",
+      "sha256": "c67f2a303ae3aa5c4d674028bfa360b2d9456a0eace5a7bcccaa0106cfae4a6b"
     },
     "test-memory-knowledge-conflicts.js": {
       "isolation": "parallel",
@@ -449,63 +1135,126 @@
       "sha256": "e23ee55ff7275590b81d149b315f2badf7ad00a2d2716d1dda6380e5b48083d8"
     },
     "test-memory-session-end.js": {
-      "isolation": "serial",
-      "reason": "audit 2026-10-02: repo-write: mkdirSync, writeFileSync on a path built from the repo root. Ambiguous or shared side effects run alone",
-      "sha256": "b47a8014f6951330f51f290f549a895544e3d11c4b40e7d7c92bdcb4b8ef3129"
+      "isolation": "parallel",
+      "reason": "measured 2026-11-10: passed with every other suite overlapping at 16 and 8 workers, its verdict matching the serial run",
+      "accepted": [
+        "repo-write: mkdirSync, writeFileSync on a path built from the repo root"
+      ],
+      "sha256": "b2526a49b89d9648036633290216078027fc077cf966b2cb9d3cf58c9077d09e"
+    },
+    "test-merge-lock.js": {
+      "isolation": "parallel",
+      "reason": "measured 2026-11-10: passed with every other suite overlapping at 16 and 8 workers, its verdict matching the serial run",
+      "accepted": [
+        "repo-write: mkdirSync, writeFileSync, rmSync, unlinkSync on a path built from the repo root",
+        "nested-runner: drives gate-lock, gate-fast, full-gate-queue",
+        "npm: spawns npm"
+      ],
+      "sha256": "be9a405dc476e935dcda0349e2f4c2ae9e54f0352fc1f9001584a52fc600b59c"
+    },
+    "test-merged-skills.js": {
+      "isolation": "parallel",
+      "reason": "measured 2026-11-10: passed with every other suite overlapping at 16 and 8 workers, its verdict matching the serial run",
+      "accepted": [
+        "profile: runs plugin code without overriding HOME, USERPROFILE or CLAUDE_CONFIG_DIR"
+      ],
+      "sha256": "c404106d10360308d5bf5d36df408bb2593030c328e592cf796e6f0b3f5ef613"
     },
     "test-mine-fixes.js": {
-      "isolation": "serial",
-      "reason": "audit 2026-10-02: profile: runs plugin code without overriding HOME, USERPROFILE or CLAUDE_CONFIG_DIR. Ambiguous or shared side effects run alone",
+      "isolation": "parallel",
+      "reason": "measured 2026-11-10: passed with every other suite overlapping at 16 and 8 workers, its verdict matching the serial run",
+      "accepted": [
+        "profile: runs plugin code without overriding HOME, USERPROFILE or CLAUDE_CONFIG_DIR"
+      ],
       "sha256": "5a8f4a5620dbd50364ba1e5e30a3ad2972d61899008f707d39db54e546b506e1"
     },
     "test-mission-contract.js": {
-      "isolation": "serial",
-      "reason": "audit 2026-10-02: profile: runs plugin code without overriding HOME, USERPROFILE or CLAUDE_CONFIG_DIR. Ambiguous or shared side effects run alone",
+      "isolation": "parallel",
+      "reason": "measured 2026-11-10: passed with every other suite overlapping at 16 and 8 workers, its verdict matching the serial run",
+      "accepted": [
+        "profile: runs plugin code without overriding HOME, USERPROFILE or CLAUDE_CONFIG_DIR"
+      ],
       "sha256": "155036d8c5426ea8384f4f4491e3346ca50addce33ce377d1f7905c00dfbadda"
     },
     "test-mission-deliver.js": {
-      "isolation": "serial",
-      "reason": "audit 2026-10-02: profile: runs plugin code without overriding HOME, USERPROFILE or CLAUDE_CONFIG_DIR. Ambiguous or shared side effects run alone",
+      "isolation": "parallel",
+      "reason": "measured 2026-11-10: passed with every other suite overlapping at 16 and 8 workers, its verdict matching the serial run",
+      "accepted": [
+        "profile: runs plugin code without overriding HOME, USERPROFILE or CLAUDE_CONFIG_DIR"
+      ],
       "sha256": "dfe02206fe5b2ab2b9ec575708686821e565a811022638989120ad97cae43ac3"
     },
     "test-mission-dispatch.js": {
-      "isolation": "serial",
-      "reason": "audit 2026-10-02: profile: runs plugin code without overriding HOME, USERPROFILE or CLAUDE_CONFIG_DIR. Ambiguous or shared side effects run alone",
+      "isolation": "parallel",
+      "reason": "measured 2026-11-10: passed with every other suite overlapping at 16 and 8 workers, its verdict matching the serial run",
+      "accepted": [
+        "profile: runs plugin code without overriding HOME, USERPROFILE or CLAUDE_CONFIG_DIR"
+      ],
       "sha256": "a5c50e1ae9600fc66158d9904b72260d35686e14e659ec841f59aafb5cfea098"
     },
     "test-mission-hardening.js": {
-      "isolation": "serial",
-      "reason": "audit 2026-10-02: profile: runs plugin code without overriding HOME, USERPROFILE or CLAUDE_CONFIG_DIR. Ambiguous or shared side effects run alone",
+      "isolation": "parallel",
+      "reason": "measured 2026-11-10: passed with every other suite overlapping at 16 and 8 workers, its verdict matching the serial run",
+      "accepted": [
+        "profile: runs plugin code without overriding HOME, USERPROFILE or CLAUDE_CONFIG_DIR"
+      ],
       "sha256": "7842765cb78fa2989ce922ebf35150c8371f0eb14e3662507a3e0be4d1326995"
     },
+    "test-mission-queue.js": {
+      "isolation": "parallel",
+      "reason": "measured 2026-11-10: passed with every other suite overlapping at 16 and 8 workers, its verdict matching the serial run",
+      "accepted": [
+        "repo-write: mkdirSync, writeFileSync on a path built from the repo root"
+      ],
+      "sha256": "99a88e29e3e6032a05d723a2b6fb6ab6b045ea0b7988fafc445183e62fa7e8a5"
+    },
     "test-mission-runtime-boundaries.js": {
-      "isolation": "serial",
-      "reason": "audit 2026-10-02: profile: runs plugin code without overriding HOME, USERPROFILE or CLAUDE_CONFIG_DIR. Ambiguous or shared side effects run alone",
+      "isolation": "parallel",
+      "reason": "measured 2026-11-10: passed with every other suite overlapping at 16 and 8 workers, its verdict matching the serial run",
+      "accepted": [
+        "profile: runs plugin code without overriding HOME, USERPROFILE or CLAUDE_CONFIG_DIR"
+      ],
       "sha256": "7d6ff05da9f5d95f0084ec72166d43e90095864effc39a68140d25676678943d"
     },
     "test-mission-runtime-crashes.js": {
-      "isolation": "serial",
-      "reason": "audit 2026-10-02: profile: runs plugin code without overriding HOME, USERPROFILE or CLAUDE_CONFIG_DIR. Ambiguous or shared side effects run alone",
+      "isolation": "parallel",
+      "reason": "measured 2026-11-10: passed with every other suite overlapping at 16 and 8 workers, its verdict matching the serial run",
+      "accepted": [
+        "profile: runs plugin code without overriding HOME, USERPROFILE or CLAUDE_CONFIG_DIR"
+      ],
       "sha256": "34120cda207540c1e44ba7ef48a221ee99a0a825b22f871f99cd8a7f08460891"
     },
     "test-mission-runtime.js": {
-      "isolation": "serial",
-      "reason": "audit 2026-10-02: profile: runs plugin code without overriding HOME, USERPROFILE or CLAUDE_CONFIG_DIR. Ambiguous or shared side effects run alone",
+      "isolation": "parallel",
+      "reason": "measured 2026-11-10: passed with every other suite overlapping at 16 and 8 workers, its verdict matching the serial run",
+      "accepted": [
+        "profile: runs plugin code without overriding HOME, USERPROFILE or CLAUDE_CONFIG_DIR"
+      ],
       "sha256": "fc2fac648b021ee0d3ba027d33e070c91fb57af4aee0adf97c9d45a3f9352d00"
     },
     "test-mission-store.js": {
-      "isolation": "serial",
-      "reason": "audit 2026-10-02: repo-write: writeFileSync, symlinkSync, mkdirSync on a path built from the repo root; profile: runs plugin code without overriding HOME, USERPROFILE or CLAUDE_CONFIG_DIR. Ambiguous or shared side effects run alone",
+      "isolation": "parallel",
+      "reason": "measured 2026-11-10: passed with every other suite overlapping at 16 and 8 workers, its verdict matching the serial run",
+      "accepted": [
+        "repo-write: writeFileSync, symlinkSync, mkdirSync on a path built from the repo root",
+        "profile: runs plugin code without overriding HOME, USERPROFILE or CLAUDE_CONFIG_DIR"
+      ],
       "sha256": "629da4a228d6dcc8a5993b836eb784acf1772231c8bc295d5bc053a604785cf2"
     },
     "test-mission-supervisor.js": {
-      "isolation": "serial",
-      "reason": "audit 2026-10-02: profile: runs plugin code without overriding HOME, USERPROFILE or CLAUDE_CONFIG_DIR. Ambiguous or shared side effects run alone",
+      "isolation": "parallel",
+      "reason": "measured 2026-11-10: passed with every other suite overlapping at 16 and 8 workers, its verdict matching the serial run",
+      "accepted": [
+        "profile: runs plugin code without overriding HOME, USERPROFILE or CLAUDE_CONFIG_DIR"
+      ],
       "sha256": "383558c43ccee0db2eff184c91250825dfa838598eb21e32bfc3c5e5ab25609e"
     },
     "test-mission-write-boundaries.js": {
-      "isolation": "serial",
-      "reason": "audit 2026-10-02: profile: runs plugin code without overriding HOME, USERPROFILE or CLAUDE_CONFIG_DIR. Ambiguous or shared side effects run alone",
+      "isolation": "parallel",
+      "reason": "measured 2026-11-10: passed with every other suite overlapping at 16 and 8 workers, its verdict matching the serial run",
+      "accepted": [
+        "profile: runs plugin code without overriding HOME, USERPROFILE or CLAUDE_CONFIG_DIR"
+      ],
       "sha256": "cb661dff598fc063d506ef01f608dfcad4e7bf5b9ac81b858b488c43c0d85189"
     },
     "test-mistake-recurrence.js": {
@@ -513,9 +1262,17 @@
       "reason": "reviewed 2026-10-02: writes only under its own mkdtemp fixtures; any profile, config or HOME it touches is pointed into them; no git outside temp repos; no fixed port",
       "sha256": "2c1782b22d837a24688277f545d138c13c9620afcfb57d55301d3404cbc990c8"
     },
+    "test-model-tiers.js": {
+      "isolation": "parallel",
+      "reason": "measured 2026-11-10: passed with every other suite overlapping at 16 and 8 workers, its verdict matching the serial run",
+      "sha256": "65cebb889356cc965261fe6783590988f8bdbca745fd104a6a987febbb21c3b7"
+    },
     "test-nested-sprints.js": {
-      "isolation": "serial",
-      "reason": "audit 2026-10-02: profile: runs plugin code without overriding HOME, USERPROFILE or CLAUDE_CONFIG_DIR. Ambiguous or shared side effects run alone",
+      "isolation": "parallel",
+      "reason": "measured 2026-11-10: passed with every other suite overlapping at 16 and 8 workers, its verdict matching the serial run",
+      "accepted": [
+        "profile: runs plugin code without overriding HOME, USERPROFILE or CLAUDE_CONFIG_DIR"
+      ],
       "sha256": "bb5d8d36fc6c426e262cada95f9089f61d7bbf7b86556e04b942fc56afb63767"
     },
     "test-no-home-paths.js": {
@@ -526,36 +1283,93 @@
     "test-no-private-names.js": {
       "isolation": "serial",
       "reason": "serial seed: writes an untracked probe file at the repo root and runs the gate over the whole tree",
-      "sha256": "29ab8575ed44426f754aabc7c86a2564c352cf3cd54de583c42f27f95f65c725"
+      "sha256": "56a637e8bb12e12fa09a1d67bed46341b4d1c753d501f739b1809e8fa7a54ea2"
+    },
+    "test-notify-policy.js": {
+      "isolation": "parallel",
+      "reason": "measured 2026-11-10: passed with every other suite overlapping at 16 and 8 workers, its verdict matching the serial run",
+      "sha256": "0e7fae307c73d60fd4118a3b66359fc0ceb1acc4cba332e1d317e747c525bfbf"
     },
     "test-observation-classifier.js": {
-      "isolation": "serial",
-      "reason": "audit 2026-10-02: git-write: git commit; profile: loads plugin code in-process without overriding the profile; npm: spawns npm. Ambiguous or shared side effects run alone",
-      "sha256": "86510fe1d6465e1596859ba3c3500f46e0b144680236283ac7724c89e9894372"
+      "isolation": "parallel",
+      "reason": "measured 2026-11-10: passed with every other suite overlapping at 16 and 8 workers, its verdict matching the serial run",
+      "accepted": [
+        "git-write: git commit",
+        "profile: loads plugin code in-process without overriding the profile",
+        "npm: spawns npm"
+      ],
+      "sha256": "558c76f954a5a18369830e2bc7abae75fbae5c1e4fcbd5f0573a3757019841e9"
+    },
+    "test-observation-dedupe.js": {
+      "isolation": "parallel",
+      "reason": "measured 2026-11-10: passed with every other suite overlapping at 16 and 8 workers, its verdict matching the serial run",
+      "sha256": "7da760e3a6ed155239cac94350094613caa77740d63196e24e24dd97d718a5ef"
+    },
+    "test-operating-lock.js": {
+      "isolation": "parallel",
+      "reason": "measured 2026-11-10: passed with every other suite overlapping at 16 and 8 workers, its verdict matching the serial run",
+      "accepted": [
+        "profile: runs plugin code without overriding HOME, USERPROFILE or CLAUDE_CONFIG_DIR"
+      ],
+      "sha256": "1f13f98baa6fd575aff38a730204f592ea90ddb544c7f6bed024827c5d229941"
     },
     "test-orphan-checks.js": {
-      "isolation": "serial",
-      "reason": "audit 2026-10-02: repo-write: mkdirSync, writeFileSync on a path built from the repo root. Ambiguous or shared side effects run alone",
+      "isolation": "parallel",
+      "reason": "measured 2026-11-10: passed with every other suite overlapping at 16 and 8 workers, its verdict matching the serial run",
+      "accepted": [
+        "repo-write: mkdirSync, writeFileSync on a path built from the repo root"
+      ],
       "sha256": "8e238812bbc25ce6ce958bc11480ef4978e216a751e0ce6974a19d7419f8dc95"
     },
+    "test-owner-asks.js": {
+      "isolation": "parallel",
+      "reason": "measured 2026-11-10: passed with every other suite overlapping at 16 and 8 workers, its verdict matching the serial run",
+      "accepted": [
+        "repo-write: writeFileSync, mkdirSync, rmSync on a path built from the repo root"
+      ],
+      "sha256": "de65ac517c3045e2f55b00d164f5d9d7a4bd3888b816feca7993ac2f4ccfa7b2"
+    },
+    "test-owner-time-baseline.js": {
+      "isolation": "parallel",
+      "reason": "measured 2026-11-10: passed with every other suite overlapping at 16 and 8 workers, its verdict matching the serial run",
+      "sha256": "a1f8a33f12a17f020a2d58cf8e6293bbfbf21b6cc615cdbb2abd9691760004de"
+    },
+    "test-paid-key-guard.js": {
+      "isolation": "parallel",
+      "reason": "measured 2026-11-10: passed with every other suite overlapping at 16 and 8 workers, its verdict matching the serial run",
+      "sha256": "96208cb8a517e3c9bb1237c00a2aac837b2ddd016809e75dfda55bb4fb892845"
+    },
     "test-panel-recommendation.js": {
-      "isolation": "serial",
-      "reason": "audit 2026-10-02: profile: runs plugin code without overriding HOME, USERPROFILE or CLAUDE_CONFIG_DIR. Ambiguous or shared side effects run alone",
-      "sha256": "81aa948db5d5b55263109c87b4a0730dbbc94dbe810eb955be961e39a7b4ae00"
+      "isolation": "parallel",
+      "reason": "measured 2026-11-10: passed with every other suite overlapping at 16 and 8 workers, its verdict matching the serial run",
+      "accepted": [
+        "profile: runs plugin code without overriding HOME, USERPROFILE or CLAUDE_CONFIG_DIR"
+      ],
+      "sha256": "37cec531bc100f8f38bba0af3bcc6a0ff6f84bb0cff1750825613b27d9c715fd"
     },
     "test-parity-capture.js": {
-      "isolation": "serial",
-      "reason": "audit 2026-10-02: repo-write: writeFileSync on a path built from the repo root; profile: runs plugin code without overriding HOME, USERPROFILE or CLAUDE_CONFIG_DIR. Ambiguous or shared side effects run alone",
-      "sha256": "3077927fe1a08d5b0f473f54acca2f97b3492041ac0556e3c7b0340bd1b3f861"
+      "isolation": "parallel",
+      "reason": "measured 2026-11-10: passed with every other suite overlapping at 16 and 8 workers, its verdict matching the serial run",
+      "accepted": [
+        "repo-write: writeFileSync on a path built from the repo root",
+        "profile: runs plugin code without overriding HOME, USERPROFILE or CLAUDE_CONFIG_DIR"
+      ],
+      "sha256": "d26c522141db0ec016488851d0faf5bfc8d76308e7651d7eb4b4072a07fc6a9b"
     },
     "test-path-filter-deadlock.js": {
-      "isolation": "serial",
-      "reason": "audit 2026-10-02: repo-write: mkdirSync, writeFileSync on a path built from the repo root. Ambiguous or shared side effects run alone",
+      "isolation": "parallel",
+      "reason": "measured 2026-11-10: passed with every other suite overlapping at 16 and 8 workers, its verdict matching the serial run",
+      "accepted": [
+        "repo-write: mkdirSync, writeFileSync on a path built from the repo root"
+      ],
       "sha256": "808b7dd49ccb86ff8b473809d5a5d789dfd9d371e0c5eec5b0cf6bad75b1463b"
     },
     "test-peer-message-budget.js": {
-      "isolation": "serial",
-      "reason": "audit 2026-10-02: profile: runs plugin code without overriding HOME, USERPROFILE or CLAUDE_CONFIG_DIR. Ambiguous or shared side effects run alone",
+      "isolation": "parallel",
+      "reason": "measured 2026-11-10: passed with every other suite overlapping at 16 and 8 workers, its verdict matching the serial run",
+      "accepted": [
+        "profile: runs plugin code without overriding HOME, USERPROFILE or CLAUDE_CONFIG_DIR"
+      ],
       "sha256": "1e6eaec79e73e3c7aaa552dece72e7491ae8bd16a4c9f6db5b28407bc476a032"
     },
     "test-peer-queue-check.js": {
@@ -564,9 +1378,20 @@
       "sha256": "c7d292735754b49ae3d5ff826bb6398750ed97f66efbed1b64c350c55ddf2655"
     },
     "test-peer-send-ledger.js": {
-      "isolation": "serial",
-      "reason": "audit 2026-10-02: profile: runs plugin code without overriding HOME, USERPROFILE or CLAUDE_CONFIG_DIR. Ambiguous or shared side effects run alone",
-      "sha256": "1ba71587cee63b56a7c16747648ef2a1dff5815a1199c4c529d8ce72e5c74e87"
+      "isolation": "parallel",
+      "reason": "measured 2026-11-10: passed with every other suite overlapping at 16 and 8 workers, its verdict matching the serial run",
+      "accepted": [
+        "profile: runs plugin code without overriding HOME, USERPROFILE or CLAUDE_CONFIG_DIR"
+      ],
+      "sha256": "9478eea093c9d72273f003d0408cf4f29c1ec7ead37b5d3ba96304d5f44ab3f0"
+    },
+    "test-pinned-acceptance.js": {
+      "isolation": "parallel",
+      "reason": "measured 2026-11-10: passed with every other suite overlapping at 16 and 8 workers, its verdict matching the serial run",
+      "accepted": [
+        "repo-write: appendFileSync, mkdirSync, writeFileSync on a path built from the repo root"
+      ],
+      "sha256": "cf7501d917f6dbba495bd7dad0be1fe468e13f2dafae87e02d202d2d83861f1a"
     },
     "test-plugin-drift.js": {
       "isolation": "parallel",
@@ -582,73 +1407,145 @@
       "sha256": "07e5021da52ce78de332bb0939046f2d1700e65e19f25a9b28bc477280ca838c"
     },
     "test-post-tool-typecheck.js": {
-      "isolation": "serial",
-      "reason": "audit 2026-10-02: profile: runs plugin code without overriding HOME, USERPROFILE or CLAUDE_CONFIG_DIR. Ambiguous or shared side effects run alone",
+      "isolation": "parallel",
+      "reason": "measured 2026-11-10: passed with every other suite overlapping at 16 and 8 workers, its verdict matching the serial run",
+      "accepted": [
+        "profile: runs plugin code without overriding HOME, USERPROFILE or CLAUDE_CONFIG_DIR"
+      ],
       "sha256": "892c028f1ba68c5d195f91a859961da30306acf195a5f4807cb993a2b63f0ff6"
     },
     "test-pr-path-filters.js": {
-      "isolation": "serial",
-      "reason": "audit 2026-10-02: repo-write: writeFileSync on a path built from the repo root; profile: runs plugin code without overriding HOME, USERPROFILE or CLAUDE_CONFIG_DIR. Ambiguous or shared side effects run alone",
+      "isolation": "parallel",
+      "reason": "measured 2026-11-10: passed with every other suite overlapping at 16 and 8 workers, its verdict matching the serial run",
+      "accepted": [
+        "repo-write: writeFileSync on a path built from the repo root",
+        "profile: runs plugin code without overriding HOME, USERPROFILE or CLAUDE_CONFIG_DIR"
+      ],
       "sha256": "eb6d41c76585246cea6e9cc847be130088a744241cf4af64c8c3038700841fd7"
     },
     "test-prd-container-class.js": {
       "isolation": "parallel",
-      "reason": "reviewed 2026-10-02: writes only under its own mkdtemp fixtures; any profile, config or HOME it touches is pointed into them; no git outside temp repos; no fixed port",
-      "sha256": "226214a9d1ea644c9172024be8d54d4687631275304edc2bba90db1b59b0a419"
+      "reason": "measured 2026-11-10: passed with every other suite overlapping at 16 and 8 workers, its verdict matching the serial run",
+      "sha256": "d40a954e972c65e6396c9fd422af8346c81ac2f944d6f4a75c6a8a5700ceabac"
     },
     "test-prd-mark-needs-setup.js": {
-      "isolation": "serial",
-      "reason": "audit 2026-10-02: profile: runs plugin code without overriding HOME, USERPROFILE or CLAUDE_CONFIG_DIR. Ambiguous or shared side effects run alone",
+      "isolation": "parallel",
+      "reason": "measured 2026-11-10: passed with every other suite overlapping at 16 and 8 workers, its verdict matching the serial run",
+      "accepted": [
+        "profile: runs plugin code without overriding HOME, USERPROFILE or CLAUDE_CONFIG_DIR"
+      ],
       "sha256": "84ecd075c6356e9176797d8fffde315ad78f851501bc4348d92ca7e11a8ab778"
     },
     "test-prd-states.js": {
-      "isolation": "serial",
-      "reason": "audit 2026-10-02: profile: loads plugin code in-process without overriding the profile. Ambiguous or shared side effects run alone",
+      "isolation": "parallel",
+      "reason": "measured 2026-11-10: passed with every other suite overlapping at 16 and 8 workers, its verdict matching the serial run",
+      "accepted": [
+        "profile: loads plugin code in-process without overriding the profile"
+      ],
       "sha256": "c3efdf068b282324bbe1d77485253b8808aa3bf3439e6963949f85c97d19ec45"
     },
     "test-pre-tool-filter.js": {
-      "isolation": "serial",
-      "reason": "audit 2026-10-02: git-write: git checkout, push; profile: runs plugin code without overriding HOME, USERPROFILE or CLAUDE_CONFIG_DIR. Ambiguous or shared side effects run alone",
+      "isolation": "parallel",
+      "reason": "measured 2026-11-10: passed with every other suite overlapping at 16 and 8 workers, its verdict matching the serial run",
+      "accepted": [
+        "git-write: git checkout, push",
+        "profile: runs plugin code without overriding HOME, USERPROFILE or CLAUDE_CONFIG_DIR"
+      ],
       "sha256": "9862ef5f1c3ac5264cf5bac82c6ca24ee1c5883f582d83e2888f976cf66f4b45"
     },
     "test-preflight-template.js": {
-      "isolation": "serial",
-      "reason": "audit 2026-10-02: profile: runs plugin code without overriding HOME, USERPROFILE or CLAUDE_CONFIG_DIR. Ambiguous or shared side effects run alone",
+      "isolation": "parallel",
+      "reason": "measured 2026-11-10: passed with every other suite overlapping at 16 and 8 workers, its verdict matching the serial run",
+      "accepted": [
+        "profile: runs plugin code without overriding HOME, USERPROFILE or CLAUDE_CONFIG_DIR"
+      ],
       "sha256": "61a0dd05678dac901510d0a24ba1c40ff115c897022da657f9e0285f451209f6"
     },
     "test-production-signals.js": {
-      "isolation": "serial",
-      "reason": "audit 2026-10-02: repo-write: writeFileSync, mkdirSync, rmSync on a path built from the repo root; git-write: git init, add (a fixture repo is initialised; every call must target it); profile: runs plugin code without overriding HOME, USERPROFILE or CLAUDE_CONFIG_DIR. Ambiguous or shared side effects run alone",
-      "sha256": "1a1c6e568bdbca226562f6913eea63addb871f75bf4482145c85e286a33d09bd"
+      "isolation": "parallel",
+      "reason": "measured 2026-11-10: passed with every other suite overlapping at 16 and 8 workers, its verdict matching the serial run",
+      "accepted": [
+        "repo-write: writeFileSync, mkdirSync, rmSync on a path built from the repo root",
+        "git-write: git init, add (a fixture repo is initialised; every call must target it)",
+        "profile: runs plugin code without overriding HOME, USERPROFILE or CLAUDE_CONFIG_DIR",
+        "profile: a child is given process.env unchanged"
+      ],
+      "sha256": "199fd909b5d36fdc376c8c8b19535031e153d237e12f54735bd42b0dfae4093e"
+    },
+    "test-publish-release.js": {
+      "isolation": "parallel",
+      "reason": "measured 2026-11-10: passed with every other suite overlapping at 16 and 8 workers, its verdict matching the serial run",
+      "accepted": [
+        "nested-runner: drives gate-fast, gate-lock"
+      ],
+      "sha256": "be7bd7c15d4953e71e83fd40a5ca5da24ee07311fda3d800d61d9b648d09253c"
     },
     "test-push-authorisation.js": {
-      "isolation": "serial",
-      "reason": "audit 2026-10-02: git-write: git push; profile: runs plugin code without overriding HOME, USERPROFILE or CLAUDE_CONFIG_DIR. Ambiguous or shared side effects run alone",
+      "isolation": "parallel",
+      "reason": "measured 2026-11-10: passed with every other suite overlapping at 16 and 8 workers, its verdict matching the serial run",
+      "accepted": [
+        "git-write: git push",
+        "profile: runs plugin code without overriding HOME, USERPROFILE or CLAUDE_CONFIG_DIR"
+      ],
       "sha256": "f5c7361545dd8b7c3bc27841078ad4841aa05127d992c3b7e649812a2b494603"
     },
+    "test-push-guard.js": {
+      "isolation": "parallel",
+      "reason": "measured 2026-11-10: passed with every other suite overlapping at 16 and 8 workers, its verdict matching the serial run",
+      "accepted": [
+        "repo-write: copyFileSync on a path built from the repo root"
+      ],
+      "sha256": "324ee16f782c8c134472b82b0213160bf62324dc38bc66e673c3c31cf4e80c58"
+    },
     "test-queue-drained.js": {
-      "isolation": "serial",
-      "reason": "audit 2026-10-02: git-write: git commit, add; profile: runs plugin code without overriding HOME, USERPROFILE or CLAUDE_CONFIG_DIR; npm: spawns npm. Ambiguous or shared side effects run alone",
-      "sha256": "6b75b0cd1470a3898f9f7a23bb2c7717e12e99e07290ba6dfdb25afb685791fd"
+      "isolation": "parallel",
+      "reason": "measured 2026-11-10: passed with every other suite overlapping at 16 and 8 workers, its verdict matching the serial run",
+      "accepted": [
+        "git-write: git commit, add",
+        "npm: spawns npm"
+      ],
+      "sha256": "cec105a3ec51a030aced7dff9d3838f20daad935bb3e627b36b872ddb9b9695c"
+    },
+    "test-queue-recovery.js": {
+      "isolation": "parallel",
+      "reason": "measured 2026-11-10: passed with every other suite overlapping at 16 and 8 workers, its verdict matching the serial run",
+      "accepted": [
+        "profile: runs plugin code without overriding HOME, USERPROFILE or CLAUDE_CONFIG_DIR"
+      ],
+      "sha256": "1463083088d08dfc103fb50cc47782b1265046a8c2ff3fc0bc8a6f2259c7607f"
     },
     "test-quota-burn.js": {
       "isolation": "parallel",
-      "reason": "reviewed 2026-10-02: writes only under its own mkdtemp fixtures; any profile, config or HOME it touches is pointed into them; no git outside temp repos; no fixed port",
-      "sha256": "977571278cc9ae81de4416acd7a6211b2f120d8fcb67c9887c53ed2797fab542"
+      "reason": "measured 2026-11-10: passed with every other suite overlapping at 16 and 8 workers, its verdict matching the serial run",
+      "sha256": "5d0270953f95a80bba61579515eeb38571d3e873980df25a3628f23365e401fd"
     },
     "test-quota-tripwire.js": {
       "isolation": "parallel",
       "reason": "reviewed 2026-10-02: writes only under its own mkdtemp fixtures; any profile, config or HOME it touches is pointed into them; no git outside temp repos; no fixed port",
       "sha256": "74bb4b90ed16995b546a625f30a4ac0eb3a68ccbc8cef4a1410ed7b97f48546b"
     },
+    "test-qwen-eval.js": {
+      "isolation": "parallel",
+      "reason": "measured 2026-11-10: passed with every other suite overlapping at 16 and 8 workers, its verdict matching the serial run",
+      "accepted": [
+        "profile: reads the home directory without overriding HOME or USERPROFILE"
+      ],
+      "sha256": "35768e6509aefb2569e1c0cefbd83c2c5068717616a584a7f4533ff311ee5130"
+    },
     "test-radar-learning.js": {
-      "isolation": "serial",
-      "reason": "audit 2026-10-02: profile: runs plugin code without overriding HOME, USERPROFILE or CLAUDE_CONFIG_DIR. Ambiguous or shared side effects run alone",
+      "isolation": "parallel",
+      "reason": "measured 2026-11-10: passed with every other suite overlapping at 16 and 8 workers, its verdict matching the serial run",
+      "accepted": [
+        "profile: runs plugin code without overriding HOME, USERPROFILE or CLAUDE_CONFIG_DIR"
+      ],
       "sha256": "8721979aa84abc164c38244fcfcd99ae19950f6c99b3135fab6f0d2513287aee"
     },
     "test-reachable-entrypoints.js": {
-      "isolation": "serial",
-      "reason": "audit 2026-10-02: npm: spawns npm. Ambiguous or shared side effects run alone",
+      "isolation": "parallel",
+      "reason": "measured 2026-11-10: passed with every other suite overlapping at 16 and 8 workers, its verdict matching the serial run",
+      "accepted": [
+        "npm: spawns npm"
+      ],
       "sha256": "dbb6815a322c0da9c0d1e8249d8105c52fa5fda7f01d876ca3b124e7f9ccea93"
     },
     "test-reachable-repo-scope.js": {
@@ -656,9 +1553,31 @@
       "reason": "reviewed 2026-10-02: writes only under its own mkdtemp fixtures; any profile, config or HOME it touches is pointed into them; no git outside temp repos; no fixed port",
       "sha256": "e9d52dddeb4ae95594194f60526d135bf21dc54f483c8922318884cb912ba5ad"
     },
+    "test-reap-build-output.js": {
+      "isolation": "parallel",
+      "reason": "measured 2026-11-10: passed with every other suite overlapping at 16 and 8 workers, its verdict matching the serial run",
+      "accepted": [
+        "repo-write: writeFileSync, mkdirSync, utimesSync, rmSync, symlinkSync, copyFileSync, renameSync on a path built from the repo root",
+        "profile: runs plugin code without overriding HOME, USERPROFILE or CLAUDE_CONFIG_DIR",
+        "nested-runner: drives full-gate-queue"
+      ],
+      "sha256": "2e3dbd9fec62d3fb1c4e4fd8c660832cefc7ee7c5acb7a629995c23f9a339932"
+    },
+    "test-recheck-passed.js": {
+      "isolation": "parallel",
+      "reason": "measured 2026-11-10: passed with every other suite overlapping at 16 and 8 workers, its verdict matching the serial run",
+      "accepted": [
+        "profile: runs plugin code without overriding HOME, USERPROFILE or CLAUDE_CONFIG_DIR",
+        "npm: spawns npm"
+      ],
+      "sha256": "edfe64c8c66ce05edeb95562db1b3603525f784ab996a9b0b8dee503b0d39772"
+    },
     "test-recommendation-quality.js": {
-      "isolation": "serial",
-      "reason": "audit 2026-10-02: profile: runs plugin code without overriding HOME, USERPROFILE or CLAUDE_CONFIG_DIR. Ambiguous or shared side effects run alone",
+      "isolation": "parallel",
+      "reason": "measured 2026-11-10: passed with every other suite overlapping at 16 and 8 workers, its verdict matching the serial run",
+      "accepted": [
+        "profile: runs plugin code without overriding HOME, USERPROFILE or CLAUDE_CONFIG_DIR"
+      ],
       "sha256": "80e7b0b707538ca5fcf285f2874108fa6064e872465d55123c08e2b8712f62e6"
     },
     "test-record-drift.js": {
@@ -666,15 +1585,73 @@
       "reason": "reviewed 2026-10-02: writes only under its own mkdtemp fixtures; any profile, config or HOME it touches is pointed into them; no git outside temp repos; no fixed port",
       "sha256": "99a6e1e2d2f22be3ab75a758123b5e247fe818616b60dd20f9799435ca632eb4"
     },
+    "test-reference-contents.js": {
+      "isolation": "parallel",
+      "reason": "measured 2026-11-10: passed with every other suite overlapping at 16 and 8 workers, its verdict matching the serial run",
+      "accepted": [
+        "profile: runs plugin code without overriding HOME, USERPROFILE or CLAUDE_CONFIG_DIR"
+      ],
+      "sha256": "056bb7801a5ae4d34dca039658763d16f2f7f582a420830c1a643d4491172f69"
+    },
+    "test-release-protection.js": {
+      "isolation": "parallel",
+      "reason": "measured 2026-11-10: passed with every other suite overlapping at 16 and 8 workers, its verdict matching the serial run",
+      "sha256": "5f88cf82106e97c4ed9c5ce25336bb34ce3c508725f4a7810fe139b5ada13632"
+    },
     "test-rendered-layout-gate.js": {
+      "isolation": "parallel",
+      "reason": "measured 2026-11-10: passed with every other suite overlapping at 16 and 8 workers, its verdict matching the serial run",
+      "accepted": [
+        "profile: runs plugin code without overriding HOME, USERPROFILE or CLAUDE_CONFIG_DIR"
+      ],
+      "sha256": "de3185a628cc4c46dc4ff72b83ca6f46dc0af42a4a797ebe9a40eedece684b07"
+    },
+    "test-requeue-salvage.js": {
+      "isolation": "parallel",
+      "reason": "measured 2026-11-10: passed with every other suite overlapping at 16 and 8 workers, its verdict matching the serial run",
+      "accepted": [
+        "git-write: git init (a fixture repo is initialised; every call must target it)"
+      ],
+      "sha256": "e573a8604414803910a272edbc57849b2b71e20a94adb594268cfe02d37c34e8"
+    },
+    "test-restore-drill.js": {
+      "isolation": "parallel",
+      "reason": "measured 2026-11-10: passed with every other suite overlapping at 16 and 8 workers, its verdict matching the serial run",
+      "sha256": "8e0b064a95ff21428547d54a0220a53260927494fddfa84a5016bbc0404a76b1"
+    },
+    "test-review-security-regressions.js": {
+      "isolation": "parallel",
+      "reason": "measured 2026-11-10: passed with every other suite overlapping at 16 and 8 workers, its verdict matching the serial run",
+      "accepted": [
+        "repo-write: writeFileSync on a path built from the repo root",
+        "git-write: git init, push, commit, stash (a fixture repo is initialised; every call must target it)",
+        "npm: spawns npm"
+      ],
+      "sha256": "ef5a08ded46214acd6724a76cc6ce8035d8c2531c1df7181acb57eb8451e23c0"
+    },
+    "test-role-chain.js": {
+      "isolation": "parallel",
+      "reason": "measured 2026-11-10: passed with every other suite overlapping at 16 and 8 workers, its verdict matching the serial run",
+      "accepted": [
+        "npm: spawns npm"
+      ],
+      "sha256": "e562ff537500e129cfd1287e7a7c1325c80fd29928b047cf6cb659511a80a5e2"
+    },
+    "test-runner-deadline.js": {
       "isolation": "serial",
-      "reason": "audit 2026-10-02: profile: runs plugin code without overriding HOME, USERPROFILE or CLAUDE_CONFIG_DIR. Ambiguous or shared side effects run alone",
-      "sha256": "3c763a4451f82e54b86633fa00798221515d07e31de5cac17d7c739e0e013f51"
+      "reason": "serial, measured 2026-11-10: failed on its timing at 16 workers, and it passes alone",
+      "sha256": "b523abfa8e352e5dcb8423d0f5cad82ad14b5c38afee0fcc9336f17ef1c1da36"
     },
     "test-runner-evidence.js": {
-      "isolation": "serial",
-      "reason": "audit 2026-10-02: repo-write: mkdirSync, copyFileSync, writeFileSync, appendFileSync, unlinkSync on a path built from the repo root; git-write: git commit; profile: runs plugin code without overriding HOME, USERPROFILE or CLAUDE_CONFIG_DIR; nested-runner: drives test-all.js, coverage-receipt, find-untested-functions. Ambiguous or shared side effects run alone",
-      "sha256": "956a2ac17c8832336fb627bd4c52df2de47ba218698dd41ae873bde5082e5777"
+      "isolation": "parallel",
+      "reason": "measured 2026-11-10: passed with every other suite overlapping at 16 and 8 workers, its verdict matching the serial run",
+      "accepted": [
+        "repo-write: mkdirSync, copyFileSync, writeFileSync, appendFileSync, unlinkSync on a path built from the repo root",
+        "git-write: git commit",
+        "profile: runs plugin code without overriding HOME, USERPROFILE or CLAUDE_CONFIG_DIR",
+        "nested-runner: drives test-all.js, coverage-receipt, find-untested-functions"
+      ],
+      "sha256": "f4b6879ebf85d05d59c96a215698ef4817802bddd8acf9ccfe411717ae3bf867"
     },
     "test-runner-guard.js": {
       "isolation": "serial",
@@ -686,15 +1663,56 @@
       "reason": "reviewed 2026-10-02: writes only under its own mkdtemp fixtures; any profile, config or HOME it touches is pointed into them; no git outside temp repos; no fixed port",
       "sha256": "c38eb1af6476adaef622ca98246f6c7db002e578d1275a47aa949e77e7eb599c"
     },
+    "test-runtime-restore.js": {
+      "isolation": "parallel",
+      "reason": "measured 2026-11-10: passed with every other suite overlapping at 16 and 8 workers, its verdict matching the serial run",
+      "accepted": [
+        "repo-write: mkdirSync, copyFileSync, writeFileSync, appendFileSync on a path built from the repo root"
+      ],
+      "sha256": "20ace88abe8fff02f78ea7f7d1207cc02c4a185f1b39ceb79f2e5b9f456c06ec"
+    },
+    "test-scaffold-command-quoting.js": {
+      "isolation": "parallel",
+      "reason": "measured 2026-11-10: passed with every other suite overlapping at 16 and 8 workers, its verdict matching the serial run",
+      "accepted": [
+        "profile: runs plugin code without overriding HOME, USERPROFILE or CLAUDE_CONFIG_DIR"
+      ],
+      "sha256": "5803c34a854141f09a36aaf071b6d1fa4419861ec6d5b2941f5ef4c0d8d13a0a"
+    },
     "test-scheduled-verdicts.js": {
-      "isolation": "serial",
-      "reason": "audit 2026-10-02: profile: runs plugin code without overriding HOME, USERPROFILE or CLAUDE_CONFIG_DIR. Ambiguous or shared side effects run alone",
-      "sha256": "0c934c0956c824b7aedea0fb8623b543efc550fc243d435b7042687ecb45e546"
+      "isolation": "parallel",
+      "reason": "measured 2026-11-10: passed with every other suite overlapping at 16 and 8 workers, its verdict matching the serial run",
+      "accepted": [
+        "profile: runs plugin code without overriding HOME, USERPROFILE or CLAUDE_CONFIG_DIR"
+      ],
+      "sha256": "21bf942c607a2aa845d61b00a914ab575722e3d000f5340ece931a8757caa9c1"
+    },
+    "test-scorecard.js": {
+      "isolation": "parallel",
+      "reason": "measured 2026-11-10: passed with every other suite overlapping at 16 and 8 workers, its verdict matching the serial run",
+      "accepted": [
+        "repo-write: writeFileSync on a path built from the repo root"
+      ],
+      "sha256": "f9ea0bb92888bd0f1a3379a62381aaa6c6900ffdbeb269fabf949c7103756158"
     },
     "test-security-gate.js": {
-      "isolation": "serial",
-      "reason": "audit 2026-10-02: git-write: git init (a fixture repo is initialised; every call must target it); profile: runs plugin code without overriding HOME, USERPROFILE or CLAUDE_CONFIG_DIR. Ambiguous or shared side effects run alone",
-      "sha256": "36dbaee822a9cdb446fbe9496bf4689be9c4827bba559735fc3b8841e642a0c5"
+      "isolation": "parallel",
+      "reason": "measured 2026-11-10: passed with every other suite overlapping at 16 and 8 workers, its verdict matching the serial run",
+      "accepted": [
+        "git-write: git init (a fixture repo is initialised; every call must target it)",
+        "profile: runs plugin code without overriding HOME, USERPROFILE or CLAUDE_CONFIG_DIR"
+      ],
+      "sha256": "11c7ddabd271608ab7ac1d27cde941a5bf3f17f9f48cd3d0b5e15367bc789ced"
+    },
+    "test-security-learned-rules.js": {
+      "isolation": "parallel",
+      "reason": "measured 2026-11-10: passed with every other suite overlapping at 16 and 8 workers, its verdict matching the serial run",
+      "accepted": [
+        "repo-write: mkdirSync, writeFileSync on a path built from the repo root",
+        "git-write: git init (a fixture repo is initialised; every call must target it)",
+        "profile: runs plugin code without overriding HOME, USERPROFILE or CLAUDE_CONFIG_DIR"
+      ],
+      "sha256": "ee1ecc01037268914392a5b1330dcf5dbe36b6755fb432b7f4a6676f3d47c53f"
     },
     "test-semantic-search.js": {
       "isolation": "parallel",
@@ -702,23 +1720,48 @@
       "sha256": "a34a6e70daf30a2e6a4f0e41e9280e9fdeafe67223cd1e2a9762ef0f844a5d26"
     },
     "test-session-carrier.js": {
-      "isolation": "serial",
-      "reason": "audit 2026-10-02: repo-write: writeFileSync on a path built from the repo root. Ambiguous or shared side effects run alone",
-      "sha256": "76b3d465364e54a2323057715f44ec6f0a53a4df6c6f1ef900d322759680cbe9"
+      "isolation": "parallel",
+      "reason": "measured 2026-11-10: passed with every other suite overlapping at 16 and 8 workers, its verdict matching the serial run",
+      "accepted": [
+        "repo-write: writeFileSync on a path built from the repo root"
+      ],
+      "sha256": "87a7f116cc95ffc346e9d572725b9f35a20bc3e3baa1c61b91423daf06a1623f"
+    },
+    "test-session-context-cost.js": {
+      "isolation": "parallel",
+      "reason": "measured 2026-11-10: passed with every other suite overlapping at 16 and 8 workers, its verdict matching the serial run",
+      "sha256": "1ecc5dca6c9e15712aefb7f40d0faf456c547099d0e01a8e8e3d704095fd93d3"
     },
     "test-session-env-dedupe.js": {
-      "isolation": "serial",
-      "reason": "audit 2026-10-02: repo-write: mkdirSync, writeFileSync, appendFileSync on a path built from the repo root. Ambiguous or shared side effects run alone",
+      "isolation": "parallel",
+      "reason": "measured 2026-11-10: passed with every other suite overlapping at 16 and 8 workers, its verdict matching the serial run",
+      "accepted": [
+        "repo-write: mkdirSync, writeFileSync, appendFileSync on a path built from the repo root"
+      ],
       "sha256": "a3c31134c997dd41663207591b59ba29ca7b5f01568a3134a40939c88cd3b41c"
     },
+    "test-session-env-semantics.js": {
+      "isolation": "parallel",
+      "reason": "measured 2026-11-10: passed with every other suite overlapping at 16 and 8 workers, its verdict matching the serial run",
+      "sha256": "9c4a000a9ed9053b7b936a2272bbb3762b2ee87f9fe5abc371d7ee9dff93382f"
+    },
     "test-session-exit.js": {
-      "isolation": "serial",
-      "reason": "audit 2026-10-02: repo-write: mkdirSync, writeFileSync on a path built from the repo root; git-write: git init (a fixture repo is initialised; every call must target it); profile: runs plugin code without overriding HOME, USERPROFILE or CLAUDE_CONFIG_DIR; npm: spawns npm. Ambiguous or shared side effects run alone",
+      "isolation": "parallel",
+      "reason": "measured 2026-11-10: passed with every other suite overlapping at 16 and 8 workers, its verdict matching the serial run",
+      "accepted": [
+        "repo-write: mkdirSync, writeFileSync on a path built from the repo root",
+        "git-write: git init (a fixture repo is initialised; every call must target it)",
+        "profile: runs plugin code without overriding HOME, USERPROFILE or CLAUDE_CONFIG_DIR",
+        "npm: spawns npm"
+      ],
       "sha256": "a0c36a47a56e3137b43bf2e86864c8327c878dcdffefa2aef6a94da5412efb36"
     },
     "test-session-patterns.js": {
-      "isolation": "serial",
-      "reason": "audit 2026-10-02: profile: runs plugin code without overriding HOME, USERPROFILE or CLAUDE_CONFIG_DIR. Ambiguous or shared side effects run alone",
+      "isolation": "parallel",
+      "reason": "measured 2026-11-10: passed with every other suite overlapping at 16 and 8 workers, its verdict matching the serial run",
+      "accepted": [
+        "profile: runs plugin code without overriding HOME, USERPROFILE or CLAUDE_CONFIG_DIR"
+      ],
       "sha256": "f439b92107f86e064b5986056d1be5fd11c74a5aa19537903e827462df4f29ad"
     },
     "test-session-register.js": {
@@ -728,58 +1771,158 @@
     },
     "test-session-start-compact.js": {
       "isolation": "parallel",
-      "reason": "reviewed 2026-10-02: writes only under its own mkdtemp fixtures; any profile, config or HOME it touches is pointed into them; no git outside temp repos; no fixed port",
-      "sha256": "3693ad1d7046f510146c36a6fcd82a35d6358f8583c4ab42dae085318f67ea1b"
+      "reason": "measured 2026-11-10: passed with every other suite overlapping at 16 and 8 workers, its verdict matching the serial run",
+      "sha256": "ed69a1d6ec7c2ba1d07f8132a89ac801df950b338916c7f610894b19268fb980"
     },
     "test-session-start-hook.js": {
       "isolation": "parallel",
-      "reason": "reviewed 2026-10-02: writes only under its own mkdtemp fixtures; any profile, config or HOME it touches is pointed into them; no git outside temp repos; no fixed port",
-      "sha256": "dc78aeef869c7ea7a2835e762ec67061945fc4202861d500966c7cf76c7f7d8a"
+      "reason": "measured 2026-11-10: passed with every other suite overlapping at 16 and 8 workers, its verdict matching the serial run",
+      "accepted": [
+        "git-write: git init (a fixture repo is initialised; every call must target it)",
+        "npm: spawns npm"
+      ],
+      "sha256": "baa240680f9ce2a31b2301aeaab6600eacec9b5772624160e98881210a41d011"
     },
     "test-session-sweep.js": {
-      "isolation": "serial",
-      "reason": "audit 2026-10-02: repo-write: mkdirSync, writeFileSync, utimesSync on a path built from the repo root; git-write: git init, clone, config, add, commit, push, worktree, update-ref (a fixture repo is initialised; every call must target it). Ambiguous or shared side effects run alone",
-      "sha256": "78fc342922c93cd649b15602642cca85b2ac8fc2fc20e55559ef5b196fc804da"
+      "isolation": "parallel",
+      "reason": "measured 2026-11-10: passed with every other suite overlapping at 16 and 8 workers, its verdict matching the serial run",
+      "accepted": [
+        "repo-write: mkdirSync, writeFileSync, utimesSync, unlinkSync, symlinkSync, rmSync, rmdirSync, appendFileSync, linkSync on a path built from the repo root",
+        "git-write: git config, worktree, checkout, add, commit, push, clone, reset, init, update-ref (a fixture repo is initialised; every call must target it)"
+      ],
+      "sha256": "08f05bcf7a3a1e0e1197e7dec436c5723cf5be3bd4cf6f3186ce4f1276bada82"
+    },
+    "test-settle-blocker.js": {
+      "isolation": "parallel",
+      "reason": "measured 2026-11-10: passed with every other suite overlapping at 16 and 8 workers, its verdict matching the serial run",
+      "accepted": [
+        "profile: runs plugin code without overriding HOME, USERPROFILE or CLAUDE_CONFIG_DIR"
+      ],
+      "sha256": "2b430c62b7335e5e934a2a3c11364d37d98428f2c67cd6c31ab824c739438b7a"
+    },
+    "test-settle-usage-limit.js": {
+      "isolation": "parallel",
+      "reason": "measured 2026-11-10: passed with every other suite overlapping at 16 and 8 workers, its verdict matching the serial run",
+      "accepted": [
+        "profile: runs plugin code without overriding HOME, USERPROFILE or CLAUDE_CONFIG_DIR"
+      ],
+      "sha256": "f22947dae75f4c7013558d76d5350a0b9d445e7b33670af506beffedee445098"
+    },
+    "test-shared-install.js": {
+      "isolation": "parallel",
+      "reason": "measured 2026-11-10: passed with every other suite overlapping at 16 and 8 workers, its verdict matching the serial run",
+      "accepted": [
+        "repo-write: mkdirSync, writeFileSync, rmSync on a path built from the repo root",
+        "git-write: git init, config, add, commit, worktree, rm (a fixture repo is initialised; every call must target it)",
+        "profile: runs plugin code without overriding HOME, USERPROFILE or CLAUDE_CONFIG_DIR",
+        "npm: spawns npm"
+      ],
+      "sha256": "f9b6b24e7d261da7ed3c8da08118a21c529b32c50d58cbf7a53c367835f74899"
     },
     "test-skill-census.js": {
-      "isolation": "serial",
-      "reason": "audit 2026-10-02: repo-write: writeFileSync, rmSync, mkdirSync on a path built from the repo root; profile: runs plugin code without overriding HOME, USERPROFILE or CLAUDE_CONFIG_DIR. Ambiguous or shared side effects run alone",
-      "sha256": "01e1ebfdf33e92729af7cae76912610bae4fa01c2244b2fc0c9ed6d800903a64"
+      "isolation": "parallel",
+      "reason": "measured 2026-11-10: passed with every other suite overlapping at 16 and 8 workers, its verdict matching the serial run",
+      "accepted": [
+        "repo-write: writeFileSync, rmSync, mkdirSync on a path built from the repo root",
+        "profile: runs plugin code without overriding HOME, USERPROFILE or CLAUDE_CONFIG_DIR"
+      ],
+      "sha256": "b9194eac6e3120704a7099a7f98c64ec29a1afc5eb1ab430929e628a9205a1c4"
     },
     "test-skill-collisions.js": {
-      "isolation": "serial",
-      "reason": "audit 2026-10-02: repo-write: writeFileSync, rmSync on a path built from the repo root. Ambiguous or shared side effects run alone",
-      "sha256": "95ec819bfdf8999d8409248da3c5100385d1d5853b9096f1ba223e8b82c8893c"
+      "isolation": "parallel",
+      "reason": "measured 2026-11-10: passed with every other suite overlapping at 16 and 8 workers, its verdict matching the serial run",
+      "accepted": [
+        "repo-write: writeFileSync, rmSync on a path built from the repo root"
+      ],
+      "sha256": "8f29f80255278efea311d415eebd19c40f82d7e85a81736966853576f5d13c19"
+    },
+    "test-skill-dispositions.js": {
+      "isolation": "parallel",
+      "reason": "measured 2026-11-10: passed with every other suite overlapping at 16 and 8 workers, its verdict matching the serial run",
+      "sha256": "23a7bf6260883cbc184ee12c6ede3e6d7dc0122918c336ed608bb1c353ffa54c"
     },
     "test-skill-invocations.js": {
-      "isolation": "serial",
-      "reason": "audit 2026-10-02: repo-write: copyFileSync on a path built from the repo root; profile: runs plugin code without overriding HOME, USERPROFILE or CLAUDE_CONFIG_DIR. Ambiguous or shared side effects run alone",
+      "isolation": "parallel",
+      "reason": "measured 2026-11-10: passed with every other suite overlapping at 16 and 8 workers, its verdict matching the serial run",
+      "accepted": [
+        "repo-write: copyFileSync on a path built from the repo root",
+        "profile: runs plugin code without overriding HOME, USERPROFILE or CLAUDE_CONFIG_DIR"
+      ],
       "sha256": "da76cbd945785d869393abba9606f83b6da7851da9e2d1a502ebe8a11a5ed20b"
     },
+    "test-skill-layout.js": {
+      "isolation": "parallel",
+      "reason": "measured 2026-11-10: passed with every other suite overlapping at 16 and 8 workers, its verdict matching the serial run",
+      "accepted": [
+        "profile: runs plugin code without overriding HOME, USERPROFILE or CLAUDE_CONFIG_DIR"
+      ],
+      "sha256": "8fc6c368c02d955d5f72c51428c1412aa90425464b05c861e42bac2fa55a6b93"
+    },
     "test-skill-plugin-root.js": {
-      "isolation": "serial",
-      "reason": "audit 2026-10-02: profile: runs plugin code without overriding HOME, USERPROFILE or CLAUDE_CONFIG_DIR. Ambiguous or shared side effects run alone",
+      "isolation": "parallel",
+      "reason": "measured 2026-11-10: passed with every other suite overlapping at 16 and 8 workers, its verdict matching the serial run",
+      "accepted": [
+        "profile: runs plugin code without overriding HOME, USERPROFILE or CLAUDE_CONFIG_DIR"
+      ],
       "sha256": "15b7a2b1a9fde142f6b3ab73c607f6ed53406b181c4d5ce478d8a78dd876f4e2"
     },
     "test-skill-prd-commands-selftest.js": {
-      "isolation": "serial",
-      "reason": "audit 2026-10-02: profile: runs plugin code without overriding HOME, USERPROFILE or CLAUDE_CONFIG_DIR. Ambiguous or shared side effects run alone",
+      "isolation": "parallel",
+      "reason": "measured 2026-11-10: passed with every other suite overlapping at 16 and 8 workers, its verdict matching the serial run",
+      "accepted": [
+        "profile: runs plugin code without overriding HOME, USERPROFILE or CLAUDE_CONFIG_DIR"
+      ],
       "sha256": "55dc29eea5971637231744c802445af9966f39e798d817de4fc9b0e309c5e46f"
     },
     "test-skill-prd-commands.js": {
-      "isolation": "serial",
-      "reason": "audit 2026-10-02: profile: runs plugin code without overriding HOME, USERPROFILE or CLAUDE_CONFIG_DIR. Ambiguous or shared side effects run alone",
+      "isolation": "parallel",
+      "reason": "measured 2026-11-10: passed with every other suite overlapping at 16 and 8 workers, its verdict matching the serial run",
+      "accepted": [
+        "profile: runs plugin code without overriding HOME, USERPROFILE or CLAUDE_CONFIG_DIR"
+      ],
       "sha256": "5c212df9e0401472bd8281e04c913313cd96960c88c70e2e80178751bad83651"
     },
+    "test-skill-routing.js": {
+      "isolation": "parallel",
+      "reason": "measured 2026-11-10: passed with every other suite overlapping at 16 and 8 workers, its verdict matching the serial run",
+      "sha256": "fcec296753a191d18ad2d023a6a43c0c3ff6bc3c85283981fb0038ef0e2e8d99"
+    },
+    "test-skill-scan-unreadable.js": {
+      "isolation": "parallel",
+      "reason": "measured 2026-11-10: passed with every other suite overlapping at 16 and 8 workers, its verdict matching the serial run",
+      "accepted": [
+        "profile: runs plugin code without overriding HOME, USERPROFILE or CLAUDE_CONFIG_DIR"
+      ],
+      "sha256": "c4e5258d5bd7d60b02a9a8d60b53598279d8cc4679757ddfd4f70c408fc28729"
+    },
     "test-skill-tool-declarations.js": {
-      "isolation": "serial",
-      "reason": "audit 2026-10-02: profile: runs plugin code without overriding HOME, USERPROFILE or CLAUDE_CONFIG_DIR. Ambiguous or shared side effects run alone",
+      "isolation": "parallel",
+      "reason": "measured 2026-11-10: passed with every other suite overlapping at 16 and 8 workers, its verdict matching the serial run",
+      "accepted": [
+        "profile: runs plugin code without overriding HOME, USERPROFILE or CLAUDE_CONFIG_DIR"
+      ],
       "sha256": "b6f8a60bdf08b6cb56bd2af7a02c5977cba4b03ac2c1b478aa101ea2845e4606"
     },
+    "test-skill-trigger-cost.js": {
+      "isolation": "parallel",
+      "reason": "measured 2026-11-10: passed with every other suite overlapping at 16 and 8 workers, its verdict matching the serial run",
+      "sha256": "6b73156f623699b086b1931c2ef2296200f4812a954d86dc784b0ae3becb061a"
+    },
+    "test-skill-trigger-eval.js": {
+      "isolation": "parallel",
+      "reason": "measured 2026-11-10: passed with every other suite overlapping at 16 and 8 workers, its verdict matching the serial run",
+      "accepted": [
+        "profile: runs plugin code without overriding HOME, USERPROFILE or CLAUDE_CONFIG_DIR"
+      ],
+      "sha256": "e73d435e8008ee72a0a742794c3463f86c24c4022dc79b55e7ae14fa5f193cb7"
+    },
     "test-spawn-budget.js": {
-      "isolation": "serial",
-      "reason": "audit 2026-10-02: nested-runner: drives test-all.js, check-suites-can-fail. Ambiguous or shared side effects run alone",
-      "sha256": "330054f852c8bf3afa327568441437059b685e3f1790f91e7d235682001569a1"
+      "isolation": "parallel",
+      "reason": "measured 2026-11-10: passed with every other suite overlapping at 16 and 8 workers, its verdict matching the serial run",
+      "accepted": [
+        "nested-runner: drives test-all.js, check-suites-can-fail"
+      ],
+      "sha256": "44cff6fa94a6480ee50197c4b640d71c655fc790bc36423fd31c81e344b32114"
     },
     "test-standing-order-wake.js": {
       "isolation": "parallel",
@@ -787,8 +1930,11 @@
       "sha256": "68fc72c1b8d196098cddbb4b88566d3205bf7b1f2d87654454600847b6de23d7"
     },
     "test-standing-orders.js": {
-      "isolation": "serial",
-      "reason": "audit 2026-10-02: npm: spawns npm. Ambiguous or shared side effects run alone",
+      "isolation": "parallel",
+      "reason": "measured 2026-11-10: passed with every other suite overlapping at 16 and 8 workers, its verdict matching the serial run",
+      "accepted": [
+        "npm: spawns npm"
+      ],
       "sha256": "f6e5dd20c1527cdb73f6a33db55b5136e6bc1ecc0d096fb1c380e754e27d5a3b"
     },
     "test-steer-log.js": {
@@ -798,107 +1944,239 @@
     },
     "test-stop-auto-check.js": {
       "isolation": "parallel",
-      "reason": "reviewed 2026-10-02: writes only under its own mkdtemp fixtures; any profile, config or HOME it touches is pointed into them; no git outside temp repos; no fixed port",
-      "sha256": "f929992d040f78d2192f5d2611dfeb0e4542f5f29aca6da0ecab8aa32b9a7b52"
+      "reason": "measured 2026-11-10: passed with every other suite overlapping at 16 and 8 workers, its verdict matching the serial run",
+      "accepted": [
+        "repo-write: cpSync on a path built from the repo root"
+      ],
+      "sha256": "bf3830997c6962b6728561370bfc0befb9f89cf813e4cdbe20151eef6377f655"
     },
     "test-stop-brain-report.js": {
-      "isolation": "serial",
-      "reason": "audit 2026-10-02: git-write: git init, push, fetch (a fixture repo is initialised; every call must target it); profile: runs plugin code without overriding HOME, USERPROFILE or CLAUDE_CONFIG_DIR. Ambiguous or shared side effects run alone",
-      "sha256": "7f8f7bbb294fc71b0326fa0ec150d832802896625e8f650152bb1d0c14766bfc"
+      "isolation": "parallel",
+      "reason": "measured 2026-11-10: passed with every other suite overlapping at 16 and 8 workers, its verdict matching the serial run",
+      "accepted": [
+        "repo-write: cpSync on a path built from the repo root",
+        "git-write: git init, push, fetch (a fixture repo is initialised; every call must target it)",
+        "profile: runs plugin code without overriding HOME, USERPROFILE or CLAUDE_CONFIG_DIR"
+      ],
+      "sha256": "df30251cb38b59b0f161c2779c6f20843d4e3537dd57d53f46d268b1a15929e6"
     },
     "test-stop-failure-note.js": {
-      "isolation": "serial",
-      "reason": "audit 2026-10-02: profile: runs plugin code without overriding HOME, USERPROFILE or CLAUDE_CONFIG_DIR. Ambiguous or shared side effects run alone",
+      "isolation": "parallel",
+      "reason": "measured 2026-11-10: passed with every other suite overlapping at 16 and 8 workers, its verdict matching the serial run",
+      "accepted": [
+        "profile: runs plugin code without overriding HOME, USERPROFILE or CLAUDE_CONFIG_DIR"
+      ],
       "sha256": "aba8fa7e4cb5f606ae1a9e82333ffbba81f39d5a21467225efb4d661a0c23339"
     },
     "test-stop-intent-record.js": {
-      "isolation": "serial",
-      "reason": "audit 2026-10-02: repo-write: writeFileSync, mkdirSync, rmSync on a path built from the repo root; profile: runs plugin code without overriding HOME, USERPROFILE or CLAUDE_CONFIG_DIR; npm: spawns npm. Ambiguous or shared side effects run alone",
+      "isolation": "parallel",
+      "reason": "measured 2026-11-10: passed with every other suite overlapping at 16 and 8 workers, its verdict matching the serial run",
+      "accepted": [
+        "repo-write: writeFileSync, mkdirSync, rmSync on a path built from the repo root",
+        "profile: runs plugin code without overriding HOME, USERPROFILE or CLAUDE_CONFIG_DIR",
+        "npm: spawns npm"
+      ],
       "sha256": "3681066ac20384c56692394843520c1caa80d6985f34fcc39bd162b6cf0dafc7"
     },
     "test-stop-ledger-race.js": {
-      "isolation": "serial",
-      "reason": "audit 2026-10-02: profile: runs plugin code without overriding HOME, USERPROFILE or CLAUDE_CONFIG_DIR. Ambiguous or shared side effects run alone",
+      "isolation": "parallel",
+      "reason": "measured 2026-11-10: passed with every other suite overlapping at 16 and 8 workers, its verdict matching the serial run",
+      "accepted": [
+        "profile: runs plugin code without overriding HOME, USERPROFILE or CLAUDE_CONFIG_DIR"
+      ],
       "sha256": "2d6ab162c4cd07f066cfc6a9a1133b00afbaafbeb2f48a75f183211da7f544fd"
     },
     "test-stop-typecheck.js": {
-      "isolation": "serial",
-      "reason": "audit 2026-10-02: profile: runs plugin code without overriding HOME, USERPROFILE or CLAUDE_CONFIG_DIR. Ambiguous or shared side effects run alone",
-      "sha256": "42778b43fb97a31e2f5e67c897425700d78f5b232b7512a9df07b67dec015de9"
+      "isolation": "parallel",
+      "reason": "measured 2026-11-10: passed with every other suite overlapping at 16 and 8 workers, its verdict matching the serial run",
+      "accepted": [
+        "profile: runs plugin code without overriding HOME, USERPROFILE or CLAUDE_CONFIG_DIR"
+      ],
+      "sha256": "c26da853bfbb4079ead5a60cbb4d448c75ce85699c817aa519a983490f7e59a5"
     },
     "test-stop-workflow-wall-note.js": {
-      "isolation": "serial",
-      "reason": "audit 2026-10-02: profile: runs plugin code without overriding HOME, USERPROFILE or CLAUDE_CONFIG_DIR. Ambiguous or shared side effects run alone",
+      "isolation": "parallel",
+      "reason": "measured 2026-11-10: passed with every other suite overlapping at 16 and 8 workers, its verdict matching the serial run",
+      "accepted": [
+        "profile: runs plugin code without overriding HOME, USERPROFILE or CLAUDE_CONFIG_DIR"
+      ],
       "sha256": "c85ded362de0d4849d929591e2f602b7c6f0682d7f73bccaf3cc88bd6a969b8f"
     },
     "test-subject-evidence.js": {
-      "isolation": "serial",
-      "reason": "audit 2026-10-02: nested-runner: drives check-suites-can-fail. Ambiguous or shared side effects run alone",
-      "sha256": "40238f3ea1bc801d5006d815d9e36f9ea3ab4dd852d7bc5d2e1555d79081d772"
+      "isolation": "parallel",
+      "reason": "measured 2026-11-10: passed with every other suite overlapping at 16 and 8 workers, its verdict matching the serial run",
+      "accepted": [
+        "nested-runner: drives check-suites-can-fail"
+      ],
+      "sha256": "c0f9d40bdd4626ccc393e90ee56df58331068deb4f00ff87df1163ba6db8a14d"
+    },
+    "test-suite-pair-cache.js": {
+      "isolation": "parallel",
+      "reason": "measured 2026-11-10: passed with every other suite overlapping at 16 and 8 workers, its verdict matching the serial run",
+      "accepted": [
+        "repo-write: copyFileSync, writeFileSync, appendFileSync, mkdirSync, writeFile, rmSync on a path built from the repo root",
+        "git-write: git init (a fixture repo is initialised; every call must target it)",
+        "nested-runner: drives check-suites-can-fail"
+      ],
+      "sha256": "12fe2674e43a2d57ed006691f079f9c8435b374b0294d285f2db05141540fd12"
     },
     "test-suite-pool.js": {
       "isolation": "serial",
       "reason": "serial by choice: its end-to-end case runs a whole test-all.js with a pool of 4 inside it. The audit signals it carries come from code samples inside its strings, not its own behaviour",
-      "sha256": "0c536619a4d204451029730745caf2400e3512ee03c149c1d3fad14b5d3c5e26"
+      "sha256": "7e8550616cb18a1a4751714c4a60ecb5a83ac558a4e900e047b718d4509bc0f3"
+    },
+    "test-suite-process-tree.js": {
+      "isolation": "parallel",
+      "reason": "measured 2026-11-10: passed with every other suite overlapping at 16 and 8 workers, its verdict matching the serial run",
+      "accepted": [
+        "nested-runner: drives test-all.js"
+      ],
+      "sha256": "da17aa6ad85451552b52f5cb8d3b3c934bfe6263ff58735ac544c43c8f6c1370"
     },
     "test-suite-tmp.js": {
-      "isolation": "serial",
-      "reason": "audit 2026-10-02: repo-write: copyFileSync, rmSync on a path built from the repo root; nested-runner: drives test-all.js, coverage-receipt, check-suites-can-fail, find-untested-functions, find-vacuous-assertions. Ambiguous or shared side effects run alone",
-      "sha256": "a689b23039c980bd1136a1660eda4cef0dadcb09daa097d85d55d0a32ec23d35"
+      "isolation": "parallel",
+      "reason": "measured 2026-11-10: passed with every other suite overlapping at 16 and 8 workers, its verdict matching the serial run",
+      "accepted": [
+        "repo-write: copyFileSync, rmSync on a path built from the repo root",
+        "nested-runner: drives test-all.js, coverage-receipt, check-suites-can-fail, find-untested-functions, find-vacuous-assertions"
+      ],
+      "sha256": "4048a006ee04c74c0fa10e4fd41ef6554a37e6edfb11e8b608ebfe8d1a9ae115"
     },
     "test-suite-verdict-summary.js": {
-      "isolation": "serial",
-      "reason": "audit 2026-10-02: repo-write: copyFileSync on a path built from the repo root; nested-runner: drives check-suites-can-fail. Ambiguous or shared side effects run alone",
-      "sha256": "dbf2b4ddec1d0c4fc7b1972dfb99e158b7f4e2d66f29ed1b01d93e7bf573d938"
+      "isolation": "parallel",
+      "reason": "measured 2026-11-10: passed with every other suite overlapping at 16 and 8 workers, its verdict matching the serial run",
+      "accepted": [
+        "repo-write: copyFileSync on a path built from the repo root",
+        "nested-runner: drives check-suites-can-fail"
+      ],
+      "sha256": "64ec25fa7db9d78cb5948200393a8ec39b9fdc257e3b13c3559a695d1188713d"
     },
     "test-superseded.js": {
-      "isolation": "serial",
-      "reason": "audit 2026-10-02: profile: runs plugin code without overriding HOME, USERPROFILE or CLAUDE_CONFIG_DIR; npm: spawns npm. Ambiguous or shared side effects run alone",
+      "isolation": "parallel",
+      "reason": "measured 2026-11-10: passed with every other suite overlapping at 16 and 8 workers, its verdict matching the serial run",
+      "accepted": [
+        "profile: runs plugin code without overriding HOME, USERPROFILE or CLAUDE_CONFIG_DIR",
+        "npm: spawns npm"
+      ],
       "sha256": "538539e527989b5b9d18c8870e2ac296bc375cabcf01b2d1e09e51e43a330687"
     },
     "test-telemetry-hook.js": {
-      "isolation": "serial",
-      "reason": "audit 2026-10-02: git-write: git push, commit; profile: loads plugin code in-process without overriding the profile. Ambiguous or shared side effects run alone",
+      "isolation": "parallel",
+      "reason": "measured 2026-11-10: passed with every other suite overlapping at 16 and 8 workers, its verdict matching the serial run",
+      "accepted": [
+        "git-write: git push, commit",
+        "profile: loads plugin code in-process without overriding the profile"
+      ],
       "sha256": "94b817771f22714de83c0fcff38628a3b9ce75490c85abeb9775dd43fcabe661"
     },
     "test-telemetry-report.js": {
-      "isolation": "serial",
-      "reason": "audit 2026-10-02: profile: runs plugin code without overriding HOME, USERPROFILE or CLAUDE_CONFIG_DIR. Ambiguous or shared side effects run alone",
+      "isolation": "parallel",
+      "reason": "measured 2026-11-10: passed with every other suite overlapping at 16 and 8 workers, its verdict matching the serial run",
+      "accepted": [
+        "profile: runs plugin code without overriding HOME, USERPROFILE or CLAUDE_CONFIG_DIR"
+      ],
       "sha256": "002136891d7b6f9cd7a774a321bfdf6d1ac0505f73187bce77d5c35ec6bf80c1"
     },
     "test-text-hygiene.js": {
-      "isolation": "serial",
-      "reason": "audit 2026-10-02: profile: runs plugin code without overriding HOME, USERPROFILE or CLAUDE_CONFIG_DIR. Ambiguous or shared side effects run alone",
+      "isolation": "parallel",
+      "reason": "measured 2026-11-10: passed with every other suite overlapping at 16 and 8 workers, its verdict matching the serial run",
+      "accepted": [
+        "profile: runs plugin code without overriding HOME, USERPROFILE or CLAUDE_CONFIG_DIR"
+      ],
       "sha256": "f96f78a0d38ff9dde395f4297dd68b382c7b0432387f1b078f3d535eaa76fe4b"
     },
+    "test-touched-suites.js": {
+      "isolation": "parallel",
+      "reason": "measured 2026-11-10: passed with every other suite overlapping at 16 and 8 workers, its verdict matching the serial run",
+      "accepted": [
+        "nested-runner: drives gate-fast",
+        "npm: spawns npm"
+      ],
+      "sha256": "8712f0c7e85d666a80aea430a0ab21a10771ac09704f255d83edb635d1ebea18"
+    },
     "test-tracking-parity.js": {
-      "isolation": "serial",
-      "reason": "audit 2026-10-02: repo-write: mkdirSync, writeFileSync on a path built from the repo root; profile: runs plugin code without overriding HOME, USERPROFILE or CLAUDE_CONFIG_DIR. Ambiguous or shared side effects run alone",
+      "isolation": "parallel",
+      "reason": "measured 2026-11-10: passed with every other suite overlapping at 16 and 8 workers, its verdict matching the serial run",
+      "accepted": [
+        "repo-write: mkdirSync, writeFileSync on a path built from the repo root",
+        "profile: runs plugin code without overriding HOME, USERPROFILE or CLAUDE_CONFIG_DIR"
+      ],
       "sha256": "599aee83cf0ca3321d39fd8609051900e88e1c5929d4d990ebc807f75df3d962"
+    },
+    "test-typecheck-worktree-root.js": {
+      "isolation": "parallel",
+      "reason": "measured 2026-11-10: passed with every other suite overlapping at 16 and 8 workers, its verdict matching the serial run",
+      "accepted": [
+        "profile: runs plugin code without overriding HOME, USERPROFILE or CLAUDE_CONFIG_DIR"
+      ],
+      "sha256": "65f4dce913861f1cf0ecb9537b268ba86bec65d412120abebafdc94f2572cba0"
     },
     "test-unattended-queue.js": {
       "isolation": "parallel",
-      "reason": "reviewed 2026-10-02: writes only under its own mkdtemp fixtures; any profile, config or HOME it touches is pointed into them; no git outside temp repos; no fixed port",
-      "sha256": "fb3e1edc3aff4e215394af7a131e9a8153212ae5ffb5ab13be968a91f4f40209"
+      "reason": "measured 2026-11-10: passed with every other suite overlapping at 16 and 8 workers, its verdict matching the serial run",
+      "accepted": [
+        "repo-write: writeFileSync on a path built from the repo root"
+      ],
+      "sha256": "734fc72c7d60c63b5145ec42f4816865365b8ddbd2c19f3728470d9d51aec882"
     },
     "test-unattended-worker-version.js": {
-      "isolation": "serial",
-      "reason": "audit 2026-10-02: repo-write: copyFileSync on a path built from the repo root. Ambiguous or shared side effects run alone",
-      "sha256": "ee9f05b053333ba569670854bd36c19c16a01a7d15d3849662c673bf203c9608"
+      "isolation": "parallel",
+      "reason": "measured 2026-11-10: passed with every other suite overlapping at 16 and 8 workers, its verdict matching the serial run",
+      "accepted": [
+        "repo-write: copyFileSync on a path built from the repo root"
+      ],
+      "sha256": "a6ae8e1cbb5c1b5a1c852be1c55e304f8a5a790af12a9b6de7652935d463fe93"
     },
     "test-unattended-worker.js": {
       "isolation": "parallel",
-      "reason": "reviewed 2026-10-02: writes only under its own mkdtemp fixtures; any profile, config or HOME it touches is pointed into them; no git outside temp repos; no fixed port",
-      "sha256": "b84a54fa3997b1f794baa93cff9375aef545fa734f9b953bd5569f113d336890"
+      "reason": "measured 2026-11-10: passed with every other suite overlapping at 16 and 8 workers, its verdict matching the serial run",
+      "sha256": "cc69404e5d98bd0b7e38d371e6f2e9aa72c443f1107afdb28470222d222685b7"
+    },
+    "test-ungated-apps.js": {
+      "isolation": "parallel",
+      "reason": "measured 2026-11-10: passed with every other suite overlapping at 16 and 8 workers, its verdict matching the serial run",
+      "accepted": [
+        "repo-write: mkdirSync, writeFileSync on a path built from the repo root",
+        "profile: runs plugin code without overriding HOME, USERPROFILE or CLAUDE_CONFIG_DIR",
+        "npm: spawns npm"
+      ],
+      "sha256": "e59fa42ec046bc3c747d5b9e8946ff6e6133b4b1040c90b7181e8ccbc2a22a0d"
+    },
+    "test-unslop.js": {
+      "isolation": "serial",
+      "reason": "serial: its source binds a fixed port, which a worktree does not isolate",
+      "sha256": "d7e47e9dbcdbebe359db26108fb78245a4dfd973f48f32ba483cde6abc620525"
     },
     "test-untrusted-fence.js": {
-      "isolation": "serial",
-      "reason": "audit 2026-10-02: profile: runs plugin code without overriding HOME, USERPROFILE or CLAUDE_CONFIG_DIR. Ambiguous or shared side effects run alone",
+      "isolation": "parallel",
+      "reason": "measured 2026-11-10: passed with every other suite overlapping at 16 and 8 workers, its verdict matching the serial run",
+      "accepted": [
+        "profile: runs plugin code without overriding HOME, USERPROFILE or CLAUDE_CONFIG_DIR"
+      ],
       "sha256": "0bd83fec0b0050c496616a9fb24c19a2d2c808682135005727b03e866429cca1"
     },
+    "test-usage-digest.js": {
+      "isolation": "parallel",
+      "reason": "measured 2026-11-10: passed with every other suite overlapping at 16 and 8 workers, its verdict matching the serial run",
+      "accepted": [
+        "profile: a child is given process.env unchanged"
+      ],
+      "sha256": "47a4dc089de4cb3dd7288693f8dcf61ffa2e1fa8e4a812af3954c33b85dd3312"
+    },
+    "test-usage-mine.js": {
+      "isolation": "parallel",
+      "reason": "measured 2026-11-10: passed with every other suite overlapping at 16 and 8 workers, its verdict matching the serial run",
+      "accepted": [
+        "npm: spawns npm"
+      ],
+      "sha256": "3815cccd9a3ccf318c47ef58b5b6efc4d92454f1e93d41b2df68b1084366a4f6"
+    },
     "test-vacuity-exit.js": {
-      "isolation": "serial",
-      "reason": "audit 2026-10-02: nested-runner: drives find-vacuous-assertions. Ambiguous or shared side effects run alone",
+      "isolation": "parallel",
+      "reason": "measured 2026-11-10: passed with every other suite overlapping at 16 and 8 workers, its verdict matching the serial run",
+      "accepted": [
+        "nested-runner: drives find-vacuous-assertions"
+      ],
       "sha256": "ad75c398a222fc98644d9b8094350b4341d68542cbc6e036a6d39d5cc6b82dc3"
     },
     "test-validate-host-scan.js": {
@@ -918,13 +2196,46 @@
     },
     "test-watch-panels.js": {
       "isolation": "parallel",
-      "reason": "reviewed 2026-10-02: writes only under its own mkdtemp fixtures; any profile, config or HOME it touches is pointed into them; no git outside temp repos; no fixed port",
-      "sha256": "644f073d09363bbaf0ddcaabe542ed1d97dcc77007659c7c045323175bf56b73"
+      "reason": "measured 2026-11-10: passed with every other suite overlapping at 16 and 8 workers, its verdict matching the serial run",
+      "sha256": "7bf4622df5a0685482c9656ea89c197636a3d867ed09512004f34da0fceae46e"
+    },
+    "test-window-probe.js": {
+      "isolation": "parallel",
+      "reason": "measured 2026-11-10: passed with every other suite overlapping at 16 and 8 workers, its verdict matching the serial run",
+      "accepted": [
+        "profile: reads the home directory without overriding HOME or USERPROFILE",
+        "profile: runs plugin code without overriding HOME, USERPROFILE or CLAUDE_CONFIG_DIR",
+        "nested-runner: drives gate-fast"
+      ],
+      "sha256": "11dcad75a61ae919211f4e2effdf1ccbfbd14bea2d6bb396ecc3e74ac173a8d1"
     },
     "test-work-cost.js": {
-      "isolation": "serial",
-      "reason": "audit 2026-10-02: repo-write: appendFileSync on a path built from the repo root; git-write: git commit, add. Ambiguous or shared side effects run alone",
-      "sha256": "47ed71900a01c090e55d96307f0aadd5844788dd409a82be28b67501d83aca0c"
+      "isolation": "parallel",
+      "reason": "measured 2026-11-10: passed with every other suite overlapping at 16 and 8 workers, its verdict matching the serial run",
+      "accepted": [
+        "repo-write: appendFileSync on a path built from the repo root",
+        "git-write: git commit, add"
+      ],
+      "sha256": "3458f64cbee3aec68ca53e97210152ce1418f1fd33d1a6f266ed065c7a6b6ccd"
+    },
+    "test-worker-authority.js": {
+      "isolation": "parallel",
+      "reason": "measured 2026-11-10: passed with every other suite overlapping at 16 and 8 workers, its verdict matching the serial run",
+      "accepted": [
+        "git-write: git push, commit, config, add, worktree",
+        "npm: spawns npm"
+      ],
+      "sha256": "041aed703062bfcaf7721bc09206f8001c07765665916006d2ef86aeef98746d"
+    },
+    "test-worker-profiles.js": {
+      "isolation": "parallel",
+      "reason": "measured 2026-11-10: passed with every other suite overlapping at 16 and 8 workers, its verdict matching the serial run",
+      "sha256": "a3d72917b72c0737c4c929d41e60f96aeb165161f051a185f4fc9c0ffd959208"
+    },
+    "test-worker-reconciliation.js": {
+      "isolation": "parallel",
+      "reason": "measured 2026-11-10: passed with every other suite overlapping at 16 and 8 workers, its verdict matching the serial run",
+      "sha256": "a70ea9bcfefb668ee10673944605ffb65dea384038502b1d009bc8761927e69f"
     },
     "test-workflow-isolation.js": {
       "isolation": "parallel",
@@ -932,19 +2243,33 @@
       "sha256": "1c1c52f8ae2dd3b6ba2d950a714673a9e78c5876dfa14d764c1b28a9ebf341c7"
     },
     "test-workflow-liveness.js": {
-      "isolation": "serial",
-      "reason": "audit 2026-10-02: profile: runs plugin code without overriding HOME, USERPROFILE or CLAUDE_CONFIG_DIR. Ambiguous or shared side effects run alone",
+      "isolation": "parallel",
+      "reason": "measured 2026-11-10: passed with every other suite overlapping at 16 and 8 workers, its verdict matching the serial run",
+      "accepted": [
+        "profile: runs plugin code without overriding HOME, USERPROFILE or CLAUDE_CONFIG_DIR"
+      ],
       "sha256": "f8086a57fe6e8a768ed6b990231e1d8e1112ed26201159113305de361fdad9b0"
     },
     "test-workflow-run-triage.js": {
-      "isolation": "serial",
-      "reason": "audit 2026-10-02: profile: runs plugin code without overriding HOME, USERPROFILE or CLAUDE_CONFIG_DIR. Ambiguous or shared side effects run alone",
-      "sha256": "9e90089c0a76f5a18c48f29c4cd9d16e12998a88912b387ceb2a35c6031e55bc"
+      "isolation": "parallel",
+      "reason": "measured 2026-11-10: passed with every other suite overlapping at 16 and 8 workers, its verdict matching the serial run",
+      "sha256": "215a8afac881bc7eff8bb1668211b6bde019bef8ec16977e86866f458a479ed4"
     },
     "test-worktree-placement.js": {
-      "isolation": "serial",
-      "reason": "audit 2026-10-02: profile: runs plugin code without overriding HOME, USERPROFILE or CLAUDE_CONFIG_DIR. Ambiguous or shared side effects run alone",
+      "isolation": "parallel",
+      "reason": "measured 2026-11-10: passed with every other suite overlapping at 16 and 8 workers, its verdict matching the serial run",
+      "accepted": [
+        "profile: runs plugin code without overriding HOME, USERPROFILE or CLAUDE_CONFIG_DIR"
+      ],
       "sha256": "dd023c52f67ff2d26969ce3c5033e8d1e10d52b695777fbe9131cd8d0537f956"
+    },
+    "test-worktree-reap.js": {
+      "isolation": "parallel",
+      "reason": "measured 2026-11-10: passed with every other suite overlapping at 16 and 8 workers, its verdict matching the serial run",
+      "accepted": [
+        "git-write: git init, gc (a fixture repo is initialised; every call must target it)"
+      ],
+      "sha256": "4aa87c066db1ae923c007d51f75a1c7b7db870b6bb6c87cd174fe7c4a7546c90"
     }
   }
 }
