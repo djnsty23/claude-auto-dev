@@ -28,6 +28,7 @@ const fs = require('fs');
 const path = require('path');
 const { configDir } = require('./claude-paths.js');
 const capacity = require('./capacity.js');
+const { limitHolds } = require('./usage-limit-hold.js');
 
 const DAY = 86400000;
 const LONG_WAIT_MIN = 10;
@@ -257,8 +258,14 @@ function build(base, { now, days, capacityBase = path.join(base, 'locks', 'full-
     return {
         schema: 1, at: new Date(now).toISOString(), days,
         population: { runs: runs.length, reports, statedRuns, statedNone },
-        unread, ranked, queue, alarms: capacityAlarms(capacityBase, now),
+        unread, ranked, queue, alarms: capacityAlarms(capacityBase, now), ...launchHolds(base, now),
     };
+}
+
+/** { launchHolds } when a usage-limit hold is live now, else nothing: no hold prints no line and writes no field. */
+function launchHolds(base, now) {
+    const holds = limitHolds(readLedger(path.join(base, 'headless-workers.json'), []) || [], now);
+    return holds.length ? { launchHolds: holds } : {};
 }
 
 function summaryLine(r) {
@@ -323,6 +330,7 @@ function main(argv) {
             fs.appendFileSync(hist, JSON.stringify(row) + '\n');
         }
     }
+    for (const h of r.launchHolds || []) console.log(h.line);
     console.log(o.print ? printTable(r) : summaryLine(r));
     return 0;
 }
