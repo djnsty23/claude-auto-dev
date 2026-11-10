@@ -41,6 +41,14 @@ const SHA_SKIPPED = 'd'.repeat(40);
 const LONG = `<h1>Shipped</h1><p>${'real page text '.repeat(60)}</p>`;
 const page = (body, title = 'Real page') => `<!doctype html><html><head><title>${title}</title></head><body>${body}</body></html>`;
 
+let hangHits = 0;
+let otherAuthSeen = 0;
+const otherServer = http.createServer((req, res) => {
+    if (req.headers.authorization) otherAuthSeen++;
+    res.writeHead(200);
+    res.end('ok');
+});
+
 const server = http.createServer((req, res) => {
     const send = (status, body, headers = {}) => { res.writeHead(status, { 'content-type': 'text/html', ...headers }); res.end(body); };
     const base = `http://127.0.0.1:${server.address().port}`;
@@ -57,7 +65,14 @@ const server = http.createServer((req, res) => {
     case '/plain-429': return send(429, 'slow down');
     case '/checkpoint-200': return send(200, page('x', 'Vercel Security Checkpoint'));
     case '/boom': return send(500, 'boom');
-    case '/hang': return undefined;
+    case '/slow': return setTimeout(() => send(200, page(LONG)), 500) && undefined;
+    case '/hang': hangHits++; return undefined;
+    case '/version-short': return send(200, JSON.stringify({ sha: 'a' }));
+    case '/long-forbidden': return send(200, page(`${LONG}${'x '.repeat(110000)}ZZMARKER`));
+    case '/sitemap-other': return send(200, `<urlset>${[1, 2, 3, 4, 5].map((n) => `<loc>http://127.0.0.1:${otherServer.address().port}/p${n}</loc>`).join('')}</urlset>`);
+    case '/sitemap-same': return send(200, `<urlset>${[1, 2, 3, 4, 5].map((n) => `<loc>${base}/needs-token?${n}</loc>`).join('')}</urlset>`);
+    case '/needs-token': return req.headers.authorization === 'Bearer TOK' ? send(200, 'ok') : send(500, 'no token');
+    case '/sitemap-checkpoints': return send(200, `<urlset>${[1, 2, 3, 4, 5].map((n) => `<loc>${base}/checkpoint-200?${n}</loc>`).join('')}</urlset>`);
     case '/version': return send(200, JSON.stringify({ sha: SHA_GOOD }));
     case '/sitemap': return send(200, `<urlset>${[1, 2, 3, 4, 5, 6].map((n) => `<loc>${base}/ok?${n}</loc>`).join('')}</urlset>`);
     case '/sitemap-redirect': return send(200, `<urlset>${[1, 2, 3, 4, 5].map((n) => `<loc>${base}/to-login?${n}</loc>`).join('')}</urlset>`);
@@ -103,6 +118,18 @@ fs.writeFileSync(ROUTES, JSON.stringify({
     'repos/o/app/pulls?state=closed&per_page=30&head=o%3Aabandoned': [{ merged_at: null }],
     'repos/o/denied/commits/HEAD': 401,
     'repos/o/notag/contents/VERSION': { content: b64('8.5.0\n') },
+    'repos/o/failedtop/deployments?environment=Production&per_page=30': [{ id: 2, sha: SHA_OLD }, { id: 1, sha: SHA_GOOD }],
+    'repos/o/failedtop/deployments/2/statuses?per_page=1': [{ state: 'failure' }],
+    'repos/o/failedtop/deployments/1/statuses?per_page=1': [{ state: 'success' }],
+    [`repos/o/failedtop/compare/${SHA_GOOD}...${SHA_SKIPPED}`]: { status: 'ahead', commits: [{ sha: SHA_SKIPPED }] },
+    [`repos/o/failedtop/compare/${SHA_OLD}...${SHA_SKIPPED}`]: { status: 'ahead', commits: [{ sha: SHA_SKIPPED }] },
+    [`repos/o/failedtop/commits/${SHA_SKIPPED}/status`]: { statuses: [{ context: 'Vercel', state: 'success', description: 'Canceled by Ignored Build Step' }] },
+    'repos/o/mixed/deployments?environment=Production&per_page=30': [{ id: 5, sha: SHA_GOOD }],
+    'repos/o/mixed/deployments/5/statuses?per_page=1': [{ state: 'success' }],
+    [`repos/o/mixed/compare/${SHA_GOOD}...${SHA_WRONG}`]: { status: 'ahead', commits: [{ sha: SHA_WRONG }] },
+    [`repos/o/mixed/commits/${SHA_WRONG}/status`]: { statuses: [{ context: 'Vercel', state: 'failure', description: 'Build failed' }, { context: 'ci/e2e', state: 'success', description: 'Canceled by Ignored Build Step' }] },
+    [`repos/o/mixed/compare/${SHA_GOOD}...${SHA_OLD}`]: { status: 'ahead', commits: [{ sha: SHA_OLD }] },
+    [`repos/o/mixed/commits/${SHA_OLD}/status`]: { statuses: [{ context: 'Vercel', state: 'failure', description: 'Ignored Build Step crashed' }] },
 }));
 
 // A fake playwright driver. It fetches the real local page, and treats the page's own script text as what ran.
@@ -118,6 +145,7 @@ function newPage() {
         on(name, fn) { handlers[name] = fn; },
         mainFrame() { return frame; },
         async goto(url) {
+            if (url.includes(':1/')) throw new Error('page.goto: net::ERR_UNSAFE_PORT at ' + url + '\\nCall log: more');
             const res = await fetch(url);
             const html = await res.text();
             state = { title: (/<title>([^<]*)/.exec(html) || [])[1] || '', html, text: html.replace(/<script[\\\\s\\\\S]*?<\\/script>|<[^>]+>/g, ''), url };
@@ -136,11 +164,15 @@ function newPage() {
 }
 module.exports = { chromium: {
     async launchServer(options) {
-        fs.appendFileSync(${JSON.stringify(LAUNCH_LOG)}, JSON.stringify(options) + '\\n');
+        fs.appendFileSync(${JSON.stringify(LAUNCH_LOG)}, JSON.stringify({ event: 'launch', ...options, pwdebug: process.env.PWDEBUG || null }) + '\\n');
         if (process.env.FAKE_DRIVER_NO_START) throw new Error('browser failed to start');
-        return { wsEndpoint: () => 'ws://fake', kill: async () => {} };
+        if (process.env.FAKE_DRIVER_SLOW_LAUNCH) await new Promise((r) => setTimeout(r, Number(process.env.FAKE_DRIVER_SLOW_LAUNCH)));
+        return { wsEndpoint: () => 'ws://fake', kill: async () => { fs.appendFileSync(${JSON.stringify(LAUNCH_LOG)}, JSON.stringify({ event: 'kill' }) + '\\n'); } };
     },
-    async connect() { return { newContext: async () => ({ newPage: async () => newPage(), close: async () => {} }), close: async () => {} }; },
+    async connect() {
+        if (process.env.FAKE_DRIVER_NO_CONNECT) throw new Error('connect failed');
+        return { newContext: () => (process.env.FAKE_DRIVER_HANG_CONTEXT ? new Promise(() => {}) : Promise.resolve({ newPage: async () => newPage(), close: async () => {} })), close: async () => {} };
+    },
 } };
 `);
 
@@ -179,6 +211,7 @@ async function single(label, c, expectedStatus, expectedExit, valuePattern, opts
 
 async function main() {
     await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+    await new Promise((resolve) => otherServer.listen(0, '127.0.0.1', resolve));
     const u = (p) => `http://127.0.0.1:${server.address().port}${p}`;
     const appCheck = { repo: 'o/app' };
 
@@ -245,8 +278,9 @@ async function main() {
 
     // Section E: timeouts, attempts and the run deadline.
     {
-        const r = await single('per-probe timeout is INDETERMINATE', { type: 'http', url: u('/hang'), timeoutMs: 300 }, 'INDETERMINATE', 2, /timeout after 300ms/);
-        check('a timed-out probe ran at most two attempts', r.ms < 8000, `${r.ms}ms`);
+        hangHits = 0;
+        await single('per-probe timeout is INDETERMINATE', { type: 'http', url: u('/hang'), timeoutMs: 300 }, 'INDETERMINATE', 2, /timeout after 300ms/);
+        check('a timed-out probe reached the server exactly twice', hangHits === 2, `${hangHits} hits`);
         const file = path.join(root, 'attempts.json');
         const a = await run({ checks: [{ id: 'X1', type: 'http', url: u('/hang'), timeoutMs: 200 }] }, { args: ['--out', file] });
         const receipt = JSON.parse(fs.readFileSync(file, 'utf8'));
@@ -322,7 +356,7 @@ async function main() {
             fs.rmSync(LAUNCH_LOG, { force: true });
             await run({ headless: false, checks: [{ id: 'X1', type: 'browser', headless: false, url: u('/ok'), widths: [390], ...browserFast }] });
             const launches = fs.readFileSync(LAUNCH_LOG, 'utf8').trim().split('\n').map((l) => JSON.parse(l));
-            check('config cannot turn headless off', launches.length === 1 && launches.every((o) => o.headless === true), JSON.stringify(launches));
+            check('config cannot turn headless off', launches.filter((o) => o.event === 'launch').length === 1 && launches.filter((o) => o.event === 'launch').every((o) => o.headless === true), JSON.stringify(launches));
             await single('a browser that will not start is INDETERMINATE', { type: 'browser', url: u('/ok'), widths: [390] }, 'INDETERMINATE', 2, /browser would not start/, { env: { FAKE_DRIVER_NO_START: '1' } });
         }
         const r = await run({ checks: [{ id: 'X1', type: 'browser', url: u('/ok'), widths: [390], ...browserFast }] });
@@ -345,7 +379,7 @@ async function main() {
         const openOnly = await run({ checks: [{ id: 'P', type: 'http', url: u('/ok') }, { id: 'I', type: 'http', url: u('/challenge') }] });
         check('one INDETERMINATE among passes exits 2', openOnly.status === 2, openOnly.stdout);
         const receiptFile = path.join(root, 'receipt.json');
-        const ok = await run({ checks: [{ id: 'Z', type: 'http', url: u('/ok') }, { id: 'A', type: 'http', url: u('/ok') }] }, { args: ['--out', receiptFile] });
+        const ok = await run({ checks: [{ id: 'Z', type: 'http', url: u('/slow') }, { id: 'A', type: 'http', url: u('/ok') }] }, { args: ['--out', receiptFile] });
         const receipt = JSON.parse(fs.readFileSync(receiptFile, 'utf8'));
         check('all green exits 0', ok.status === 0, ok.stdout);
         check('lines print in config order', ok.stdout.indexOf('CHECK Z:') < ok.stdout.indexOf('CHECK A:') && ok.stdout.indexOf('CHECK Z:') >= 0, ok.stdout);
@@ -354,6 +388,61 @@ async function main() {
         fs.writeFileSync(receiptFile, '{"stale":true}');
         const refused = await run({ checks: [] }, { args: ['--out', receiptFile] });
         check('a refused run removes an older receipt', refused.status === 2 && !fs.existsSync(receiptFile), String(fs.existsSync(receiptFile)));
+    }
+
+    // Section L: each defect the escalation review reproduced, pinned to its own input.
+    await single('skipped-build walk starts from the newest live deployment', { type: 'deployed-sha', repo: 'o/failedtop', sha: SHA_SKIPPED }, 'PASS', 0, /Production is at aaaaaaaa; the 1 newer/);
+    await single('a failed deploy with a skipped status in another context fails', { type: 'deployed-sha', repo: 'o/mixed', sha: SHA_WRONG }, 'FAIL', 1, /Production is at aaaaaaaa, expected cccccccc/);
+    await single('a failed deploy mentioning the skip text fails', { type: 'deployed-sha', repo: 'o/mixed', sha: SHA_OLD }, 'FAIL', 1, /Production is at aaaaaaaa, expected bbbbbbbb/);
+    {
+        const bad = await run({ checks: [{ id: 'X1', type: 'plugin-version', pluginRoot: root, minVersion: 'v9.0.0' }] });
+        check('a malformed minVersion is refused', bad.status === 2 && /minVersion must be N\.N\.N/.test(bad.stderr), bad.stderr);
+    }
+    await single('browser sitemap treats challenge pages as unreadable', { type: 'sitemap', via: 'browser', url: u('/sitemap-checkpoints'), settleMs: 100 }, 'INDETERMINATE', 2, /5 of 5 sampled could not be read/);
+    await single('browser sitemap treats mitigated 429s as unreadable', { type: 'sitemap', via: 'browser', url: u('/sitemap-challenged'), settleMs: 100 }, 'INDETERMINATE', 2, /5 of 5 sampled could not be read/);
+    {
+        const r = await run({ checks: [{ id: 'X1', type: 'browser', url: 'http://127.0.0.1:1/x?token=SECRETVALUE123', widths: [390], ...browserFast }] });
+        check('a driver error does not leak the query string', statusOf(r, 'X1') === 'INDETERMINATE' && !/SECRETVALUE123/.test(r.stdout) && /127\.0\.0\.1:1\/x/.test(r.stdout), r.stdout);
+    }
+    await single('a version endpoint answering a stub is not a sha', { type: 'deployed-sha', url: u('/version-short'), pattern: '"sha":"([0-9a-f]+)"', sha: SHA_GOOD }, 'FAIL', 1, /not a commit sha/);
+    await single('forbidden text is found past 200000 characters', { type: 'browser', url: u('/long-forbidden'), widths: [390], forbiddenText: ['ZZMARKER'], maxOverflowPx: 100000, ...browserFast }, 'FAIL', 1, /forbidden text/);
+    {
+        const r = await run({ checks: [{ id: 'X1', type: 'http', url: u('/ok') }] }, { args: ['--out', path.join(root, 'no-such-dir', 'r.json')] });
+        check('a failed receipt write prints no verdict line', r.status === 2 && !/POPULATION/.test(r.stdout) && lineOf(r, 'X1') !== '', `${r.status} ${r.stdout}`);
+        otherAuthSeen = 0;
+        const cross = await run({ checks: [{ id: 'X1', type: 'sitemap', url: u('/sitemap-other'), headers: { authorization: 'Bearer TOK' } }] });
+        check('check headers do not reach another origin', cross.status === 0 && otherAuthSeen === 0, `${otherAuthSeen} leaks ${cross.stdout}`);
+        const same = await run({ checks: [{ id: 'X1', type: 'sitemap', url: u('/sitemap-same'), headers: { authorization: 'Bearer TOK' } }] });
+        check('check headers still reach the same origin', same.status === 0, same.stdout);
+        const marker = path.join(root, 'cwd-ran.txt');
+        const cwd = path.join(root, 'hostile-cwd');
+        fs.mkdirSync(cwd);
+        fs.writeFileSync(path.join(cwd, 'index.js'), `require('fs').writeFileSync(${JSON.stringify(marker)}, 'ran');`);
+        const file = path.join(root, 'hostile.json');
+        fs.writeFileSync(file, JSON.stringify({ checks: [{ id: 'X1', type: 'browser', url: u('/ok'), widths: [390] }] }));
+        const hostile = await new Promise((resolve) => {
+            const child = spawn(process.execPath, [SUBJECT, 'run', '--config', file], { cwd, windowsHide: true });
+            child.on('close', (status) => resolve({ status }));
+        });
+        check('the working directory entry point is never executed', hostile.status === 2 && !fs.existsSync(marker), String(fs.existsSync(marker)));
+    }
+    if (!REAL_PLAYWRIGHT) {
+        const fake = (extra) => ({ type: 'browser', url: u('/ok'), widths: [390], ...browserFast, ...extra });
+        const events = () => fs.readFileSync(LAUNCH_LOG, 'utf8').trim().split('\n').map((l) => JSON.parse(l));
+        fs.rmSync(LAUNCH_LOG, { force: true });
+        const noConnect = await run({ checks: [{ id: 'X1', ...fake() }] }, { env: { FAKE_DRIVER_NO_CONNECT: '1' } });
+        const connectEvents = events();
+        check('a failed connect kills every launched server', noConnect.status === 2 && connectEvents.filter((e) => e.event === 'launch').length === 2 && connectEvents.filter((e) => e.event === 'kill').length === 2, JSON.stringify(connectEvents));
+        fs.rmSync(LAUNCH_LOG, { force: true });
+        const late = await run({ checks: [{ id: 'X1', ...fake() }] }, { args: ['--deadline-ms', '300'], env: { FAKE_DRIVER_SLOW_LAUNCH: '1500' } });
+        check('a launch finishing after the deadline is killed', late.status === 2 && events().some((e) => e.event === 'kill'), JSON.stringify(events()));
+        const prompt = await run({ checks: [{ id: 'X1', ...fake() }] });
+        check('a browser run exits without waiting on idle timers', prompt.status === 0 && prompt.ms < 4500, `${prompt.ms}ms`);
+        const hung = await run({ checks: [{ id: 'X1', ...fake({ timeoutMs: 300 }) }] }, { args: ['--deadline-ms', '20000'], env: { FAKE_DRIVER_HANG_CONTEXT: '1' } });
+        check('the probe timeout covers a hung newContext', hung.status === 2 && /timed out after 300ms/.test(lineOf(hung, 'X1')) && hung.ms < 8000, `${hung.ms}ms ${hung.stdout}`);
+        fs.rmSync(LAUNCH_LOG, { force: true });
+        await run({ checks: [{ id: 'X1', ...fake() }] }, { env: { PWDEBUG: '1' } });
+        check('PWDEBUG never reaches the browser launch', events().every((e) => e.event !== 'launch' || (e.pwdebug === null && e.headless === true)), JSON.stringify(events()));
     }
 
     // Section K: the small pure pieces, with literals.
@@ -366,9 +455,18 @@ async function main() {
 
     server.closeAllConnections();
     server.close();
+    otherServer.closeAllConnections();
+    otherServer.close();
     fs.rmSync(root, { recursive: true, force: true });
     console.log(`\n${pass} passed, ${fail} failed${REAL_PLAYWRIGHT ? ' (browser: real Chromium)' : ' (browser: fake driver)'}`);
     if (fail) { console.log(`failed: ${failures.join('; ')}`); process.exitCode = 1; }
 }
 
-main().catch((e) => { console.error(e); process.exitCode = 1; server.close(); });
+main().catch((e) => {
+    console.error(e);
+    process.exitCode = 1;
+    server.closeAllConnections();
+    server.close();
+    otherServer.closeAllConnections();
+    otherServer.close();
+});

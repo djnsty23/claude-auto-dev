@@ -81,7 +81,7 @@ const USER_AGENT = 'autodev-verify-shipped';
 const ID_RE = /^[A-Za-z0-9_.-]+$/;
 const SHA_RE = /^[0-9a-f]{7,40}$/i;
 const REPO_RE = /^[\w.-]+\/[\w.-]+$/;
-const IGNORED_BUILD_RE = /ignored build step|build.*(skipped|ignored)/i;
+const IGNORED_BUILD_RE = /ignored build step/i;
 const CHALLENGE_TITLE_RE = /^\s*(vercel security checkpoint|just a moment\b|attention required)/i;
 const BROWSER_TYPES = new Set(['browser']);
 
@@ -106,6 +106,20 @@ const indeterminate = (value, extra) => result(INDET, value, extra);
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 const shortSha = (sha) => String(sha || '').slice(0, 8);
 const shaMatches = (a, b) => Boolean(a && b) && (a.toLowerCase().startsWith(b.toLowerCase()) || b.toLowerCase().startsWith(a.toLowerCase()));
+
+/** Races a promise against a limit and clears the timer, so a settled race keeps nothing alive. */
+function timed(promise, ms) {
+    let timer;
+    const limit = new Promise((resolve) => { timer = setTimeout(resolve, ms); });
+    return Promise.race([promise, limit]).finally(() => clearTimeout(timer));
+}
+
+/** A driver's error can quote the URL it failed on: first line only, URLs reduced to origin and path. */
+function scrubError(message) {
+    // eslint-disable-next-line no-control-regex
+    const plain = String(message || '').replace(/\u001b\[[0-9;]*m/g, '').split('\n')[0];
+    return cleanValue(plain.replace(/https?:\/\/[^\s"'<>]+/g, (url) => safeUrl(url))).slice(0, 160);
+}
 
 /** A printed value stays on one line and cannot forge the line's own separator. */
 function cleanValue(value) {
@@ -165,6 +179,7 @@ function validateTypeFields(check) {
     }
     if (check.type === 'pr-merged' && !check.number && !check.head) throw new Refusal(`check ${check.id}: pr-merged needs number or head`);
     if (check.type === 'plugin-version' && !check.minVersion && !check.versionRepo) throw new Refusal(`check ${check.id}: plugin-version needs minVersion or versionRepo`);
+    if (check.minVersion !== undefined && !/^\d+\.\d+\.\d+$/.test(check.minVersion)) throw new Refusal(`check ${check.id}: minVersion must be N.N.N`);
     if (check.sha !== undefined && !SHA_RE.test(check.sha)) throw new Refusal(`check ${check.id}: sha is not a commit sha`);
     for (const field of ['bodyPattern', 'bodyAbsent', 'redirect', 'finalUrlPattern']) if (check[field]) compileRegex(check, field, check[field]);
     for (const field of ['requiredText', 'forbiddenText', 'ignoreConsole']) {
@@ -308,7 +323,8 @@ async function checkSitemapHttp(run, check) {
     const locs = parseLocs(res.text);
     const sample = locs.slice(0, check.sample === undefined ? 5 : check.sample);
     const statuses = await Promise.all(sample.map(async (url) => {
-        const r = await httpProbe(run, { headers: check.headers }, url);
+        const sameOrigin = new URL(url).origin === new URL(check.url).origin;
+        const r = await httpProbe(run, { headers: sameOrigin ? check.headers : undefined }, url);
         if (r.error || challengeReason(r.status, (n) => r.headers.get(n), r.text)) return 'unreadable';
         return r.status;
     }));
@@ -321,14 +337,21 @@ async function checkSitemapBrowser(run, check) {
         const state = await settle(page, check.settleMs === undefined ? 1000 : check.settleMs);
         if (state.challenged) return indeterminate('challenge page in the browser', { noRetry: true });
         const data = await page.evaluate(async ({ url, sample, perFetchMs }) => {
-            const read = async (u) => { const r = await fetch(u, { signal: AbortSignal.timeout(perFetchMs) }); return { status: r.status, text: await r.text() }; };
+            const read = async (u) => {
+                const r = await fetch(u, { signal: AbortSignal.timeout(perFetchMs) });
+                const text = await r.text();
+                return { status: r.status, mitigated: r.headers.get('x-vercel-mitigated') || r.headers.get('cf-mitigated'), text };
+            };
             const map = await read(url);
             const locs = [...map.text.matchAll(/<loc>\s*([^<\s]+)\s*<\/loc>/gi)].map((m) => m[1]);
-            const statuses = await Promise.all(locs.slice(0, sample).map((u) => read(u).then((r) => r.status, () => 'unreadable')));
-            return { status: map.status, count: locs.length, statuses };
+            const samples = await Promise.all(locs.slice(0, sample).map((u) => read(u).then((r) => ({ status: r.status, mitigated: r.mitigated, head: r.text.slice(0, 8192) }), () => null)));
+            return { status: map.status, mitigated: map.mitigated, head: map.text.slice(0, 8192), count: locs.length, samples };
         }, { url: check.url, sample: check.sample === undefined ? 5 : check.sample, perFetchMs: run.timeoutMs });
+        const reasonFor = (r) => challengeReason(r.status, (name) => (name === 'x-vercel-mitigated' ? r.mitigated : null), r.head);
+        const blocked = reasonFor(data);
+        if (blocked) return indeterminate(blocked, { noRetry: true });
         if (data.status !== 200) return failed(`sitemap HTTP ${data.status} in the browser`);
-        return scoreSitemap(check, data.count, data.statuses);
+        return scoreSitemap(check, data.count, data.samples.map((s) => (!s || reasonFor(s) ? 'unreadable' : s.status)));
     });
 }
 
@@ -360,7 +383,9 @@ async function deploymentState(run, repo, id) {
 }
 
 /** True when every commit between production and the expected sha skipped its build on purpose. */
-async function allSkippedSince(run, repo, productionSha, expected) {
+async function allSkippedSince(run, check, productionSha, expected) {
+    const repo = check.repo;
+    const context = String(check.context || 'Vercel').toLowerCase();
     const compare = await ghJson(run, `repos/${repo}/compare/${productionSha}...${expected}`);
     if (!compare.ok) return { error: compare.unavailable || 'could not compare production with the expected sha' };
     if (compare.data.status !== 'ahead') return { skipped: false };
@@ -369,9 +394,20 @@ async function allSkippedSince(run, repo, productionSha, expected) {
     for (const commit of commits) {
         const combined = await ghJson(run, `repos/${repo}/commits/${commit.sha}/status`);
         if (!combined.ok) return { error: combined.unavailable || 'could not read a commit status' };
-        if (!(combined.data.statuses || []).some((s) => IGNORED_BUILD_RE.test(s.description || ''))) return { skipped: false };
+        const statuses = (combined.data.statuses || []).filter((s) => String(s.context).toLowerCase().includes(context));
+        if (!statuses.length || !statuses.every((s) => s.state === 'success' && IGNORED_BUILD_RE.test(s.description || ''))) return { skipped: false };
     }
     return { skipped: true, count: commits.length };
+}
+
+/** The newest deployment that actually went live. A failed or building one never held production. */
+async function newestLive(run, repo, environment, deployments) {
+    for (const deployment of deployments.slice(0, MAX_SKIPPED_WALK)) {
+        const state = await deploymentState(run, repo, deployment.id);
+        if (state.error) return { error: state.error };
+        if (state.state === 'success') return { deployment };
+    }
+    return { error: `no successful "${environment}" deployment among the newest ${MAX_SKIPPED_WALK}` };
 }
 
 async function checkDeployedShaUrl(run, check, expected) {
@@ -381,6 +417,7 @@ async function checkDeployedShaUrl(run, check, expected) {
     if (res.status !== 200) return failed(`version endpoint HTTP ${res.status}`);
     const match = new RegExp(check.pattern, 'i').exec(res.text);
     if (!match || !match[1]) return failed(`no sha matching /${check.pattern}/ in the response`);
+    if (!SHA_RE.test(match[1])) return failed('the version endpoint answered something that is not a commit sha');
     return shaMatches(match[1], expected) ? pass(`deployed ${shortSha(match[1])} matches`) : failed(`deployed ${shortSha(match[1])}, expected ${shortSha(expected)}`);
 }
 
@@ -394,11 +431,13 @@ async function checkDeployedSha(run, check) {
     if (!Array.isArray(list.data) || !list.data.length) return indeterminate(`no "${environment}" deployments recorded for ${check.repo}`);
     const match = list.data.find((d) => shaMatches(d.sha, expected.sha));
     if (match) return scoreDeployment(run, check, environment, match, expected.sha);
-    const newest = list.data[0];
-    const walk = await allSkippedSince(run, check.repo, newest.sha, expected.sha);
+    const live = await newestLive(run, check.repo, environment, list.data);
+    if (live.error) return indeterminate(live.error);
+    const liveSha = live.deployment.sha;
+    const walk = await allSkippedSince(run, check, liveSha, expected.sha);
     if (walk.error) return indeterminate(walk.error);
-    if (walk.skipped) return pass(`${environment} is at ${shortSha(newest.sha)}; the ${walk.count} newer commit(s) up to ${shortSha(expected.sha)} skipped their build`);
-    return failed(`${environment} is at ${shortSha(newest.sha)}, expected ${shortSha(expected.sha)}`);
+    if (walk.skipped) return pass(`${environment} is at ${shortSha(liveSha)}; the ${walk.count} newer commit(s) up to ${shortSha(expected.sha)} skipped their build`);
+    return failed(`${environment} is at ${shortSha(liveSha)}, expected ${shortSha(expected.sha)}`);
 }
 
 async function scoreDeployment(run, check, environment, deployment, expected) {
@@ -461,26 +500,43 @@ async function checkPrMerged(run, check) {
 }
 
 function loadBrowserDriver(run) {
-    const roots = [run.playwright, process.cwd()].filter(Boolean);
-    for (const root of roots) {
+    const usable = (driver) => (driver && driver.chromium ? driver : null);
+    for (const root of [run.playwright, process.cwd()].filter(Boolean)) {
         for (const name of ['playwright', 'playwright-core']) {
-            try { return require(require.resolve(name, { paths: [root] })); } catch { /* try the next location */ }
+            try { return usable(require(require.resolve(name, { paths: [root] }))); } catch { /* try the next location */ }
         }
-        try { return require(path.resolve(root)); } catch { /* try the next location */ }
+    }
+    // A bare path is loaded only when it was named explicitly: requiring the cwd would run its entry point.
+    if (run.playwright) {
+        try { return usable(require(path.resolve(run.playwright))); } catch { /* reported as no driver */ }
     }
     return null;
+}
+
+async function killBrowserServer(run) {
+    const server = run.browserServer;
+    run.browserServer = null;
+    if (server) await timed(Promise.resolve().then(() => server.kill()).catch(() => {}), 5000);
 }
 
 /** The shared headless browser, started once. Rejected starts are forgotten so the second attempt can retry. */
 function browserFor(run) {
     if (run.browser) return run.browser;
     run.browser = (async () => {
+        await killBrowserServer(run);
         const driver = loadBrowserDriver(run);
-        if (!driver || !driver.chromium) throw new Error('no playwright resolves; set "playwright" in the config or pass --playwright');
-        const server = await driver.chromium.launchServer({ headless: true, timeout: BROWSER_TIMEOUT_MS });
-        run.browserServer = server;
-        return driver.chromium.connect(server.wsEndpoint(), { timeout: BROWSER_TIMEOUT_MS });
-    })().catch((error) => { run.browser = null; throw error; });
+        if (!driver) throw new Error('no playwright resolves; set "playwright" in the config or pass --playwright');
+        // Playwright's inspector mode turns headless off, so it must not reach this launch.
+        delete process.env.PWDEBUG;
+        const timeout = Math.min(BROWSER_TIMEOUT_MS, Math.max(1000, run.deadlineAt - Date.now()));
+        run.browserServer = await driver.chromium.launchServer({ headless: true, timeout });
+        if (run.closing) throw new Error('run ended during browser start');
+        return driver.chromium.connect(run.browserServer.wsEndpoint(), { timeout });
+    })().catch(async (error) => {
+        run.browser = null;
+        await killBrowserServer(run);
+        throw error;
+    });
     return run.browser;
 }
 
@@ -500,19 +556,22 @@ async function settle(page, settleMs) {
 /** Runs body against a fresh page in a fresh context, so no cookie survives between probes. */
 async function withPage(run, check, height, body, width) {
     let browser;
-    try { browser = await browserFor(run); } catch (e) { return indeterminate(`browser would not start: ${cleanValue(e.message).slice(0, 160)}`); }
+    try { browser = await browserFor(run); } catch (e) { return indeterminate(`browser would not start: ${scrubError(e.message)}`); }
     let context;
     const probe = probeSignal(run, check.timeoutMs || BROWSER_TIMEOUT_MS);
     try {
-        context = await browser.newContext({ viewport: { width: width || 1280, height } });
-        const page = await context.newPage();
         const aborted = new Promise((resolve) => probe.signal.addEventListener('abort', () => resolve(indeterminate(`browser probe timed out after ${probe.remaining}ms`)), { once: true }));
-        return await Promise.race([body({ page, timeoutMs: probe.remaining }), aborted]);
+        const work = (async () => {
+            context = await browser.newContext({ viewport: { width: width || 1280, height } });
+            const page = await context.newPage();
+            return body({ page, timeoutMs: probe.remaining });
+        })();
+        return await Promise.race([work, aborted]);
     } catch (e) {
-        return indeterminate(`browser probe failed: ${cleanValue(e.message).slice(0, 160)}`);
+        return indeterminate(`browser probe failed: ${scrubError(e.message)}`);
     } finally {
         probe.dispose();
-        if (context) await Promise.race([context.close().catch(() => {}), sleep(5000)]);
+        if (context) await timed(context.close().catch(() => {}), 5000);
     }
 }
 
@@ -553,7 +612,7 @@ async function browserWidth(run, check, width) {
         if (status !== null && status >= 400) return failed(`width ${width}: HTTP ${status}`);
         const metrics = await page.evaluate((selector) => ({
             url: location.href,
-            text: document.body.innerText.slice(0, 200000),
+            text: document.body.innerText,
             textLen: document.body.innerText.length,
             h1: document.querySelectorAll('h1').length,
             overflowPx: document.documentElement.scrollWidth - window.innerWidth,
@@ -600,7 +659,7 @@ async function runCheck(run, check) {
     while (attempts < MAX_ATTEMPTS) {
         if (run.deadline.signal.aborted) { outcome = indeterminate('run deadline reached before this check finished'); break; }
         attempts++;
-        const attempt = Promise.resolve().then(() => HANDLERS[check.type](run, check)).catch((e) => indeterminate(`probe error: ${cleanValue(e.message).slice(0, 160)}`));
+        const attempt = Promise.resolve().then(() => HANDLERS[check.type](run, check)).catch((e) => indeterminate(`probe error: ${scrubError(e.message)}`));
         outcome = await Promise.race([attempt, deadlineHit.then(() => indeterminate('run deadline reached before this check finished'))]);
         if (outcome.status !== INDET || outcome.noRetry) break;
         if (attempts < MAX_ATTEMPTS) await Promise.race([sleep(1000), deadlineHit]);
@@ -622,10 +681,12 @@ function needsBrowser(check) {
 }
 
 async function shutdownBrowser(run) {
-    if (!run.browser) return;
-    const browser = await Promise.race([run.browser.catch(() => null), sleep(5000)]);
-    if (browser) await Promise.race([browser.close().catch(() => {}), sleep(5000)]);
-    if (run.browserServer) await Promise.race([Promise.resolve(run.browserServer.kill()).catch(() => {}), sleep(5000)]);
+    run.closing = true;
+    if (run.browser) {
+        const browser = await timed(run.browser.catch(() => null), 5000);
+        if (browser) await timed(browser.close().catch(() => {}), 5000);
+    }
+    await killBrowserServer(run);
 }
 
 function exitCodeFor(counts) {
@@ -710,6 +771,7 @@ async function execute(options) {
         heads: new Map(),
         browser: null,
         browserServer: null,
+        closing: false,
     };
     const startedAt = new Date();
     const results = new Array(population.length);
@@ -733,7 +795,7 @@ async function execute(options) {
     for (const r of results) counts[r.status]++;
     const exit = exitCodeFor(counts);
     const durationMs = finishedAt - startedAt;
-    process.stdout.write(`POPULATION ${counts.total} | PASS ${counts[PASS]} FAIL ${counts[FAIL]} INDETERMINATE ${counts[INDET]} | ${durationMs}ms | exit ${exit}\n`);
+    // The receipt goes first: a failed write must not follow a printed verdict it contradicts.
     if (options.out) {
         writeReceipt(options.out, {
             tool: 'verify-shipped', schema: 1, repo: run.repo, sha: run.sha,
@@ -742,6 +804,7 @@ async function execute(options) {
             counts: { pass: counts[PASS], fail: counts[FAIL], indeterminate: counts[INDET] }, exit, results,
         });
     }
+    process.stdout.write(`POPULATION ${counts.total} | PASS ${counts[PASS]} FAIL ${counts[FAIL]} INDETERMINATE ${counts[INDET]} | ${durationMs}ms | exit ${exit}\n`);
     return exit;
 }
 
