@@ -20,6 +20,8 @@
 // node:sqlite is built in on Node 22+ and loads without a flag on this project's
 // runtime, so no extra flags are passed to children. If a future Node build
 // required `--experimental-sqlite`, add it to CHILD_FLAGS below.
+// --canary-only=<suite> runs one suite for check-suites-can-fail.js and never
+// exits 0: see CANARY_ONLY below.
 // Run: node tooling/test-all.js [--serial] [--no-receipt]   (or: npm test)
 
 'use strict';
@@ -66,10 +68,23 @@ const suiteEnv = () => {
 };
 
 const argv = process.argv.slice(2);
+// ONE SUITE, FOR THE RUNNER CANARY AND NOTHING ELSE. check-suites-can-fail.js
+// proves this runner reports a failing suite. `[measured 2026-11-10]` proving it
+// by running all 301 suites a second time cost over 67 minutes of a release gate.
+//
+// It is an argument and never an environment variable, so a shell or a parent
+// process cannot leave it on: `npm test` has a fixed argv. It names one suite
+// that must exist, or nothing runs and the exit is 2. It publishes no receipt
+// and leaves the previous one alone. And A PARTIAL RUN NEVER EXITS 0, because one
+// suite passing says nothing about the rest: left in a gate script it would stop
+// the && chain at step 1.
+const CANARY_ONLY = '--canary-only=';
 const USAGE = 'usage: node tooling/test-all.js [--serial] [--no-receipt]\n'
   + 'Runs every tooling/test-*.js suite, then validate.js, and checks the run left the tree alone.\n'
   + '--serial      ignore tooling/test-all-pool.js and run one suite at a time\n'
   + '--no-receipt  collect no coverage and publish no receipt (an inherited NODE_V8_COVERAGE is kept)\n'
+  + '--canary-only=<suite>  the check:suites runner canary: run that one suite (test-foo, no .js) and validate,\n'
+  + '              publish no receipt, and exit 1 if anything failed, otherwise 2. It never exits 0\n'
   + 'AUTODEV_TEST_SUITE_TIMEOUT_MS: per-suite deadline, default 600000 ms (1000 to 3600000)\n'
   + 'Exit 0 all passed, 1 anything failed, 2 nothing failed but something gave no verdict.';
 
@@ -298,8 +313,11 @@ async function main() {
     return 2;
   }
   if (argv.includes('--help')) { console.log(USAGE); return 0; }
-  const unknown = argv.filter((a) => !['--serial', '--no-receipt'].includes(a));
+  const unknown = argv.filter((a) => !['--serial', '--no-receipt'].includes(a) && !a.startsWith(CANARY_ONLY));
   if (unknown.length) { console.error('unknown argument(s): ' + unknown.join(' ') + '\n' + USAGE); return 2; }
+  const canaryArgs = argv.filter((a) => a.startsWith(CANARY_ONLY));
+  if (canaryArgs.length > 1) { console.error(`${CANARY_ONLY.slice(0, -1)} names one suite, and it was given ${canaryArgs.length} times. No suite ran.`); return 2; }
+  const canaryLabel = canaryArgs.length ? canaryArgs[0].slice(CANARY_ONLY.length) : null;
 
   const suites = receipts.discoverSuites(scriptsDir);
   if (suites.length === 0) {
@@ -308,12 +326,17 @@ async function main() {
   }
   if (sweepInFlight()) return 2;
 
-  const items = suites.map((f) => ({ label: f.replace(/\.js$/, ''), args: [...CHILD_FLAGS, path.join(scriptsDir, f)] }));
+  const discovered = suites.map((f) => ({ label: f.replace(/\.js$/, ''), args: [...CHILD_FLAGS, path.join(scriptsDir, f)] }));
+  const items = canaryLabel === null ? discovered : discovered.filter((i) => i.label === canaryLabel);
+  if (canaryLabel !== null && items.length !== 1) {
+    console.error(`${CANARY_ONLY}${canaryLabel} matched ${items.length} of ${discovered.length} suites. No suite ran.`);
+    return 2;
+  }
   const expected = items.map((i) => i.label).concat('validate');
 
   const treeBefore = receipts.treeIdentity(repoRoot);
   let run = null;
-  if (!argv.includes('--no-receipt')) {
+  if (!argv.includes('--no-receipt') && canaryLabel === null) {
     try {
       run = receipts.beginRun(repoRoot);
     } catch (e) {
@@ -435,7 +458,12 @@ async function main() {
     }
   }
 
-  return failed ? 1 : indeterminate ? 2 : 0;
+  const code = failed ? 1 : indeterminate ? 2 : 0;
+  if (canaryLabel !== null) {
+    console.log(`\nPARTIAL RUN: ${CANARY_ONLY}${canaryLabel} ran 1 of ${discovered.length} suites, so this is no verdict on the population.`);
+    if (code === 0) return 2;
+  }
+  return code;
 }
 
 const strip = (t) => ({ head: t.head, tree: t.tree, statusHash: t.statusHash });

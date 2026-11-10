@@ -259,6 +259,47 @@ try {
             leaked.length === 0, 'printed: ' + leaked.join(', '));
     }
 
+    // ---- RUNNER CANARY: the real test-all.js, through --canary-only -----------
+    // Each mutant is a defect in the real runner's bytes, read from disk here.
+    const RUNNER_SRC = fs.readFileSync(path.join(TOOLING, 'test-all.js'), 'utf8');
+    const runnerRepo = (label, source) => {
+        const dir = makeRepo(label, {
+            'VERSION': '1.0.0\n',
+            'tooling/validate.js': GREEN_VALIDATE,
+            'plugins/demo/subject.js': SUBJECT,
+            'tooling/test-planted-green.js': GREEN_SUITE,
+            'tooling/test-all.js': source,
+        });
+        dirs.push(dir);
+        return dir;
+    };
+    const runnerRow = (run) => (run.all.match(/[✓✗~] test-all\.js[^\n]*/) || [''])[0];
+    const rc = c ? runSweep(runnerRepo('runner', RUNNER_SRC), false, { AUTODEV_SUITE_CACHE: 'off' }) : null;
+    if (rc) {
+        check('runner: the real runner is verified able to fail',
+            /✓ test-all\.js\s+ok/.test(runnerRow(rc)) && rc.code === 0, runnerRow(rc) + ' exit ' + rc.code + ' ' + rc.all.slice(-500));
+        const canaryRun = rc.evidence.find((e) => e.label === 'test-all.js' && e.phase === 'runner canary');
+        check('runner: the canary ran one suite through --canary-only',
+            canaryRun && canaryRun.args.includes('--canary-only=test-planted-green'), JSON.stringify(canaryRun && canaryRun.args));
+        check('runner: the failing row was read from the real summary',
+            canaryRun && /^FAIL +test-planted-green\s*$/m.test(canaryRun.stdout) && canaryRun.status === 1,
+            canaryRun && canaryRun.stdout.slice(-400));
+    }
+    for (const [name, from, to, expectNote] of [
+        ['exit 0 despite a failing suite', 'main().then((code) => { process.exitCode = code; }', 'main().then((code) => { process.exitCode = 0; }', /exited 0 and its row reads FAIL/],
+        ['a failing suite not counted as failed', "if (state === 'fail') {\n      failed++;", "if (state === 'fail') {", /exited 2 and its row reads FAIL/],
+        ['an empty suite list', 'const suites = receipts.discoverSuites(scriptsDir);', 'const suites = [];', /exited 1 with no summary/],
+    ]) {
+        const count = RUNNER_SRC.split(from).length - 1;
+        check(`runner mutant "${name}": its anchor matches the real runner once`, count === 1, 'matched ' + count);
+        if (count !== 1 || !rc) continue;
+        const m = runSweep(runnerRepo('runner-mutant', RUNNER_SRC.replace(from, () => to)), true, { AUTODEV_SUITE_CACHE: 'off' });
+        if (!m) continue;
+        check(`runner mutant "${name}": the row goes VACUOUS`,
+            /✗ test-all\.js\s+VACUOUS/.test(runnerRow(m)) && expectNote.test(runnerRow(m)), runnerRow(m));
+        check(`runner mutant "${name}": the sweep exits 1`, m.code === 1, 'exit ' + m.code);
+    }
+
     // ---- RED: two baselines fail, and each says why --------------------------
     const red = makeRepo('red', {
         'VERSION': '1.0.0\n',

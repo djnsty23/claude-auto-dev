@@ -25,6 +25,8 @@
 //      name while an earlier failure still exits 1.
 //   8. One store, two runners: the one that started later owns the receipt,
 //      and a detached grandchild's late coverage still reaches the census.
+//   9. --canary-only runs one suite, never exits 0, and refuses a name that
+//      matches nothing, so it cannot be left on or pass on an empty list.
 
 'use strict';
 
@@ -558,7 +560,62 @@ async function lateCoverage() {
         { status: r.status, problem: c.problem, key, entry, tail: out(r).slice(-400) });
 }
 
-main().then(sharedStore).then(lateCoverage).catch((e) => check('the suite ran to the end', false, e && e.stack)).then(() => {
+// --- 9. --canary-only: one suite, never a green verdict -----------------------
+// The runner canary in check-suites-can-fail.js depends on this path, and a
+// filter that could be left on would shrink the whole gate, so each way of
+// leaving it on is run here against the real runner.
+async function canaryOnly() {
+    const suites = { 'test-a-fails.js': FAILING, 'test-b-ok.js': PASSING, 'test-c-ok.js': PASSING };
+    const fx = fixture({ suites });
+
+    const whole = runAll(fx);
+    if (!finished(whole, 'canary-only baseline')) return;
+    check('9. without the flag the run covers every suite and fails on the failing one',
+        whole.status === 1 && row(whole, 'FAIL ', 'test-a-fails') && row(whole, 'PASS ', 'test-b-ok') && row(whole, 'PASS ', 'test-c-ok'), `exit ${whole.status}\n${out(whole).slice(-600)}`);
+    const before = readReceipt(fx);
+    check('9. the full run published a receipt to compare against', before && typeof before.runId === 'string', before);
+
+    const red = runAll(fx, ['--canary-only=test-a-fails']);
+    if (finished(red, 'canary-only red')) {
+        check('9. a failing named suite exits 1 and is reported FAIL',
+            red.status === 1 && row(red, 'FAIL ', 'test-a-fails'), `exit ${red.status}\n${out(red).slice(-600)}`);
+        check('9. no other suite ran', !/test-b-ok|test-c-ok/.test(out(red)), out(red).slice(-600));
+        check('9. validate and the tree check still ran', row(red, 'PASS ', 'validate') && row(red, 'PASS ', 'tree-inert'), out(red).slice(-600));
+        check('9. it says the run was partial', /PARTIAL RUN: --canary-only=test-a-fails ran 1 of 3 suites/.test(out(red)), out(red).slice(-400));
+    }
+
+    const green = runAll(fx, ['--canary-only=test-b-ok']);
+    if (finished(green, 'canary-only green')) {
+        check('9. a passing named suite exits 2, because a partial run is never a pass',
+            green.status === 2 && row(green, 'PASS ', 'test-b-ok'), `exit ${green.status}\n${out(green).slice(-600)}`);
+    }
+
+    for (const [name, args, pattern] of [
+        ['a name that matches nothing', ['--canary-only=test-nope'], /matched 0 of 3 suites\. No suite ran/],
+        ['an empty name', ['--canary-only='], /matched 0 of 3 suites\. No suite ran/],
+        ['a name that is a substring of a suite', ['--canary-only=test-b'], /matched 0 of 3 suites\. No suite ran/],
+        ['a name with .js on it', ['--canary-only=test-b-ok.js'], /matched 0 of 3 suites\. No suite ran/],
+        ['the flag given twice', ['--canary-only=test-b-ok', '--canary-only=test-c-ok'], /given 2 times\. No suite ran/],
+        ['the flag with no value', ['--canary-only'], /unknown argument/],
+    ]) {
+        const r = runAll(fx, args);
+        if (!finished(r, 'canary-only refusal: ' + name)) continue;
+        check(`9. ${name} exits 2 and runs nothing`,
+            r.status === 2 && pattern.test(out(r)) && !/=== test-/.test(out(r)) && !/─ summary ─/.test(out(r)), `exit ${r.status}\n${out(r).slice(-500)}`);
+    }
+
+    const after = readReceipt(fx);
+    check('9. partial runs published no receipt and left the full run\'s in place',
+        after && before && after.runId === before.runId, { before: before && before.runId, after: after && after.runId });
+
+    // The repo's own scripts: a gate that passed the flag would grade one suite.
+    const scripts = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'package.json'), 'utf8')).scripts;
+    check('9. npm test is the bare runner', scripts.test === 'node tooling/test-all.js', scripts.test);
+    const using = Object.keys(scripts).filter((k) => scripts[k].includes('canary-only'));
+    check('9. no package.json script passes --canary-only', using.length === 0, using);
+}
+
+main().then(sharedStore).then(lateCoverage).then(canaryOnly).catch((e) => check('the suite ran to the end', false, e && e.stack)).then(() => {
     console.log(`\n${pass} passed, ${fail} failed${infra ? `, ${infra} indeterminate` : ''}`);
     if (infra) console.log('indeterminate: ' + indeterminate.join(' | '));
     process.exitCode = fail ? 1 : infra ? 2 : 0;

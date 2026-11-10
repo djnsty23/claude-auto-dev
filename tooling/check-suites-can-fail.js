@@ -647,16 +647,17 @@ const suiteEnv = (extra) => {
 // `traced` is a pair-cache run from pairCache.beginRun(): its env adds the
 // tracer preload and the run's private coverage and trace directories. null
 // (cache off, or the trace could not start) runs the suite exactly as before.
-const runSuite = (suite, traced, phase = 'baseline') => {
-    // checkRunner's child is the WHOLE of test-all.js — ~40x a single suite, and
-    // measured at 827-890s against the 900s every suite used to share.
+const runSuite = (suite, traced, phase = 'baseline', extraArgs = []) => {
+    // The test-all.js child keeps the budget that was sized for a whole run. Since
+    // --canary-only it runs one suite, so that budget is a ceiling it never nears.
     const budget = sb.sweepBudgetFor(suite);
-    return retainEvidence(suite, phase, spawnSuiteSync(process.execPath, [path.join(SWEEP_TOOLING, suite)], {
+    const args = [path.join(SWEEP_TOOLING, suite), ...extraArgs];
+    return retainEvidence(suite, phase, spawnSuiteSync(process.execPath, args, {
         cwd: SWEEP_ROOT, encoding: 'utf8', timeout: budget,
         env: suiteEnv(Object.assign({
             [sb.DEADLINE_ENV]: String(Date.now() + budget - REPORT_MARGIN_MS),
         }, traced ? traced.env : {})),
-    }, { label: suite }), { command: process.execPath, args: [path.join(SWEEP_TOOLING, suite)], cwd: SWEEP_ROOT });
+    }, { label: suite }), { command: process.execPath, args, cwd: SWEEP_ROOT });
 };
 
 // THE PAIR CACHE. Shadow by default, so it changes no verdict until it has been
@@ -678,6 +679,17 @@ const rows = [];
 // on an empty test run.
 //
 // So: make one child suite fail, and assert the runner notices.
+//
+// ONE child, through --canary-only, because the property is about the runner's
+// verdict path and needs no other suite. `[measured 2026-11-10]` running all of
+// them here spent over 67 minutes of a release gate re-proving what `npm test`
+// had just graded. The real test-all.js still runs: discovery, the child spawn,
+// the summary and the exit code.
+//
+// THE ROW IS READ, NOT JUST THE EXIT CODE. An exit 1 alone is also what the
+// runner prints when it found no suites at all, so the summary must name the
+// planted suite as FAIL. A run with any other red row, or with no verdict on
+// some row, is no evidence about this victim.
 function checkRunner(suite) {
     const victim = suites.find((s) => s !== suite && deriveSubjects(path.join(SWEEP_TOOLING, s)).length);
     if (!victim) return { suite, status: 'NO-SUBJECT', cause: sv.CAUSE.NO_SUBJECT, note: 'no child suite to fail' };
@@ -688,13 +700,29 @@ function checkRunner(suite) {
         return { suite, status: 'UNCHECKED', cause: sv.CAUSE.RUN_INCOMPLETE, note: 'could not install the runner canary — see conflicts' };
     }
     try {
-        const r = runSuite(suite, null, 'runner canary');
-        if (!completed(r, suite + ' (runner canary run)')) {
-            return { suite, status: 'UNCHECKED', cause: sv.CAUSE.RUN_INCOMPLETE, note: 'canary run did not complete — indeterminate, not a verdict' };
+        const label = victim.replace(/\.js$/, '');
+        const r = runSuite(suite, null, 'runner canary', ['--canary-only=' + label]);
+        const incomplete = { suite, status: 'UNCHECKED', cause: sv.CAUSE.RUN_INCOMPLETE, note: 'canary run did not complete — indeterminate, not a verdict' };
+        const summary = sv.parseRunnerSummary(r.stdout);
+        if (r.error || r.signal || !summary) {
+            if (!completed(r, suite + ' (runner canary run)')) return incomplete;
+            return { suite, status: 'VACUOUS', note: `exited ${r.status} with no summary, so nothing says ${victim} ran` };
         }
-        return r.status !== 0
-            ? { suite, status: 'ok', note: `reports failure when ${victim} fails` }
-            : { suite, status: 'VACUOUS', note: `stays GREEN while ${victim} exits 1 — it is not running them` };
+        const noVerdict = summary.filter((row) => row.state === 'INDET').map((row) => row.label);
+        if (noVerdict.length) {
+            conflict(`${suite} (runner canary run) had no verdict on: ${noVerdict.join(', ')}. Its last output: ${sb.lastWords(r)}`);
+            return incomplete;
+        }
+        const planted = summary.find((row) => row.label === label);
+        if (r.status !== 1 || !planted || planted.state !== 'FAIL') {
+            return { suite, status: 'VACUOUS', note: `exited ${r.status} and its row reads ${planted ? planted.state : 'nothing'} while ${victim} exits 1, so it is not reporting them` };
+        }
+        const otherReds = summary.filter((row) => row.state === 'FAIL' && row.label !== label).map((row) => row.label);
+        if (otherReds.length) {
+            conflict(`${suite} (runner canary run) was also red on: ${otherReds.join(', ')}, so its exit 1 is not evidence about ${victim}`);
+            return incomplete;
+        }
+        return { suite, status: 'ok', note: `exits 1 and reports FAIL for ${victim}` };
     } finally {
         removeOwn('tooling/' + victim);
     }

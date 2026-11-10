@@ -129,7 +129,18 @@ function renderCauses(sum) {
     return parts.join('; ');
 }
 
-module.exports = { CAUSE, UNCATEGORISED, UNVERIFIED_FAMILY, inFamily, summarise, renderCauses };
+// The verdict rows test-all.js prints under its summary heading, as
+// [{ state, label }], or null when no summary was printed. Only what follows the
+// LAST heading counts: a suite's own output can hold a line that looks like a row.
+const RUNNER_SUMMARY_HEADING = '──────── summary ────────';
+function parseRunnerSummary(stdout) {
+    const text = String(stdout || '');
+    const at = text.lastIndexOf(RUNNER_SUMMARY_HEADING);
+    if (at < 0) return null;
+    return [...text.slice(at).matchAll(/^(PASS|FAIL|INDET) +(\S+)\s*$/gm)].map((m) => ({ state: m[1], label: m[2] }));
+}
+
+module.exports = { CAUSE, UNCATEGORISED, UNVERIFIED_FAMILY, inFamily, summarise, renderCauses, parseRunnerSummary };
 
 if (require.main === module) {
     if (process.argv.includes('--help') || process.argv.includes('-h')) {

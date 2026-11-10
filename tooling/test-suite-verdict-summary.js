@@ -313,6 +313,21 @@ if (!process.env[CHILD]) {
     }
 }
 
+// parseRunnerSummary: the rows the runner canary reads. Literals written here,
+// so narrowing the parser cannot narrow what this demands.
+{
+    const heading = '\n──────── summary ────────\n';
+    const got = sv.parseRunnerSummary('FAIL  test-noise\n' + heading + 'FAIL   test-a\r\nPASS   validate\nINDET  tree-inert\n\n1/3 suites passed, 1 FAILED\n');
+    check('runner summary: only rows after the heading count, in order, with CRLF tolerated',
+        JSON.stringify(got) === JSON.stringify([{ state: 'FAIL', label: 'test-a' }, { state: 'PASS', label: 'validate' }, { state: 'INDET', label: 'tree-inert' }]),
+        JSON.stringify(got));
+    const last = sv.parseRunnerSummary(heading + 'PASS   test-old\n' + heading + 'FAIL   test-new\n');
+    check('runner summary: the last heading wins', last.length === 1 && last[0].label === 'test-new', JSON.stringify(last));
+    check('runner summary: no heading is null, not an empty list', sv.parseRunnerSummary('FAIL   test-a\n') === null);
+    check('runner summary: undefined stdout is null', sv.parseRunnerSummary(undefined) === null);
+    check('runner summary: a heading with no rows is an empty list', Array.isArray(sv.parseRunnerSummary(heading)) && sv.parseRunnerSummary(heading).length === 0);
+}
+
 console.log(`\n${pass} passed, ${fail} failed`);
 console.log('subject: tooling/suite-verdict-summary.js; asserted over a row set containing BOTH a '
     + 'derivation deficiency and sweep failures with different counts, so a single collapsed bucket '
