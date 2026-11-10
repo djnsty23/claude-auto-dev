@@ -1,0 +1,374 @@
+#!/usr/bin/env node
+// Tests for plugins/autodev-core/scripts/verify-shipped.js.
+// Run: node tooling/test-verify-shipped.js
+// Exits 1 on any failure, 0 when all pass.
+//
+// THE SUBJECT RUNS AS A SUBPROCESS and every verdict below is read from its
+// printed line and its exit status, the two things a caller consumes. Network
+// checks hit a local server written here. GitHub is a fake gh that answers from
+// a table written here. The browser is a fake driver by default, because CI has
+// no Chromium. Set VERIFY_SHIPPED_PLAYWRIGHT to a directory holding playwright
+// and the same browser cases run through real headless Chromium instead.
+//
+// Every expected status and value is a literal in this file, so narrowing a
+// pattern list in the subject cannot narrow a fixture with it.
+
+'use strict';
+
+const fs = require('fs');
+const http = require('http');
+const os = require('os');
+const path = require('path');
+const { spawn } = require('child_process');
+
+const SUBJECT = path.resolve(__dirname, '..', 'plugins', 'autodev-core', 'scripts', 'verify-shipped.js');
+const lib = require(SUBJECT);
+
+let pass = 0;
+let fail = 0;
+const failures = [];
+function check(label, ok, detail) {
+    if (ok) pass++;
+    else { fail++; failures.push(label); }
+    console.log(`${ok ? 'PASS' : 'FAIL'}  ${label}${!ok && detail ? `  (${detail})` : ''}`);
+}
+
+const root = fs.mkdtempSync(path.join(os.tmpdir(), 'verifyshipped'));
+const SHA_GOOD = 'a'.repeat(40);
+const SHA_OLD = 'b'.repeat(40);
+const SHA_WRONG = 'c'.repeat(40);
+const SHA_SKIPPED = 'd'.repeat(40);
+const LONG = `<h1>Shipped</h1><p>${'real page text '.repeat(60)}</p>`;
+const page = (body, title = 'Real page') => `<!doctype html><html><head><title>${title}</title></head><body>${body}</body></html>`;
+
+const server = http.createServer((req, res) => {
+    const send = (status, body, headers = {}) => { res.writeHead(status, { 'content-type': 'text/html', ...headers }); res.end(body); };
+    const base = `http://127.0.0.1:${server.address().port}`;
+    switch (req.url.split('?')[0]) {
+    case '/ok': return send(200, page(LONG));
+    case '/console-error': return send(200, page(`${LONG}<script>console.error('planted')</script>`));
+    case '/no-string': return send(200, page(LONG));
+    case '/protected-open': return send(200, page('admin table'));
+    case '/protected': return send(401, 'no');
+    case '/protected-403-challenge': return send(403, page('x'), { 'x-vercel-mitigated': 'challenge' });
+    case '/to-login': return send(307, '', { location: '/login?next=1' });
+    case '/to-elsewhere': return send(307, '', { location: '/somewhere' });
+    case '/challenge': return send(429, page('x', 'Vercel Security Checkpoint'), { 'x-vercel-mitigated': 'challenge' });
+    case '/plain-429': return send(429, 'slow down');
+    case '/checkpoint-200': return send(200, page('x', 'Vercel Security Checkpoint'));
+    case '/boom': return send(500, 'boom');
+    case '/hang': return undefined;
+    case '/version': return send(200, JSON.stringify({ sha: SHA_GOOD }));
+    case '/sitemap': return send(200, `<urlset>${[1, 2, 3, 4, 5, 6].map((n) => `<loc>${base}/ok?${n}</loc>`).join('')}</urlset>`);
+    case '/sitemap-redirect': return send(200, `<urlset>${[1, 2, 3, 4, 5].map((n) => `<loc>${base}/to-login?${n}</loc>`).join('')}</urlset>`);
+    case '/sitemap-short': return send(200, `<urlset><loc>${base}/ok</loc></urlset>`);
+    case '/sitemap-empty': return send(200, '<urlset></urlset>');
+    case '/sitemap-bad': return send(200, `<urlset>${[1, 2, 3, 4, 5].map((n) => `<loc>${base}/${n === 3 ? 'boom' : 'ok'}?${n}</loc>`).join('')}</urlset>`);
+    case '/sitemap-challenged': return send(200, `<urlset>${[1, 2, 3, 4, 5].map((n) => `<loc>${base}/challenge?${n}</loc>`).join('')}</urlset>`);
+    default: return send(404, 'missing');
+    }
+});
+
+// A fake gh: reads routes.json, prints the body for the endpoint, or an HTTP error like the real one.
+const FAKE_GH = path.join(root, 'fake-gh.js');
+const ROUTES = path.join(root, 'routes.json');
+const GH_LOG = path.join(root, 'gh.log');
+fs.writeFileSync(FAKE_GH, `
+const fs = require('fs');
+const routes = JSON.parse(fs.readFileSync(${JSON.stringify(ROUTES)}, 'utf8'));
+const endpoint = process.argv[3];
+fs.appendFileSync(${JSON.stringify(GH_LOG)}, endpoint + '\\n');
+if (Object.prototype.hasOwnProperty.call(routes, endpoint)) {
+    const value = routes[endpoint];
+    if (typeof value === 'number') { process.stderr.write('gh: HTTP ' + value + '\\n'); process.exitCode = 1; }
+    else process.stdout.write(JSON.stringify(value));
+} else { process.stderr.write('gh: HTTP 404\\n'); process.exitCode = 1; }
+`);
+const b64 = (s) => Buffer.from(s).toString('base64');
+fs.writeFileSync(ROUTES, JSON.stringify({
+    'repos/o/app/commits/HEAD': { sha: SHA_GOOD },
+    [`repos/o/app/commits/${SHA_GOOD}/status`]: { statuses: [{ context: 'Vercel', state: 'success', description: 'Deployment has completed' }] },
+    [`repos/o/app/commits/${SHA_OLD}/status`]: { statuses: [{ context: 'Vercel', state: 'failure', description: 'Deployment failed' }] },
+    [`repos/o/app/commits/${SHA_SKIPPED}/status`]: { statuses: [{ context: 'Vercel', state: 'success', description: 'Canceled by Ignored Build Step' }] },
+    [`repos/o/app/commits/${SHA_WRONG}/status`]: { statuses: [{ context: 'Vercel', state: 'pending', description: 'Building' }] },
+    'repos/o/app/deployments?environment=Production&per_page=30': [{ id: 1, sha: SHA_GOOD }],
+    'repos/o/app/deployments/1/statuses?per_page=1': [{ state: 'success' }],
+    [`repos/o/app/compare/${SHA_GOOD}...${SHA_SKIPPED}`]: { status: 'ahead', commits: [{ sha: SHA_SKIPPED }] },
+    [`repos/o/app/compare/${SHA_GOOD}...${SHA_WRONG}`]: { status: 'ahead', commits: [{ sha: SHA_WRONG }] },
+    'repos/o/app/contents/VERSION': { content: b64('8.5.0\n') },
+    'repos/o/app/git/ref/tags/v8.5.0': { ref: 'refs/tags/v8.5.0' },
+    'repos/o/app/pulls/7': { merged: true, state: 'closed' },
+    'repos/o/app/pulls/8': { merged: false, state: 'open' },
+    'repos/o/app/pulls?state=closed&per_page=30&head=o%3Afeature': [{ merged_at: '2026-11-10T00:00:00Z' }],
+    'repos/o/app/pulls?state=closed&per_page=30&head=o%3Aabandoned': [{ merged_at: null }],
+    'repos/o/denied/commits/HEAD': 401,
+    'repos/o/notag/contents/VERSION': { content: b64('8.5.0\n') },
+}));
+
+// A fake playwright driver. It fetches the real local page, and treats the page's own script text as what ran.
+const FAKE_DRIVER = path.join(root, 'fake-driver.js');
+const LAUNCH_LOG = path.join(root, 'launch.log');
+fs.writeFileSync(FAKE_DRIVER, `
+const fs = require('fs');
+function newPage() {
+    const handlers = {};
+    const frame = {};
+    let state = { title: '', text: '', html: '', url: '', errors: 0 };
+    return {
+        on(name, fn) { handlers[name] = fn; },
+        mainFrame() { return frame; },
+        async goto(url) {
+            const res = await fetch(url);
+            const html = await res.text();
+            state = { title: (/<title>([^<]*)/.exec(html) || [])[1] || '', html, text: html.replace(/<script[\\\\s\\\\S]*?<\\/script>|<[^>]+>/g, ''), url };
+            const headers = Object.fromEntries(res.headers.entries());
+            if (handlers.response) handlers.response({ status: () => res.status, headers: () => headers, frame: () => frame, request: () => ({ isNavigationRequest: () => true }) });
+            if (/console\\.error/.test(html) && handlers.console) handlers.console({ type: () => 'error', text: () => 'planted' });
+            return { status: () => res.status };
+        },
+        async evaluate(fn, arg) {
+            const body = { innerText: state.text };
+            const doc = { title: state.title, body, documentElement: { scrollWidth: 390 }, querySelectorAll: (s) => ({ length: (state.html.match(new RegExp('<' + s + '[ >]', 'g')) || []).length }) };
+            global.document = doc; global.location = { href: state.url }; global.window = { innerWidth: 390 };
+            return fn(arg);
+        },
+    };
+}
+module.exports = { chromium: {
+    async launchServer(options) {
+        fs.appendFileSync(${JSON.stringify(LAUNCH_LOG)}, JSON.stringify(options) + '\\n');
+        if (process.env.FAKE_DRIVER_NO_START) throw new Error('browser failed to start');
+        return { wsEndpoint: () => 'ws://fake', kill: async () => {} };
+    },
+    async connect() { return { newContext: async () => ({ newPage: async () => newPage(), close: async () => {} }), close: async () => {} }; },
+} };
+`);
+
+const REAL_PLAYWRIGHT = process.env.VERIFY_SHIPPED_PLAYWRIGHT || null;
+const DRIVER = REAL_PLAYWRIGHT || FAKE_DRIVER;
+
+let configCount = 0;
+function run(config, { args = [], env = {}, raw = false, timeoutMs = 90000 } = {}) {
+    const file = path.join(root, `config-${++configCount}.json`);
+    fs.writeFileSync(file, raw ? config : JSON.stringify(config));
+    return new Promise((resolve) => {
+        const child = spawn(process.execPath, [SUBJECT, 'run', '--config', file, '--playwright', DRIVER, ...args], {
+            env: { ...process.env, VERIFY_SHIPPED_GH: FAKE_GH, ...env }, windowsHide: true,
+        });
+        let stdout = '';
+        let stderr = '';
+        const startedAt = Date.now();
+        const killer = setTimeout(() => child.kill(), timeoutMs);
+        child.stdout.on('data', (d) => { stdout += d; });
+        child.stderr.on('data', (d) => { stderr += d; });
+        child.on('close', (status) => { clearTimeout(killer); resolve({ status, stdout, stderr, ms: Date.now() - startedAt }); });
+    });
+}
+
+const lineOf = (r, id) => (r.stdout.split('\n').find((l) => l.startsWith(`CHECK ${id}: `)) || '');
+const statusOf = (r, id) => (/^CHECK \S+: (\S+) \|/.exec(lineOf(r, id)) || [])[1] || null;
+const browserFast = { settleMs: 200 };
+
+async function single(label, c, expectedStatus, expectedExit, valuePattern, opts) {
+    const r = await run({ checks: [{ id: 'X1', ...c }] }, opts);
+    const line = lineOf(r, 'X1');
+    const ok = statusOf(r, 'X1') === expectedStatus && r.status === expectedExit && (!valuePattern || valuePattern.test(line));
+    check(label, ok, `exit=${r.status} line=${line} stderr=${r.stderr.slice(0, 200)}`);
+    return r;
+}
+
+async function main() {
+    await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+    const u = (p) => `http://127.0.0.1:${server.address().port}${p}`;
+    const appCheck = { repo: 'o/app' };
+
+    // Section A: the population and the refusals. Nothing may run on a refused config.
+    {
+        const r = await run({ checks: [] });
+        check('empty config refused with exit 2', r.status === 2 && /empty config/.test(r.stderr), `exit=${r.status} ${r.stderr}`);
+        check('empty config prints no CHECK line and no verdict', !/^CHECK /m.test(r.stdout) && !/POPULATION/.test(r.stdout), r.stdout);
+        const missing = await run({});
+        check('config without a checks array refused', missing.status === 2 && /no checks array/.test(missing.stderr), missing.stderr);
+        const notJson = await run('{nope', { raw: true });
+        check('unparsable config refused', notJson.status === 2 && /not JSON/.test(notJson.stderr), notJson.stderr);
+        const dup = await run({ checks: [{ id: 'a', type: 'http', url: u('/ok') }, { id: 'a', type: 'http', url: u('/ok') }] });
+        check('duplicate id refused', dup.status === 2 && /duplicate check id/.test(dup.stderr), dup.stderr);
+        const unknown = await run({ checks: [{ id: 'a', type: 'telepathy' }] });
+        check('unknown type refused', unknown.status === 2 && /unknown type/.test(unknown.stderr), unknown.stderr);
+        const noUrl = await run({ checks: [{ id: 'a', type: 'http' }] });
+        check('http without url refused', noUrl.status === 2 && /needs url/.test(noUrl.stderr), noUrl.stderr);
+        const badRe = await run({ checks: [{ id: 'a', type: 'http', url: u('/ok'), bodyPattern: '(' }] });
+        check('invalid regex refused before running', badRe.status === 2 && /not a valid regex/.test(badRe.stderr) && !/^CHECK/m.test(badRe.stdout), badRe.stderr);
+        const expectCount = await run({ expectCount: 2, checks: [{ id: 'a', type: 'http', url: u('/ok') }] });
+        check('expectCount mismatch refused', expectCount.status === 2 && /expectCount 2/.test(expectCount.stderr), expectCount.stderr);
+        const sel = await run({ checks: [{ id: 'a', type: 'http', url: u('/ok'), repo: 'o/app' }] }, { args: ['--repo', 'o/other', '--sha', SHA_GOOD] });
+        check('--repo selecting nothing refused', sel.status === 2 && /selects 0 of 1/.test(sel.stderr), sel.stderr);
+        const half = await run({ checks: [{ id: 'a', type: 'http', url: u('/ok') }] }, { args: ['--repo', 'o/app'] });
+        check('--repo without --sha refused', half.status === 2 && /go together/.test(half.stderr), half.stderr);
+    }
+
+    // Section B: help and output shape.
+    {
+        const help = await new Promise((resolve) => {
+            const child = spawn(process.execPath, [SUBJECT, '--help'], { windowsHide: true });
+            let out = '';
+            child.stdout.on('data', (d) => { out += d; });
+            child.on('close', (status) => resolve({ status, out }));
+        });
+        check('help prints the run usage and exits 0', help.status === 0 && /verify-shipped\.js run --config/.test(help.out), help.out);
+    }
+
+    // Section C: planted defects. Each one must go red for its own named reason.
+    await single('plant: wrong expected sha, version endpoint', { type: 'deployed-sha', url: u('/version'), pattern: '"sha":"([0-9a-f]+)"', sha: SHA_WRONG }, 'FAIL', 1, /deployed aaaaaaaa, expected cccccccc/);
+    await single('plant: wrong expected sha, deployment record', { type: 'deployed-sha', ...appCheck, sha: SHA_WRONG }, 'FAIL', 1, /Production is at aaaaaaaa, expected cccccccc/);
+    await single('plant: console error in the page', { type: 'browser', url: u('/console-error'), widths: [390], ...browserFast }, 'FAIL', 1, /1 console error/);
+    await single('plant: required string missing', { type: 'browser', url: u('/no-string'), widths: [390], requiredText: ['this text is not on the page'], ...browserFast }, 'FAIL', 1, /missing required text/);
+    await single('plant: protected path answers 200', { type: 'refused', url: u('/protected-open') }, 'FAIL', 1, /not refused: HTTP 200/);
+    await single('plant: 429 challenge is INDETERMINATE on http', { type: 'http', url: u('/challenge') }, 'INDETERMINATE', 2, /x-vercel-mitigated: challenge, HTTP 429/);
+    await single('plant: 429 challenge is INDETERMINATE on refused', { type: 'refused', url: u('/challenge') }, 'INDETERMINATE', 2, /x-vercel-mitigated/);
+    await single('plant: 429 challenge is INDETERMINATE in the browser', { type: 'browser', url: u('/challenge'), widths: [390], ...browserFast }, 'INDETERMINATE', 2, /challenge/, { timeoutMs: 60000 });
+
+    // Section D: the http and refused verdicts, positive and negative.
+    await single('http 200 passes with its status in the value', { type: 'http', url: u('/ok') }, 'PASS', 0, /HTTP 200/);
+    await single('http body regex passes', { type: 'http', url: u('/ok'), bodyPattern: 'real page text' }, 'PASS', 0, /body matches/);
+    await single('http body regex missing fails', { type: 'http', url: u('/ok'), bodyPattern: 'absent words' }, 'FAIL', 1, /body lacks/);
+    await single('http forbidden body fails', { type: 'http', url: u('/ok'), bodyAbsent: 'real page text' }, 'FAIL', 1, /body holds/);
+    await single('http wrong status fails', { type: 'http', url: u('/boom') }, 'FAIL', 1, /HTTP 500, expected 200/);
+    await single('plain 429 without a mitigation header is INDETERMINATE', { type: 'http', url: u('/plain-429') }, 'INDETERMINATE', 2, /rate limited/);
+    await single('a 200 checkpoint page is INDETERMINATE', { type: 'http', url: u('/checkpoint-200') }, 'INDETERMINATE', 2, /challenge page/);
+    await single('refused 401 passes', { type: 'refused', url: u('/protected') }, 'PASS', 0, /refused: HTTP 401/);
+    await single('a 403 carrying a mitigation header is not a refusal', { type: 'refused', url: u('/protected-403-challenge') }, 'INDETERMINATE', 2, /x-vercel-mitigated/);
+    await single('named redirect passes', { type: 'refused', url: u('/to-login'), redirect: '^/login' }, 'PASS', 0, /named redirect/);
+    await single('a redirect elsewhere fails', { type: 'refused', url: u('/to-elsewhere'), redirect: '^/login' }, 'FAIL', 1, /not matching/);
+    await single('a redirect with none named fails', { type: 'refused', url: u('/to-login') }, 'FAIL', 1, /no redirect is named/);
+    await single('a 500 is not a refusal', { type: 'refused', url: u('/boom') }, 'FAIL', 1, /not refused: HTTP 500/);
+
+    // Section E: timeouts, attempts and the run deadline.
+    {
+        const r = await single('per-probe timeout is INDETERMINATE', { type: 'http', url: u('/hang'), timeoutMs: 300 }, 'INDETERMINATE', 2, /timeout after 300ms/);
+        check('a timed-out probe ran at most two attempts', r.ms < 8000, `${r.ms}ms`);
+        const file = path.join(root, 'attempts.json');
+        const a = await run({ checks: [{ id: 'X1', type: 'http', url: u('/hang'), timeoutMs: 200 }] }, { args: ['--out', file] });
+        const receipt = JSON.parse(fs.readFileSync(file, 'utf8'));
+        check('a timeout is retried exactly once', a.status === 2 && receipt.results[0].attempts === 2, JSON.stringify(receipt.results[0]));
+        const c = await run({ checks: [{ id: 'X1', type: 'http', url: u('/challenge') }] }, { args: ['--out', file] });
+        check('a challenge is not retried', c.status === 2 && JSON.parse(fs.readFileSync(file, 'utf8')).results[0].attempts === 1, fs.readFileSync(file, 'utf8'));
+        const d = await run({ checks: [
+            { id: 'D1', type: 'http', url: u('/hang'), timeoutMs: 60000 },
+            { id: 'D2', type: 'http', url: u('/ok') },
+        ] }, { args: ['--deadline-ms', '500'] });
+        check('run deadline turns a hung check INDETERMINATE and the run still ends', d.status === 2 && statusOf(d, 'D1') === 'INDETERMINATE' && d.ms < 10000, `${d.ms}ms ${d.stdout}`);
+        const closed = await run({ checks: [{ id: 'X1', type: 'http', url: 'http://127.0.0.1:1/x', timeoutMs: 500 }] });
+        check('connection refused is INDETERMINATE', closed.status === 2 && statusOf(closed, 'X1') === 'INDETERMINATE', closed.stdout);
+    }
+
+    // Section F: sitemaps. The floor is on the location count.
+    await single('sitemap with enough locations passes', { type: 'sitemap', url: u('/sitemap') }, 'PASS', 0, /6 locations, 5 of 5 sampled/);
+    await single('sitemap exact sample status passes on 200', { type: 'sitemap', url: u('/sitemap'), sampleStatus: 200 }, 'PASS', 0, /5 of 5 sampled answered 200/);
+    await single('sitemap exact sample status fails on a redirect', { type: 'sitemap', url: u('/sitemap-redirect'), sampleStatus: 200 }, 'FAIL', 1, /5 of 5 sampled answered 307/);
+    await single('sitemap redirects pass without an exact status', { type: 'sitemap', url: u('/sitemap-redirect') }, 'PASS', 0, /under 400/);
+    await single('sitemap below the floor fails', { type: 'sitemap', url: u('/sitemap-short') }, 'FAIL', 1, /1 locations, expected at least 5/);
+    await single('empty sitemap fails', { type: 'sitemap', url: u('/sitemap-empty') }, 'FAIL', 1, /0 locations/);
+    await single('sitemap with a broken page fails', { type: 'sitemap', url: u('/sitemap-bad') }, 'FAIL', 1, /1 of 5 sampled answered 500/);
+    await single('sitemap whose pages are challenged is INDETERMINATE', { type: 'sitemap', url: u('/sitemap-challenged') }, 'INDETERMINATE', 2, /5 of 5 sampled could not be read/);
+
+    // Section G: GitHub facts through the fake gh.
+    await single('commit status success passes on the default branch head', { type: 'commit-status', ...appCheck }, 'PASS', 0, /aaaaaaaa Vercel=success/);
+    await single('commit status failure fails', { type: 'commit-status', ...appCheck, sha: SHA_OLD }, 'FAIL', 1, /bbbbbbbb Vercel=failure/);
+    await single('commit status pending is INDETERMINATE', { type: 'commit-status', ...appCheck, sha: SHA_WRONG }, 'INDETERMINATE', 2, /still pending/);
+    await single('an unknown status context is INDETERMINATE', { type: 'commit-status', ...appCheck, context: 'Nonesuch' }, 'INDETERMINATE', 2, /no status matching/);
+    await single('commit status says when the build was skipped', { type: 'commit-status', ...appCheck, sha: SHA_SKIPPED }, 'PASS', 0, /build skipped/);
+    await single('gh auth failure is INDETERMINATE', { type: 'commit-status', repo: 'o/denied' }, 'INDETERMINATE', 2, /could not read the head/);
+    await single('deployed sha matches production', { type: 'deployed-sha', ...appCheck }, 'PASS', 0, /Production aaaaaaaa success/);
+    await single('a skipped build ahead of production passes and says so', { type: 'deployed-sha', ...appCheck, sha: SHA_SKIPPED }, 'PASS', 0, /skipped their build/);
+    {
+        const r = await run({ checks: [{ id: 'X1', type: 'commit-status', ...appCheck }] }, { args: ['--repo', 'o/app', '--sha', SHA_OLD] });
+        check('--sha overrides the expected sha for its repo', statusOf(r, 'X1') === 'FAIL' && /bbbbbbbb/.test(lineOf(r, 'X1')), r.stdout);
+        const narrow = await run({ checks: [
+            { id: 'IN', type: 'http', url: u('/ok'), repo: 'o/app' },
+            { id: 'OUT', type: 'http', url: u('/boom'), repo: 'o/zzz' },
+        ] }, { args: ['--repo', 'o/app', '--sha', SHA_GOOD] });
+        check('--repo narrows the population', narrow.status === 0 && statusOf(narrow, 'IN') === 'PASS' && lineOf(narrow, 'OUT') === '', narrow.stdout);
+    }
+    await single('release tag present passes', { type: 'release-tag', ...appCheck }, 'PASS', 0, /tag v8\.5\.0 exists/);
+    await single('release tag absent fails', { type: 'release-tag', repo: 'o/notag' }, 'FAIL', 1, /tag v8\.5\.0 is absent/);
+    await single('merged PR passes', { type: 'pr-merged', ...appCheck, number: 7 }, 'PASS', 0, /PR 7 merged/);
+    await single('open PR fails', { type: 'pr-merged', ...appCheck, number: 8 }, 'FAIL', 1, /state open/);
+    await single('merged PR by head branch passes', { type: 'pr-merged', ...appCheck, head: 'feature' }, 'PASS', 0, /1 merged PR/);
+    await single('closed unmerged PR by head branch fails', { type: 'pr-merged', ...appCheck, head: 'abandoned' }, 'FAIL', 1, /0 merged PRs/);
+
+    // Section H: the installed plugin version.
+    {
+        const plugin = path.join(root, 'plugin');
+        fs.mkdirSync(path.join(plugin, '8.5.0', 'scripts'), { recursive: true });
+        fs.writeFileSync(path.join(plugin, '8.5.0', 'scripts', 'wanted.js'), '');
+        await single('installed version with its file passes', { type: 'plugin-version', pluginRoot: plugin, versionRepo: 'o/app', minVersion: '8.5.0', requiredFiles: ['scripts/wanted.js'] }, 'PASS', 0, /8\.5\.0 installed, 1 required/);
+        await single('missing required file fails', { type: 'plugin-version', pluginRoot: plugin, versionRepo: 'o/app', requiredFiles: ['scripts/absent.js'] }, 'FAIL', 1, /missing scripts\/absent\.js/);
+        await single('version below the minimum fails', { type: 'plugin-version', pluginRoot: plugin, minVersion: '8.10.0' }, 'FAIL', 1, /below the required 8\.10\.0/);
+        await single('missing plugin root is INDETERMINATE', { type: 'plugin-version', pluginRoot: path.join(root, 'nope'), minVersion: '1.0.0' }, 'INDETERMINATE', 2, /plugin root not found/);
+        const empty = path.join(root, 'empty-plugin');
+        fs.mkdirSync(empty);
+        await single('plugin root with no version fails', { type: 'plugin-version', pluginRoot: empty, minVersion: '1.0.0' }, 'FAIL', 1, /no plugin version/);
+    }
+
+    // Section I: browser verdicts and the headless rule.
+    {
+        await single('browser passes both widths with values', { type: 'browser', url: u('/ok'), ...browserFast }, 'PASS', 0, /2 of 2 widths: w390 HTTP 200/);
+        await single('browser HTTP 500 fails', { type: 'browser', url: u('/boom'), widths: [390], ...browserFast }, 'FAIL', 1, /HTTP 500/);
+        await single('browser final url mismatch fails', { type: 'browser', url: u('/ok'), widths: [390], finalUrlPattern: '/login', ...browserFast }, 'FAIL', 1, /ended at/);
+        await single('browser ignoreConsole suppressor is visible in the value', { type: 'browser', url: u('/console-error'), widths: [390], ignoreConsole: ['planted'], ...browserFast }, 'PASS', 0, /1 ignored by config/);
+        await single('browser forbidden selector fails', { type: 'browser', url: u('/ok'), widths: [390], forbiddenSelector: 'h1', ...browserFast }, 'FAIL', 1, /match h1/);
+        if (!REAL_PLAYWRIGHT) {
+            fs.rmSync(LAUNCH_LOG, { force: true });
+            await run({ headless: false, checks: [{ id: 'X1', type: 'browser', headless: false, url: u('/ok'), widths: [390], ...browserFast }] });
+            const launches = fs.readFileSync(LAUNCH_LOG, 'utf8').trim().split('\n').map((l) => JSON.parse(l));
+            check('config cannot turn headless off', launches.length === 1 && launches.every((o) => o.headless === true), JSON.stringify(launches));
+            await single('a browser that will not start is INDETERMINATE', { type: 'browser', url: u('/ok'), widths: [390] }, 'INDETERMINATE', 2, /browser would not start/, { env: { FAKE_DRIVER_NO_START: '1' } });
+        }
+        const r = await run({ checks: [{ id: 'X1', type: 'browser', url: u('/ok'), widths: [390], ...browserFast }] });
+        check('browser value carries no page text', !/real page text/.test(r.stdout), r.stdout);
+        const noDriver = await new Promise((resolve) => {
+            const file = path.join(root, 'nodriver.json');
+            fs.writeFileSync(file, JSON.stringify({ checks: [{ id: 'X1', type: 'browser', url: u('/ok'), widths: [390] }] }));
+            const child = spawn(process.execPath, [SUBJECT, 'run', '--config', file], { cwd: root, windowsHide: true, env: { ...process.env, NODE_PATH: '' } });
+            let out = '';
+            child.stdout.on('data', (d) => { out += d; });
+            child.on('close', (status) => resolve({ status, out }));
+        });
+        check('no playwright is INDETERMINATE, not PASS', noDriver.status === 2 && /no playwright resolves/.test(noDriver.out), noDriver.out);
+    }
+
+    // Section J: the exit reflects every printed finding, and the receipt names the population.
+    {
+        const failAndOpen = await run({ checks: [{ id: 'P', type: 'http', url: u('/ok') }, { id: 'F', type: 'http', url: u('/boom') }, { id: 'I', type: 'http', url: u('/challenge') }] });
+        check('FAIL outranks INDETERMINATE in the exit', failAndOpen.status === 1, failAndOpen.stdout);
+        const openOnly = await run({ checks: [{ id: 'P', type: 'http', url: u('/ok') }, { id: 'I', type: 'http', url: u('/challenge') }] });
+        check('one INDETERMINATE among passes exits 2', openOnly.status === 2, openOnly.stdout);
+        const receiptFile = path.join(root, 'receipt.json');
+        const ok = await run({ checks: [{ id: 'Z', type: 'http', url: u('/ok') }, { id: 'A', type: 'http', url: u('/ok') }] }, { args: ['--out', receiptFile] });
+        const receipt = JSON.parse(fs.readFileSync(receiptFile, 'utf8'));
+        check('all green exits 0', ok.status === 0, ok.stdout);
+        check('lines print in config order', ok.stdout.indexOf('CHECK Z:') < ok.stdout.indexOf('CHECK A:') && ok.stdout.indexOf('CHECK Z:') >= 0, ok.stdout);
+        check('receipt holds the population, timestamps and zero tokens', receipt.population.count === 2 && receipt.population.ids.join(',') === 'Z,A' && receipt.startedAt && receipt.finishedAt && receipt.modelTokens === 0 && receipt.exit === 0, JSON.stringify(receipt));
+        check('POPULATION line reports what ran', /^POPULATION 2 \| PASS 2 FAIL 0 INDETERMINATE 0 \| \d+ms \| exit 0$/m.test(ok.stdout), ok.stdout);
+        fs.writeFileSync(receiptFile, '{"stale":true}');
+        const refused = await run({ checks: [] }, { args: ['--out', receiptFile] });
+        check('a refused run removes an older receipt', refused.status === 2 && !fs.existsSync(receiptFile), String(fs.existsSync(receiptFile)));
+    }
+
+    // Section K: the small pure pieces, with literals.
+    check('cleanValue keeps a value on one line and strips the separator', lib.cleanValue('a\nb|c') === 'a b c', lib.cleanValue('a\nb|c'));
+    check('safeUrl drops the query string', lib.safeUrl('https://x.test/a?token=secret') === 'https://x.test/a', lib.safeUrl('https://x.test/a?token=secret'));
+    check('compareVersions orders numerically', lib.compareVersions('8.10.0', '8.9.0') > 0 && lib.compareVersions('8.9.0', '8.9.0') === 0);
+    check('shaMatches accepts a prefix and rejects another sha', lib.shaMatches('abcdef12', 'abcdef1234') && !lib.shaMatches('abcdef12', 'bbcdef1234'));
+    check('parseLocs reads the literal locations', lib.parseLocs('<loc>https://a</loc><loc> https://b </loc>').join(',') === 'https://a,https://b');
+    check('exitCodeFor refuses an empty population', lib.exitCodeFor({ total: 0, PASS: 0, FAIL: 0, INDETERMINATE: 0 }) === 2);
+
+    server.closeAllConnections();
+    server.close();
+    fs.rmSync(root, { recursive: true, force: true });
+    console.log(`\n${pass} passed, ${fail} failed${REAL_PLAYWRIGHT ? ' (browser: real Chromium)' : ' (browser: fake driver)'}`);
+    if (fail) { console.log(`failed: ${failures.join('; ')}`); process.exitCode = 1; }
+}
+
+main().catch((e) => { console.error(e); process.exitCode = 1; server.close(); });
