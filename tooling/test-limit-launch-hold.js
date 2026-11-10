@@ -171,9 +171,23 @@ try {
         unsettled('no-exit', logFile('no-exit', `${ev(NO_RESET, true)}\n`)),
         unsettled('unreadable', path.join(ctl.home, 'absent.log')),
         { code: 'plain', startedAt: ago(5), state: 'settled', result: 'unreported', reason: 'exited 1', exit: 1, settledAt: ago(4), blocker: { status: 'unknown' }, report: 'r.md' },
+        { code: 'plain-log', startedAt: ago(5), state: 'settled', result: 'unreported', reason: 'exited 1', exit: 1, settledAt: ago(4), blocker: { status: 'unknown' }, report: 'r.md', log: logFile('plain-log', `${ev('It broke.', true)}\nCLAUDE_EXIT=1\n`) },
+        wall('out-of-range', NO_RESET, '+275760-09-13T00:00:00.000Z'),
     ]);
     const ctlStart = ctl.start('control-1');
     check('non-defect: a quoted limit, a recovered limit, a run still going, an unreadable log and a plain failure set no hold', ctlStart.status === 0 && ctl.waitExit('control-1'), ctlStart.stdout + ctlStart.stderr);
+
+    // A limit ending settled before settle stamped usageLimit, as the real ledger holds them.
+    const old = scenario('unstamped');
+    const oldLog = path.join(old.home, 'old.log');
+    fs.writeFileSync(oldLog, `${ev(NO_RESET, true)}\nCLAUDE_EXIT=1\n`);
+    old.seed([{ code: 'unstamped', startedAt: ago(9), state: 'settled', result: 'unreported', reason: 'exited 1', exit: 1, settledAt: ago(5), blocker: { status: 'unknown' }, report: 'r.md', log: oldLog }]);
+    const oldHeld = old.start('after-unstamped');
+    check('H1. a settled run with no stamp holds through its log', oldHeld.code === 'usage-limit-hold', oldHeld.stdout + oldHeld.stderr);
+    const longAgo = new Date(Date.now() - 9 * 24 * 60 * MIN);
+    fs.utimesSync(oldLog, longAgo, longAgo);
+    const oldFree = old.start('after-old');
+    check('H2. the same log last written 9 days ago holds nothing', oldFree.status === 0 && old.waitExit('after-old'), oldFree.stdout + oldFree.stderr);
 
     // One config dir is one login.
     const cfg = scenario('config');
@@ -260,11 +274,13 @@ process.stdout.write(JSON.stringify({ type:'result', is_error:false, num_turns:1
     const tb = tRec('worker-tick-b');
     check('H1. a tick-held task stays queued with no launch error', tb.state === 'queued' && !tb.lastLaunchError, JSON.stringify(tb));
     check('H1. a tick-held task is no failed launch', startsRows().every((r) => r.ok !== false && r.taskId !== 'worker-tick-b') && heldTicks.every((x) => !(x.value.events || []).some((e) => e.type === 'judge.launch-refused')), JSON.stringify(startsRows()));
-    check('H1. two held ticks open no breaker', heldTicks.every((x) => x.value.lines.every((l) => !/BREAKER/.test(l))), heldTicks[1].stdout.slice(0, 400));
+    // The breaker reads clock passes and judge runs. A tick writes only the second, so no judge run means no input.
+    const judgeRuns = () => { try { return fs.readFileSync(path.join(t.autodev, 'brain-judge', 'runs.jsonl'), 'utf8').trim().split('\n').filter(Boolean).length; } catch { return 0; } };
+    check('H1. held ticks write no judge run, the only breaker input a tick has', judgeRuns() === 0, judgeRuns());
 
     t.editLedger((r) => { r.find((x) => x.code === 'w').usageLimit.endedAt = ago(61); });
     const tAfter = tick();
-    check('H1. after the hold the tick judges again', fs.existsSync(judgeSeen), tAfter.value && tAfter.value.lines.join(' | '));
+    check('H1. after the hold the tick judges again', fs.existsSync(judgeSeen) && judgeRuns() === 1, tAfter.value && `${judgeRuns()} ${tAfter.value.lines.join(' | ')}`);
     check('H1. after the hold the tick starts the queued task, one more process', tRec('worker-tick-b').state === 'started' && waitLog(tRec('worker-tick-b').headless.log) && t.runs() === 2, `${tRec('worker-tick-b').state} ${t.runs()}`);
     check('H3. tick prints no hold once it lifted', !tAfter.value.lines.some((l) => /launch hold/.test(l)), tAfter.value.lines.join(' | '));
 
@@ -288,6 +304,37 @@ process.stdout.write(JSON.stringify({ type:'result', is_error:false, num_turns:1
     check('H1. a hold that appears after the plan is no failed launch', tc.state === 'queued' && raceStarts === '' && !(raced.value.events || []).some((e) => e.type === 'judge.launch-refused'), `${tc.state} ${raceStarts}`);
     check('H1. that race counts no attempt', tc.lastLaunchError && tc.lastLaunchError.attempts === 0 && tc.lastLaunchError.transient === true, JSON.stringify(tc.lastLaunchError));
     check('H1. that race started no process', race.runs() === 0, race.runs());
+
+    // An operator's --start-override on the queue also decides about the hold.
+    const ov = scenario('launch-override');
+    const ovLedger = path.join(ov.autodev, 'unattended-workers.json');
+    ov.cli(UW, ['enqueue', '--repo', repo, '--slug', 'ov-a', '--brief-file', briefFile, '--return', 'brain', '--ledger', ovLedger]);
+    ov.seed([wall('w', NO_RESET, ago(1))]);
+    const ovStart = ov.cli(UW, ['launch', '--task-id', 'worker-ov-a', '--ledger', ovLedger, '--claude-bin', ov.okBin, '--dev', '--start-override', 'an operator asked']);
+    check('H1. --start-override on launch carries through the hold and records why', ovStart.status === 0 && ov.recOf('ov-a')?.holdOverride?.reason === 'an operator asked', ovStart.stdout + ovStart.stderr);
+
+    // On the tick, one login's hold holds only that login's tasks and only its judge.
+    const lg = scenario('logins');
+    const lgLedger = path.join(lg.autodev, 'unattended-workers.json');
+    const lgClock = path.join(lg.autodev, 'brain-clock');
+    const lgAcct = path.join(lg.home, 'acct-b');
+    fs.mkdirSync(lgAcct);
+    fs.mkdirSync(lgClock, { recursive: true });
+    fs.writeFileSync(path.join(lgClock, 'passes.jsonl'), ['ok', 'ok', 'ok'].map((x) => JSON.stringify({ status: x, at: new Date().toISOString() })).join('\n') + '\n');
+    lg.cli(UW, ['enqueue', '--repo', repo, '--slug', 'on-held', '--brief-file', briefFile, '--return', 'brain', '--config-dir', lgAcct, '--ledger', lgLedger]);
+    lg.cli(UW, ['enqueue', '--repo', repo, '--slug', 'on-free', '--brief-file', briefFile, '--return', 'brain', '--ledger', lgLedger]);
+    lg.seed([wall('w', NO_RESET, ago(1), 'acct-b')]);
+    lg.cli(JUDGE, ['switch', '--judge', 'live', '--start', 'live']);
+    const lgTick = () => lg.cli(JUDGE, ['tick', '--live', '--dev', '--worker-bin', lg.okBin]);
+    const lgFirst = lgTick();
+    const lgRec = (id) => JSON.parse(fs.readFileSync(lgLedger, 'utf8')).records.find((r) => r.taskId === id);
+    sleep(1200);
+    check('H1. on the tick a hold on one login leaves that login\'s task queued', lgRec('worker-on-held').state === 'queued', lgRec('worker-on-held').state);
+    check('H1. on the tick a hold on one login lets another login start', lgRec('worker-on-free').state === 'started' && lg.runs() === 1, `${lgRec('worker-on-free').state} ${lg.runs()}`);
+    check('H1. a hold on another login does not hold the judge', !(lgFirst.value?.lines || []).some((l) => /^judge \(live\): held/.test(l)), (lgFirst.value?.lines || []).join(' | '));
+    lg.cli(JUDGE, ['switch', '--config-dir', lgAcct]);
+    const lgSecond = lgTick();
+    check('H1. a hold on the judge\'s own login holds the judge', (lgSecond.value?.lines || []).some((l) => /^judge \(live\): held: launch hold: usage limit until \S+ \(config dir acct-b\)$/.test(l)), (lgSecond.value?.lines || []).join(' | '));
 
     // ------------------------------------------------------------ the lift time, every shape, one CLI run
     const b = scenario('table');

@@ -355,7 +355,7 @@ function headlessLedgers(ctx) {
     return out;
 }
 
-/** Every run in the ledgers that could be read. An unreadable one already holds start through authHold. */
+/** Every run in the ledgers that could be read. An unreadable ledger holds start through authHold, and the judge goes on without its runs. */
 const readableRuns = (ledgers) => [...ledgers.values()].filter(Array.isArray).flat();
 
 /** The judgement keys of finished records whose headless run settled auth-refused. */

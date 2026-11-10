@@ -20,8 +20,8 @@
 //     run settling on the limit extends the hold and can never shorten it.
 //   - One config dir is one login, so the hold is per config dir.
 //
-// THE FORMAT IS OBSERVED. Every limit text in the recorded worker logs, 29 endings,
-// is one of these three shapes:
+// THE FORMAT IS OBSERVED. `[measured 2026-11-10]` every limit text in the recorded
+// worker logs is one of these three shapes:
 //   You've hit your session limit · resets 5:30am (Europe/Bucharest)
 //   You've hit your weekly limit · resets 8pm (Europe/Bucharest)
 //   You've hit your weekly limit · resets Nov 11, 1am (Europe/Bucharest)
@@ -38,6 +38,8 @@ const DAY = 24 * 60 * MINUTE;
 const RESET_MARGIN_MS = 2 * MINUTE;
 const NO_RESET_HOLD_MS = 60 * MINUTE;
 const MAX_RESET_AHEAD_MS = 8 * DAY;
+// A log last written longer ago than this cannot hold anything: no reset is accepted further out.
+const LOG_MAX_AGE_MS = MAX_RESET_AHEAD_MS + RESET_MARGIN_MS;
 const HOLD_CODE = 'usage-limit-hold';
 const TEXT_MAX = 300;
 
@@ -125,19 +127,26 @@ function liftAt(text, endedAtMs) {
 const ms = (v) => { const t = Date.parse(v || ''); return Number.isFinite(t) ? t : null; };
 
 /** The limit ending a ledger record carries, as {text, endedAt}, or null. */
-function endingOf(rec) {
+function endingOf(rec, now) {
     if (rec.state === 'settled') {
         const stamped = rec.usageLimit && typeof rec.usageLimit === 'object' ? rec.usageLimit : null;
-        // A run settled before settle stamped usageLimit has only its blocker and settle time.
         const text = stamped ? stamped.text : rec.blocker && rec.blocker.status === 'usage-limit' ? rec.blocker.text : null;
-        if (typeof text !== 'string') return null;
-        const endedAt = (stamped && ms(stamped.endedAt)) ?? ms(rec.settledAt) ?? ms(rec.startedAt);
-        return endedAt === null ? null : { text, endedAt };
+        if (typeof text === 'string') {
+            const endedAt = (stamped && ms(stamped.endedAt)) ?? ms(rec.settledAt) ?? ms(rec.startedAt);
+            return endedAt === null ? null : { text, endedAt };
+        }
+        // `[measured 2026-11-10]` every limit ending settled before settle stamped usageLimit
+        // carries a blocker of unknown or stated, so only its log can say how it ended.
     }
     if (!rec.log) return null;
     let log;
     let endedAt;
-    try { log = fs.readFileSync(rec.log, 'utf8'); endedAt = fs.statSync(rec.log).mtimeMs; } catch { return null; }
+    try {
+        endedAt = fs.statSync(rec.log).mtimeMs;
+        // Records are never pruned while unsettled, so this is what keeps the cost flat.
+        if (now - endedAt > LOG_MAX_AGE_MS) return null;
+        log = fs.readFileSync(rec.log, 'utf8');
+    } catch { return null; }
     if (!/^CLAUDE_EXIT=/m.test(log)) return null;
     const text = usageLimit(log);
     return text ? { text, endedAt } : null;
@@ -152,10 +161,12 @@ const holdLine = (untilIso, cfg) => `launch hold: usage limit until ${untilIso}$
 function limitHolds(records, now = Date.now()) {
     const best = new Map();
     for (const rec of records || []) {
-        const ending = endingOf(rec);
+        const ending = endingOf(rec, now);
         if (!ending) continue;
         const cfg = rec.configDir || null;
         const lift = liftAt(ending.text, ending.endedAt);
+        // A corrupt ending past the Date range would throw below, on a path every tick runs.
+        if (Number.isNaN(new Date(lift).getTime())) continue;
         if (!best.has(cfg) || lift > best.get(cfg).lift) best.set(cfg, { lift, code: rec.code, text: ending.text });
     }
     return [...best].filter(([, b]) => b.lift > now).sort((a, b) => b[1].lift - a[1].lift).map(([configDir, b]) => {
