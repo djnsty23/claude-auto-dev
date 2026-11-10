@@ -383,7 +383,7 @@
         "profile: runs plugin code without overriding HOME, USERPROFILE or CLAUDE_CONFIG_DIR",
         "nested-runner: drives check-suites-can-fail, test-all.js"
       ],
-      "sha256": "fc366b3b155ce9cfeb50ed25149b847182b5e75bb0832618be1bd254265f2eff"
+      "sha256": "3737223ae1557463137722ace7e0f3f847eff0194898f84056c1f39f9bd164d9"
     },
     "test-claude-paths.js": {
       "isolation": "parallel",

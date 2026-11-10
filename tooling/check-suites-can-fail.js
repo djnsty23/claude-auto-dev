@@ -572,7 +572,9 @@ const canonPath = (p) => {
     try { real = fs.realpathSync(r); } catch { real = r; }
     return process.platform === 'win32' ? real.toLowerCase() : real;
 };
-{
+// [measured 2026-11-10] `git worktree list` dies on a half-written registration
+// exactly as `git worktree add` does, so a worker never lists: its siblings are writing.
+if (!WORKER) { // The parent alone reclaims, before any worker starts.
     // -z output: NUL-separated attribute records, so a path containing a
     // newline — legal on POSIX — cannot shear the parse (same blocker).
     const registered = new Set(gitArgv(['worktree', 'list', '--porcelain', '-z'], ROOT)
@@ -661,13 +663,23 @@ async function runWorkers() {
 const SWEEP_ROOT = (() => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'check-suites-wt-' + process.pid + '-'));
     fs.rmdirSync(dir);   // hand git a unique, nonexistent path
-    try {
-        gitArgv(['worktree', 'add', '--detach', dir, HEAD_SHA], ROOT);
-    } catch (e) {
-        console.error('\nCould not create the private mutation worktree: ' + e.message);
-        process.exit(2);
+    // `git worktree add` reads every registered worktree, and a sibling worker's
+    // can be half written. [measured 2026-11-10] one of 16 workers lost that race:
+    // "failed to read .../commondir". Only that message waits and retries.
+    const waits = WORKER ? [500, 1000, 2000, 4000, 8000] : [];
+    for (let attempt = 0; ; attempt++) {
+        try {
+            gitArgv(['worktree', 'add', '--detach', dir, HEAD_SHA], ROOT);
+            return dir;
+        } catch (e) {
+            if (attempt < waits.length && /failed to read .*(commondir|gitdir)/.test(e.message)) {
+                Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, waits[attempt]);
+                continue;
+            }
+            console.error('\nCould not create the private mutation worktree: ' + e.message);
+            process.exit(2);
+        }
     }
-    return dir;
 })();
 const SWEEP_TOOLING = path.join(SWEEP_ROOT, 'tooling');
 process.on('exit', () => {

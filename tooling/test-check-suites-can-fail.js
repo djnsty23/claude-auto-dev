@@ -34,7 +34,7 @@
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
-const { spawnSync } = require('child_process');
+const { spawn, spawnSync } = require('child_process');
 const sb = require('./spawn-budget.js');
 
 const TOOLING = __dirname;
@@ -298,6 +298,53 @@ try {
         const m = runSweep(workerRepo('workers-mutant', SWEEP_SRC.replace(from, () => to)), true, OFF, ['--workers=3']);
         if (!m) continue;
         check(`workers mutant "${name}": the sweep exits 2, never a smaller pass`, m.code === 2 && /INDETERMINATE/.test(m.all), `exit ${m.code} ${m.all.slice(-400)}`);
+    }
+
+    // A sibling's half-written worktree registration, the way 16 workers meet one.
+    // It clears after 3 s. Until then every `git worktree add` fails on it.
+    const raceRepo = workerRepo('workers-race');
+    // HEAD and gitdir make git count it as a worktree. A directory named commondir
+    // exists and cannot be read, like a sibling's file mid-write. "locked" keeps
+    // the sweep's own git worktree prune off it.
+    const halfWritten = (repo) => {
+        const admin = path.join(repo, '.git', 'worktrees', 'half-written');
+        fs.mkdirSync(path.join(admin, 'commondir'), { recursive: true });
+        for (const name of ['HEAD', 'gitdir', 'locked']) fs.writeFileSync(path.join(admin, name), 'x\n');
+        return admin;
+    };
+    const plantRace = (lifetime) => {
+        const admin = halfWritten(raceRepo);
+        spawn(process.execPath, ['-e', `setTimeout(() => require('fs').rmSync(${JSON.stringify(admin)}, { recursive: true, force: true }), ${lifetime})`],
+            { stdio: 'ignore', windowsHide: true });
+    };
+    // The parent lists worktrees before any worker exists, so the race is a
+    // worker's: one is launched directly, the way runWorkers launches it.
+    const launchWorker = (repo) => {
+        const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'workers-race-run-'));
+        dirs.push(dir);
+        fs.mkdirSync(path.join(dir, 'claims'));
+        const head = spawnSync('git', ['rev-parse', 'HEAD'], { cwd: repo, encoding: 'utf8' }).stdout.trim();
+        fs.writeFileSync(path.join(dir, 'meta.json'), JSON.stringify({ head, held: [] }));
+        const run = runSweep(repo, true, OFF, ['--worker-dir=' + dir, '--worker-id=race', '--worker-phase=parallel']);
+        return run && { ...run, resultFile: path.join(dir, 'result-race.json') };
+    };
+    plantRace(3000);
+    const raceRun = launchWorker(raceRepo);
+    if (raceRun) {
+        const rows = fs.existsSync(raceRun.resultFile) ? JSON.parse(fs.readFileSync(raceRun.resultFile, 'utf8')).rows.length : -1;
+        check('workers: a sibling half-written worktree is waited out, and the worker reports all five rows', raceRun.code === 0 && rows === 5, `exit ${raceRun.code} rows ${rows} ${raceRun.all.slice(-500)}`);
+    }
+    for (const [name, from, to, exit] of [
+        ['no retry', 'const waits = WORKER ? [500, 1000, 2000, 4000, 8000] : [];', 'const waits = [];', 2],
+        ['a worker that lists worktrees', 'if (!WORKER) { // The parent alone reclaims', 'if (true) { // The parent alone reclaims', 1],
+    ]) {
+        const count = SWEEP_SRC.split(from).length - 1;
+        check(`workers mutant "${name}": its anchor matches the real sweep once`, count === 1, 'matched ' + count);
+        if (count !== 1) continue;
+        const repo = workerRepo('workers-race-mutant', SWEEP_SRC.replace(from, () => to));
+        halfWritten(repo);
+        const m = launchWorker(repo);
+        if (m) check(`workers mutant "${name}": the same race exits ${exit}`, m.code === exit && /failed to read/.test(m.all), `exit ${m.code} ${m.all.slice(-500)}`);
     }
 
     // ---- RUNNER CANARY: the real test-all.js, through --canary-only -----------
