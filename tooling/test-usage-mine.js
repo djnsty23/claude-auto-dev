@@ -108,8 +108,11 @@ try {
     try { r = JSON.parse(rj.stdout); } catch { /* reported below */ }
     const row = (c) => r && r.byCount.find((x) => x.class === c);
     check('report --json exits 0 and names its population', rj.status === 0 && r && r.population.filesMined === 3 && r.population.events === ev3.length, rj.stdout.slice(0, 200));
-    check('a class is counted in the week it happened', row('gate-red') && row('gate-red').weekly.join(',') === '0,1,0,0' && row('permission-denied/mode:dontAsk').weekly.join(',') === '0,0,0,1',
-        JSON.stringify(r && r.population.weeks));
+    // The fixture dates are fixed and the window ends this week, so the window is pinned to the fixture's own last week.
+    const pinned = require(SUBJECT).report({ out, weeks: 4, now: Date.parse('2026-11-05T12:00:00Z') });
+    const pinnedRow = (c) => pinned.byCount.find((x) => x.class === c);
+    check('a class is counted in the week it happened', pinnedRow('gate-red') && pinnedRow('gate-red').weekly.join(',') === '0,1,0,0' && pinnedRow('permission-denied/mode:dontAsk').weekly.join(',') === '0,0,0,1',
+        JSON.stringify(pinned.population.weeks));
     check('cost carries tokens and retries', row('gate-red') && row('gate-red').tok > 0 && row('gate-red').retries === 1, JSON.stringify(row('gate-red')));
     check('--class narrows the ranking by prefix', JSON.parse(cli(['report', '--out', out, '--json', '--class', 'gate-']).stdout).byCount.every((x) => x.class.startsWith('gate-')));
     const human = cli(['report', '--out', out]);
