@@ -12,6 +12,9 @@
 //   U5  control: a limit met earlier in a run that later recovered is not a wall
 //   U6  a limit ending with a report but no RESULT line keeps both facts
 //   U7  blocker-report ranks limit runs as usage limit, and the control as unreported
+//   U8  a limit reason with an unreadable log still ranks as usage limit
+//   U9  a blocker sentence naming the limit ranks as usage limit, from a report and a stored blocker
+//   U11 control: an unreadable log with no limit in its reason stays settled unreported
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
@@ -77,6 +80,28 @@ try {
     check('U7. the report ran over all six planted runs', rr.status === 0 && latest.population.runs === 6, `${rr.status} ${rr.stderr} ${JSON.stringify(latest.population)}`);
     check('U7. limit runs rank as usage limit', cause('usage limit')?.runs === 3, JSON.stringify(latest.ranked));
     check('U7. the three controls stay settled unreported', cause('settled unreported')?.runs === 3, JSON.stringify(latest.ranked));
+
+    // The usage limit row of CLASSES has work only where the log cannot answer: every
+    // run above has a readable log, so those cases rank the same with the row deleted.
+    const base2 = path.join(root, 'autodev2');
+    const absent = path.join(root, 'no-such-dir', 'gone.log');
+    const reportOf = (name) => path.join(root, name, 'REPORT.md');
+    write(reportOf('U9'), `A partial report.\nBLOCKER: ${WEEKLY}\nRESULT PARTIAL\n`);
+    const row = (code, extra) => ({ code, startedAt: at, state: 'settled', settledAt: at, report: reportOf(code), ...extra });
+    write(path.join(base2, 'headless-workers.json'), JSON.stringify({ version: 1, records: [
+        row('U8', { result: 'unreported', log: absent, reason: 'the worker stopped at the account usage limit, and REPORT.md does not exist' }),
+        row('U9', { result: 'partial', log: absent, reason: 'partial' }),
+        row('U10', { result: 'done', log: absent, reason: 'done', blocker: { status: 'stated', text: WEEKLY } }),
+        row('U11', { result: 'unreported', log: absent, reason: 'exited 1 and REPORT.md does not exist' }),
+    ] }));
+    write(path.join(base2, 'unattended-workers.json'), JSON.stringify({ version: 1, records: [] }));
+    const r2 = spawnSync(process.execPath, [report, '--base', base2, '--now', '2026-11-08T12:00:00Z'], { encoding: 'utf8' });
+    const second = JSON.parse(fs.readFileSync(path.join(base2, 'blockers/latest.json'), 'utf8'));
+    const cause2 = (name) => second.ranked.find((c) => c.cause === name);
+    check('U8. the second report ran over all four planted runs', r2.status === 0 && second.population.runs === 4, `${r2.status} ${r2.stderr} ${JSON.stringify(second.population)}`);
+    check('U8. an unreadable log with a limit reason ranks as usage limit', cause2('usage limit')?.settled === 1, JSON.stringify(second.ranked));
+    check('U9. a limit sentence classified from a report BLOCKER and a stated blocker ranks as usage limit', cause2('usage limit')?.stated === 2 && cause2('usage limit')?.runs === 3, JSON.stringify(second.ranked));
+    check('U11. control: an unreadable log with no limit in its reason stays settled unreported', cause2('settled unreported')?.runs === 1, JSON.stringify(second.ranked));
 } finally { fs.rmSync(root, { recursive: true, force: true }); }
 console.log(`settle-usage-limit: ${total} checks, ${failed} failed`);
 process.exitCode = failed ? 1 : 0;
