@@ -436,6 +436,10 @@ async function main() {
         fs.rmSync(LAUNCH_LOG, { force: true });
         const late = await run({ checks: [{ id: 'X1', ...fake() }] }, { args: ['--deadline-ms', '300'], env: { FAKE_DRIVER_SLOW_LAUNCH: '1500' } });
         check('a launch finishing after the deadline is killed', late.status === 2 && events().some((e) => e.event === 'kill'), JSON.stringify(events()));
+        // Shutdown waits 5s for the launch. This one outlives that wait, so only the closing guard can kill it.
+        fs.rmSync(LAUNCH_LOG, { force: true });
+        const later = await run({ checks: [{ id: 'X1', ...fake() }] }, { args: ['--deadline-ms', '300'], env: { FAKE_DRIVER_SLOW_LAUNCH: '6500' } });
+        check('a launch outliving the shutdown wait is still killed', later.status === 2 && events().some((e) => e.event === 'kill'), JSON.stringify(events()));
         const prompt = await run({ checks: [{ id: 'X1', ...fake() }] });
         check('a browser run exits without waiting on idle timers', prompt.status === 0 && prompt.ms < 4500, `${prompt.ms}ms`);
         const hung = await run({ checks: [{ id: 'X1', ...fake({ timeoutMs: 300 }) }] }, { args: ['--deadline-ms', '20000'], env: { FAKE_DRIVER_HANG_CONTEXT: '1' } });
