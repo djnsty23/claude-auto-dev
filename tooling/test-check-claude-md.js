@@ -35,7 +35,10 @@ const GATE = path.join(ROOT, 'tooling/check-claude-md.js');
 
 const cases = [];
 const check = (label, ok, detail) => cases.push([label, ok, detail]);
-const run = (args, timeout = 120000) => spawnSync(process.execPath, [GATE, ...args], {
+// An assertion that did not run. Printed and counted on its own, never a PASS.
+const skips = [];
+const skip = (label, reason) => skips.push([label, reason]);
+const run =(args, timeout = 120000) => spawnSync(process.execPath, [GATE, ...args], {
     cwd: ROOT, encoding: 'utf8', windowsHide: true, timeout, input: '', maxBuffer: 16 * 1024 * 1024,
 });
 const detail = (r) => `status=${r.status} signal=${r.signal} error=${r.error ? r.error.message : 'none'}\n`
@@ -234,24 +237,53 @@ try {
         fs.writeFileSync(MD, pristine);
     }
 
+    // Asked here with `gh` directly, not through the checker, so a checker that
+    // starts skipping on a host that CAN answer goes red instead of skipping.
+    let ghAnswer = null;
+    const ghAnswers = () => {
+        if (ghAnswer !== null) return ghAnswer;
+        const url = JSON.parse(fs.readFileSync(path.join(ROOT, 'package.json'), 'utf8')).repository.url;
+        const slug = /github\.com[/:]([^/]+\/[^/.]+)/.exec(url)[1];
+        ghAnswer = [`repos/${slug}/branches/main/protection`, `repos/${slug}/rulesets?includes_parents=true`]
+            .every((api) => {
+                const r = spawnSync('gh', ['api', api], {
+                    encoding: 'utf8', windowsHide: true, timeout: 20000, input: '', maxBuffer: 16 * 1024 * 1024,
+                });
+                return !r.error && (r.status === 0 || /Branch not protected/i.test(`${r.stdout}${r.stderr}`));
+            });
+        return ghAnswer;
+    };
+    // A graded run takes its verdict. A skipped run is legal only when `gh`
+    // really cannot answer, and then the assertion is reported as skipped.
+    const graded = (label, r, verdict) => {
+        if (!/^SKIP \[force-push\]/m.test(r.stdout)) { check(label, verdict(), detail(r)); return; }
+        const why = /NOT VERIFIED[^]*?the GitHub API was unreachable: ([^]*?)\. Unreachable is not verified/.exec(r.stdout);
+        check(`an unreachable API never reads as "claim verified": ${label}`,
+            r.status === 0 && !!why && !ghAnswers(), `gh answers here: ${ghAnswers()}\n${detail(r)}`);
+        skip(label, `GitHub API unreachable: ${why ? why[1].replace(/\s+/g, ' ') : 'no reason printed'}`);
+    };
+
     // The pre-2026-10-15 sentence, "force-push is not blocked", must be caught
     // while the pre-push push-guard refuses force-pushes, whatever GitHub says.
-    // Skipped rather than failed when `gh` cannot answer: unreachable is not a
-    // verdict.
+    //
+    // CLAUDE.md may sit exactly on its byte budget, and "not " adds four bytes.
+    // The last section goes first, so this mutation can only trip the force-push
+    // family and the byte budget cannot supply the exit 1 this assertion reads.
     const FORCE_CLAIM = /\*\*force-push is blocked\*\*/;
     check('the real CLAUDE.md states the blocked polarity', FORCE_CLAIM.test(pristine), 'sentence missing');
-    fs.writeFileSync(MD, pristine.replace(FORCE_CLAIM, '**force-push is not blocked**'));
+    const roomy = pristine.replace(/\n## Product repos\r?\n[^]*$/, '\n');
+    check('the force-push mutation fits the byte budget',
+        Buffer.byteLength(roomy, 'utf8') + 'not '.length <= 8192, String(Buffer.byteLength(roomy, 'utf8')));
+    fs.writeFileSync(MD, roomy);
+    const roomyControl = run(['--root', scratch, '--no-network']);
+    check('trimming the last section adds no finding (exit 0, silent)',
+        roomyControl.status === 0 && roomyControl.stdout.trim() === '', detail(roomyControl));
+    fs.writeFileSync(MD, roomy.replace(FORCE_CLAIM, '**force-push is not blocked**'));
     const online = run(['--root', scratch]);
-    const reachable = !/^SKIP \[force-push\]/m.test(online.stdout);
-    check('re-asserting "force-push is not blocked" is caught by the push-guard '
-        + (reachable ? '(API reachable)' : '(SKIPPED: API unreachable here)'),
-        reachable
-            ? online.status === 1 && /force-push is NOT blocked/.test(online.stdout)
-              && /local hooks reference force-push/.test(online.stdout)
-            : online.status === 0 && /NOT VERIFIED/.test(online.stdout),
-        detail(online));
-    check('an unreachable API never reads as "claim verified"',
-        reachable || /Unreachable is not verified/.test(online.stdout), online.stdout.slice(0, 600));
+    graded('re-asserting "force-push is not blocked" is caught by the push-guard', online,
+        () => online.status === 1 && /^1 claim\(s\) in CLAUDE\.md disagree/m.test(online.stdout)
+            && /force-push is NOT blocked/.test(online.stdout)
+            && /local hooks reference force-push/.test(online.stdout));
 
     // Without the local hook, "blocked" stands on the GitHub rulesets alone.
     // Offline that cannot be settled, so it SKIPs visibly. Online the verdict
@@ -264,14 +296,12 @@ try {
     check('without the local guard, the blocked claim SKIPs visibly offline',
         offline.status === 0 && /^SKIP \[force-push\]/m.test(offline.stdout), detail(offline));
     const apiOnly = run(['--root', scratch]);
-    if (!/^SKIP \[force-push\]/m.test(apiOnly.stdout)) {
+    graded('without the local guard, the blocked claim follows the rulesets', apiOnly, () => {
         const rp = require('./release-protection.js');
         const live = rp.readLive(rp.repoFromRemote());
         const blocked = Boolean(live.state) && rp.forcePushBlockers(live.state, 'main').length > 0;
-        check(`without the local guard, the blocked claim follows the rulesets (rules ${blocked ? 'present' : 'absent'})`,
-            blocked ? apiOnly.status === 0 : apiOnly.status === 1 && /force-push IS blocked/.test(apiOnly.stdout),
-            detail(apiOnly));
-    }
+        return blocked ? apiOnly.status === 0 : apiOnly.status === 1 && /force-push IS blocked/.test(apiOnly.stdout);
+    });
     fs.writeFileSync(hook, hookText);
     fs.writeFileSync(MD, pristine);
 } finally {
@@ -283,5 +313,6 @@ for (const [label, ok, d] of cases) {
     console.log((ok ? 'PASS  ' : 'FAIL  ') + label);
     if (!ok) { failed++; console.log('        ' + String(d).replace(/\n/g, '\n        ')); }
 }
-console.log(`${cases.length - failed}/${cases.length} assertions passed`);
+for (const [label, reason] of skips) console.log(`SKIP  ${label}: ${reason}`);
+console.log(`${cases.length - failed}/${cases.length} assertions passed, ${skips.length} skipped`);
 process.exitCode = failed ? 1 : 0;
