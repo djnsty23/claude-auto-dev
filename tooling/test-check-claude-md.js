@@ -237,10 +237,16 @@ try {
     // The pre-2026-10-15 sentence, "force-push is not blocked", must be caught
     // while the pre-push push-guard refuses force-pushes, whatever GitHub says.
     // Skipped rather than failed when `gh` cannot answer: unreachable is not a
-    // verdict.
+    // verdict. The mutation keeps the byte count: CLAUDE.md sits at its 8192
+    // byte cap, and a longer sentence trips the size claim, so the unreachable
+    // branch would exit 1 for a reason this case does not test.
     const FORCE_CLAIM = /\*\*force-push is blocked\*\*/;
     check('the real CLAUDE.md states the blocked polarity', FORCE_CLAIM.test(pristine), 'sentence missing');
-    fs.writeFileSync(MD, pristine.replace(FORCE_CLAIM, '**force-push is not blocked**'));
+    const forceMutated = pristine.replace(FORCE_CLAIM, 'force-push is not blocked');
+    check('the force-push mutation keeps CLAUDE.md the same size',
+        Buffer.byteLength(forceMutated) === Buffer.byteLength(pristine),
+        `${Buffer.byteLength(pristine)} -> ${Buffer.byteLength(forceMutated)} bytes`);
+    fs.writeFileSync(MD, forceMutated);
     const online = run(['--root', scratch]);
     const reachable = !/^SKIP \[force-push\]/m.test(online.stdout);
     check('re-asserting "force-push is not blocked" is caught by the push-guard '
