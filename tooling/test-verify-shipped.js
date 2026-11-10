@@ -182,10 +182,26 @@ module.exports = { chromium: {
 const REAL_PLAYWRIGHT = process.env.VERIFY_SHIPPED_PLAYWRIGHT || null;
 const DRIVER = REAL_PLAYWRIGHT || FAKE_DRIVER;
 
+// 0xC0000409, a Windows native fast-fail. 4 of 4500 subject runs died this way with no output, 0 of 5000
+// bare node and fetch children did, and its cause is not known. It never reads as a pass, but about 120
+// children per suite would turn that into a flaky gate. So it alone is re-spawned, at most 3 times, and printed.
+const NATIVE_CRASH = 3221226505;
+const MAX_NATIVE_CRASHES = 3;
+let nativeCrashes = 0;
+
 let configCount = 0;
-function run(config, { args = [], env = {}, raw = false, timeoutMs = 90000 } = {}) {
+async function run(config, options = {}) {
     const file = path.join(root, `config-${++configCount}.json`);
-    fs.writeFileSync(file, raw ? config : JSON.stringify(config));
+    fs.writeFileSync(file, options.raw ? config : JSON.stringify(config));
+    let result = await runOnce(file, options);
+    while (result.status === NATIVE_CRASH && result.stdout === '' && nativeCrashes < MAX_NATIVE_CRASHES) {
+        nativeCrashes++;
+        result = await runOnce(file, options);
+    }
+    return result;
+}
+
+function runOnce(file, { args = [], env = {}, timeoutMs = 90000 }) {
     return new Promise((resolve) => {
         const child = spawn(process.execPath, [SUBJECT, 'run', '--config', file, '--playwright', DRIVER, ...args], {
             env: { ...process.env, VERIFY_SHIPPED_GH: FAKE_GH, ...env }, windowsHide: true,
@@ -479,6 +495,7 @@ async function main() {
     otherServer.closeAllConnections();
     otherServer.close();
     fs.rmSync(root, { recursive: true, force: true });
+    if (nativeCrashes) console.log(`native crashes re-run: ${nativeCrashes}`);
     console.log(`\n${pass} passed, ${fail} failed${REAL_PLAYWRIGHT ? ' (browser: real Chromium)' : ' (browser: fake driver)'}`);
     if (fail) { console.log(`failed: ${failures.join('; ')}`); process.exitCode = 1; }
 }
