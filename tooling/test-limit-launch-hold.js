@@ -158,7 +158,7 @@ try {
     const over = scenario('override');
     over.seed([wall('w', NO_RESET, new Date().toISOString())]);
     const forced = over.start('forced', ['--hold-override', 'bought more usage']);
-    check('H1. --hold-override starts this one run and records why', forced.status === 0 && over.waitExit('forced') && over.recOf('forced').holdOverride.reason === 'bought more usage', forced.stdout);
+    check('H1. --hold-override starts this one run and records why', forced.status === 0 && over.waitExit('forced') && over.recOf('forced')?.holdOverride?.reason === 'bought more usage', forced.stdout);
 
     // Controls: the shapes that are not a limit ending.
     const ctl = scenario('controls');
