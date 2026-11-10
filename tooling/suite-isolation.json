@@ -139,11 +139,8 @@
       "sha256": "ce1c08e9803b5375c596e64d1e444b9c627176f3fd9d9482c150ec21c8192ead"
     },
     "test-board-sync.js": {
-      "isolation": "parallel",
-      "reason": "measured 2026-11-10: passed with every other suite overlapping at 16 and 8 workers, its verdict matching the serial run",
-      "accepted": [
-        "repo-write: writeFileSync, mkdirSync, rmSync, utimesSync on a path built from the repo root"
-      ],
+      "isolation": "serial",
+      "reason": "serial, measured 2026-11-10: it takes the pid of an exited child as a dead process, and under the pool another suite can be handed that pid. test-requeue-salvage failed that way at 16 workers",
       "sha256": "1b5bfc686405509d37010321bbabda80267327434943b4d52efd3ed3263d49fc"
     },
     "test-brain-brief.js": {
@@ -177,11 +174,8 @@
       "sha256": "7a49390292f00eff39dd285f0dfe951b973a3a72efb747fc93c5cc75fb9f774c"
     },
     "test-brain-judge.js": {
-      "isolation": "parallel",
-      "reason": "measured 2026-11-10: passed with every other suite overlapping at 16 and 8 workers, its verdict matching the serial run",
-      "accepted": [
-        "repo-write: writeFileSync, mkdirSync, appendFileSync, rmSync, unlinkSync on a path built from the repo root"
-      ],
+      "isolation": "serial",
+      "reason": "serial, measured 2026-11-10: it takes the pid of an exited child as a dead process, and under the pool another suite can be handed that pid. test-requeue-salvage failed that way at 16 workers",
       "sha256": "4d14d13e1a30b6657a7970925b026f3ba277400fffe000503b6620c6e13eab09"
     },
     "test-brain-lock-owner.js": {
@@ -207,11 +201,8 @@
       "sha256": "47f299ec7f7e63877f9bf640c6a9fecd05bbef48c8b8a6fd20ad0b424607bcb9"
     },
     "test-capacity-deferral.js": {
-      "isolation": "parallel",
-      "reason": "measured 2026-11-10: passed with every other suite overlapping at 16 and 8 workers, its verdict matching the serial run",
-      "accepted": [
-        "git-write: git init, add (a fixture repo is initialised; every call must target it)"
-      ],
+      "isolation": "serial",
+      "reason": "serial, measured 2026-11-10: it takes the pid of an exited child as a dead process, and under the pool another suite can be handed that pid. test-requeue-salvage failed that way at 16 workers",
       "sha256": "d26ee8266ffa98fe11a92943193c35a81141346e4d36d09515db4110641e4bae"
     },
     "test-capacity-lifecycle.js": {
@@ -258,11 +249,8 @@
       "sha256": "f75f00101aed40f5f0cfeac96298741fec3437e6c404f0a38b0e4ce9123b0aa9"
     },
     "test-check-brain-role.js": {
-      "isolation": "parallel",
-      "reason": "measured 2026-11-10: passed with every other suite overlapping at 16 and 8 workers, its verdict matching the serial run",
-      "accepted": [
-        "profile: runs plugin code without overriding HOME, USERPROFILE or CLAUDE_CONFIG_DIR"
-      ],
+      "isolation": "serial",
+      "reason": "serial, measured 2026-11-10: it takes the pid of an exited child as a dead process, and under the pool another suite can be handed that pid. test-requeue-salvage failed that way at 16 workers",
       "sha256": "09debb9d3feca2568a6a79bd02b362597f251cd579305577d4940a0c46e7a2a2"
     },
     "test-check-branch-landed.js": {
@@ -881,11 +869,8 @@
       "sha256": "95aa0cfbbaa2b3535400430e7ec897881b913b746c262de4c15eb93f15ac66ff"
     },
     "test-headless-worker.js": {
-      "isolation": "parallel",
-      "reason": "measured 2026-11-10: passed with every other suite overlapping at 16 and 8 workers, its verdict matching the serial run",
-      "accepted": [
-        "repo-write: mkdirSync, writeFileSync, linkSync, unlinkSync, utimesSync, renameSync, rmSync, copyFileSync on a path built from the repo root"
-      ],
+      "isolation": "serial",
+      "reason": "serial, measured 2026-11-10: it takes the pid of an exited child as a dead process, and under the pool another suite can be handed that pid. test-requeue-salvage failed that way at 16 workers",
       "sha256": "c5c3a6a9775841c47377820dc442801a59294cec300c99c9cc238d8b087dbcf6"
     },
     "test-hook-budget.js": {
@@ -1049,11 +1034,8 @@
       "sha256": "4bbf4404899c3b513b51f71c7af3e9a4831683570e8ae9a271b4c99ec52b61e3"
     },
     "test-ledger-lock.js": {
-      "isolation": "parallel",
-      "reason": "measured 2026-11-10: passed with every other suite overlapping at 16 and 8 workers, its verdict matching the serial run",
-      "accepted": [
-        "profile: runs plugin code without overriding HOME, USERPROFILE or CLAUDE_CONFIG_DIR"
-      ],
+      "isolation": "serial",
+      "reason": "serial, measured 2026-11-10: it takes the pid of an exited child as a dead process, and under the pool another suite can be handed that pid. test-requeue-salvage failed that way at 16 workers",
       "sha256": "2722d7cc6a0f41e67ac31e29f207af62dbe32f1e56cb32feba9b7628a5d1bd75"
     },
     "test-ledger-rotate.js": {
@@ -1306,11 +1288,8 @@
       "sha256": "7da760e3a6ed155239cac94350094613caa77740d63196e24e24dd97d718a5ef"
     },
     "test-operating-lock.js": {
-      "isolation": "parallel",
-      "reason": "measured 2026-11-10: passed with every other suite overlapping at 16 and 8 workers, its verdict matching the serial run",
-      "accepted": [
-        "profile: runs plugin code without overriding HOME, USERPROFILE or CLAUDE_CONFIG_DIR"
-      ],
+      "isolation": "serial",
+      "reason": "serial, measured 2026-11-10: it takes the pid of an exited child as a dead process, and under the pool another suite can be handed that pid. test-requeue-salvage failed that way at 16 workers",
       "sha256": "1f13f98baa6fd575aff38a730204f592ea90ddb544c7f6bed024827c5d229941"
     },
     "test-orphan-checks.js": {
@@ -1607,11 +1586,8 @@
       "sha256": "de3185a628cc4c46dc4ff72b83ca6f46dc0af42a4a797ebe9a40eedece684b07"
     },
     "test-requeue-salvage.js": {
-      "isolation": "parallel",
-      "reason": "measured 2026-11-10: passed with every other suite overlapping at 16 and 8 workers, its verdict matching the serial run",
-      "accepted": [
-        "git-write: git init (a fixture repo is initialised; every call must target it)"
-      ],
+      "isolation": "serial",
+      "reason": "serial, measured 2026-11-10: it takes the pid of an exited child as a dead process, and under the pool another suite can be handed that pid. test-requeue-salvage failed that way at 16 workers",
       "sha256": "e573a8604414803910a272edbc57849b2b71e20a94adb594268cfe02d37c34e8"
     },
     "test-restore-drill.js": {
@@ -1793,19 +1769,13 @@
       "sha256": "08f05bcf7a3a1e0e1197e7dec436c5723cf5be3bd4cf6f3186ce4f1276bada82"
     },
     "test-settle-blocker.js": {
-      "isolation": "parallel",
-      "reason": "measured 2026-11-10: passed with every other suite overlapping at 16 and 8 workers, its verdict matching the serial run",
-      "accepted": [
-        "profile: runs plugin code without overriding HOME, USERPROFILE or CLAUDE_CONFIG_DIR"
-      ],
+      "isolation": "serial",
+      "reason": "serial, measured 2026-11-10: it takes the pid of an exited child as a dead process, and under the pool another suite can be handed that pid. test-requeue-salvage failed that way at 16 workers",
       "sha256": "2b430c62b7335e5e934a2a3c11364d37d98428f2c67cd6c31ab824c739438b7a"
     },
     "test-settle-usage-limit.js": {
-      "isolation": "parallel",
-      "reason": "measured 2026-11-10: passed with every other suite overlapping at 16 and 8 workers, its verdict matching the serial run",
-      "accepted": [
-        "profile: runs plugin code without overriding HOME, USERPROFILE or CLAUDE_CONFIG_DIR"
-      ],
+      "isolation": "serial",
+      "reason": "serial, measured 2026-11-10: it takes the pid of an exited child as a dead process, and under the pool another suite can be handed that pid. test-requeue-salvage failed that way at 16 workers",
       "sha256": "f22947dae75f4c7013558d76d5350a0b9d445e7b33670af506beffedee445098"
     },
     "test-shared-install.js": {
@@ -2233,8 +2203,8 @@
       "sha256": "a3d72917b72c0737c4c929d41e60f96aeb165161f051a185f4fc9c0ffd959208"
     },
     "test-worker-reconciliation.js": {
-      "isolation": "parallel",
-      "reason": "measured 2026-11-10: passed with every other suite overlapping at 16 and 8 workers, its verdict matching the serial run",
+      "isolation": "serial",
+      "reason": "serial, measured 2026-11-10: it takes the pid of an exited child as a dead process, and under the pool another suite can be handed that pid. test-requeue-salvage failed that way at 16 workers",
       "sha256": "a70ea9bcfefb668ee10673944605ffb65dea384038502b1d009bc8761927e69f"
     },
     "test-workflow-isolation.js": {
