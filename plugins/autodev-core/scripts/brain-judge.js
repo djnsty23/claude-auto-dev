@@ -82,6 +82,7 @@ const { spawnSync } = require('node:child_process');
 const claudePaths = require('./claude-paths.js');
 const uw = require('./unattended-worker.js');
 const hw = require('./headless-worker.js');
+const limitHolds = require('./usage-limit-hold.js');
 const capacity = require('./capacity.js');
 const budget = require('./execution-budget.js');
 const profiles = require('./worker-profiles.js');
@@ -103,6 +104,7 @@ const USAGE = [
     'judge and backfill judge for real and log the verdict; neither writes it to the ledger, nor counts toward tick\'s caps.',
     'auth-refused: when the newest settled headless run was refused its login, tick starts nothing and judges no run',
     '        that was refused, until a later run succeeds or probe passes on that config dir after it settled.',
+    'usage limit: while a settled or ended run on a login sits at the account limit (usage-limit-hold.js), tick starts nothing and judges nothing on it, and prints launch hold: usage limit until <iso>.',
     'probe: one tool-less claude -p on the workers\' login, logged to probes.jsonl; a refusal or failure exits 1.',
     'Output: {"ok":true,"value":{...}} exit 0; {"ok":false,"error":{"code","message"}} exit 1.',
     'compare: the logged verdicts against what the Brain did next. The Brain side is inferred.',
@@ -352,6 +354,9 @@ function headlessLedgers(ctx) {
     for (const f of files) { try { out.set(f, hw.readLedger(f).records); } catch (e) { out.set(f, e); } }
     return out;
 }
+
+/** Every run in the ledgers that could be read. An unreadable one already holds start through authHold. */
+const readableRuns = (ledgers) => [...ledgers.values()].filter(Array.isArray).flat();
 
 /** The judgement keys of finished records whose headless run settled auth-refused. */
 function authRefusedKeys(records, ledgers, defaultLedger) {
@@ -635,6 +640,9 @@ function judgeStep(ctx) {
     // A verdict logged while dry, or one whose ledger write failed, is written now. The judge already spent on it.
     if (mode === 'live') applyLogged(ctx, latest);
     if (br.judgeOpen) { out.lines.push(`judge: BREAKER OPEN: ${br.judgeOpen}`); return; }
+    // A judge run on an account at its limit fails, and enough failures open the judge breaker.
+    const limited = limitHolds.limitHold(readableRuns(headlessLedgers(ctx)), cfgKey(readSwitch(p.state).judgeConfigDir), now);
+    if (limited) { out.lines.push(`judge (${mode}): held: ${limited.line}`); return; }
     const runs = readJsonl(path.join(p.state, 'runs.jsonl'));
     const lastHour = tickRuns(runs ? runs.rows : []).filter((r) => ms(r.at) !== null && now - ms(r.at) < HOUR_MS).length;
     const all = judgeCandidates(ctx.records, new Set(latest.keys()), ctx.sinceMs);
@@ -762,7 +770,7 @@ function startStep(ctx) {
     const ledgers = headlessLedgers(ctx);
     const probes = readProbes(p.state);
     const holds = new Map();
-    const holdFor = (cfg) => { if (!holds.has(cfg)) holds.set(cfg, authHold(ledgers, probes, cfg)); return holds.get(cfg); };
+    const holdFor = (cfg) => { if (!holds.has(cfg)) holds.set(cfg, authHold(ledgers, probes, cfg) || limitHolds.limitHold(readableRuns(ledgers), cfg, ctx.now)); return holds.get(cfg); };
     // A held task leaves the plan before slots are handed out, so it cannot starve a task whose login works.
     const held = new Map();
     for (const r of ctx.records) {
@@ -805,6 +813,8 @@ function startStep(ctx) {
             appendJsonl(path.join(p.state, 'starts.jsonl'), { at, taskId, mode, ok: true, pid: v.record.headless.pid });
             out.events.push({ type: 'judge.started', key: taskId, detail: { taskId, slug: v.record.slug, pid: v.record.headless.pid } });
         } catch (e) {
+            // A run met the limit after the plan was read. The task stays queued, and this is no failed launch.
+            if (e.publicCode === limitHolds.HOLD_CODE) { out.lines.push(`start (${mode}): ${taskId} held: ${String(e.message).slice(0, 200)}`); break; }
             appendJsonl(path.join(p.state, 'starts.jsonl'), { at, taskId, mode, ok: false, error: e.publicCode || 'internal' });
             out.events.push({ type: 'judge.launch-refused', key: taskId, detail: { taskId, error: e.publicCode || 'internal', message: String(e.message).slice(0, 300) } });
         }

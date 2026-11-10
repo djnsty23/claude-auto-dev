@@ -249,7 +249,8 @@ const DEFER_BASE_MS = 15 * 60 * 1000;
 const DEFER_MAX_MS = 4 * HOUR_MS;
 // Refusals a later tick can clear with no person. They are logged, never counted.
 // paid-key-refused is not one: only a person can clear a key from the env, so it counts toward MAX_LAUNCH_ATTEMPTS.
-const TRANSIENT_LAUNCH_CODES = ['fetch-failed', 'origin-unreadable', 'git-unavailable', 'ledger-locked'];
+// usage-limit-hold: the account was at its limit, which says nothing about this task, so it stays queued with no attempt counted.
+const TRANSIENT_LAUNCH_CODES = ['fetch-failed', 'origin-unreadable', 'git-unavailable', 'ledger-locked', 'usage-limit-hold'];
 
 function fault(code, message) { const e = new Error(message || code); e.publicCode = code; throw e; }
 
@@ -771,6 +772,8 @@ function headlessArgs(rec, files, opts) {
     if (files.attemptId) args.push('--attempt-id', files.attemptId);
     // The outbox the prompt names, so the worker and its supervisor agree on where the report is.
     if (files.outbox) args.push('--outbox', files.outbox);
+    // An operator starting this one task on purpose has also decided about the usage-limit hold.
+    if (opts['start-override'] !== undefined) args.push('--hold-override', String(opts['start-override']));
     if (opts.dev) args.push('--dev');
     if (opts['dry-run']) args.push('--dry-run');
     return args;

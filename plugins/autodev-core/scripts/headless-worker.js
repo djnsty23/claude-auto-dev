@@ -66,6 +66,7 @@ const budget = require('./execution-budget.js');
 const profiles = require('./worker-profiles.js');
 const authority = require('./worker-authority.js');
 const paidKeys = require('./paid-key-guard.js');
+const limitHolds = require('./usage-limit-hold.js');
 const { spawn, spawnSync } = require('node:child_process');
 
 const USAGE = [
@@ -79,6 +80,8 @@ const USAGE = [
     '       node headless-worker.js settle --code <CODE> [--started-at <iso>] [--lost] [--unreported] [--ledger <file>] [--json]',
     '       node headless-worker.js selftest',
     'start: spawn a detached supervisor that runs `claude -p` and appends CLAUDE_EXIT=<code> to the log.',
+    'start, usage limit: while a run on this ledger and login has ended on the account limit, start refuses with usage-limit-hold, reserving and spawning nothing.',
+    '        The hold lifts 2 minutes after the reset the message states, or 60 minutes after the ending when none can be read. --hold-override "<reason>" starts this one run.',
     '       The caller may exit at once; the result is the report file plus that exit line.',
     '       --config-dir is an absolute path, ~ or ~/<name>. A bare relative name is refused, and so is',
     '       a directory that does not exist, before anything is spawned or recorded.',
@@ -380,7 +383,7 @@ function parseArgs(argv) {
     const out = { _: [] };
     const flags = ['help', 'dry-run', 'json', 'lost', 'unreported', 'dev'];
     const known = ['_', ...flags, 'code', 'started-at', 'prompt-file', 'log', 'report', 'config-dir', 'model', 'effort',
-        'permission-mode', 'cwd', 'claude-bin', 'ledger', 'plugin-dir', 'keep-tools', 'profile', 'attempt-id', 'budget-ledger', 'secret', 'outbox'];
+        'permission-mode', 'cwd', 'claude-bin', 'ledger', 'plugin-dir', 'keep-tools', 'profile', 'attempt-id', 'budget-ledger', 'secret', 'outbox', 'hold-override'];
     for (let i = 0; i < argv.length; i++) {
         const a = argv[i];
         if (a === '--help' || a === '-h' || a === 'help') { out.help = true; continue; }
@@ -847,6 +850,12 @@ function start(opts) {
         if (ledger.records.some((r) => r.code === o.code && isUnsettled(r))) {
             fault('code-active', `${o.code} has an unsettled record in ${o.ledger}; settle it or pick another code`);
         }
+        // Before the budget and the move aside, so a held launch reserves nothing and leaves no record or process.
+        const hold = limitHolds.limitHold(ledger.records, record.configDir);
+        if (hold && opts['hold-override'] === undefined) {
+            fault(limitHolds.HOLD_CODE, `${hold.line}: ${hold.code} ended on "${hold.text}". Nothing was started or reserved. Retry after that time, or pass --hold-override "<reason>" to start this one run`);
+        }
+        if (hold) record.holdOverride = { reason: String(opts['hold-override']).slice(0, 500), until: hold.until };
         const b = budget.reserve({ attemptId: o.attemptId, kind: 'worker', billing: budget.billingOf(plan.env),
             account: o.configDir ? path.basename(o.configDir) : 'default', log: o.log, note: o.code }, { ledger: o.budgetLedger });
         if (!b.ok) fault(b.code === 'attempt-restart' ? 'attempt-restart' : 'budget-refused', `execution budget refused ${o.attemptId}: ${b.why}`);
@@ -1122,31 +1131,13 @@ function authRefusal(logText) {
 }
 
 /** The last stream-json `result` event of a log, or null. */
-function lastResultEvent(logText) {
-    let last = null;
-    for (const line of String(logText || '').split(/\r?\n/)) {
-        if (!line.startsWith('{') || !line.includes('"type":"result"')) continue;
-        let j; try { j = JSON.parse(line); } catch { continue; }
-        if (j && j.type === 'result') last = j;
-    }
-    return last;
-}
+const { lastResultEvent, usageLimit } = limitHolds;
 
 // `[measured 2026-11-09]` four runs in one night ended on "You've hit your weekly
 // limit" and settled as "exited 1 and REPORT.md does not exist", so the ranking
 // filed an account limit as a worker that left no report. One had run 96 turns and
-// two were launched after the wall. Only the last result event counts, it must be
-// an error event, and the text is anchored: a worker's closing message that quotes
-// a limit is neither. The result stays `unreported` so salvage and requeue still apply.
-const USAGE_LIMIT_RE = /^You['’]ve hit your\b[^.\n]{0,40}\blimit\b/;
-
-/** The text of a usage-limit ending, from the LAST result event of a log, or null. */
-function usageLimit(logText) {
-    const last = lastResultEvent(logText);
-    if (!last || last.is_error !== true || typeof last.result !== 'string') return null;
-    const t = last.result.trim();
-    return USAGE_LIMIT_RE.test(t) ? t.slice(0, AUTH_REASON_MAX) : null;
-}
+// two were launched after the wall. usageLimit (usage-limit-hold.js) names such an
+// ending. The result stays `unreported` so salvage and requeue still apply.
 
 /** The LAST `RESULT <code> <state>: <sentence>` line for this exact code, or null. */
 function parseResult(reportText, code) {
@@ -1273,11 +1264,12 @@ function status(opts) {
     const boot = bootAt();
     const records = ledger.records.filter((r) => !opts.code || r.code === opts.code).map((r) => recordStatus(r, boot, undefined, ledger.records));
     const population = `${file}: ${ledger.records.length} record(s)${opts.code ? `, ${records.length} for ${opts.code}` : ''}`;
-    return { ledger: file, readable: true, recordsRead: ledger.records.length, population, records };
+    const launchHolds = limitHolds.limitHolds(ledger.records);
+    return { ledger: file, readable: true, recordsRead: ledger.records.length, population, ...(launchHolds.length ? { launchHolds } : {}), records };
 }
 
 function statusLines(value) {
-    const lines = [value.population];
+    const lines = [value.population, ...(value.launchHolds || []).map((h) => h.line)];
     for (const r of value.records) {
         lines.push(`${r.code} pid=${r.pid} process=${r.process} exit=${r.exit === null ? '-' : r.exit} `
             + `result=${r.result}${r.resultCodeFound ? ` (RESULT line found for a different code: ${r.resultCodeFound})` : ''}`
@@ -1336,6 +1328,11 @@ function settle(opts) {
     return value;
 }
 
+/** When a log was last written, which for an ended run is when it ended: the supervisor's exit line is the last write. */
+function logEndedAt(file) {
+    try { return fs.statSync(file).mtime.toISOString(); } catch { return new Date().toISOString(); }
+}
+
 function settleRecord(opts, seen = {}) {
     const code = requireCode(opts);
     const file = path.resolve(opts.ledger || defaultLedger());
@@ -1358,6 +1355,9 @@ function settleRecord(opts, seen = {}) {
         seen.rec = rec;
         const logText = readText(rec.log);
         const exit = logText === null ? null : exitCodeOf(logText);
+        // Stamped whichever way the run settles: a worker that wrote its RESULT line and then met the limit still met it.
+        const limit = exit === null ? null : usageLimit(logText);
+        if (limit) rec.usageLimit = { text: limit, endedAt: logEndedAt(rec.log) };
         if (opts.lost && opts.unreported) fault('usage', '--lost and --unreported name different endings: a worker with no exit line, and one that exited without a RESULT line. Pass one');
         if (opts.lost) return settleLost(rec, code, exit);
         // Read only once the run has ended: a refusal is a claim about how it ended.
