@@ -60,6 +60,7 @@ const server = http.createServer((req, res) => {
     case '/protected': return send(401, 'no');
     case '/protected-403-challenge': return send(403, page('x'), { 'x-vercel-mitigated': 'challenge' });
     case '/to-login': return send(307, '', { location: '/login?next=1' });
+    case '/login': return send(200, 'sign in');
     case '/to-elsewhere': return send(307, '', { location: '/somewhere' });
     case '/challenge': return send(429, page('x', 'Vercel Security Checkpoint'), { 'x-vercel-mitigated': 'challenge' });
     case '/plain-429': return send(429, 'slow down');
@@ -137,6 +138,8 @@ const FAKE_DRIVER = path.join(root, 'fake-driver.js');
 const LAUNCH_LOG = path.join(root, 'launch.log');
 fs.writeFileSync(FAKE_DRIVER, `
 const fs = require('fs');
+// Playwright reads PWDEBUG when its module loads, so the fake must too.
+const PWDEBUG_AT_LOAD = process.env.PWDEBUG || null;
 function newPage() {
     const handlers = {};
     const frame = {};
@@ -164,7 +167,7 @@ function newPage() {
 }
 module.exports = { chromium: {
     async launchServer(options) {
-        fs.appendFileSync(${JSON.stringify(LAUNCH_LOG)}, JSON.stringify({ event: 'launch', ...options, pwdebug: process.env.PWDEBUG || null }) + '\\n');
+        fs.appendFileSync(${JSON.stringify(LAUNCH_LOG)}, JSON.stringify({ event: 'launch', ...options, pwdebug: PWDEBUG_AT_LOAD }) + '\\n');
         if (process.env.FAKE_DRIVER_NO_START) throw new Error('browser failed to start');
         if (process.env.FAKE_DRIVER_SLOW_LAUNCH) await new Promise((r) => setTimeout(r, Number(process.env.FAKE_DRIVER_SLOW_LAUNCH)));
         return { wsEndpoint: () => 'ws://fake', kill: async () => { fs.appendFileSync(${JSON.stringify(LAUNCH_LOG)}, JSON.stringify({ event: 'kill' }) + '\\n'); } };
@@ -400,6 +403,20 @@ async function main() {
     }
     await single('browser sitemap treats challenge pages as unreadable', { type: 'sitemap', via: 'browser', url: u('/sitemap-checkpoints'), settleMs: 100 }, 'INDETERMINATE', 2, /5 of 5 sampled could not be read/);
     await single('browser sitemap treats mitigated 429s as unreadable', { type: 'sitemap', via: 'browser', url: u('/sitemap-challenged'), settleMs: 100 }, 'INDETERMINATE', 2, /5 of 5 sampled could not be read/);
+    await single('browser sitemap exact status passes on real 200s', { type: 'sitemap', via: 'browser', url: u('/sitemap'), sampleStatus: 200, settleMs: 100 }, 'PASS', 0, /5 of 5 sampled answered 200/);
+    await single('browser sitemap exact status fails on a followed redirect', { type: 'sitemap', via: 'browser', url: u('/sitemap-redirect'), sampleStatus: 200, settleMs: 100 }, 'FAIL', 1, /5 of 5 sampled answered redirected/);
+    await single('browser sitemap cannot grade an exact 3xx', { type: 'sitemap', via: 'browser', url: u('/sitemap-redirect'), sampleStatus: 307, settleMs: 100 }, 'INDETERMINATE', 2, /5 of 5 sampled could not be read/);
+    await single('browser sitemap redirects pass without an exact status', { type: 'sitemap', via: 'browser', url: u('/sitemap-redirect'), settleMs: 100 }, 'PASS', 0, /under 400/);
+    {
+        const file = path.join(root, 'sample-attempts.json');
+        for (const [name, via] of [['http', {}], ['browser', { via: 'browser', settleMs: 100 }]]) {
+            const r = await run({ checks: [{ id: 'X1', type: 'sitemap', url: u('/sitemap-challenged'), ...via }] }, { args: ['--out', file] });
+            const body = fs.readFileSync(file, 'utf8');
+            check(`a challenged sitemap sample is not retried (${name})`, r.status === 2 && JSON.parse(body).results[0].attempts === 1, body);
+        }
+        const slow = await run({ checks: [{ id: 'X1', type: 'browser', url: u('/checkpoint-200'), widths: [390], ...browserFast }] }, { args: ['--deadline-ms', '2000'] });
+        check('a challenge page stops waiting at the run deadline', slow.status === 2 && slow.ms < 8000, `${slow.status} ${slow.ms}ms`);
+    }
     {
         const r = await run({ checks: [{ id: 'X1', type: 'browser', url: 'http://127.0.0.1:1/x?token=SECRETVALUE123', widths: [390], ...browserFast }] });
         check('a driver error does not leak the query string', statusOf(r, 'X1') === 'INDETERMINATE' && !/SECRETVALUE123/.test(r.stdout) && /127\.0\.0\.1:1\/x/.test(r.stdout), r.stdout);
