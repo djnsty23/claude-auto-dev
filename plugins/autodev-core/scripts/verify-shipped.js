@@ -308,10 +308,10 @@ function parseLocs(xml) {
 function scoreSitemap(check, count, statuses) {
     const minLocs = check.minLocs === undefined ? 5 : check.minLocs;
     if (count < minLocs) return failed(`${count} locations, expected at least ${minLocs}`);
-    const unknown = statuses.filter((s) => typeof s !== 'number');
-    const bad = statuses.filter((s) => typeof s === 'number' && (check.sampleStatus ? s !== check.sampleStatus : s >= 400));
+    const unknown = statuses.filter((s) => s === 'unreadable' || s === 'challenged');
+    const bad = statuses.filter((s) => s === 'redirected' || (typeof s === 'number' && (check.sampleStatus ? s !== check.sampleStatus : s >= 400)));
     if (bad.length) return failed(`${count} locations, ${bad.length} of ${statuses.length} sampled answered ${bad.join(',')}`);
-    if (unknown.length || !statuses.length) return indeterminate(`${count} locations, ${unknown.length} of ${statuses.length} sampled could not be read`);
+    if (unknown.length || !statuses.length) return indeterminate(`${count} locations, ${unknown.length} of ${statuses.length} sampled could not be read`, statuses.includes('challenged') ? { noRetry: true } : undefined);
     return pass(`${count} locations, ${statuses.length} of ${statuses.length} sampled ${check.sampleStatus ? `answered ${check.sampleStatus}` : 'under 400'}`);
 }
 
@@ -325,33 +325,40 @@ async function checkSitemapHttp(run, check) {
     const statuses = await Promise.all(sample.map(async (url) => {
         const sameOrigin = new URL(url).origin === new URL(check.url).origin;
         const r = await httpProbe(run, { headers: sameOrigin ? check.headers : undefined }, url);
-        if (r.error || challengeReason(r.status, (n) => r.headers.get(n), r.text)) return 'unreadable';
-        return r.status;
+        if (r.error) return 'unreadable';
+        return challengeReason(r.status, (n) => r.headers.get(n), r.text) ? 'challenged' : r.status;
     }));
     return scoreSitemap(check, locs.length, statuses);
 }
 
 async function checkSitemapBrowser(run, check) {
-    return withPage(run, check, 800, async ({ page, timeoutMs }) => {
+    return withPage(run, check, 800, async ({ page, timeoutMs, stopAt }) => {
         await page.goto(check.origin || new URL(check.url).origin, { waitUntil: 'load', timeout: timeoutMs });
-        const state = await settle(page, check.settleMs === undefined ? 1000 : check.settleMs);
+        const state = await settle(page, check.settleMs === undefined ? 1000 : check.settleMs, stopAt);
         if (state.challenged) return indeterminate('challenge page in the browser', { noRetry: true });
         const data = await page.evaluate(async ({ url, sample, perFetchMs }) => {
             const read = async (u) => {
                 const r = await fetch(u, { signal: AbortSignal.timeout(perFetchMs) });
                 const text = await r.text();
-                return { status: r.status, mitigated: r.headers.get('x-vercel-mitigated') || r.headers.get('cf-mitigated'), text };
+                return { status: r.status, redirected: r.redirected, mitigated: r.headers.get('x-vercel-mitigated') || r.headers.get('cf-mitigated'), text };
             };
             const map = await read(url);
             const locs = [...map.text.matchAll(/<loc>\s*([^<\s]+)\s*<\/loc>/gi)].map((m) => m[1]);
-            const samples = await Promise.all(locs.slice(0, sample).map((u) => read(u).then((r) => ({ status: r.status, mitigated: r.mitigated, head: r.text.slice(0, 8192) }), () => null)));
-            return { status: map.status, mitigated: map.mitigated, head: map.text.slice(0, 8192), count: locs.length, samples };
+            const samples = await Promise.all(locs.slice(0, sample).map((u) => read(u).then((r) => ({ status: r.status, redirected: r.redirected, mitigated: r.mitigated, head: r.text.slice(0, 8192) }), () => null)));
+            return { status: map.status, redirected: map.redirected, mitigated: map.mitigated, head: map.text.slice(0, 8192), count: locs.length, samples };
         }, { url: check.url, sample: check.sample === undefined ? 5 : check.sample, perFetchMs: run.timeoutMs });
         const reasonFor = (r) => challengeReason(r.status, (name) => (name === 'x-vercel-mitigated' ? r.mitigated : null), r.head);
         const blocked = reasonFor(data);
         if (blocked) return indeterminate(blocked, { noRetry: true });
-        if (data.status !== 200) return failed(`sitemap HTTP ${data.status} in the browser`);
-        return scoreSitemap(check, data.count, data.samples.map((s) => (!s || reasonFor(s) ? 'unreadable' : s.status)));
+        if (data.status !== 200 || data.redirected) return failed(`sitemap HTTP ${data.status}${data.redirected ? ' after a redirect' : ''} in the browser`);
+        // fetch in a page follows redirects and hides the 3xx, so the end of the redirect must not be graded as the sample.
+        const sampled = (s) => {
+            if (!s) return 'unreadable';
+            if (reasonFor(s)) return 'challenged';
+            if (!s.redirected || !check.sampleStatus) return s.status;
+            return check.sampleStatus >= 300 && check.sampleStatus < 400 ? 'unreadable' : 'redirected';
+        };
+        return scoreSitemap(check, data.count, data.samples.map(sampled));
     });
 }
 
@@ -524,10 +531,10 @@ function browserFor(run) {
     if (run.browser) return run.browser;
     run.browser = (async () => {
         await killBrowserServer(run);
+        // Playwright reads PWDEBUG once, at module load, and its inspector mode turns headless off.
+        delete process.env.PWDEBUG;
         const driver = loadBrowserDriver(run);
         if (!driver) throw new Error('no playwright resolves; set "playwright" in the config or pass --playwright');
-        // Playwright's inspector mode turns headless off, so it must not reach this launch.
-        delete process.env.PWDEBUG;
         const timeout = Math.min(BROWSER_TIMEOUT_MS, Math.max(1000, run.deadlineAt - Date.now()));
         run.browserServer = await driver.chromium.launchServer({ headless: true, timeout });
         if (run.closing) throw new Error('run ended during browser start');
@@ -541,9 +548,9 @@ function browserFor(run) {
 }
 
 /** Waits for the page's own load to settle and reports whether it is still a challenge page. */
-async function settle(page, settleMs) {
-    await sleep(settleMs);
-    const until = Date.now() + CHALLENGE_WAIT_MS;
+async function settle(page, settleMs, stopAt) {
+    await sleep(Math.max(0, Math.min(settleMs, stopAt - Date.now())));
+    const until = Math.min(Date.now() + CHALLENGE_WAIT_MS, stopAt);
     for (;;) {
         const state = await page.evaluate(() => ({ title: document.title, text: (document.body && document.body.innerText) || '' })).catch(() => null);
         const challenged = !state || CHALLENGE_TITLE_RE.test(state.title) || (state.text.length < 800 && /security checkpoint/i.test(state.text));
@@ -559,12 +566,13 @@ async function withPage(run, check, height, body, width) {
     try { browser = await browserFor(run); } catch (e) { return indeterminate(`browser would not start: ${scrubError(e.message)}`); }
     let context;
     const probe = probeSignal(run, check.timeoutMs || BROWSER_TIMEOUT_MS);
+    const stopAt = Date.now() + probe.remaining;
     try {
         const aborted = new Promise((resolve) => probe.signal.addEventListener('abort', () => resolve(indeterminate(`browser probe timed out after ${probe.remaining}ms`)), { once: true }));
         const work = (async () => {
             context = await browser.newContext({ viewport: { width: width || 1280, height } });
             const page = await context.newPage();
-            return body({ page, timeoutMs: probe.remaining });
+            return body({ page, timeoutMs: probe.remaining, stopAt });
         })();
         return await Promise.race([work, aborted]);
     } catch (e) {
@@ -590,7 +598,7 @@ function browserFindings(check, metrics, errors) {
 
 /** One width of one browser check. Console errors count only on the final document. */
 async function browserWidth(run, check, width) {
-    return withPage(run, check, 844, async ({ page, timeoutMs }) => {
+    return withPage(run, check, 844, async ({ page, timeoutMs, stopAt }) => {
         const ignore = (check.ignoreConsole || []).map((source) => new RegExp(source, 'i'));
         let errors = 0;
         let ignored = 0;
@@ -602,7 +610,7 @@ async function browserWidth(run, check, width) {
             if (response.request().isNavigationRequest() && response.frame() === page.mainFrame()) { navigation = response; errors = 0; ignored = 0; }
         });
         await page.goto(check.url, { waitUntil: 'load', timeout: timeoutMs });
-        const state = await settle(page, check.settleMs === undefined ? 3000 : check.settleMs);
+        const state = await settle(page, check.settleMs === undefined ? 3000 : check.settleMs, stopAt);
         if (state.challenged) return indeterminate(`width ${width}: challenge page in the browser`, { noRetry: true });
         const status = navigation ? navigation.status() : null;
         if (navigation) {
