@@ -293,6 +293,32 @@ async function main() {
             ['a versionPath carrying a query', { type: 'release-tag', repo: 'o/app', versionPath: 'VERSION?ref=x' }, /versionPath must be a file path/],
             ['a versionPath carrying a fragment', { type: 'plugin-version', versionRepo: 'o/app', versionPath: 'VERSION#x' }, /versionPath must be a file path/],
             ['allowSkipped given as a string', { type: 'commit-status', repo: 'o/app', allowSkipped: 'yes' }, /allowSkipped must be true or false/],
+            // A guard value of the wrong type compared as false and dropped the guard: "0px" let 210px of overflow pass.
+            ['minTextLen given as a string', { type: 'browser', url: u('/thin'), widths: [390], minTextLen: '500' }, /check a: minTextLen must be a whole number of 0 or more/],
+            ['minH1 carrying a unit', { type: 'browser', url: u('/no-h1'), widths: [390], minH1: '1x' }, /check a: minH1 must be a whole number of 0 or more/],
+            ['maxOverflowPx carrying a unit', { type: 'browser', url: u('/wide'), widths: [390], maxOverflowPx: '0px' }, /check a: maxOverflowPx must be a whole number of 0 or more/],
+            ['a fractional maxConsoleErrors', { type: 'browser', url: u('/console-error'), widths: [390], maxConsoleErrors: 0.5 }, /check a: maxConsoleErrors must be a whole number of 0 or more/],
+            ['sampleStatus given as a string', { type: 'sitemap', url: u('/sitemap-redirect'), sampleStatus: '200' }, /check a: sampleStatus must be a whole number from 100 to 599/],
+            ['a negative settleMs', { type: 'browser', url: u('/ok'), widths: [390], settleMs: -1 }, /check a: settleMs must be a whole number of 0 or more/],
+            ['a zero timeoutMs', { type: 'http', url: u('/ok'), timeoutMs: 0 }, /check a: timeoutMs must be a positive whole number/],
+            ['a url that is not absolute http(s)', { type: 'http', url: 'file:///etc/passwd' }, /check a: url must be an absolute http\(s\) URL/],
+            // A misspelt key used to be ignored, so the guard it meant was silently absent.
+            ['a misspelt requiredText on a browser check', { type: 'browser', url: u('/ok'), widths: [390], requiredTxt: ['Checkout'] }, /check a: unknown key "requiredTxt" for type browser/],
+            ['a misspelt forbiddenText on a browser check', { type: 'browser', url: u('/ok'), widths: [390], forbidenText: ['real page'] }, /check a: unknown key "forbidenText" for type browser/],
+            ['a misspelt bodyPattern on an http check', { type: 'http', url: u('/ok'), bodyPatern: 'Checkout' }, /check a: unknown key "bodyPatern" for type http/],
+            ['a key of another type', { type: 'http', url: u('/ok'), minH1: 1 }, /check a: unknown key "minH1" for type http/],
+            ['headless on a check', { type: 'browser', url: u('/ok'), widths: [390], headless: false }, /check a: unknown key "headless" for type browser/],
+            // A flag outside the type or mode where it works did nothing and read as if it had.
+            ['allowRedirects with sampleStatus', { type: 'sitemap', url: u('/sitemap-redirect'), sampleStatus: 200, allowRedirects: true }, /check a: allowRedirects does nothing with sampleStatus/],
+            ['allowSkipped on deployed-sha by url', { type: 'deployed-sha', url: u('/version'), pattern: '"sha":"([0-9a-f]+)"', sha: SHA_GOOD, allowSkipped: true }, /check a: allowSkipped does nothing for deployed-sha by url/],
+            ['allowSkipped on an http check', { type: 'http', url: u('/ok'), allowSkipped: true }, /check a: unknown key "allowSkipped" for type http/],
+            ['allowRedirects on a browser check', { type: 'browser', url: u('/ok'), widths: [390], allowRedirects: true }, /check a: unknown key "allowRedirects" for type browser/],
+            ['environment on deployed-sha by url', { type: 'deployed-sha', url: u('/version'), pattern: '"sha":"([0-9a-f]+)"', sha: SHA_GOOD, environment: 'Preview' }, /check a: environment does nothing for deployed-sha by url/],
+            ['pattern on deployed-sha by repo', { type: 'deployed-sha', repo: 'o/app', pattern: '(x)' }, /check a: pattern does nothing for deployed-sha by repo/],
+            ['settleMs on a sitemap read via http', { type: 'sitemap', url: u('/sitemap'), settleMs: 100 }, /check a: settleMs does nothing for a sitemap read via http/],
+            ['headers on a sitemap read via browser', { type: 'sitemap', via: 'browser', url: u('/sitemap'), headers: { authorization: 'Bearer TOK' } }, /check a: headers does nothing for a sitemap read via browser/],
+            ['a PR number and head together', { type: 'pr-merged', repo: 'o/app', number: 7, head: 'feature' }, /check a: pr-merged takes number or head, not both/],
+            ['versionPath without versionRepo', { type: 'plugin-version', minVersion: '1.0.0', versionPath: 'VERSION' }, /check a: versionPath does nothing without versionRepo/],
         ];
         for (const [label, c, pattern] of refusals) {
             fs.writeFileSync(GH_LOG, '');
@@ -304,6 +330,62 @@ async function main() {
         fs.writeFileSync(evil, `require('fs').writeFileSync(${JSON.stringify(marker)}, 'ran'); module.exports = {};`);
         const named = await run({ playwright: evil, checks: [{ id: 'a', type: 'browser', url: u('/ok'), widths: [390] }] });
         check('a config naming the driver is refused and its code never runs', named.status === 2 && /--playwright DIR/.test(named.stderr) && !fs.existsSync(marker), `exit=${named.status} ran=${fs.existsSync(marker)} ${named.stderr}`);
+        fs.writeFileSync(GH_LOG, '');
+        const topTypo = await run({ expectcount: 1, checks: [{ id: 'a', type: 'commit-status', repo: 'o/app' }] });
+        check('a misspelt top-level key is refused before running', topTypo.status === 2 && /unknown top-level key "expectcount"/.test(topTypo.stderr) && !/^CHECK /m.test(topTypo.stdout) && fs.readFileSync(GH_LOG, 'utf8') === '', `exit=${topTypo.status} ${topTypo.stderr}`);
+    }
+
+    // The documented key list is the contract: read it from the header, so a documented key cannot be refused by accident.
+    {
+        const lines = fs.readFileSync(SUBJECT, 'utf8').split('\n');
+        const start = lines.findIndex((l) => /Keys each type accepts/.test(l));
+        const common = ((/every type also takes ([^)]+)\)/.exec(lines[start] || '') || [])[1] || '').split(/,\s*|\s+and\s+/).map((s) => s.trim()).filter(Boolean);
+        const documented = {};
+        let current = null;
+        for (const line of lines.slice(start + 1)) {
+            const head = /^ \* {3}([a-z-]+):\s+(.+)$/.exec(line);
+            const more = /^ \* {10,}(\S.*)$/.exec(line);
+            if (head) { current = head[1]; documented[current] = head[2]; } else if (more && current) documented[current] += `, ${more[1]}`; else break;
+        }
+        for (const type of Object.keys(documented)) documented[type] = documented[type].split(',').map((s) => s.trim()).filter(Boolean);
+        const sorted = (a) => [...a].sort().join(',');
+        check('the header documents every check type and the common keys', start > 0 && sorted(Object.keys(documented)) === sorted(Object.keys(lib.KEYS)) && sorted(common) === sorted(lib.COMMON_KEYS), `${Object.keys(documented)} | ${common}`);
+        const drift = Object.keys(lib.KEYS).filter((type) => sorted(documented[type] || []) !== sorted(lib.KEYS[type]));
+        check('the header lists exactly the keys each type accepts', drift.length === 0, drift.map((t) => `${t}: header ${documented[t]} vs code ${lib.KEYS[t]}`).join('; '));
+        const base = {
+            'commit-status': { repo: 'o/app' }, 'deployed-sha': { repo: 'o/app' }, http: { url: 'https://x.test/a' }, refused: { url: 'https://x.test/a' },
+            sitemap: { url: 'https://x.test/sitemap.xml' }, browser: { url: 'https://x.test/a' }, 'plugin-version': { minVersion: '1.0.0' },
+            'release-tag': { repo: 'o/app' }, 'pr-merged': { repo: 'o/app', number: 7 },
+        };
+        const byUrl = { url: 'https://x.test/version', pattern: '"sha":"(\\w+)"', sha: SHA_GOOD };
+        // A literal value per key, with type.key where one type needs its mode set. undefined removes a base key.
+        const samples = {
+            id: {}, type: {}, repo: { repo: 'o/app' }, sha: { sha: SHA_GOOD }, context: { context: 'Vercel' }, allowSkipped: { allowSkipped: true },
+            environment: { environment: 'Preview' }, 'deployed-sha.url': byUrl, 'deployed-sha.pattern': byUrl, 'deployed-sha.timeoutMs': { ...byUrl, timeoutMs: 1000 },
+            url: { url: 'https://x.test/b' }, method: { method: 'POST' }, headers: { headers: { authorization: 'Bearer t' } }, body: { body: 'x' },
+            expectStatus: { expectStatus: 204 }, bodyPattern: { bodyPattern: 'ok' }, bodyAbsent: { bodyAbsent: 'error' }, timeoutMs: { timeoutMs: 1000 },
+            statuses: { statuses: [404] }, redirect: { redirect: '^/login' }, minLocs: { minLocs: 1 }, sample: { sample: 2 }, sampleStatus: { sampleStatus: 200 },
+            allowRedirects: { allowRedirects: true }, via: { via: 'browser' }, origin: { via: 'browser', origin: 'https://x.test/' }, 'sitemap.settleMs': { via: 'browser', settleMs: 100 },
+            widths: { widths: [390] }, requiredText: { requiredText: ['a'] }, forbiddenText: { forbiddenText: ['b'] }, forbiddenSelector: { forbiddenSelector: 'h1' },
+            finalUrlPattern: { finalUrlPattern: '/a' }, minTextLen: { minTextLen: 10 }, minH1: { minH1: 0 }, maxOverflowPx: { maxOverflowPx: 5 },
+            maxConsoleErrors: { maxConsoleErrors: 1 }, ignoreConsole: { ignoreConsole: ['x'] }, settleMs: { settleMs: 100 },
+            pluginRoot: { pluginRoot: '~/plugin' }, minVersion: { minVersion: '1.2.3' }, versionRepo: { versionRepo: 'o/app' },
+            'plugin-version.versionPath': { versionRepo: 'o/app', versionPath: 'VERSION' }, versionPath: { versionPath: 'VERSION' }, requiredFiles: { requiredFiles: ['a.js'] },
+            number: { number: 8 }, head: { number: undefined, head: 'feature' },
+        };
+        const refusedKeys = [];
+        let tried = 0;
+        for (const type of Object.keys(documented)) {
+            for (const key of [...common, ...documented[type]]) {
+                tried++;
+                const sample = samples[`${type}.${key}`] || samples[key];
+                if (!sample) { refusedKeys.push(`${type}.${key}: no sample value in this suite`); continue; }
+                const c = { id: 'k', type, ...base[type], ...sample };
+                for (const k of Object.keys(c)) if (c[k] === undefined) delete c[k];
+                try { lib.validateConfig({ checks: [c] }); } catch (e) { refusedKeys.push(`${type}.${key}: ${e.message}`); }
+            }
+        }
+        check(`every documented key is accepted on its type (${tried} type and key pairs)`, tried >= 60 && refusedKeys.length === 0, refusedKeys.join('; '));
     }
 
     // Section B: help and output shape.
@@ -440,9 +522,13 @@ async function main() {
         await single('browser overflow within maxOverflowPx passes', { type: 'browser', url: u('/wide'), widths: [390], maxOverflowPx: 400, ...browserFast }, 'PASS', 0, /w390 HTTP 200/);
         if (!REAL_PLAYWRIGHT) {
             fs.rmSync(LAUNCH_LOG, { force: true });
-            await run({ headless: false, checks: [{ id: 'X1', type: 'browser', headless: false, url: u('/ok'), widths: [390], ...browserFast }] });
-            const launches = fs.readFileSync(LAUNCH_LOG, 'utf8').trim().split('\n').map((l) => JSON.parse(l));
-            check('config cannot turn headless off', launches.filter((o) => o.event === 'launch').length === 1 && launches.filter((o) => o.event === 'launch').every((o) => o.headless === true), JSON.stringify(launches));
+            const offTop = await run({ headless: false, checks: [{ id: 'X1', type: 'browser', url: u('/ok'), widths: [390], ...browserFast }] });
+            const offCheck = await run({ checks: [{ id: 'X1', type: 'browser', headless: false, url: u('/ok'), widths: [390], ...browserFast }] });
+            check('config cannot turn headless off: both keys are refused and nothing launches', offTop.status === 2 && /unknown top-level key "headless"/.test(offTop.stderr)
+                && offCheck.status === 2 && /unknown key "headless"/.test(offCheck.stderr) && !fs.existsSync(LAUNCH_LOG), `${offTop.stderr} ${offCheck.stderr} launched=${fs.existsSync(LAUNCH_LOG)}`);
+            await run({ checks: [{ id: 'X1', type: 'browser', url: u('/ok'), widths: [390], ...browserFast }] });
+            const launches = fs.readFileSync(LAUNCH_LOG, 'utf8').trim().split('\n').map((l) => JSON.parse(l)).filter((o) => o.event === 'launch');
+            check('a browser run launches headless', launches.length === 1 && launches[0].headless === true, JSON.stringify(launches));
             await single('a browser that will not start is INDETERMINATE', { type: 'browser', url: u('/ok'), widths: [390] }, 'INDETERMINATE', 2, /browser would not start/, { env: { FAKE_DRIVER_NO_START: '1' } });
         }
         const r = await run({ checks: [{ id: 'X1', type: 'browser', url: u('/ok'), widths: [390], ...browserFast }] });

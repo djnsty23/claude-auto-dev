@@ -37,27 +37,51 @@
  * ~/.claude/autodev/shipped-checks.json:
  *   { "expectCount": 2, "deadlineMs": 600000, "timeoutMs": 20000,
  *     "checks": [ { "id": "A1", "type": "http", "url": "https://..." } ] }
- * expectCount, when present, must equal the number of checks, so a check that
- * was deleted by accident is a refusal and not a smaller green run.
+ * Those four are the only top-level keys. expectCount, when present, must equal
+ * the number of checks, so a check that was deleted by accident is a refusal and
+ * not a smaller green run.
  *
  * THE DRIVER LOCATION IS TRUSTED LIKE CODE. --playwright DIR is loaded with
  * require in this process, so only the command line can name it. A config that
  * carries a "playwright" key is refused: a JSON file must not be able to run code.
  *
- * Check types and their fields (repo is optional on all but those marked *):
- *   commit-status   repo*, context="Vercel", sha, allowSkipped=false
- *   deployed-sha    repo* with environment="Production", or url with pattern (capture group 1 is the sha); sha,
- *                   allowSkipped=false (a build skipped by the project deployed nothing, so it FAILs unless allowed)
- *   http            url, method, headers, body, expectStatus=200, bodyPattern, bodyAbsent
- *   refused         url, method, headers, body, statuses=[401,403], redirect (a regex on Location)
- *   sitemap         url, minLocs=5, sample=5, sampleStatus (exact, default any under 300),
- *                   allowRedirects=false (true accepts a 3xx sample), via="http"|"browser",
- *                   origin (page loaded first when via browser). Every <loc> must be an absolute http(s) URL.
- *   browser         url, widths=[390,414], requiredText[], forbiddenText[], forbiddenSelector,
- *                   finalUrlPattern, minTextLen=500, minH1=1, maxOverflowPx=0, maxConsoleErrors=0, ignoreConsole[], settleMs=3000
- *   plugin-version  pluginRoot, minVersion, versionRepo, versionPath="VERSION", requiredFiles[]
- *   release-tag     repo*, versionPath="VERSION"
- *   pr-merged       repo*, number or head
+ * EVERY KEY IS CHECKED. A key its check type does not list below is refused, and
+ * so is a value of the wrong type, before anything runs. A misspelt guard is a
+ * refusal, never a guard that silently drops out of the check.
+ * Keys each type accepts (every type also takes id, type and repo):
+ *   commit-status:   sha, context, allowSkipped
+ *   deployed-sha:    sha, environment, context, allowSkipped, url, pattern, timeoutMs
+ *   http:            url, method, headers, body, expectStatus, bodyPattern, bodyAbsent, timeoutMs
+ *   refused:         url, method, headers, body, statuses, redirect, timeoutMs
+ *   sitemap:         url, headers, minLocs, sample, sampleStatus, allowRedirects, via, origin,
+ *                    settleMs, timeoutMs
+ *   browser:         url, widths, requiredText, forbiddenText, forbiddenSelector, finalUrlPattern,
+ *                    minTextLen, minH1, maxOverflowPx, maxConsoleErrors, ignoreConsole, settleMs, timeoutMs
+ *   plugin-version:  pluginRoot, minVersion, versionRepo, versionPath, requiredFiles
+ *   release-tag:     versionPath
+ *   pr-merged:       number, head
+ *
+ * What the keys mean, with their defaults:
+ *   commit-status   repo is required. context="Vercel". allowSkipped=false: a build the
+ *                   project skipped deployed nothing, so it FAILs unless allowed.
+ *   deployed-sha    By repo: environment="Production", context="Vercel" (read by the skipped
+ *                   walk), allowSkipped=false.
+ *                   By url: pattern is a regex whose capture group 1 is the sha.
+ *                   A key of the other mode is refused.
+ *   http            expectStatus=200, method="GET". bodyPattern and bodyAbsent are regexes.
+ *   refused         statuses=[401,403]. redirect is a regex on Location that also counts as refused.
+ *   sitemap         minLocs=5, sample=5, sampleStatus is exact (default any under 300),
+ *                   allowRedirects=false (true accepts a 3xx sample, refused with sampleStatus),
+ *                   via="http" or "browser". origin and settleMs only via browser, headers only
+ *                   via http (sent to the sitemap's own origin). Every <loc> must be an absolute
+ *                   http(s) URL.
+ *   browser         widths=[390,414]. requiredText, forbiddenText and ignoreConsole are lists of
+ *                   regexes. minTextLen=500, minH1=1, maxOverflowPx=0, maxConsoleErrors=0, settleMs=3000.
+ *   plugin-version  pluginRoot is a local folder, minVersion is N.N.N, versionPath="VERSION" needs
+ *                   versionRepo, requiredFiles is a list. Needs minVersion or versionRepo.
+ *   release-tag     repo is required. versionPath="VERSION".
+ *   pr-merged       repo is required, and number or head, not both.
+ * Counts, sizes and statuses are whole numbers. timeoutMs (per probe, in ms) is a positive one.
  *
  * LIMITS. Headless only, and no config field can change that. At most two
  * attempts per check, and a challenge is not retried. Every network call has
@@ -87,6 +111,7 @@ const USER_AGENT = 'autodev-verify-shipped';
 const ID_RE = /^[A-Za-z0-9_.-]+$/;
 const SHA_RE = /^[0-9a-f]{7,40}$/i;
 const REPO_RE = /^[\w.-]+\/[\w.-]+$/;
+const validRepo = (repo) => typeof repo === 'string' && REPO_RE.test(repo);
 const IGNORED_BUILD_RE = /ignored build step/i;
 const CHALLENGE_TITLE_RE = /^\s*(vercel security checkpoint|just a moment\b|attention required)/i;
 const BROWSER_TYPES = new Set(['browser']);
@@ -152,9 +177,70 @@ function compareVersions(a, b) {
     return 0;
 }
 
-function compileRegex(check, field, source) {
-    try { return new RegExp(source, 'i'); } catch (e) { throw new Refusal(`check ${check.id}: ${field} is not a valid regex: ${e.message}`); }
-}
+/** The keys each check type reads, beyond id, type and repo. Kept equal to the header's list by the suite. */
+const KEYS = {
+    'commit-status': ['sha', 'context', 'allowSkipped'],
+    'deployed-sha': ['sha', 'environment', 'context', 'allowSkipped', 'url', 'pattern', 'timeoutMs'],
+    http: ['url', 'method', 'headers', 'body', 'expectStatus', 'bodyPattern', 'bodyAbsent', 'timeoutMs'],
+    refused: ['url', 'method', 'headers', 'body', 'statuses', 'redirect', 'timeoutMs'],
+    sitemap: ['url', 'headers', 'minLocs', 'sample', 'sampleStatus', 'allowRedirects', 'via', 'origin', 'settleMs', 'timeoutMs'],
+    browser: ['url', 'widths', 'requiredText', 'forbiddenText', 'forbiddenSelector', 'finalUrlPattern', 'minTextLen', 'minH1', 'maxOverflowPx', 'maxConsoleErrors', 'ignoreConsole', 'settleMs', 'timeoutMs'],
+    'plugin-version': ['pluginRoot', 'minVersion', 'versionRepo', 'versionPath', 'requiredFiles'],
+    'release-tag': ['versionPath'],
+    'pr-merged': ['number', 'head'],
+};
+const COMMON_KEYS = ['id', 'type', 'repo'];
+const TOP_KEYS = ['expectCount', 'deadlineMs', 'timeoutMs', 'checks'];
+
+const isWhole = (v, min, max = Infinity) => Number.isInteger(v) && v >= min && v <= max;
+const isText = (v) => typeof v === 'string' && v.length > 0;
+const regexOk = (v) => { try { new RegExp(v, 'i'); return true; } catch { return false; } };
+const isRegex = (v) => isText(v) && regexOk(v);
+const isRegexList = (v) => Array.isArray(v) && v.every(isRegex);
+
+/** Each key's value test and the refusal it prints. A wrong type is refused, never coerced into a comparison. */
+const KINDS = {
+    url: [isAbsoluteHttp, 'must be an absolute http(s) URL'],
+    origin: [isAbsoluteHttp, 'must be an absolute http(s) URL'],
+    method: [(v) => typeof v === 'string' && /^[A-Z]+$/.test(v), 'must be an upper-case HTTP method'],
+    headers: [(v) => Boolean(v) && typeof v === 'object' && !Array.isArray(v) && Object.values(v).every((h) => typeof h === 'string'), 'must be an object of string values'],
+    body: [(v) => typeof v === 'string', 'must be a string'],
+    expectStatus: [(v) => isWhole(v, 100, 599), 'must be a whole number from 100 to 599'],
+    sampleStatus: [(v) => isWhole(v, 100, 599), 'must be a whole number from 100 to 599'],
+    statuses: [(v) => Array.isArray(v) && v.length > 0 && v.every((s) => isWhole(s, 400, 599)), 'must be an array of whole numbers from 400 to 599'],
+    bodyPattern: [isRegex, 'is not a valid regex'],
+    bodyAbsent: [isRegex, 'is not a valid regex'],
+    redirect: [isRegex, 'is not a valid regex'],
+    finalUrlPattern: [isRegex, 'is not a valid regex'],
+    pattern: [isRegex, 'is not a valid regex'],
+    requiredText: [isRegexList, 'must be an array of valid regexes'],
+    forbiddenText: [isRegexList, 'must be an array of valid regexes'],
+    ignoreConsole: [isRegexList, 'must be an array of valid regexes'],
+    forbiddenSelector: [isText, 'must be a non-empty string'],
+    context: [isText, 'must be a non-empty string'],
+    environment: [isText, 'must be a non-empty string'],
+    head: [isText, 'must be a non-empty string'],
+    pluginRoot: [isText, 'must be a non-empty string'],
+    requiredFiles: [(v) => Array.isArray(v) && v.every(isText), 'must be an array of non-empty strings'],
+    minLocs: [(v) => isWhole(v, 0), 'must be a whole number of 0 or more'],
+    sample: [(v) => isWhole(v, 0), 'must be a whole number of 0 or more'],
+    minTextLen: [(v) => isWhole(v, 0), 'must be a whole number of 0 or more'],
+    minH1: [(v) => isWhole(v, 0), 'must be a whole number of 0 or more'],
+    maxOverflowPx: [(v) => isWhole(v, 0), 'must be a whole number of 0 or more'],
+    maxConsoleErrors: [(v) => isWhole(v, 0), 'must be a whole number of 0 or more'],
+    settleMs: [(v) => isWhole(v, 0), 'must be a whole number of 0 or more'],
+    timeoutMs: [(v) => isWhole(v, 1), 'must be a positive whole number'],
+    widths: [(v) => Array.isArray(v) && v.length > 0 && v.every((w) => isWhole(w, 1)), 'must be a non-empty array of positive whole numbers'],
+    number: [(v) => isWhole(v, 1), 'must be a positive whole number'],
+    versionPath: [(v) => isText(v) && !/\.\.|[?#]/.test(v), 'must be a file path without "..", "?" or "#"'],
+    allowSkipped: [(v) => typeof v === 'boolean', 'must be true or false'],
+    allowRedirects: [(v) => typeof v === 'boolean', 'must be true or false'],
+    via: [(v) => v === 'http' || v === 'browser', 'must be "http" or "browser"'],
+    sha: [(v) => typeof v === 'string' && SHA_RE.test(v), 'is not a commit sha'],
+    minVersion: [(v) => typeof v === 'string' && /^\d+\.\d+\.\d+$/.test(v), 'must be N.N.N'],
+    versionRepo: [validRepo, 'must be OWNER/NAME'],
+    repo: [validRepo, 'must be OWNER/NAME'],
+};
 
 /** Refuses a config that could only produce an empty or meaningless run. Nothing runs when this throws. */
 function validateConfig(config) {
@@ -162,61 +248,62 @@ function validateConfig(config) {
     if (config.playwright !== undefined) {
         throw new Refusal('config key "playwright" is not accepted: the driver is loaded as code, so name it with --playwright DIR');
     }
+    const strayTop = Object.keys(config).find((key) => !TOP_KEYS.includes(key));
+    if (strayTop !== undefined) throw new Refusal(`unknown top-level key ${JSON.stringify(strayTop)} (accepted: ${TOP_KEYS.join(', ')})`);
     if (!Array.isArray(config.checks)) throw new Refusal('config has no checks array');
     if (config.checks.length === 0) throw new Refusal('empty config: 0 checks, so nothing would be verified');
+    if (config.expectCount !== undefined && !isWhole(config.expectCount, 1)) throw new Refusal('expectCount must be a positive whole number');
     if (config.expectCount !== undefined && config.expectCount !== config.checks.length) {
         throw new Refusal(`config declares expectCount ${config.expectCount} but holds ${config.checks.length} checks`);
     }
+    for (const key of ['deadlineMs', 'timeoutMs']) if (config[key] !== undefined && !isWhole(config[key], 1)) throw new Refusal(`${key} must be a positive whole number`);
     const seen = new Set();
     for (const check of config.checks) {
-        if (!check || typeof check !== 'object') throw new Refusal('every check must be an object');
+        if (!check || typeof check !== 'object' || Array.isArray(check)) throw new Refusal('every check must be an object');
         if (typeof check.id !== 'string' || !ID_RE.test(check.id)) throw new Refusal(`invalid check id: ${JSON.stringify(check.id)}`);
         if (seen.has(check.id)) throw new Refusal(`duplicate check id: ${check.id}`);
         seen.add(check.id);
         const spec = TYPES[check.type];
         if (!spec) throw new Refusal(`check ${check.id}: unknown type ${JSON.stringify(check.type)}`);
-        for (const field of spec.required) if (!check[field]) throw new Refusal(`check ${check.id}: ${check.type} needs ${field}`);
-        if (check.repo !== undefined && !REPO_RE.test(check.repo)) throw new Refusal(`check ${check.id}: repo must be OWNER/NAME`);
-        validateTypeFields(check);
+        validateKeys(check);
+        for (const field of spec.required) if (check[field] === undefined) throw new Refusal(`check ${check.id}: ${check.type} needs ${field}`);
+        validateModes(check);
     }
 }
 
-/** Numbers and paths a check carries into a comparison or a gh endpoint. A wrong type is refused, never coerced. */
-function validateValues(check) {
+/** Every key must belong to the check's type and hold a value of its kind. */
+function validateKeys(check) {
+    const accepted = [...COMMON_KEYS, ...KEYS[check.type]];
+    for (const key of Object.keys(check)) {
+        if (!accepted.includes(key)) throw new Refusal(`check ${check.id}: unknown key ${JSON.stringify(key)} for type ${check.type} (accepted: ${accepted.join(', ')})`);
+        const kind = KINDS[key];
+        if (kind && !kind[0](check[key])) throw new Refusal(`check ${check.id}: ${key} ${kind[1]}`);
+    }
+}
+
+/** Keys that are accepted by the type but do nothing in the mode the check is in, and keys that need each other. */
+function validateModes(check) {
     const refuse = (message) => { throw new Refusal(`check ${check.id}: ${message}`); };
-    const whole = (v) => Number.isInteger(v) && v >= 0;
-    if (check.statuses !== undefined && !(Array.isArray(check.statuses) && check.statuses.length && check.statuses.every((s) => Number.isInteger(s) && s >= 400 && s <= 599))) {
-        refuse('statuses must be an array of whole numbers from 400 to 599');
-    }
-    if (check.expectStatus !== undefined && !(Number.isInteger(check.expectStatus) && check.expectStatus >= 100 && check.expectStatus <= 599)) refuse('expectStatus must be a whole number from 100 to 599');
-    for (const field of ['sample', 'minLocs']) if (check[field] !== undefined && !whole(check[field])) refuse(`${field} must be a whole number`);
-    if (check.widths !== undefined && !(Array.isArray(check.widths) && check.widths.length && check.widths.every((w) => Number.isInteger(w) && w > 0))) {
-        refuse('widths must be a non-empty array of positive whole numbers');
-    }
-    if (check.number !== undefined && !(Number.isInteger(check.number) && check.number > 0)) refuse('number must be a positive whole number');
-    if (check.versionPath !== undefined && !(typeof check.versionPath === 'string' && check.versionPath && !/\.\.|[?#]/.test(check.versionPath))) {
-        refuse('versionPath must be a file path without "..", "?" or "#"');
-    }
-    for (const field of ['allowSkipped', 'allowRedirects']) if (check[field] !== undefined && typeof check[field] !== 'boolean') refuse(`${field} must be true or false`);
-}
-
-function validateTypeFields(check) {
-    validateValues(check);
+    const outside = (keys, mode) => { const key = keys.find((k) => check[k] !== undefined); if (key) refuse(`${key} does nothing ${mode}`); };
     if (check.type === 'deployed-sha') {
-        if (!check.repo && !(check.url && check.pattern)) throw new Refusal(`check ${check.id}: deployed-sha needs repo, or url with pattern`);
-        if (check.url && !check.pattern) throw new Refusal(`check ${check.id}: deployed-sha by url needs pattern (capture group 1 is the sha)`);
-        if (check.url && !check.sha && !check.repo) throw new Refusal(`check ${check.id}: deployed-sha by url needs sha or repo to say what is expected`);
-        if (check.pattern) compileRegex(check, 'pattern', check.pattern);
+        if (check.url === undefined && check.repo === undefined) refuse('deployed-sha needs repo, or url with pattern');
+        if (check.url !== undefined && check.pattern === undefined) refuse('deployed-sha by url needs pattern (capture group 1 is the sha)');
+        if (check.url !== undefined && check.sha === undefined && check.repo === undefined) refuse('deployed-sha by url needs sha or repo to say what is expected');
+        if (check.url !== undefined) outside(['environment', 'context', 'allowSkipped'], 'for deployed-sha by url');
+        else outside(['pattern', 'timeoutMs'], 'for deployed-sha by repo');
     }
-    if (check.type === 'pr-merged' && !check.number && !check.head) throw new Refusal(`check ${check.id}: pr-merged needs number or head`);
-    if (check.type === 'plugin-version' && !check.minVersion && !check.versionRepo) throw new Refusal(`check ${check.id}: plugin-version needs minVersion or versionRepo`);
-    if (check.minVersion !== undefined && !/^\d+\.\d+\.\d+$/.test(check.minVersion)) throw new Refusal(`check ${check.id}: minVersion must be N.N.N`);
-    if (check.sha !== undefined && !SHA_RE.test(check.sha)) throw new Refusal(`check ${check.id}: sha is not a commit sha`);
-    for (const field of ['bodyPattern', 'bodyAbsent', 'redirect', 'finalUrlPattern']) if (check[field]) compileRegex(check, field, check[field]);
-    for (const field of ['requiredText', 'forbiddenText', 'ignoreConsole']) {
-        if (check[field] === undefined) continue;
-        if (!Array.isArray(check[field])) throw new Refusal(`check ${check.id}: ${field} must be an array`);
-        check[field].forEach((source) => compileRegex(check, field, source));
+    if (check.type === 'sitemap') {
+        if (check.via === 'browser') outside(['headers'], 'for a sitemap read via browser');
+        else outside(['origin', 'settleMs'], 'for a sitemap read via http');
+        if (check.allowRedirects !== undefined && check.sampleStatus !== undefined) refuse('allowRedirects does nothing with sampleStatus, which names the exact status');
+    }
+    if (check.type === 'pr-merged') {
+        if (check.number === undefined && check.head === undefined) refuse('pr-merged needs number or head');
+        if (check.number !== undefined && check.head !== undefined) refuse('pr-merged takes number or head, not both');
+    }
+    if (check.type === 'plugin-version') {
+        if (check.minVersion === undefined && check.versionRepo === undefined) refuse('plugin-version needs minVersion or versionRepo');
+        if (check.versionPath !== undefined && check.versionRepo === undefined) refuse('versionPath does nothing without versionRepo');
     }
 }
 
@@ -906,4 +993,4 @@ async function main(argv) {
 
 if (require.main === module) main(process.argv.slice(2));
 
-module.exports = { challengeReason, cleanValue, compareVersions, exitCodeFor, parseLocs, safeUrl, shaMatches, validateConfig };
+module.exports = { COMMON_KEYS, KEYS, TOP_KEYS, challengeReason, cleanValue, compareVersions, exitCodeFor, parseLocs, safeUrl, shaMatches, validateConfig };
