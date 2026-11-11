@@ -127,9 +127,10 @@ function scrubError(message) {
     return cleanValue(plain.replace(/https?:\/\/[^\s"'<>]+/g, (url) => safeUrl(url))).slice(0, 160);
 }
 
-/** A printed value stays on one line and cannot forge the line's own separator. */
+/** A printed value stays on one line and cannot forge the line's own separator or carry a terminal escape. */
 function cleanValue(value) {
-    return String(value == null ? '' : value).replace(/[\r\n|]+/g, ' ').trim().slice(0, 400);
+    // eslint-disable-next-line no-control-regex
+    return String(value == null ? '' : value).replace(/[\u0000-\u001f\u007f-\u009f\u2028\u2029|]+/g, ' ').trim().slice(0, 400);
 }
 
 /** Origin and path only: a query string can carry a token. */
@@ -264,8 +265,13 @@ async function expectedSha(run, check) {
     if (check.sha) return { sha: check.sha };
     if (!check.repo) return { error: 'no repo to resolve an expected sha from' };
     if (!run.heads.has(check.repo)) run.heads.set(check.repo, ghJson(run, `repos/${check.repo}/commits/HEAD`));
-    const head = await run.heads.get(check.repo);
-    if (!head.ok || !head.data || !head.data.sha) return { error: `could not read the head of ${check.repo}` };
+    const pending = run.heads.get(check.repo);
+    const head = await pending;
+    if (!head.ok || !head.data || !head.data.sha) {
+        // Only an answer is shared. A failed lookup is forgotten, so the retry asks again.
+        if (run.heads.get(check.repo) === pending) run.heads.delete(check.repo);
+        return { error: `could not read the head of ${check.repo}` };
+    }
     return { sha: head.data.sha };
 }
 

@@ -371,7 +371,12 @@ async function main() {
     await single('an unknown status context is INDETERMINATE', { type: 'commit-status', ...appCheck, context: 'Nonesuch' }, 'INDETERMINATE', 2, /no status matching/);
     await single('a skipped build fails commit status by default', { type: 'commit-status', ...appCheck, sha: SHA_SKIPPED }, 'FAIL', 1, /build skipped by the project, nothing deployed; allowSkipped not set/);
     await single('commit status passes a skipped build only with allowSkipped', { type: 'commit-status', ...appCheck, sha: SHA_SKIPPED, allowSkipped: true }, 'PASS', 0, /build skipped by the project, nothing deployed\)$/);
+    fs.writeFileSync(GH_LOG, '');
     await single('gh auth failure is INDETERMINATE', { type: 'commit-status', repo: 'o/denied' }, 'INDETERMINATE', 2, /could not read the head/);
+    {
+        const lookups = fs.readFileSync(GH_LOG, 'utf8').split('\n').filter((l) => l === 'repos/o/denied/commits/HEAD').length;
+        check('a failed head lookup is not cached: the retry asks gh again', lookups === 2, `${lookups} lookups`);
+    }
     await single('deployed sha matches production', { type: 'deployed-sha', ...appCheck }, 'PASS', 0, /Production aaaaaaaa success, the newest live deployment/);
     await single('an older success under a newer live deployment fails with both shas', { type: 'deployed-sha', repo: 'o/superseded', sha: SHA_OLD }, 'FAIL', 1, /Production is at aaaaaaaa, a newer live deployment than the expected bbbbbbbb/);
     await single('the expected deployment still in progress is INDETERMINATE', { type: 'deployed-sha', repo: 'o/states', sha: SHA_WRONG }, 'INDETERMINATE', 2, /Production cccccccc in_progress \(still deploying\)/);
@@ -534,6 +539,8 @@ async function main() {
 
     // Section K: the small pure pieces, with literals.
     check('cleanValue keeps a value on one line and strips the separator', lib.cleanValue('a\nb|c') === 'a b c', lib.cleanValue('a\nb|c'));
+    check('cleanValue strips every control character and the Unicode line separators',
+        lib.cleanValue('a\u0007b\u2028c\td\u001b[31mE\u2029f\u0085g\u007fh') === 'a b c d [31mE f g h', JSON.stringify(lib.cleanValue('a\u0007b\u2028c\td\u001b[31mE\u2029f\u0085g\u007fh')));
     check('safeUrl drops the query string', lib.safeUrl('https://x.test/a?token=secret') === 'https://x.test/a', lib.safeUrl('https://x.test/a?token=secret'));
     check('compareVersions orders numerically', lib.compareVersions('8.10.0', '8.9.0') > 0 && lib.compareVersions('8.9.0', '8.9.0') === 0);
     check('shaMatches accepts a prefix and rejects another sha', lib.shaMatches('abcdef12', 'abcdef1234') && !lib.shaMatches('abcdef12', 'bbcdef1234'));
