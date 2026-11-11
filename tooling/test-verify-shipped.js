@@ -126,7 +126,16 @@ else process.stdout.write(JSON.stringify(value));
 `);
 const prAt = (number, state, merged, day, base = 'main') => ({ number, state, merged_at: merged ? `2026-11-${day}T00:00:00Z` : null, created_at: `2026-11-${day}T00:00:00Z`, base: { ref: base } });
 const b64 = (s) => Buffer.from(s).toString('base64');
+// A deployments list for repo: each entry is [sha, state], newest first.
+const deploymentRoutes = (repo, entries, firstId) => Object.fromEntries([
+    [`repos/${repo}/deployments?environment=Production&per_page=30`, entries.map(([sha], i) => ({ id: firstId + i, sha }))],
+    ...entries.map(([, state], i) => [`repos/${repo}/deployments/${firstId + i}/statuses?per_page=1`, [{ state }]]),
+]);
 fs.writeFileSync(ROUTES, JSON.stringify({
+    // Ten failed, a live one at 12 that the walk never reads, then the expected sha at 15, also at success.
+    ...deploymentRoutes('o/deep', [...Array(12).fill([SHA_WRONG, 'failure']), [SHA_GOOD, 'success'], [SHA_WRONG, 'failure'], [SHA_WRONG, 'failure'], [SHA_OLD, 'success']], 200),
+    // Three deployments, none live, and none of them the expected sha.
+    ...deploymentRoutes('o/few', [[SHA_WRONG, 'failure'], [SHA_WRONG, 'failure'], [SHA_WRONG, 'error']], 300),
     // The repo reads, so a 404 inside it is an answer. o/private has no route at all: GitHub hides a repo the token cannot see.
     'repos/o/app': { full_name: 'o/app', default_branch: 'main' },
     'repos/o/app/commits/HEAD': { sha: SHA_GOOD },
@@ -542,6 +551,8 @@ async function main() {
     }
     await single('deployed sha matches production', { type: 'deployed-sha', ...appCheck }, 'PASS', 0, /Production aaaaaaaa success, the newest live deployment/);
     await single('an older success under a newer live deployment fails with both shas', { type: 'deployed-sha', repo: 'o/superseded', sha: SHA_OLD }, 'FAIL', 1, /Production is at aaaaaaaa, a newer live deployment than the expected bbbbbbbb/);
+    await single('an expected success past the deployments read is never a PASS', { type: 'deployed-sha', repo: 'o/deep', sha: SHA_OLD }, 'INDETERMINATE', 2, /Production bbbbbbbb is deployment 16 in the list, past the 10 newest read, none of them live, so a newer live deployment cannot be ruled out/);
+    await single('a walk shorter than ten names the number it read', { type: 'deployed-sha', repo: 'o/few', sha: SHA_OLD }, 'INDETERMINATE', 2, /no successful "Production" deployment among the newest 3$/);
     await single('the expected deployment still in progress is INDETERMINATE', { type: 'deployed-sha', repo: 'o/states', sha: SHA_WRONG }, 'INDETERMINATE', 2, /Production cccccccc in_progress \(still deploying\)/);
     await single('the expected deployment that failed fails', { type: 'deployed-sha', repo: 'o/states', sha: SHA_OLD }, 'FAIL', 1, /Production bbbbbbbb failure/);
     await single('the expected deployment that is inactive fails', { type: 'deployed-sha', repo: 'o/states', sha: SHA_SKIPPED }, 'FAIL', 1, /Production dddddddd inactive/);
