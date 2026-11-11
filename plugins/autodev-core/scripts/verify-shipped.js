@@ -41,8 +41,9 @@
  * was deleted by accident is a refusal and not a smaller green run.
  *
  * Check types and their fields (repo is optional on all but those marked *):
- *   commit-status   repo*, context="Vercel", sha
- *   deployed-sha    repo* with environment="Production", or url with pattern (capture group 1 is the sha); sha
+ *   commit-status   repo*, context="Vercel", sha, allowSkipped=false
+ *   deployed-sha    repo* with environment="Production", or url with pattern (capture group 1 is the sha); sha,
+ *                   allowSkipped=false (a build skipped by the project deployed nothing, so it FAILs unless allowed)
  *   http            url, method, headers, body, expectStatus=200, bodyPattern, bodyAbsent
  *   refused         url, method, headers, body, statuses=[401,403], redirect (a regex on Location)
  *   sitemap         url, minLocs=5, sample=5, sampleStatus (exact, default any under 400),
@@ -378,7 +379,9 @@ async function checkCommitStatus(run, check) {
     const label = `${shortSha(expected.sha)} ${statuses.map((s) => `${s.context}=${s.state}`).join(', ')}`;
     if (states.some((s) => s === 'failure' || s === 'error')) return failed(label);
     if (states.some((s) => s !== 'success')) return indeterminate(`${label} (still pending)`);
+    // A skipped build deployed nothing, so it answers "did it ship" with no only when the check allows it.
     const skipped = statuses.some((s) => IGNORED_BUILD_RE.test(s.description || ''));
+    if (skipped && !check.allowSkipped) return failed(`${label} (build skipped by the project, nothing deployed; allowSkipped not set)`);
     return pass(`${label}${skipped ? ' (build skipped by the project, nothing deployed)' : ''}`);
 }
 
@@ -394,7 +397,8 @@ async function allSkippedSince(run, check, productionSha, expected) {
     const repo = check.repo;
     const context = String(check.context || 'Vercel').toLowerCase();
     const compare = await ghJson(run, `repos/${repo}/compare/${productionSha}...${expected}`);
-    if (!compare.ok) return { error: compare.unavailable || 'could not compare production with the expected sha' };
+    // A 404 is an answer: the expected sha is not in the repo, as checkCommitStatus also reads it.
+    if (!compare.ok) return compare.notFound ? { notFound: true } : { error: compare.unavailable || 'could not compare production with the expected sha' };
     if (compare.data.status !== 'ahead') return { skipped: false };
     const commits = compare.data.commits || [];
     if (!commits.length || commits.length > MAX_SKIPPED_WALK) return { skipped: false };
@@ -454,8 +458,12 @@ async function checkDeployedSha(run, check) {
     if (live.none) return indeterminate(live.error);
     const liveSha = live.deployment.sha;
     const walk = await allSkippedSince(run, check, liveSha, expected.sha);
+    if (walk.notFound) return failed(`commit ${shortSha(expected.sha)} not found in ${check.repo}`);
     if (walk.error) return indeterminate(walk.error);
-    if (walk.skipped) return pass(`${environment} is at ${shortSha(liveSha)}; the ${walk.count} newer commit(s) up to ${shortSha(expected.sha)} skipped their build`);
+    if (walk.skipped) {
+        const value = `${environment} is at ${shortSha(liveSha)}; the ${walk.count} newer commit(s) up to ${shortSha(expected.sha)} skipped their build, nothing deployed`;
+        return check.allowSkipped ? pass(value) : failed(`${value} (allowSkipped not set)`);
+    }
     return failed(`${environment} is at ${shortSha(liveSha)}, expected ${shortSha(expected.sha)}`);
 }
 

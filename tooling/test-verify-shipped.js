@@ -340,14 +340,18 @@ async function main() {
     await single('commit status failure fails', { type: 'commit-status', ...appCheck, sha: SHA_OLD }, 'FAIL', 1, /bbbbbbbb Vercel=failure/);
     await single('commit status pending is INDETERMINATE', { type: 'commit-status', ...appCheck, sha: SHA_WRONG }, 'INDETERMINATE', 2, /still pending/);
     await single('an unknown status context is INDETERMINATE', { type: 'commit-status', ...appCheck, context: 'Nonesuch' }, 'INDETERMINATE', 2, /no status matching/);
-    await single('commit status says when the build was skipped', { type: 'commit-status', ...appCheck, sha: SHA_SKIPPED }, 'PASS', 0, /build skipped/);
+    await single('a skipped build fails commit status by default', { type: 'commit-status', ...appCheck, sha: SHA_SKIPPED }, 'FAIL', 1, /build skipped by the project, nothing deployed; allowSkipped not set/);
+    await single('commit status passes a skipped build only with allowSkipped', { type: 'commit-status', ...appCheck, sha: SHA_SKIPPED, allowSkipped: true }, 'PASS', 0, /build skipped by the project, nothing deployed\)$/);
     await single('gh auth failure is INDETERMINATE', { type: 'commit-status', repo: 'o/denied' }, 'INDETERMINATE', 2, /could not read the head/);
     await single('deployed sha matches production', { type: 'deployed-sha', ...appCheck }, 'PASS', 0, /Production aaaaaaaa success, the newest live deployment/);
     await single('an older success under a newer live deployment fails with both shas', { type: 'deployed-sha', repo: 'o/superseded', sha: SHA_OLD }, 'FAIL', 1, /Production is at aaaaaaaa, a newer live deployment than the expected bbbbbbbb/);
     await single('the expected deployment still in progress is INDETERMINATE', { type: 'deployed-sha', repo: 'o/states', sha: SHA_WRONG }, 'INDETERMINATE', 2, /Production cccccccc in_progress \(still deploying\)/);
     await single('the expected deployment that failed fails', { type: 'deployed-sha', repo: 'o/states', sha: SHA_OLD }, 'FAIL', 1, /Production bbbbbbbb failure/);
     await single('the expected deployment that is inactive fails', { type: 'deployed-sha', repo: 'o/states', sha: SHA_SKIPPED }, 'FAIL', 1, /Production dddddddd inactive/);
-    await single('a skipped build ahead of production passes and says so', { type: 'deployed-sha', ...appCheck, sha: SHA_SKIPPED }, 'PASS', 0, /skipped their build/);
+    await single('a skipped build ahead of production fails by default', { type: 'deployed-sha', ...appCheck, sha: SHA_SKIPPED }, 'FAIL', 1, /skipped their build, nothing deployed \(allowSkipped not set\)/);
+    await single('a skipped build ahead of production passes with allowSkipped and says so', { type: 'deployed-sha', ...appCheck, sha: SHA_SKIPPED, allowSkipped: true }, 'PASS', 0, /skipped their build, nothing deployed$/);
+    await single('an expected sha the repo does not have fails, as commit status does', { type: 'deployed-sha', ...appCheck, sha: 'e'.repeat(40) }, 'FAIL', 1, /commit eeeeeeee not found in o\/app/);
+    await single('commit status on a sha the repo does not have fails', { type: 'commit-status', ...appCheck, sha: 'e'.repeat(40) }, 'FAIL', 1, /commit eeeeeeee not found in o\/app/);
     {
         const r = await run({ checks: [{ id: 'X1', type: 'commit-status', ...appCheck }] }, { args: ['--repo', 'o/app', '--sha', SHA_OLD] });
         check('--sha overrides the expected sha for its repo', statusOf(r, 'X1') === 'FAIL' && /bbbbbbbb/.test(lineOf(r, 'X1')), r.stdout);
@@ -424,7 +428,7 @@ async function main() {
     }
 
     // Section L: each defect the escalation review reproduced, pinned to its own input.
-    await single('skipped-build walk starts from the newest live deployment', { type: 'deployed-sha', repo: 'o/failedtop', sha: SHA_SKIPPED }, 'PASS', 0, /Production is at aaaaaaaa; the 1 newer/);
+    await single('skipped-build walk starts from the newest live deployment', { type: 'deployed-sha', repo: 'o/failedtop', sha: SHA_SKIPPED, allowSkipped: true }, 'PASS', 0, /Production is at aaaaaaaa; the 1 newer/);
     await single('a failed deploy with a skipped status in another context fails', { type: 'deployed-sha', repo: 'o/mixed', sha: SHA_WRONG }, 'FAIL', 1, /Production is at aaaaaaaa, expected cccccccc/);
     await single('a failed deploy mentioning the skip text fails', { type: 'deployed-sha', repo: 'o/mixed', sha: SHA_OLD }, 'FAIL', 1, /Production is at aaaaaaaa, expected bbbbbbbb/);
     {
