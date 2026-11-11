@@ -754,6 +754,19 @@ async function main() {
             child.on('close', (status) => resolve({ status }));
         });
         check('the working directory entry point is never executed', hostile.status === 2 && !fs.existsSync(marker), String(fs.existsSync(marker)));
+        // Without --playwright the driver is looked up for the cwd: by package name only, never the cwd's own entry point.
+        const flaglessMarker = path.join(root, 'flagless-cwd-ran.txt');
+        const flaglessCwd = path.join(root, 'flagless-cwd');
+        fs.mkdirSync(flaglessCwd);
+        fs.writeFileSync(path.join(flaglessCwd, 'package.json'), JSON.stringify({ name: 'flagless-cwd', main: 'entry.js' }));
+        fs.writeFileSync(path.join(flaglessCwd, 'entry.js'), `require('fs').writeFileSync(${JSON.stringify(flaglessMarker)}, 'ran'); module.exports = {};`);
+        const flagless = await new Promise((resolve) => {
+            const child = spawn(process.execPath, [SUBJECT, 'run', '--config', file, '--deadline-ms', '20000'], { cwd: flaglessCwd, windowsHide: true });
+            let stdout = '';
+            child.stdout.on('data', (d) => { stdout += d; });
+            child.on('close', (status) => resolve({ status, stdout }));
+        });
+        check('with no --playwright flag the working directory entry point is never executed', /^CHECK X1: /m.test(flagless.stdout) && !fs.existsSync(flaglessMarker), `exit=${flagless.status} ran=${fs.existsSync(flaglessMarker)} ${flagless.stdout}`);
     }
     if (!REAL_PLAYWRIGHT) {
         const fake = (extra) => ({ type: 'browser', url: u('/ok'), widths: [390], ...browserFast, ...extra });
