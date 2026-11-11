@@ -35,10 +35,14 @@
  *
  * CONFIG is JSON and lives outside this public repo, normally at
  * ~/.claude/autodev/shipped-checks.json:
- *   { "expectCount": 2, "deadlineMs": 600000, "timeoutMs": 20000, "playwright": "<dir>",
+ *   { "expectCount": 2, "deadlineMs": 600000, "timeoutMs": 20000,
  *     "checks": [ { "id": "A1", "type": "http", "url": "https://..." } ] }
  * expectCount, when present, must equal the number of checks, so a check that
  * was deleted by accident is a refusal and not a smaller green run.
+ *
+ * THE DRIVER LOCATION IS TRUSTED LIKE CODE. --playwright DIR is loaded with
+ * require in this process, so only the command line can name it. A config that
+ * carries a "playwright" key is refused: a JSON file must not be able to run code.
  *
  * Check types and their fields (repo is optional on all but those marked *):
  *   commit-status   repo*, context="Vercel", sha, allowSkipped=false
@@ -154,6 +158,9 @@ function compileRegex(check, field, source) {
 /** Refuses a config that could only produce an empty or meaningless run. Nothing runs when this throws. */
 function validateConfig(config) {
     if (!config || typeof config !== 'object' || Array.isArray(config)) throw new Refusal('config must be a JSON object');
+    if (config.playwright !== undefined) {
+        throw new Refusal('config key "playwright" is not accepted: the driver is loaded as code, so name it with --playwright DIR');
+    }
     if (!Array.isArray(config.checks)) throw new Refusal('config has no checks array');
     if (config.checks.length === 0) throw new Refusal('empty config: 0 checks, so nothing would be verified');
     if (config.expectCount !== undefined && config.expectCount !== config.checks.length) {
@@ -173,9 +180,30 @@ function validateConfig(config) {
     }
 }
 
+/** Numbers and paths a check carries into a comparison or a gh endpoint. A wrong type is refused, never coerced. */
+function validateValues(check) {
+    const refuse = (message) => { throw new Refusal(`check ${check.id}: ${message}`); };
+    const whole = (v) => Number.isInteger(v) && v >= 0;
+    if (check.statuses !== undefined && !(Array.isArray(check.statuses) && check.statuses.length && check.statuses.every((s) => Number.isInteger(s) && s >= 400 && s <= 599))) {
+        refuse('statuses must be an array of whole numbers from 400 to 599');
+    }
+    if (check.expectStatus !== undefined && !(Number.isInteger(check.expectStatus) && check.expectStatus >= 100 && check.expectStatus <= 599)) refuse('expectStatus must be a whole number from 100 to 599');
+    for (const field of ['sample', 'minLocs']) if (check[field] !== undefined && !whole(check[field])) refuse(`${field} must be a whole number`);
+    if (check.widths !== undefined && !(Array.isArray(check.widths) && check.widths.length && check.widths.every((w) => Number.isInteger(w) && w > 0))) {
+        refuse('widths must be a non-empty array of positive whole numbers');
+    }
+    if (check.number !== undefined && !(Number.isInteger(check.number) && check.number > 0)) refuse('number must be a positive whole number');
+    if (check.versionPath !== undefined && !(typeof check.versionPath === 'string' && check.versionPath && !/\.\.|[?#]/.test(check.versionPath))) {
+        refuse('versionPath must be a file path without "..", "?" or "#"');
+    }
+    for (const field of ['allowSkipped', 'allowRedirects']) if (check[field] !== undefined && typeof check[field] !== 'boolean') refuse(`${field} must be true or false`);
+}
+
 function validateTypeFields(check) {
+    validateValues(check);
     if (check.type === 'deployed-sha') {
         if (!check.repo && !(check.url && check.pattern)) throw new Refusal(`check ${check.id}: deployed-sha needs repo, or url with pattern`);
+        if (check.url && !check.pattern) throw new Refusal(`check ${check.id}: deployed-sha by url needs pattern (capture group 1 is the sha)`);
         if (check.url && !check.sha && !check.repo) throw new Refusal(`check ${check.id}: deployed-sha by url needs sha or repo to say what is expected`);
         if (check.pattern) compileRegex(check, 'pattern', check.pattern);
     }
@@ -188,9 +216,6 @@ function validateTypeFields(check) {
         if (check[field] === undefined) continue;
         if (!Array.isArray(check[field])) throw new Refusal(`check ${check.id}: ${field} must be an array`);
         check[field].forEach((source) => compileRegex(check, field, source));
-    }
-    if (check.type === 'browser' && check.widths !== undefined && (!Array.isArray(check.widths) || !check.widths.length)) {
-        throw new Refusal(`check ${check.id}: widths must be a non-empty array`);
     }
 }
 
@@ -576,7 +601,7 @@ function browserFor(run) {
         // Playwright reads PWDEBUG once, at module load, and its inspector mode turns headless off.
         delete process.env.PWDEBUG;
         const driver = loadBrowserDriver(run);
-        if (!driver) throw new Error('no playwright resolves; set "playwright" in the config or pass --playwright');
+        if (!driver) throw new Error('no playwright resolves; pass --playwright DIR');
         const timeout = Math.min(BROWSER_TIMEOUT_MS, Math.max(1000, run.deadlineAt - Date.now()));
         run.browserServer = await driver.chromium.launchServer({ headless: true, timeout });
         if (run.closing) throw new Error('run ended during browser start');
@@ -817,7 +842,7 @@ async function execute(options) {
         timeoutMs: Number(config.timeoutMs || DEFAULT_TIMEOUT_MS),
         repo: options.repo || null,
         sha: options.sha || null,
-        playwright: expandHome(options.playwright || config.playwright),
+        playwright: expandHome(options.playwright),
         heads: new Map(),
         browser: null,
         browserServer: null,
