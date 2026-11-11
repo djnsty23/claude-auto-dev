@@ -80,7 +80,8 @@
  *   plugin-version  pluginRoot is a local folder, minVersion is N.N.N, versionPath="VERSION" needs
  *                   versionRepo, requiredFiles is a list. Needs minVersion or versionRepo.
  *   release-tag     repo is required. versionPath="VERSION".
- *   pr-merged       repo is required, and number or head, not both.
+ *   pr-merged       repo is required, and number or head, not both. By head it passes only when a
+ *                   PR from that branch merged and none from it is still open.
  * Counts, sizes and statuses are whole numbers. timeoutMs (per probe, in ms) is a positive one.
  *
  * LIMITS. Headless only, and no config field can change that. At most two
@@ -677,10 +678,15 @@ async function checkPrMerged(run, check) {
         return pr.data.merged ? pass(`PR ${check.number} merged`) : failed(`PR ${check.number} state ${pr.data.state}, not merged`);
     }
     const owner = check.repo.split('/')[0];
-    const list = await ghJson(run, `repos/${check.repo}/pulls?state=closed&per_page=30&head=${encodeURIComponent(`${owner}:${check.head}`)}`);
+    // Open and closed in one read: a reused branch name carries an old merge and a new open PR at once.
+    const list = await ghJson(run, `repos/${check.repo}/pulls?state=all&per_page=30&head=${encodeURIComponent(`${owner}:${check.head}`)}`);
     if (!list.ok) return indeterminate(list.unavailable || 'could not list pull requests');
+    if (!Array.isArray(list.data)) return indeterminate('gh returned no pull request list');
+    const open = list.data.find((pr) => pr.state === 'open');
+    if (open) return failed(`PR ${open.number} from ${check.head} is still open, so the branch has not shipped`);
     const merged = list.data.filter((pr) => pr.merged_at);
-    return merged.length ? pass(`${merged.length} merged PR(s) from ${check.head}`) : failed(`0 merged PRs from ${check.head}`);
+    if (!merged.length) return failed(`0 merged PRs from ${check.head}`);
+    return pass(`PR ${merged[0].number} merged from ${check.head}${merged.length > 1 ? `, the newest of ${merged.length} merged` : ''}`);
 }
 
 function loadBrowserDriver(run) {

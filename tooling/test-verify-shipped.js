@@ -124,8 +124,11 @@ fs.writeFileSync(ROUTES, JSON.stringify({
     'repos/o/app/git/ref/tags/v8.5.0': { ref: 'refs/tags/v8.5.0' },
     'repos/o/app/pulls/7': { merged: true, state: 'closed' },
     'repos/o/app/pulls/8': { merged: false, state: 'open' },
-    'repos/o/app/pulls?state=closed&per_page=30&head=o%3Afeature': [{ merged_at: '2026-11-10T00:00:00Z' }],
-    'repos/o/app/pulls?state=closed&per_page=30&head=o%3Aabandoned': [{ merged_at: null }],
+    'repos/o/app/pulls?state=all&per_page=30&head=o%3Afeature': [{ number: 12, state: 'closed', merged_at: '2026-11-10T00:00:00Z' }],
+    'repos/o/app/pulls?state=all&per_page=30&head=o%3Aabandoned': [{ number: 13, state: 'closed', merged_at: null }],
+    // A reused branch name: the old PR merged, a new one from the same branch is open.
+    'repos/o/app/pulls?state=all&per_page=30&head=o%3Areused': [{ number: 15, state: 'open', merged_at: null }, { number: 12, state: 'closed', merged_at: '2026-11-10T00:00:00Z' }],
+    'repos/o/app/pulls?state=all&per_page=30&head=o%3Afresh': [{ number: 16, state: 'open', merged_at: null }],
     'repos/o/denied/commits/HEAD': 401,
     'repos/o/notag/contents/VERSION': { content: b64('8.5.0\n') },
     'repos/o/failedtop/deployments?environment=Production&per_page=30': [{ id: 2, sha: SHA_OLD }, { id: 1, sha: SHA_GOOD }],
@@ -509,8 +512,10 @@ async function main() {
     await single('release tag absent fails', { type: 'release-tag', repo: 'o/notag' }, 'FAIL', 1, /tag v8\.5\.0 is absent/);
     await single('merged PR passes', { type: 'pr-merged', ...appCheck, number: 7 }, 'PASS', 0, /PR 7 merged/);
     await single('open PR fails', { type: 'pr-merged', ...appCheck, number: 8 }, 'FAIL', 1, /state open/);
-    await single('merged PR by head branch passes', { type: 'pr-merged', ...appCheck, head: 'feature' }, 'PASS', 0, /1 merged PR/);
+    await single('merged PR by head branch passes and names the PR', { type: 'pr-merged', ...appCheck, head: 'feature' }, 'PASS', 0, /\| PR 12 merged from feature$/);
     await single('closed unmerged PR by head branch fails', { type: 'pr-merged', ...appCheck, head: 'abandoned' }, 'FAIL', 1, /0 merged PRs/);
+    await single('a merged PR plus an open one from the same head fails, naming the open PR', { type: 'pr-merged', ...appCheck, head: 'reused' }, 'FAIL', 1, /PR 15 from reused is still open, so the branch has not shipped/);
+    await single('an open PR alone by head branch fails', { type: 'pr-merged', ...appCheck, head: 'fresh' }, 'FAIL', 1, /PR 16 from fresh is still open/);
 
     // Section H: the installed plugin version.
     {
