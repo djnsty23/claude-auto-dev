@@ -38,6 +38,7 @@ const SHA_GOOD = 'a'.repeat(40);
 const SHA_OLD = 'b'.repeat(40);
 const SHA_WRONG = 'c'.repeat(40);
 const SHA_SKIPPED = 'd'.repeat(40);
+const SHA_GHOST = 'f'.repeat(40);
 const LONG = `<h1>Shipped</h1><p>${'real page text '.repeat(60)}</p>`;
 const page = (body, title = 'Real page') => `<!doctype html><html><head><title>${title}</title></head><body>${body}</body></html>`;
 
@@ -107,7 +108,10 @@ if (Object.prototype.hasOwnProperty.call(routes, endpoint)) {
 `);
 const b64 = (s) => Buffer.from(s).toString('base64');
 fs.writeFileSync(ROUTES, JSON.stringify({
+    // The repo reads, so a 404 inside it is an answer. o/private has no route at all: GitHub hides a repo the token cannot see.
+    'repos/o/app': { full_name: 'o/app' },
     'repos/o/app/commits/HEAD': { sha: SHA_GOOD },
+    [`repos/o/app/commits/${SHA_GOOD}`]: { sha: SHA_GOOD },
     [`repos/o/app/commits/${SHA_GOOD}/status`]: { statuses: [{ context: 'Vercel', state: 'success', description: 'Deployment has completed' }] },
     [`repos/o/app/commits/${SHA_OLD}/status`]: { statuses: [{ context: 'Vercel', state: 'failure', description: 'Deployment failed' }] },
     [`repos/o/app/commits/${SHA_SKIPPED}/status`]: { statuses: [{ context: 'Vercel', state: 'success', description: 'Canceled by Ignored Build Step' }] },
@@ -146,6 +150,10 @@ fs.writeFileSync(ROUTES, JSON.stringify({
     'repos/o/states/deployments/41/statuses?per_page=1': [{ state: 'failure' }],
     'repos/o/states/deployments/42/statuses?per_page=1': [{ state: 'inactive' }],
     'repos/o/states/deployments/43/statuses?per_page=1': [{ state: 'success' }],
+    // Production runs a sha the repo does not hold, while the expected sha is in the repo: the compare 404 blames production.
+    'repos/o/ghost/deployments?environment=Production&per_page=30': [{ id: 50, sha: SHA_GHOST }],
+    'repos/o/ghost/deployments/50/statuses?per_page=1': [{ state: 'success' }],
+    [`repos/o/ghost/commits/${SHA_GOOD}`]: { sha: SHA_GOOD },
 }));
 
 // A fake playwright driver. It fetches the real local page, and treats the page's own script text as what ran.
@@ -483,6 +491,11 @@ async function main() {
     await single('a skipped build ahead of production passes with allowSkipped and says so', { type: 'deployed-sha', ...appCheck, sha: SHA_SKIPPED, allowSkipped: true }, 'PASS', 0, /skipped their build, nothing deployed$/);
     await single('an expected sha the repo does not have fails, as commit status does', { type: 'deployed-sha', ...appCheck, sha: 'e'.repeat(40) }, 'FAIL', 1, /commit eeeeeeee not found in o\/app/);
     await single('commit status on a sha the repo does not have fails', { type: 'commit-status', ...appCheck, sha: 'e'.repeat(40) }, 'FAIL', 1, /commit eeeeeeee not found in o\/app/);
+    // A 404 from a repo the token cannot see says nothing about the sha or the PR.
+    await single('commit status in a repo gh cannot see is INDETERMINATE', { type: 'commit-status', repo: 'o/private', sha: SHA_GOOD }, 'INDETERMINATE', 2, /cannot see the repo o\/private \(gh answers 404\), so commit aaaaaaaa not found in o\/private is not an answer/);
+    await single('a PR number the repo does not have fails', { type: 'pr-merged', ...appCheck, number: 9 }, 'FAIL', 1, /PR 9 not found$/);
+    await single('a PR number in a repo gh cannot see is INDETERMINATE', { type: 'pr-merged', repo: 'o/private', number: 7 }, 'INDETERMINATE', 2, /cannot see the repo o\/private \(gh answers 404\), so PR 7 not found is not an answer/);
+    await single('a compare 404 with the expected sha in the repo blames production, as INDETERMINATE', { type: 'deployed-sha', repo: 'o/ghost', sha: SHA_GOOD }, 'INDETERMINATE', 2, /Production is at ffffffff, which o\/ghost does not hold, so it cannot be compared with aaaaaaaa/);
     {
         const r = await run({ checks: [{ id: 'X1', type: 'commit-status', ...appCheck }] }, { args: ['--repo', 'o/app', '--sha', SHA_OLD] });
         check('--sha overrides the expected sha for its repo', statusOf(r, 'X1') === 'FAIL' && /bbbbbbbb/.test(lineOf(r, 'X1')), r.stdout);

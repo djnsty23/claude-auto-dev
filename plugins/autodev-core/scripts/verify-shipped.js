@@ -347,6 +347,16 @@ async function ghJson(run, endpoint) {
     try { return { ok: true, data: JSON.parse(res.stdout) }; } catch { return { ok: false, unavailable: 'gh returned unparsable JSON' }; }
 }
 
+/**
+ * GitHub answers 404 for a private repo the token cannot see as well as for a missing object, so a 404 is
+ * a FAIL only once the repo itself reads. Otherwise the access is unknown and so is the answer.
+ */
+async function notFoundUnlessHidden(run, repo, missing) {
+    const seen = await ghJson(run, `repos/${repo}`);
+    if (seen.ok) return failed(missing);
+    return indeterminate(`cannot see the repo ${repo} (${seen.notFound ? 'gh answers 404' : seen.unavailable}), so ${missing} is not an answer`);
+}
+
 /** The sha a check grades: --sha for the narrowed repo, the check's own, else the default branch head. */
 async function expectedSha(run, check) {
     if (run.sha && check.repo === run.repo) return { sha: run.sha };
@@ -513,7 +523,7 @@ async function checkCommitStatus(run, check) {
     if (expected.error) return indeterminate(expected.error);
     const context = String(check.context || 'Vercel').toLowerCase();
     const combined = await ghJson(run, `repos/${check.repo}/commits/${expected.sha}/status`);
-    if (!combined.ok) return combined.notFound ? failed(`commit ${shortSha(expected.sha)} not found in ${check.repo}`) : indeterminate(combined.unavailable);
+    if (!combined.ok) return combined.notFound ? notFoundUnlessHidden(run, check.repo, `commit ${shortSha(expected.sha)} not found in ${check.repo}`) : indeterminate(combined.unavailable);
     const statuses = (combined.data.statuses || []).filter((s) => String(s.context).toLowerCase().includes(context));
     if (!statuses.length) return indeterminate(`no status matching "${check.context || 'Vercel'}" on ${shortSha(expected.sha)}`);
     const states = statuses.map((s) => s.state);
@@ -538,7 +548,7 @@ async function allSkippedSince(run, check, productionSha, expected) {
     const repo = check.repo;
     const context = String(check.context || 'Vercel').toLowerCase();
     const compare = await ghJson(run, `repos/${repo}/compare/${productionSha}...${expected}`);
-    // A 404 is an answer: the expected sha is not in the repo, as checkCommitStatus also reads it.
+    // A 404 means one of the two shas is not in the repo. The caller reads which one.
     if (!compare.ok) return compare.notFound ? { notFound: true } : { error: compare.unavailable || 'could not compare production with the expected sha' };
     if (compare.data.status !== 'ahead') return { skipped: false };
     const commits = compare.data.commits || [];
@@ -599,7 +609,13 @@ async function checkDeployedSha(run, check) {
     if (live.none) return indeterminate(live.error);
     const liveSha = live.deployment.sha;
     const walk = await allSkippedSince(run, check, liveSha, expected.sha);
-    if (walk.notFound) return failed(`commit ${shortSha(expected.sha)} not found in ${check.repo}`);
+    if (walk.notFound) {
+        // The compare 404 blames neither sha, so the expected one is read on its own before it is blamed.
+        const commit = await ghJson(run, `repos/${check.repo}/commits/${expected.sha}`);
+        if (commit.notFound) return failed(`commit ${shortSha(expected.sha)} not found in ${check.repo}`);
+        if (!commit.ok) return indeterminate(commit.unavailable);
+        return indeterminate(`${environment} is at ${shortSha(liveSha)}, which ${check.repo} does not hold, so it cannot be compared with ${shortSha(expected.sha)}`);
+    }
     if (walk.error) return indeterminate(walk.error);
     if (walk.skipped) {
         const value = `${environment} is at ${shortSha(liveSha)}; the ${walk.count} newer commit(s) up to ${shortSha(expected.sha)} skipped their build, nothing deployed`;
@@ -657,7 +673,7 @@ async function checkReleaseTag(run, check) {
 async function checkPrMerged(run, check) {
     if (check.number) {
         const pr = await ghJson(run, `repos/${check.repo}/pulls/${check.number}`);
-        if (!pr.ok) return pr.notFound ? failed(`PR ${check.number} not found`) : indeterminate(pr.unavailable);
+        if (!pr.ok) return pr.notFound ? notFoundUnlessHidden(run, check.repo, `PR ${check.number} not found`) : indeterminate(pr.unavailable);
         return pr.data.merged ? pass(`PR ${check.number} merged`) : failed(`PR ${check.number} state ${pr.data.state}, not merged`);
     }
     const owner = check.repo.split('/')[0];
