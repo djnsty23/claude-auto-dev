@@ -80,6 +80,8 @@ const server = http.createServer((req, res) => {
     case '/sitemap-short': return send(200, `<urlset><loc>${base}/ok</loc></urlset>`);
     case '/sitemap-empty': return send(200, '<urlset></urlset>');
     case '/sitemap-bad': return send(200, `<urlset>${[1, 2, 3, 4, 5].map((n) => `<loc>${base}/${n === 3 ? 'boom' : 'ok'}?${n}</loc>`).join('')}</urlset>`);
+    case '/sitemap-relative': return send(200, `<urlset>${[1, 2, 3, 4, 5].map((n) => `<loc>/ok?${n}</loc>`).join('')}</urlset>`);
+    case '/sitemap-cf': return send(403, page('x'), { 'cf-mitigated': 'challenge' });
     case '/sitemap-challenged': return send(200, `<urlset>${[1, 2, 3, 4, 5].map((n) => `<loc>${base}/challenge?${n}</loc>`).join('')}</urlset>`);
     default: return send(404, 'missing');
     }
@@ -326,10 +328,12 @@ async function main() {
     }
 
     // Section F: sitemaps. The floor is on the location count.
-    await single('sitemap with enough locations passes', { type: 'sitemap', url: u('/sitemap') }, 'PASS', 0, /6 locations, 5 of 5 sampled/);
+    await single('sitemap with enough locations passes', { type: 'sitemap', url: u('/sitemap') }, 'PASS', 0, /6 locations, 5 of 5 sampled under 300/);
     await single('sitemap exact sample status passes on 200', { type: 'sitemap', url: u('/sitemap'), sampleStatus: 200 }, 'PASS', 0, /5 of 5 sampled answered 200/);
     await single('sitemap exact sample status fails on a redirect', { type: 'sitemap', url: u('/sitemap-redirect'), sampleStatus: 200 }, 'FAIL', 1, /5 of 5 sampled answered 307/);
-    await single('sitemap redirects pass without an exact status', { type: 'sitemap', url: u('/sitemap-redirect') }, 'PASS', 0, /under 400/);
+    await single('sitemap redirects fail by default', { type: 'sitemap', url: u('/sitemap-redirect') }, 'FAIL', 1, /5 of 5 sampled answered 307,307,307,307,307/);
+    await single('sitemap redirects pass with allowRedirects', { type: 'sitemap', url: u('/sitemap-redirect'), allowRedirects: true }, 'PASS', 0, /under 400 \(redirects allowed\)/);
+    await single('a relative sitemap location fails over http', { type: 'sitemap', url: u('/sitemap-relative') }, 'FAIL', 1, /5 of 5 locations are not absolute http\(s\) URLs, first \/ok$/);
     await single('sitemap below the floor fails', { type: 'sitemap', url: u('/sitemap-short') }, 'FAIL', 1, /1 locations, expected at least 5/);
     await single('empty sitemap fails', { type: 'sitemap', url: u('/sitemap-empty') }, 'FAIL', 1, /0 locations/);
     await single('sitemap with a broken page fails', { type: 'sitemap', url: u('/sitemap-bad') }, 'FAIL', 1, /1 of 5 sampled answered 500/);
@@ -440,7 +444,10 @@ async function main() {
     await single('browser sitemap exact status passes on real 200s', { type: 'sitemap', via: 'browser', url: u('/sitemap'), sampleStatus: 200, settleMs: 100 }, 'PASS', 0, /5 of 5 sampled answered 200/);
     await single('browser sitemap exact status fails on a followed redirect', { type: 'sitemap', via: 'browser', url: u('/sitemap-redirect'), sampleStatus: 200, settleMs: 100 }, 'FAIL', 1, /5 of 5 sampled answered redirected/);
     await single('browser sitemap cannot grade an exact 3xx', { type: 'sitemap', via: 'browser', url: u('/sitemap-redirect'), sampleStatus: 307, settleMs: 100 }, 'INDETERMINATE', 2, /5 of 5 sampled could not be read/);
-    await single('browser sitemap redirects pass without an exact status', { type: 'sitemap', via: 'browser', url: u('/sitemap-redirect'), settleMs: 100 }, 'PASS', 0, /under 400/);
+    await single('browser sitemap redirects fail by default', { type: 'sitemap', via: 'browser', url: u('/sitemap-redirect'), settleMs: 100 }, 'FAIL', 1, /5 of 5 sampled answered redirected/);
+    await single('browser sitemap redirects pass with allowRedirects', { type: 'sitemap', via: 'browser', url: u('/sitemap-redirect'), allowRedirects: true, settleMs: 100 }, 'PASS', 0, /under 400 \(redirects allowed\)/);
+    await single('a relative sitemap location fails in the browser', { type: 'sitemap', via: 'browser', url: u('/sitemap-relative'), settleMs: 100 }, 'FAIL', 1, /5 of 5 locations are not absolute http\(s\) URLs, first \/ok$/);
+    await single('browser sitemap names the cf-mitigated header it read', { type: 'sitemap', via: 'browser', url: u('/sitemap-cf'), settleMs: 100 }, 'INDETERMINATE', 2, /bot mitigation \(cf-mitigated: challenge, HTTP 403\)/);
     {
         const file = path.join(root, 'sample-attempts.json');
         for (const [name, via] of [['http', {}], ['browser', { via: 'browser', settleMs: 100 }]]) {
