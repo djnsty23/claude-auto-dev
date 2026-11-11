@@ -773,6 +773,10 @@ async function main() {
         check('a browser run exits without waiting on idle timers', prompt.status === 0 && prompt.ms < 4500, `${prompt.ms}ms`);
         const hung = await run({ checks: [{ id: 'X1', ...fake({ timeoutMs: 300 }) }] }, { args: ['--deadline-ms', '20000'], env: { FAKE_DRIVER_HANG_CONTEXT: '1' } });
         check('the probe timeout covers a hung newContext', hung.status === 2 && /timed out after 300ms/.test(lineOf(hung, 'X1')) && hung.ms < 8000, `${hung.ms}ms ${hung.stdout}`);
+        const topHung = await run({ timeoutMs: 300, checks: [{ id: 'X1', ...fake() }] }, { args: ['--deadline-ms', '20000'], env: { FAKE_DRIVER_HANG_CONTEXT: '1' } });
+        check('a browser probe falls back to the config timeoutMs, as an http one does', topHung.status === 2 && /timed out after 300ms/.test(lineOf(topHung, 'X1')) && topHung.ms < 8000, `${topHung.ms}ms ${topHung.stdout}`);
+        const checkWins = await run({ timeoutMs: 15000, checks: [{ id: 'X1', ...fake({ timeoutMs: 300 }) }] }, { args: ['--deadline-ms', '20000'], env: { FAKE_DRIVER_HANG_CONTEXT: '1' } });
+        check('a browser check timeoutMs still wins over the config one', checkWins.status === 2 && /timed out after 300ms/.test(lineOf(checkWins, 'X1')) && checkWins.ms < 8000, `${checkWins.ms}ms ${checkWins.stdout}`);
         fs.rmSync(LAUNCH_LOG, { force: true });
         await run({ checks: [{ id: 'X1', ...fake() }] }, { env: { PWDEBUG: '1' } });
         check('PWDEBUG never reaches the browser launch', events().every((e) => e.event !== 'launch' || (e.pwdebug === null && e.headless === true)), JSON.stringify(events()));

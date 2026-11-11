@@ -88,6 +88,7 @@
  *                   default branch gh cannot read is INDETERMINATE.
  * Counts, sizes and statuses are whole numbers. timeoutMs (per probe, in ms) and deadlineMs are
  * positive ones up to 2147483647, the largest delay Node's timers hold, as is --deadline-ms.
+ * A check's timeoutMs wins over the config's. With neither, a probe waits 20000, a browser one 45000.
  *
  * LIMITS. Headless only, and no config field can change that. At most two
  * attempts per check, and a challenge is not retried. Every network call has
@@ -796,7 +797,8 @@ async function withPage(run, check, height, body, width) {
     let browser;
     try { browser = await browserFor(run); } catch (e) { return indeterminate(`browser would not start: ${scrubError(e.message)}`); }
     let context;
-    const probe = probeSignal(run, check.timeoutMs || BROWSER_TIMEOUT_MS);
+    // The order the http checks use: the check's timeoutMs, then the config's, then the default.
+    const probe = probeSignal(run, check.timeoutMs || run.browserTimeoutMs);
     const stopAt = Date.now() + probe.remaining;
     try {
         const aborted = new Promise((resolve) => probe.signal.addEventListener('abort', () => resolve(indeterminate(`browser probe timed out after ${probe.remaining}ms`)), { once: true }));
@@ -1006,6 +1008,8 @@ async function execute(options) {
         deadline,
         deadlineAt: Date.now() + deadlineMs,
         timeoutMs: Number(config.timeoutMs || DEFAULT_TIMEOUT_MS),
+        // A browser probe falls back to its own longer default only when the config sets no timeoutMs.
+        browserTimeoutMs: Number(config.timeoutMs || BROWSER_TIMEOUT_MS),
         repo: options.repo || null,
         sha: options.sha || null,
         playwright: expandHome(options.playwright),
