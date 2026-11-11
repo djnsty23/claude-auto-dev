@@ -111,7 +111,8 @@ const USER_AGENT = 'autodev-verify-shipped';
 const ID_RE = /^[A-Za-z0-9_.-]+$/;
 const SHA_RE = /^[0-9a-f]{7,40}$/i;
 const REPO_RE = /^[\w.-]+\/[\w.-]+$/;
-const validRepo = (repo) => typeof repo === 'string' && REPO_RE.test(repo);
+// A segment made only of dots climbs out of the repos/ path it is put into, so it is never a repo name.
+const validRepo = (repo) => typeof repo === 'string' && REPO_RE.test(repo) && !repo.split('/').some((part) => /^\.+$/.test(part));
 const IGNORED_BUILD_RE = /ignored build step/i;
 const CHALLENGE_TITLE_RE = /^\s*(vercel security checkpoint|just a moment\b|attention required)/i;
 const BROWSER_TYPES = new Set(['browser']);
@@ -903,7 +904,7 @@ function validateOptions(options) {
     if (options.command !== 'run') throw new Refusal('expected the run command; see --help');
     if (!options.config) throw new Refusal('--config FILE is required');
     if (Boolean(options.repo) !== Boolean(options.sha)) throw new Refusal('--repo and --sha go together');
-    if (options.repo && !REPO_RE.test(options.repo)) throw new Refusal('--repo must be OWNER/NAME');
+    if (options.repo && !validRepo(options.repo)) throw new Refusal('--repo must be OWNER/NAME');
     if (options.sha && !SHA_RE.test(options.sha)) throw new Refusal('--sha is not a commit sha');
     if (options.deadlineMs !== undefined && !(Number(options.deadlineMs) > 0)) throw new Refusal('--deadline-ms must be a positive number');
 }
