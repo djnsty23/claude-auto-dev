@@ -477,7 +477,7 @@ async function checkSitemapHttp(run, check) {
     const sample = locs.slice(0, check.sample === undefined ? 5 : check.sample);
     const statuses = await Promise.all(sample.map(async (url) => {
         const sameOrigin = new URL(url).origin === new URL(check.url).origin;
-        const r = await httpProbe(run, { headers: sameOrigin ? check.headers : undefined }, url);
+        const r = await httpProbe(run, { headers: sameOrigin ? check.headers : undefined }, url, check.timeoutMs);
         if (r.error) return 'unreadable';
         return challengeReason(r.status, (n) => r.headers.get(n), r.text) ? 'challenged' : r.status;
     }));
@@ -503,7 +503,7 @@ async function checkSitemapBrowser(run, check) {
             const invalid = locs.filter((u) => !absolute(u));
             const samples = invalid.length ? [] : await Promise.all(locs.slice(0, sample).map((u) => read(u).then((r) => ({ status: r.status, redirected: r.redirected, mitigatedBy: r.mitigatedBy, mitigated: r.mitigated, head: r.text.slice(0, 8192) }), () => null)));
             return { status: map.status, redirected: map.redirected, mitigatedBy: map.mitigatedBy, mitigated: map.mitigated, head: map.text.slice(0, 8192), count: locs.length, invalid: invalid.length, firstInvalid: invalid[0] || null, samples };
-        }, { url: check.url, sample: check.sample === undefined ? 5 : check.sample, perFetchMs: run.timeoutMs });
+        }, { url: check.url, sample: check.sample === undefined ? 5 : check.sample, perFetchMs: check.timeoutMs || run.timeoutMs });
         const reasonFor = (r) => challengeReason(r.status, (name) => (name === r.mitigatedBy ? r.mitigated : null), r.head);
         const blocked = reasonFor(data);
         if (blocked) return indeterminate(blocked, { noRetry: true });

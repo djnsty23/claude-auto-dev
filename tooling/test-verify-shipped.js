@@ -70,6 +70,8 @@ const server = http.createServer((req, res) => {
     case '/checkpoint-200': return send(200, page('x', 'Vercel Security Checkpoint'));
     case '/boom': return send(500, 'boom');
     case '/slow': return setTimeout(() => send(200, page(LONG)), 500) && undefined;
+    case '/slower': return setTimeout(() => send(200, page(LONG)), 3000) && undefined;
+    case '/sitemap-slower': return send(200, `<urlset>${[1, 2, 3, 4, 5].map((n) => `<loc>${base}/slower?${n}</loc>`).join('')}</urlset>`);
     case '/hang': hangHits++; return undefined;
     case '/version-short': return send(200, JSON.stringify({ sha: 'a' }));
     case '/long-forbidden': return send(200, page(`${LONG}${'x '.repeat(110000)}ZZMARKER`));
@@ -664,6 +666,13 @@ async function main() {
     {
         const bad = await run({ checks: [{ id: 'X1', type: 'plugin-version', pluginRoot: root, minVersion: 'v9.0.0' }] });
         check('a malformed minVersion is refused', bad.status === 2 && /minVersion must be N\.N\.N/.test(bad.stderr), bad.stderr);
+    }
+    {
+        // The samples answer after 3000ms. The check's timeoutMs, not the run's, must bound each sampled fetch.
+        const viaHttp = await run({ timeoutMs: 10000, checks: [{ id: 'X1', type: 'sitemap', url: u('/sitemap-slower'), timeoutMs: 300 }] });
+        check('a sitemap read via http gives up on a sample at the check timeoutMs, not the run one', statusOf(viaHttp, 'X1') === 'INDETERMINATE' && viaHttp.status === 2 && /5 of 5 sampled could not be read/.test(lineOf(viaHttp, 'X1')) && viaHttp.ms < 3000, `exit=${viaHttp.status} ${lineOf(viaHttp, 'X1')} ${viaHttp.ms}ms`);
+        const viaBrowser = await run({ timeoutMs: 300, checks: [{ id: 'X1', type: 'sitemap', via: 'browser', url: u('/sitemap-slower'), timeoutMs: 10000, settleMs: 100 }] });
+        check('a sitemap read via browser waits for a sample up to the check timeoutMs, not the run one', statusOf(viaBrowser, 'X1') === 'PASS' && viaBrowser.status === 0 && viaBrowser.ms >= 3000, `exit=${viaBrowser.status} ${lineOf(viaBrowser, 'X1')} ${viaBrowser.ms}ms`);
     }
     await single('browser sitemap treats challenge pages as unreadable', { type: 'sitemap', via: 'browser', url: u('/sitemap-checkpoints'), settleMs: 100 }, 'INDETERMINATE', 2, /5 of 5 sampled could not be read/);
     await single('browser sitemap treats mitigated 429s as unreadable', { type: 'sitemap', via: 'browser', url: u('/sitemap-challenged'), settleMs: 100 }, 'INDETERMINATE', 2, /5 of 5 sampled could not be read/);
