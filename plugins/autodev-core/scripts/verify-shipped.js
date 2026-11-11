@@ -229,8 +229,9 @@ const KINDS = {
     base: [isText, 'must be a non-empty branch name'],
     pluginRoot: [isText, 'must be a non-empty string'],
     requiredFiles: [(v) => Array.isArray(v) && v.every(isText), 'must be an array of non-empty strings'],
-    minLocs: [(v) => isWhole(v, 0), 'must be a whole number of 0 or more'],
-    sample: [(v) => isWhole(v, 0), 'must be a whole number of 0 or more'],
+    // 0 would sample nothing, and a sitemap check that reads no location can never pass.
+    minLocs: [(v) => isWhole(v, 1), 'must be a whole number of 1 or more'],
+    sample: [(v) => isWhole(v, 1), 'must be a whole number of 1 or more'],
     minTextLen: [(v) => isWhole(v, 0), 'must be a whole number of 0 or more'],
     minH1: [(v) => isWhole(v, 0), 'must be a whole number of 0 or more'],
     maxOverflowPx: [(v) => isWhole(v, 0), 'must be a whole number of 0 or more'],
