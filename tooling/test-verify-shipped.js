@@ -94,6 +94,9 @@ const server = http.createServer((req, res) => {
 });
 
 // A fake gh: reads routes.json, prints the body for the endpoint, or an HTTP error like the real one.
+// A pull request list (route "repos/O/N/pulls#O:HEAD") is served the way the query asks: the state filter
+// applied (open when absent, as GitHub does), newest first only for sort=created&direction=desc and oldest
+// first otherwise, cut to per_page. So a reader that drops the order or the state grades the wrong PR.
 const FAKE_GH = path.join(root, 'fake-gh.js');
 const ROUTES = path.join(root, 'routes.json');
 const GH_LOG = path.join(root, 'gh.log');
@@ -102,12 +105,24 @@ const fs = require('fs');
 const routes = JSON.parse(fs.readFileSync(${JSON.stringify(ROUTES)}, 'utf8'));
 const endpoint = process.argv[3];
 fs.appendFileSync(${JSON.stringify(GH_LOG)}, endpoint + '\\n');
-if (Object.prototype.hasOwnProperty.call(routes, endpoint)) {
-    const value = routes[endpoint];
-    if (typeof value === 'number') { process.stderr.write('gh: HTTP ' + value + '\\n'); process.exitCode = 1; }
-    else process.stdout.write(JSON.stringify(value));
-} else { process.stderr.write('gh: HTTP 404\\n'); process.exitCode = 1; }
+const list = /^(repos\\/[^/]+\\/[^/]+)\\/pulls\\?(.*)$/.exec(endpoint);
+let value;
+if (list) {
+    const q = new URLSearchParams(list[2]);
+    const prs = routes[list[1] + '/pulls#' + q.get('head')];
+    if (prs) {
+        const state = q.get('state') || 'open';
+        const newestFirst = q.get('sort') === 'created' && q.get('direction') === 'desc';
+        const kept = prs.filter((pr) => state === 'all' || pr.state === state).sort((a, b) => (a.created_at < b.created_at ? -1 : 1));
+        if (newestFirst) kept.reverse();
+        value = kept.slice(0, Number(q.get('per_page') || 30));
+    }
+} else if (Object.prototype.hasOwnProperty.call(routes, endpoint)) value = routes[endpoint];
+if (value === undefined) { process.stderr.write('gh: HTTP 404\\n'); process.exitCode = 1; }
+else if (typeof value === 'number') { process.stderr.write('gh: HTTP ' + value + '\\n'); process.exitCode = 1; }
+else process.stdout.write(JSON.stringify(value));
 `);
+const prAt = (number, state, merged, day, base = 'main') => ({ number, state, merged_at: merged ? `2026-11-${day}T00:00:00Z` : null, created_at: `2026-11-${day}T00:00:00Z`, base: { ref: base } });
 const b64 = (s) => Buffer.from(s).toString('base64');
 fs.writeFileSync(ROUTES, JSON.stringify({
     // The repo reads, so a 404 inside it is an answer. o/private has no route at all: GitHub hides a repo the token cannot see.
@@ -126,11 +141,16 @@ fs.writeFileSync(ROUTES, JSON.stringify({
     'repos/o/app/git/ref/tags/v8.5.0': { ref: 'refs/tags/v8.5.0' },
     'repos/o/app/pulls/7': { merged: true, state: 'closed' },
     'repos/o/app/pulls/8': { merged: false, state: 'open' },
-    'repos/o/app/pulls?state=all&per_page=30&head=o%3Afeature': [{ number: 12, state: 'closed', merged_at: '2026-11-10T00:00:00Z' }],
-    'repos/o/app/pulls?state=all&per_page=30&head=o%3Aabandoned': [{ number: 13, state: 'closed', merged_at: null }],
-    // A reused branch name: the old PR merged, a new one from the same branch is open.
-    'repos/o/app/pulls?state=all&per_page=30&head=o%3Areused': [{ number: 15, state: 'open', merged_at: null }, { number: 12, state: 'closed', merged_at: '2026-11-10T00:00:00Z' }],
-    'repos/o/app/pulls?state=all&per_page=30&head=o%3Afresh': [{ number: 16, state: 'open', merged_at: null }],
+    'repos/o/app/pulls#o:feature': [prAt(12, 'closed', true, '01')],
+    'repos/o/app/pulls#o:abandoned': [prAt(13, 'closed', false, '01')],
+    // A reused branch name: the old PR merged, a newer one from the same branch is open.
+    'repos/o/app/pulls#o:reused': [prAt(12, 'closed', true, '01'), prAt(15, 'open', false, '05')],
+    'repos/o/app/pulls#o:fresh': [prAt(16, 'open', false, '05')],
+    'repos/o/app/pulls#o:never-opened': [],
+    // The newest PR from the branch closed without merging, over an older merge: the branch's last word is "not shipped".
+    'repos/o/app/pulls#o:reused2': [prAt(12, 'closed', true, '01'), prAt(20, 'closed', false, '09')],
+    // The newest merged, over an older one closed unmerged.
+    'repos/o/app/pulls#o:second-try': [prAt(14, 'closed', false, '01'), prAt(22, 'closed', true, '09')],
     'repos/o/denied/commits/HEAD': 401,
     'repos/o/notag/contents/VERSION': { content: b64('8.5.0\n') },
     'repos/o/failedtop/deployments?environment=Production&per_page=30': [{ id: 2, sha: SHA_OLD }, { id: 1, sha: SHA_GOOD }],
@@ -519,9 +539,20 @@ async function main() {
     await single('merged PR passes', { type: 'pr-merged', ...appCheck, number: 7 }, 'PASS', 0, /PR 7 merged/);
     await single('open PR fails', { type: 'pr-merged', ...appCheck, number: 8 }, 'FAIL', 1, /state open/);
     await single('merged PR by head branch passes and names the PR', { type: 'pr-merged', ...appCheck, head: 'feature' }, 'PASS', 0, /\| PR 12 merged from feature$/);
-    await single('closed unmerged PR by head branch fails', { type: 'pr-merged', ...appCheck, head: 'abandoned' }, 'FAIL', 1, /0 merged PRs/);
+    await single('closed unmerged PR by head branch fails', { type: 'pr-merged', ...appCheck, head: 'abandoned' }, 'FAIL', 1, /PR 13 from abandoned was closed without merging \(state closed\)/);
+    await single('a branch with no PR fails', { type: 'pr-merged', ...appCheck, head: 'never-opened' }, 'FAIL', 1, /0 merged PRs from never-opened$/);
     await single('a merged PR plus an open one from the same head fails, naming the open PR', { type: 'pr-merged', ...appCheck, head: 'reused' }, 'FAIL', 1, /PR 15 from reused is still open, so the branch has not shipped/);
     await single('an open PR alone by head branch fails', { type: 'pr-merged', ...appCheck, head: 'fresh' }, 'FAIL', 1, /PR 16 from fresh is still open/);
+    await single('the newest PR closed unmerged over an older merge fails, naming the newest', { type: 'pr-merged', ...appCheck, head: 'reused2' }, 'FAIL', 1, /PR 20 from reused2 was closed without merging \(state closed\), and it is the newest PR from that branch/);
+    await single('the newest PR merged over an older one closed unmerged passes, naming the newest', { type: 'pr-merged', ...appCheck, head: 'second-try' }, 'PASS', 0, /\| PR 22 merged from second-try$/);
+    {
+        // The fake serves oldest first unless the query asks for newest first, so the order must be asked for.
+        fs.writeFileSync(GH_LOG, '');
+        await single('the list read asks gh for all states, newest first', { type: 'pr-merged', ...appCheck, head: 'second-try' }, 'PASS', 0, /PR 22/);
+        const asked = fs.readFileSync(GH_LOG, 'utf8').split('\n').find((l) => /\/pulls\?/.test(l)) || '';
+        const q = new URLSearchParams(asked.split('?')[1] || '');
+        check('the list query names state=all, sort=created and direction=desc', q.get('state') === 'all' && q.get('sort') === 'created' && q.get('direction') === 'desc', asked);
+    }
 
     // Section H: the installed plugin version.
     {
