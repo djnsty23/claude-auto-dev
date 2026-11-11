@@ -46,8 +46,9 @@
  *                   allowSkipped=false (a build skipped by the project deployed nothing, so it FAILs unless allowed)
  *   http            url, method, headers, body, expectStatus=200, bodyPattern, bodyAbsent
  *   refused         url, method, headers, body, statuses=[401,403], redirect (a regex on Location)
- *   sitemap         url, minLocs=5, sample=5, sampleStatus (exact, default any under 400),
- *                   via="http"|"browser", origin (page loaded first when via browser)
+ *   sitemap         url, minLocs=5, sample=5, sampleStatus (exact, default any under 300),
+ *                   allowRedirects=false (true accepts a 3xx sample), via="http"|"browser",
+ *                   origin (page loaded first when via browser). Every <loc> must be an absolute http(s) URL.
  *   browser         url, widths=[390,414], requiredText[], forbiddenText[], forbiddenSelector,
  *                   finalUrlPattern, minTextLen=500, minH1=1, maxOverflowPx=0, maxConsoleErrors=0, ignoreConsole[], settleMs=3000
  *   plugin-version  pluginRoot, minVersion, versionRepo, versionPath="VERSION", requiredFiles[]
@@ -306,14 +307,27 @@ function parseLocs(xml) {
     return [...String(xml).matchAll(/<loc>\s*([^<\s]+)\s*<\/loc>/gi)].map((m) => m[1]);
 }
 
+/** A sitemap <loc> must be an absolute http(s) URL. A relative one resolves against whatever page reads it. */
+function isAbsoluteHttp(raw) {
+    try { const u = new URL(raw); return u.protocol === 'http:' || u.protocol === 'https:'; } catch { return false; }
+}
+
+/** The value for a sitemap holding locations that are not absolute http(s) URLs: query and fragment dropped. */
+function invalidLocs(count, invalid, first) {
+    return failed(`${invalid} of ${count} locations are not absolute http(s) URLs, first ${cleanValue(String(first).split(/[?#]/)[0]).slice(0, 80)}`);
+}
+
 function scoreSitemap(check, count, statuses) {
     const minLocs = check.minLocs === undefined ? 5 : check.minLocs;
     if (count < minLocs) return failed(`${count} locations, expected at least ${minLocs}`);
     const unknown = statuses.filter((s) => s === 'unreadable' || s === 'challenged');
-    const bad = statuses.filter((s) => s === 'redirected' || (typeof s === 'number' && (check.sampleStatus ? s !== check.sampleStatus : s >= 400)));
+    // A 3xx is a FAIL unless allowed: a site-wide redirect to sign-in answers every sample with one.
+    const badStatus = (s) => (check.sampleStatus ? s !== check.sampleStatus : s >= 400 || (s >= 300 && !check.allowRedirects));
+    const bad = statuses.filter((s) => s === 'redirected' || (typeof s === 'number' && badStatus(s)));
     if (bad.length) return failed(`${count} locations, ${bad.length} of ${statuses.length} sampled answered ${bad.join(',')}`);
     if (unknown.length || !statuses.length) return indeterminate(`${count} locations, ${unknown.length} of ${statuses.length} sampled could not be read`, statuses.includes('challenged') ? { noRetry: true } : undefined);
-    return pass(`${count} locations, ${statuses.length} of ${statuses.length} sampled ${check.sampleStatus ? `answered ${check.sampleStatus}` : 'under 400'}`);
+    const answered = check.sampleStatus ? `answered ${check.sampleStatus}` : check.allowRedirects ? 'under 400 (redirects allowed)' : 'under 300';
+    return pass(`${count} locations, ${statuses.length} of ${statuses.length} sampled ${answered}`);
 }
 
 async function checkSitemapHttp(run, check) {
@@ -322,6 +336,8 @@ async function checkSitemapHttp(run, check) {
     if (stop) return stop;
     if (res.status !== 200) return failed(`sitemap HTTP ${res.status}`);
     const locs = parseLocs(res.text);
+    const invalid = locs.filter((loc) => !isAbsoluteHttp(loc));
+    if (invalid.length) return invalidLocs(locs.length, invalid.length, invalid[0]);
     const sample = locs.slice(0, check.sample === undefined ? 5 : check.sample);
     const statuses = await Promise.all(sample.map(async (url) => {
         const sameOrigin = new URL(url).origin === new URL(check.url).origin;
@@ -341,22 +357,28 @@ async function checkSitemapBrowser(run, check) {
             const read = async (u) => {
                 const r = await fetch(u, { signal: AbortSignal.timeout(perFetchMs) });
                 const text = await r.text();
-                return { status: r.status, redirected: r.redirected, mitigated: r.headers.get('x-vercel-mitigated') || r.headers.get('cf-mitigated'), text };
+                // The header that was actually read is kept with its value, so a report names the right one.
+                const mitigatedBy = ['x-vercel-mitigated', 'cf-mitigated'].find((name) => r.headers.get(name)) || null;
+                return { status: r.status, redirected: r.redirected, mitigatedBy, mitigated: mitigatedBy && r.headers.get(mitigatedBy), text };
             };
+            const absolute = (u) => { try { const p = new URL(u); return p.protocol === 'http:' || p.protocol === 'https:'; } catch { return false; } };
             const map = await read(url);
             const locs = [...map.text.matchAll(/<loc>\s*([^<\s]+)\s*<\/loc>/gi)].map((m) => m[1]);
-            const samples = await Promise.all(locs.slice(0, sample).map((u) => read(u).then((r) => ({ status: r.status, redirected: r.redirected, mitigated: r.mitigated, head: r.text.slice(0, 8192) }), () => null)));
-            return { status: map.status, redirected: map.redirected, mitigated: map.mitigated, head: map.text.slice(0, 8192), count: locs.length, samples };
+            const invalid = locs.filter((u) => !absolute(u));
+            const samples = invalid.length ? [] : await Promise.all(locs.slice(0, sample).map((u) => read(u).then((r) => ({ status: r.status, redirected: r.redirected, mitigatedBy: r.mitigatedBy, mitigated: r.mitigated, head: r.text.slice(0, 8192) }), () => null)));
+            return { status: map.status, redirected: map.redirected, mitigatedBy: map.mitigatedBy, mitigated: map.mitigated, head: map.text.slice(0, 8192), count: locs.length, invalid: invalid.length, firstInvalid: invalid[0] || null, samples };
         }, { url: check.url, sample: check.sample === undefined ? 5 : check.sample, perFetchMs: run.timeoutMs });
-        const reasonFor = (r) => challengeReason(r.status, (name) => (name === 'x-vercel-mitigated' ? r.mitigated : null), r.head);
+        const reasonFor = (r) => challengeReason(r.status, (name) => (name === r.mitigatedBy ? r.mitigated : null), r.head);
         const blocked = reasonFor(data);
         if (blocked) return indeterminate(blocked, { noRetry: true });
         if (data.status !== 200 || data.redirected) return failed(`sitemap HTTP ${data.status}${data.redirected ? ' after a redirect' : ''} in the browser`);
+        if (data.invalid) return invalidLocs(data.count, data.invalid, data.firstInvalid);
         // fetch in a page follows redirects and hides the 3xx, so the end of the redirect must not be graded as the sample.
         const sampled = (s) => {
             if (!s) return 'unreadable';
             if (reasonFor(s)) return 'challenged';
-            if (!s.redirected || !check.sampleStatus) return s.status;
+            if (!s.redirected) return s.status;
+            if (!check.sampleStatus) return check.allowRedirects ? s.status : 'redirected';
             return check.sampleStatus >= 300 && check.sampleStatus < 400 ? 'unreadable' : 'redirected';
         };
         return scoreSitemap(check, data.count, data.samples.map(sampled));
