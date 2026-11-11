@@ -574,7 +574,8 @@ async function allSkippedSince(run, check, productionSha, expected) {
 
 /**
  * The newest deployment that actually went live, and its place in the list. A failed or building one
- * never held production. `none` marks an answered walk that found no success, apart from a read error.
+ * never held production. `none` marks an answered walk that found no success, apart from a read error,
+ * and `read` is how many deployments that walk read.
  */
 async function newestLive(run, repo, environment, deployments) {
     const walk = deployments.slice(0, MAX_SKIPPED_WALK);
@@ -583,7 +584,7 @@ async function newestLive(run, repo, environment, deployments) {
         if (state.error) return { error: state.error };
         if (state.state === 'success') return { deployment: walk[index], index };
     }
-    return { none: true, error: `no successful "${environment}" deployment among the newest ${MAX_SKIPPED_WALK}` };
+    return { none: true, read: walk.length, error: `no successful "${environment}" deployment among the newest ${walk.length}` };
 }
 
 async function checkDeployedShaUrl(run, check, expected) {
@@ -612,6 +613,8 @@ async function checkDeployedSha(run, check) {
     if (live.error && !live.none) return indeterminate(live.error);
     if (!live.none && shaMatches(live.deployment.sha, expected.sha)) return pass(`${environment} ${shortSha(expected.sha)} success, the newest live deployment`);
     if (matchIndex >= 0) {
+        // Past the walk, an unread deployment between it and the newest could be live, so it cannot be graded.
+        if (live.none && matchIndex >= live.read) return indeterminate(`${environment} ${shortSha(expected.sha)} is deployment ${matchIndex + 1} in the list, past the ${live.read} newest read, none of them live, so a newer live deployment cannot be ruled out`);
         // Newer than anything live, or nothing live: its own state answers (still deploying, failed, inactive).
         if (live.none || matchIndex < live.index) return scoreDeployment(run, check, environment, list.data[matchIndex], expected.sha);
         return failed(`${environment} is at ${shortSha(live.deployment.sha)}, a newer live deployment than the expected ${shortSha(expected.sha)}`);
