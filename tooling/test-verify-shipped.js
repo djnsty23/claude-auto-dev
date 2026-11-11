@@ -279,6 +279,8 @@ async function main() {
         check('--repo selecting nothing refused', sel.status === 2 && /selects 0 of 1/.test(sel.stderr), sel.stderr);
         const half = await run({ checks: [{ id: 'a', type: 'http', url: u('/ok') }] }, { args: ['--repo', 'o/app'] });
         check('--repo without --sha refused', half.status === 2 && /go together/.test(half.stderr), half.stderr);
+        const dots = await run({ checks: [{ id: 'a', type: 'http', url: u('/ok'), repo: 'o/app' }] }, { args: ['--repo', '../app', '--sha', SHA_GOOD] });
+        check('--repo made of dots is refused', dots.status === 2 && /--repo must be OWNER\/NAME/.test(dots.stderr), dots.stderr);
         // Each value below reached a probe or a gh endpoint before it was refused. Nothing may run.
         const refusals = [
             ['deployed-sha by url without a pattern', { type: 'deployed-sha', repo: 'o/app', url: u('/version') }, /deployed-sha by url needs pattern/],
@@ -318,7 +320,10 @@ async function main() {
             ['settleMs on a sitemap read via http', { type: 'sitemap', url: u('/sitemap'), settleMs: 100 }, /check a: settleMs does nothing for a sitemap read via http/],
             ['headers on a sitemap read via browser', { type: 'sitemap', via: 'browser', url: u('/sitemap'), headers: { authorization: 'Bearer TOK' } }, /check a: headers does nothing for a sitemap read via browser/],
             ['a PR number and head together', { type: 'pr-merged', repo: 'o/app', number: 7, head: 'feature' }, /check a: pr-merged takes number or head, not both/],
-            ['versionPath without versionRepo', { type: 'plugin-version', minVersion: '1.0.0', versionPath: 'VERSION' }, /check a: versionPath does nothing without versionRepo/],
+            ['a repo climbing out with ..', { type: 'commit-status', repo: '../x', sha: SHA_GOOD }, /check a: repo must be OWNER\/NAME/],
+            ['a repo name made only of dots', { type: 'release-tag', repo: 'o/...' }, /check a: repo must be OWNER\/NAME/],
+            ['a versionRepo climbing out with ..', { type: 'plugin-version', versionRepo: '../x' }, /check a: versionRepo must be OWNER\/NAME/],
+            ['versionPath without versionRepo',{ type: 'plugin-version', minVersion: '1.0.0', versionPath: 'VERSION' }, /check a: versionPath does nothing without versionRepo/],
         ];
         for (const [label, c, pattern] of refusals) {
             fs.writeFileSync(GH_LOG, '');
