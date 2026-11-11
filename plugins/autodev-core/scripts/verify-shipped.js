@@ -407,14 +407,18 @@ async function allSkippedSince(run, check, productionSha, expected) {
     return { skipped: true, count: commits.length };
 }
 
-/** The newest deployment that actually went live. A failed or building one never held production. */
+/**
+ * The newest deployment that actually went live, and its place in the list. A failed or building one
+ * never held production. `none` marks an answered walk that found no success, apart from a read error.
+ */
 async function newestLive(run, repo, environment, deployments) {
-    for (const deployment of deployments.slice(0, MAX_SKIPPED_WALK)) {
-        const state = await deploymentState(run, repo, deployment.id);
+    const walk = deployments.slice(0, MAX_SKIPPED_WALK);
+    for (let index = 0; index < walk.length; index++) {
+        const state = await deploymentState(run, repo, walk[index].id);
         if (state.error) return { error: state.error };
-        if (state.state === 'success') return { deployment };
+        if (state.state === 'success') return { deployment: walk[index], index };
     }
-    return { error: `no successful "${environment}" deployment among the newest ${MAX_SKIPPED_WALK}` };
+    return { none: true, error: `no successful "${environment}" deployment among the newest ${MAX_SKIPPED_WALK}` };
 }
 
 async function checkDeployedShaUrl(run, check, expected) {
@@ -436,10 +440,18 @@ async function checkDeployedSha(run, check) {
     const list = await ghJson(run, `repos/${check.repo}/deployments?environment=${encodeURIComponent(environment)}&per_page=30`);
     if (!list.ok) return indeterminate(list.unavailable || `no deployments readable for ${check.repo}`);
     if (!Array.isArray(list.data) || !list.data.length) return indeterminate(`no "${environment}" deployments recorded for ${check.repo}`);
-    const match = list.data.find((d) => shaMatches(d.sha, expected.sha));
-    if (match) return scoreDeployment(run, check, environment, match, expected.sha);
+    // GitHub leaves an older Production deployment at `success` after a newer one succeeds, so a matching
+    // success proves nothing until it is also the newest live deployment.
+    const matchIndex = list.data.findIndex((d) => shaMatches(d.sha, expected.sha));
     const live = await newestLive(run, check.repo, environment, list.data);
-    if (live.error) return indeterminate(live.error);
+    if (live.error && !live.none) return indeterminate(live.error);
+    if (!live.none && shaMatches(live.deployment.sha, expected.sha)) return pass(`${environment} ${shortSha(expected.sha)} success, the newest live deployment`);
+    if (matchIndex >= 0) {
+        // Newer than anything live, or nothing live: its own state answers (still deploying, failed, inactive).
+        if (live.none || matchIndex < live.index) return scoreDeployment(run, check, environment, list.data[matchIndex], expected.sha);
+        return failed(`${environment} is at ${shortSha(live.deployment.sha)}, a newer live deployment than the expected ${shortSha(expected.sha)}`);
+    }
+    if (live.none) return indeterminate(live.error);
     const liveSha = live.deployment.sha;
     const walk = await allSkippedSince(run, check, liveSha, expected.sha);
     if (walk.error) return indeterminate(walk.error);
@@ -451,7 +463,7 @@ async function scoreDeployment(run, check, environment, deployment, expected) {
     const state = await deploymentState(run, check.repo, deployment.id);
     if (state.error) return indeterminate(state.error);
     const label = `${environment} ${shortSha(expected)} ${state.state}`;
-    if (state.state === 'success') return pass(label);
+    if (state.state === 'success') return pass(`${label}, the newest live deployment`);
     if (['pending', 'queued', 'in_progress'].includes(state.state)) return indeterminate(`${label} (still deploying)`);
     return failed(label);
 }
