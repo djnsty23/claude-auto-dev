@@ -80,6 +80,9 @@ const server = http.createServer((req, res) => {
     case '/sitemap-short': return send(200, `<urlset><loc>${base}/ok</loc></urlset>`);
     case '/sitemap-empty': return send(200, '<urlset></urlset>');
     case '/sitemap-bad': return send(200, `<urlset>${[1, 2, 3, 4, 5].map((n) => `<loc>${base}/${n === 3 ? 'boom' : 'ok'}?${n}</loc>`).join('')}</urlset>`);
+    case '/thin': return send(200, page('<h1>Thin</h1><p>short</p>'));
+    case '/no-h1': return send(200, page(`<p>${'real page text '.repeat(60)}</p>`));
+    case '/wide': return send(200, page(`${LONG}<div style="width:600px">wide</div>`));
     case '/sitemap-relative': return send(200, `<urlset>${[1, 2, 3, 4, 5].map((n) => `<loc>/ok?${n}</loc>`).join('')}</urlset>`);
     case '/sitemap-cf': return send(403, page('x'), { 'cf-mitigated': 'challenge' });
     case '/sitemap-challenged': return send(200, `<urlset>${[1, 2, 3, 4, 5].map((n) => `<loc>${base}/challenge?${n}</loc>`).join('')}</urlset>`);
@@ -152,7 +155,8 @@ fs.writeFileSync(FAKE_DRIVER, `
 const fs = require('fs');
 // Playwright reads PWDEBUG when its module loads, so the fake must too.
 const PWDEBUG_AT_LOAD = process.env.PWDEBUG || null;
-function newPage() {
+// The viewport width comes from newContext, and the page is as wide as its widest inline width:NNNpx, as in Chromium.
+function newPage(width) {
     const handlers = {};
     const frame = {};
     let state = { title: '', text: '', html: '', url: '', errors: 0 };
@@ -171,8 +175,9 @@ function newPage() {
         },
         async evaluate(fn, arg) {
             const body = { innerText: state.text };
-            const doc = { title: state.title, body, documentElement: { scrollWidth: 390 }, querySelectorAll: (s) => ({ length: (state.html.match(new RegExp('<' + s + '[ >]', 'g')) || []).length }) };
-            global.document = doc; global.location = { href: state.url }; global.window = { innerWidth: 390 };
+            const inline = [...state.html.matchAll(/width:(\\d+)px/g)].map((m) => Number(m[1]));
+            const doc = { title: state.title, body, documentElement: { scrollWidth: Math.max(width, ...inline) }, querySelectorAll: (s) => ({ length: (state.html.match(new RegExp('<' + s + '[ >]', 'g')) || []).length }) };
+            global.document = doc; global.location = { href: state.url }; global.window = { innerWidth: width };
             return fn(arg);
         },
     };
@@ -186,10 +191,15 @@ module.exports = { chromium: {
     },
     async connect() {
         if (process.env.FAKE_DRIVER_NO_CONNECT) throw new Error('connect failed');
-        return { newContext: () => (process.env.FAKE_DRIVER_HANG_CONTEXT ? new Promise(() => {}) : Promise.resolve({ newPage: async () => newPage(), close: async () => {} })), close: async () => {} };
+        return { newContext: (options) => (process.env.FAKE_DRIVER_HANG_CONTEXT ? new Promise(() => {}) : Promise.resolve({ newPage: async () => newPage(options.viewport.width), close: async () => {} })), close: async () => {} };
     },
 } };
 `);
+
+// Runs that must find no driver are pointed at an empty folder inside this suite's own temp directory,
+// so they never search the temp folder or the home folder for whatever playwright happens to be there.
+const NO_DRIVER = path.join(root, 'no-driver');
+fs.mkdirSync(NO_DRIVER);
 
 const REAL_PLAYWRIGHT = process.env.VERIFY_SHIPPED_PLAYWRIGHT || null;
 const DRIVER = REAL_PLAYWRIGHT || FAKE_DRIVER;
@@ -423,6 +433,11 @@ async function main() {
         await single('browser final url mismatch fails', { type: 'browser', url: u('/ok'), widths: [390], finalUrlPattern: '/login', ...browserFast }, 'FAIL', 1, /ended at/);
         await single('browser ignoreConsole suppressor is visible in the value', { type: 'browser', url: u('/console-error'), widths: [390], ignoreConsole: ['planted'], ...browserFast }, 'PASS', 0, /1 ignored by config/);
         await single('browser forbidden selector fails', { type: 'browser', url: u('/ok'), widths: [390], forbiddenSelector: 'h1', ...browserFast }, 'FAIL', 1, /match h1/);
+        // One page per guard, each tripping only its own finding, so a removed guard turns exactly one of these green.
+        await single('browser text below minTextLen fails', { type: 'browser', url: u('/thin'), widths: [390], ...browserFast }, 'FAIL', 1, /width 390: text \d+ chars$/);
+        await single('browser page with fewer h1 than minH1 fails', { type: 'browser', url: u('/no-h1'), widths: [390], ...browserFast }, 'FAIL', 1, /width 390: 0 h1$/);
+        await single('browser page wider than the viewport fails maxOverflowPx', { type: 'browser', url: u('/wide'), widths: [390], ...browserFast }, 'FAIL', 1, /width 390: overflow \d+px$/);
+        await single('browser overflow within maxOverflowPx passes', { type: 'browser', url: u('/wide'), widths: [390], maxOverflowPx: 400, ...browserFast }, 'PASS', 0, /w390 HTTP 200/);
         if (!REAL_PLAYWRIGHT) {
             fs.rmSync(LAUNCH_LOG, { force: true });
             await run({ headless: false, checks: [{ id: 'X1', type: 'browser', headless: false, url: u('/ok'), widths: [390], ...browserFast }] });
@@ -435,7 +450,7 @@ async function main() {
         const noDriver = await new Promise((resolve) => {
             const file = path.join(root, 'nodriver.json');
             fs.writeFileSync(file, JSON.stringify({ checks: [{ id: 'X1', type: 'browser', url: u('/ok'), widths: [390] }] }));
-            const child = spawn(process.execPath, [SUBJECT, 'run', '--config', file], { cwd: root, windowsHide: true, env: { ...process.env, NODE_PATH: '' } });
+            const child = spawn(process.execPath, [SUBJECT, 'run', '--config', file, '--playwright', NO_DRIVER], { cwd: root, windowsHide: true, env: { ...process.env, NODE_PATH: '' } });
             let out = '';
             child.stdout.on('data', (d) => { out += d; });
             child.on('close', (status) => resolve({ status, out }));
@@ -509,7 +524,7 @@ async function main() {
         const file = path.join(root, 'hostile.json');
         fs.writeFileSync(file, JSON.stringify({ checks: [{ id: 'X1', type: 'browser', url: u('/ok'), widths: [390] }] }));
         const hostile = await new Promise((resolve) => {
-            const child = spawn(process.execPath, [SUBJECT, 'run', '--config', file], { cwd, windowsHide: true });
+            const child = spawn(process.execPath, [SUBJECT, 'run', '--config', file, '--playwright', NO_DRIVER], { cwd, windowsHide: true });
             child.on('close', (status) => resolve({ status }));
         });
         check('the working directory entry point is never executed', hostile.status === 2 && !fs.existsSync(marker), String(fs.existsSync(marker)));
@@ -564,4 +579,5 @@ main().catch((e) => {
     server.close();
     otherServer.closeAllConnections();
     otherServer.close();
+    fs.rmSync(root, { recursive: true, force: true });
 });
