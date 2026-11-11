@@ -1,6 +1,24 @@
 name: CI
 
-on: [push, pull_request]
+# Triggers cut 2026-11-11, when the Actions budget hit 100%. `[measured]` over
+# the 256 runs since 2026-11-01: 96 of 110 branch pushes ran the same commit
+# again as a pull_request, so a branch commit paid for six legs instead of
+# three. Branch pushes no longer run. A PR runs once per commit, main, stable
+# and v* tags run on push, and workflow_dispatch runs any ref on demand.
+# Merges and releases rest on the local gate, not on this workflow.
+on:
+  push:
+    branches: [main, stable]
+    tags: ['v*']
+  pull_request:
+  workflow_dispatch:
+
+# A newer commit on the same PR makes the older run's answer moot, so it is
+# cancelled. Runs on main, stable and tags are never cancelled: each merge
+# commit keeps its own record.
+concurrency:
+  group: ci-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 permissions:
   contents: read
@@ -42,7 +60,16 @@ jobs:
         # platform — the recorded cost driver was 28 pushes in one day, not the
         # PRs. windows-latest stays for its own reasons: cmd.exe routing, the
         # PowerShell curl alias, CRLF, reserved device names.
-        os: [ubuntu-latest, windows-latest, macos-latest]
+        #
+        # 2026-11-11: cut by event, as above. The "$0 line" no longer holds:
+        # the account's November bill showed a net Actions charge equal to its
+        # budget, with macOS the largest gross line. A pull_request runs Linux
+        # only, which carries every ubuntu-gated step below. All three
+        # platforms still run on every push to main and stable, on v* tags and
+        # on workflow_dispatch, so a platform divergence surfaces on the merge
+        # commit at the latest. Run all three on a PR branch on demand with
+        # `gh workflow run CI --ref <branch>`.
+        os: ${{ fromJSON(github.event_name == 'pull_request' && '["ubuntu-latest"]' || '["ubuntu-latest","windows-latest","macos-latest"]') }}
     steps:
       # v4 targets Node 20, which the runners now force onto Node 24 and warn
       # about on every run. v7 is the current major for both and runs natively.
