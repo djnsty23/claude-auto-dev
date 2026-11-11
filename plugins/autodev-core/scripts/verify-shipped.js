@@ -67,9 +67,9 @@
  *   commit-status   repo is required. context="Vercel". allowSkipped=false: a build the
  *                   project skipped deployed nothing, so it FAILs unless allowed.
  *   deployed-sha    By repo: environment="Production", context="Vercel" (read by the skipped
- *                   walk), allowSkipped=false.
- *                   By url: pattern is a regex whose capture group 1 is the sha.
- *                   A key of the other mode is refused.
+ *                   walk), allowSkipped=false. This trusts GitHub's deployment records.
+ *                   By url: pattern is a regex whose capture group 1 is the sha, so it reads
+ *                   what production actually serves. A key of the other mode is refused.
  *   http            expectStatus=200, method="GET". bodyPattern and bodyAbsent are regexes.
  *   refused         statuses=[401,403]. redirect is a regex on Location that also counts as refused.
  *   sitemap         minLocs=5, sample=5, sampleStatus is exact (default any under 300),
