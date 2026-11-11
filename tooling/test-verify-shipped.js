@@ -269,6 +269,31 @@ async function main() {
         check('--repo selecting nothing refused', sel.status === 2 && /selects 0 of 1/.test(sel.stderr), sel.stderr);
         const half = await run({ checks: [{ id: 'a', type: 'http', url: u('/ok') }] }, { args: ['--repo', 'o/app'] });
         check('--repo without --sha refused', half.status === 2 && /go together/.test(half.stderr), half.stderr);
+        // Each value below reached a probe or a gh endpoint before it was refused. Nothing may run.
+        const refusals = [
+            ['deployed-sha by url without a pattern', { type: 'deployed-sha', repo: 'o/app', url: u('/version') }, /deployed-sha by url needs pattern/],
+            ['statuses given as a string', { type: 'refused', url: u('/ok'), statuses: '1200' }, /statuses must be an array of whole numbers from 400 to 599/],
+            ['statuses holding a success status', { type: 'refused', url: u('/ok'), statuses: [200] }, /statuses must be an array/],
+            ['a fractional expectStatus', { type: 'http', url: u('/ok'), expectStatus: 200.5 }, /expectStatus must be a whole number/],
+            ['a fractional sample', { type: 'sitemap', url: u('/sitemap'), sample: 2.5 }, /sample must be a whole number/],
+            ['minLocs given as a string', { type: 'sitemap', url: u('/sitemap'), minLocs: '5' }, /minLocs must be a whole number/],
+            ['a zero width', { type: 'browser', url: u('/ok'), widths: [0] }, /widths must be a non-empty array of positive whole numbers/],
+            ['a PR number carrying a query', { type: 'pr-merged', repo: 'o/app', number: '7?x=1' }, /number must be a positive whole number/],
+            ['a versionPath climbing out', { type: 'release-tag', repo: 'o/app', versionPath: '../secrets' }, /versionPath must be a file path/],
+            ['a versionPath carrying a query', { type: 'release-tag', repo: 'o/app', versionPath: 'VERSION?ref=x' }, /versionPath must be a file path/],
+            ['a versionPath carrying a fragment', { type: 'plugin-version', versionRepo: 'o/app', versionPath: 'VERSION#x' }, /versionPath must be a file path/],
+            ['allowSkipped given as a string', { type: 'commit-status', repo: 'o/app', allowSkipped: 'yes' }, /allowSkipped must be true or false/],
+        ];
+        for (const [label, c, pattern] of refusals) {
+            fs.writeFileSync(GH_LOG, '');
+            const r = await run({ checks: [{ id: 'a', ...c }] });
+            check(`refused before running: ${label}`, r.status === 2 && pattern.test(r.stderr) && !/^CHECK /m.test(r.stdout) && fs.readFileSync(GH_LOG, 'utf8') === '', `exit=${r.status} ${r.stderr} ${r.stdout}`);
+        }
+        const marker = path.join(root, 'config-driver-ran.txt');
+        const evil = path.join(root, 'config-driver.js');
+        fs.writeFileSync(evil, `require('fs').writeFileSync(${JSON.stringify(marker)}, 'ran'); module.exports = {};`);
+        const named = await run({ playwright: evil, checks: [{ id: 'a', type: 'browser', url: u('/ok'), widths: [390] }] });
+        check('a config naming the driver is refused and its code never runs', named.status === 2 && /--playwright DIR/.test(named.stderr) && !fs.existsSync(marker), `exit=${named.status} ran=${fs.existsSync(marker)} ${named.stderr}`);
     }
 
     // Section B: help and output shape.
