@@ -44,6 +44,8 @@
  * THE DRIVER LOCATION IS TRUSTED LIKE CODE. --playwright DIR is loaded with
  * require in this process, so only the command line can name it. A config that
  * carries a "playwright" key is refused: a JSON file must not be able to run code.
+ * Only DIR/node_modules/playwright, DIR/node_modules/playwright-core and DIR
+ * itself are tried, with no walk up the parent folders and no fallback to the cwd.
  *
  * EVERY KEY IS CHECKED. A key its check type does not list below is refused, and
  * so is a value of the wrong type, before anything runs. A misspelt guard is a
@@ -691,14 +693,18 @@ async function checkPrMerged(run, check) {
 
 function loadBrowserDriver(run) {
     const usable = (driver) => (driver && driver.chromium ? driver : null);
-    for (const root of [run.playwright, process.cwd()].filter(Boolean)) {
-        for (const name of ['playwright', 'playwright-core']) {
-            try { return usable(require(require.resolve(name, { paths: [root] }))); } catch { /* try the next location */ }
-        }
-    }
-    // A bare path is loaded only when it was named explicitly: requiring the cwd would run its entry point.
     if (run.playwright) {
-        try { return usable(require(path.resolve(run.playwright))); } catch { /* reported as no driver */ }
+        // Only the named place. require.resolve would walk every parent node_modules, and the cwd is not named.
+        const dir = path.resolve(run.playwright);
+        for (const candidate of [path.join(dir, 'node_modules', 'playwright'), path.join(dir, 'node_modules', 'playwright-core'), dir]) {
+            if (!fs.existsSync(candidate)) continue;
+            try { const driver = usable(require(candidate)); if (driver) return driver; } catch { /* try the next candidate */ }
+        }
+        return null;
+    }
+    // No flag: a playwright installed for the cwd, by package name only. Requiring the cwd itself would run its entry point.
+    for (const name of ['playwright', 'playwright-core']) {
+        try { return usable(require(require.resolve(name, { paths: [process.cwd()] }))); } catch { /* try the next name */ }
     }
     return null;
 }

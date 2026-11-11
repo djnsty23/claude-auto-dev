@@ -34,6 +34,8 @@ function check(label, ok, detail) {
 }
 
 const root = fs.mkdtempSync(path.join(os.tmpdir(), 'verifyshipped'));
+// Removed on every way out, a throw outside main() included.
+process.on('exit', () => { try { fs.rmSync(root, { recursive: true, force: true }); } catch { /* nothing left to report to */ } });
 const SHA_GOOD = 'a'.repeat(40);
 const SHA_OLD = 'b'.repeat(40);
 const SHA_WRONG = 'c'.repeat(40);
@@ -565,6 +567,20 @@ async function main() {
             child.on('close', (status) => resolve({ status, out }));
         });
         check('no playwright is INDETERMINATE, not PASS', noDriver.status === 2 && /no playwright resolves/.test(noDriver.out), noDriver.out);
+        // --playwright names one place. A driver in its PARENT's node_modules must not load, as require.resolve would.
+        const parentMarker = path.join(root, 'parent-driver-ran.txt');
+        const parentDir = path.join(root, 'parent');
+        fs.mkdirSync(path.join(parentDir, 'node_modules', 'playwright'), { recursive: true });
+        fs.mkdirSync(path.join(parentDir, 'child'));
+        fs.writeFileSync(path.join(parentDir, 'node_modules', 'playwright', 'index.js'), `require('fs').writeFileSync(${JSON.stringify(parentMarker)}, 'ran'); module.exports = {};`);
+        const parentRun = await run({ checks: [{ id: 'X1', type: 'browser', url: u('/ok'), widths: [390], ...browserFast }] }, { args: ['--playwright', path.join(parentDir, 'child')] });
+        check('a driver in the parent of the named folder is never loaded', parentRun.status === 2 && /no playwright resolves/.test(lineOf(parentRun, 'X1')) && !fs.existsSync(parentMarker), `ran=${fs.existsSync(parentMarker)} ${parentRun.stdout}`);
+        if (!REAL_PLAYWRIGHT) {
+            const named = path.join(root, 'named');
+            fs.mkdirSync(path.join(named, 'node_modules', 'playwright'), { recursive: true });
+            fs.writeFileSync(path.join(named, 'node_modules', 'playwright', 'index.js'), `module.exports = require(${JSON.stringify(FAKE_DRIVER)});`);
+            await single('a driver in the named folder\'s node_modules is loaded', { type: 'browser', url: u('/ok'), widths: [390], ...browserFast }, 'PASS', 0, /w390 HTTP 200/, { args: ['--playwright', named] });
+        }
     }
 
     // Section J: the exit reflects every printed finding, and the receipt names the population.
