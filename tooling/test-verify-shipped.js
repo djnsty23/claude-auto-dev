@@ -367,9 +367,13 @@ async function main() {
         }
         for (const type of Object.keys(documented)) documented[type] = documented[type].split(',').map((s) => s.trim()).filter(Boolean);
         const sorted = (a) => [...a].sort().join(',');
-        check('the header documents every check type and the common keys', start > 0 && sorted(Object.keys(documented)) === sorted(Object.keys(lib.KEYS)) && sorted(common) === sorted(lib.COMMON_KEYS), `${Object.keys(documented)} | ${common}`);
-        const drift = Object.keys(lib.KEYS).filter((type) => sorted(documented[type] || []) !== sorted(lib.KEYS[type]));
-        check('the header lists exactly the keys each type accepts', drift.length === 0, drift.map((t) => `${t}: header ${documented[t]} vs code ${lib.KEYS[t]}`).join('; '));
+        // A subject that exports no key lists fails these checks instead of crashing the suite, so the tests after them still report.
+        const KEYS = lib.KEYS || {};
+        const COMMON = lib.COMMON_KEYS || [];
+        check('the subject exports its key lists', Boolean(lib.KEYS && lib.COMMON_KEYS), `KEYS ${typeof lib.KEYS}, COMMON_KEYS ${typeof lib.COMMON_KEYS}`);
+        check('the header documents every check type and the common keys', start > 0 && sorted(Object.keys(documented)) === sorted(Object.keys(KEYS)) && sorted(common) === sorted(COMMON), `${Object.keys(documented)} | ${common}`);
+        const drift = Object.keys(KEYS).filter((type) => sorted(documented[type] || []) !== sorted(KEYS[type]));
+        check('the header lists exactly the keys each type accepts', drift.length === 0, drift.map((t) => `${t}: header ${documented[t]} vs code ${KEYS[t]}`).join('; '));
         const base = {
             'commit-status': { repo: 'o/app' }, 'deployed-sha': { repo: 'o/app' }, http: { url: 'https://x.test/a' }, refused: { url: 'https://x.test/a' },
             sitemap: { url: 'https://x.test/sitemap.xml' }, browser: { url: 'https://x.test/a' }, 'plugin-version': { minVersion: '1.0.0' },
