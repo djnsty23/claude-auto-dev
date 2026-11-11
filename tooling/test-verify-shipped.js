@@ -380,6 +380,10 @@ async function main() {
             ['a repo name made only of dots', { type: 'release-tag', repo: 'o/...' }, /check a: repo must be OWNER\/NAME/],
             ['a versionRepo climbing out with ..', { type: 'plugin-version', versionRepo: '../x' }, /check a: versionRepo must be OWNER\/NAME/],
             ['versionPath without versionRepo',{ type: 'plugin-version', minVersion: '1.0.0', versionPath: 'VERSION' }, /check a: versionPath does nothing without versionRepo/],
+            ['a url given as an array', { type: 'http', url: [u('/ok')] }, /check a: url must be an absolute http\(s\) URL/],
+            ['an origin given as an array', { type: 'sitemap', via: 'browser', url: u('/sitemap'), origin: [u('/ok')] }, /check a: origin must be an absolute http\(s\) URL/],
+            ['a type named after an Object property', { type: 'constructor' }, /check a: unknown type "constructor"/],
+            ['a type named __proto__', { type: '__proto__' }, /check a: unknown type "__proto__"/],
         ];
         for (const [label, c, pattern] of refusals) {
             fs.writeFileSync(GH_LOG, '');
@@ -406,6 +410,11 @@ async function main() {
             fs.writeFileSync(GH_LOG, '');
             const r = await run({ ...top, checks: [{ id: 'a', type: 'commit-status', repo: 'o/app' }] }, { args });
             check(`refused before running: ${label}`, r.status === 2 && pattern.test(r.stderr) && !/^CHECK /m.test(r.stdout) && fs.readFileSync(GH_LOG, 'utf8') === '', `exit=${r.status} ${r.stderr} ${r.stdout}`);
+        }
+        for (const name of ['constructor', 'toString']) {
+            fs.writeFileSync(GH_LOG, '');
+            const r = await run({ checks: [{ id: 'a', type: 'commit-status', repo: 'o/app' }] }, { args: [name, 'x'] });
+            check(`an argument named ${name} is not read as a flag`, r.status === 2 && new RegExp(`unknown argument: ${name}`).test(r.stderr) && !/^CHECK /m.test(r.stdout) && fs.readFileSync(GH_LOG, 'utf8') === '', `exit=${r.status} ${r.stderr} ${r.stdout}`);
         }
         const atLimit = await run({ deadlineMs: 2147483647, checks: [{ id: 'a', type: 'commit-status', repo: 'o/app' }] }, { args: ['--deadline-ms', '2147483647'] });
         check('a deadline at the timer limit is accepted and runs', atLimit.status === 0 && /^CHECK a: PASS/m.test(atLimit.stdout), `exit=${atLimit.status} ${atLimit.stderr} ${atLimit.stdout}`);
