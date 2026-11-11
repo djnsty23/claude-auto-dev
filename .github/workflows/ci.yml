@@ -14,10 +14,11 @@ on:
   workflow_dispatch:
 
 # A newer commit on the same PR makes the older run's answer moot, so it is
-# cancelled. Runs on main, stable and tags are never cancelled: each merge
-# commit keeps its own record.
+# cancelled. Every other run gets a group of its own (run_id): a shared group
+# holds one running and one pending run and replaces the pending one, so a
+# per-ref group would drop merge commits on a busy main.
 concurrency:
-  group: ci-${{ github.event.pull_request.number || github.ref }}
+  group: ci-${{ github.event.pull_request.number || github.run_id }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 permissions:
