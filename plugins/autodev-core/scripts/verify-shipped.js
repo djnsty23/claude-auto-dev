@@ -86,7 +86,8 @@
  *                   from that branch is graded: it passes only when that PR merged. In both modes
  *                   the merge counts only into base (default: the repo's default branch), and a
  *                   default branch gh cannot read is INDETERMINATE.
- * Counts, sizes and statuses are whole numbers. timeoutMs (per probe, in ms) is a positive one.
+ * Counts, sizes and statuses are whole numbers. timeoutMs (per probe, in ms) and deadlineMs are
+ * positive ones up to 2147483647, the largest delay Node's timers hold, as is --deadline-ms.
  *
  * LIMITS. Headless only, and no config field can change that. At most two
  * attempts per check, and a challenge is not retried. Every network call has
@@ -199,6 +200,8 @@ const COMMON_KEYS = ['id', 'type', 'repo'];
 const TOP_KEYS = ['expectCount', 'deadlineMs', 'timeoutMs', 'checks'];
 
 const isWhole = (v, min, max = Infinity) => Number.isInteger(v) && v >= min && v <= max;
+// Node's timers overflow above this and fire after 1ms, so a larger deadline or timeout would end the run at once.
+const MAX_TIMER_MS = 2147483647;
 const isText = (v) => typeof v === 'string' && v.length > 0;
 const regexOk = (v) => { try { new RegExp(v, 'i'); return true; } catch { return false; } };
 const isRegex = (v) => isText(v) && regexOk(v);
@@ -237,7 +240,7 @@ const KINDS = {
     maxOverflowPx: [(v) => isWhole(v, 0), 'must be a whole number of 0 or more'],
     maxConsoleErrors: [(v) => isWhole(v, 0), 'must be a whole number of 0 or more'],
     settleMs: [(v) => isWhole(v, 0), 'must be a whole number of 0 or more'],
-    timeoutMs: [(v) => isWhole(v, 1), 'must be a positive whole number'],
+    timeoutMs: [(v) => isWhole(v, 1, MAX_TIMER_MS), `must be a positive whole number up to ${MAX_TIMER_MS}`],
     widths: [(v) => Array.isArray(v) && v.length > 0 && v.every((w) => isWhole(w, 1)), 'must be a non-empty array of positive whole numbers'],
     number: [(v) => isWhole(v, 1), 'must be a positive whole number'],
     versionPath: [(v) => isText(v) && !/\.\.|[?#]/.test(v), 'must be a file path without "..", "?" or "#"'],
@@ -264,7 +267,7 @@ function validateConfig(config) {
     if (config.expectCount !== undefined && config.expectCount !== config.checks.length) {
         throw new Refusal(`config declares expectCount ${config.expectCount} but holds ${config.checks.length} checks`);
     }
-    for (const key of ['deadlineMs', 'timeoutMs']) if (config[key] !== undefined && !isWhole(config[key], 1)) throw new Refusal(`${key} must be a positive whole number`);
+    for (const key of ['deadlineMs', 'timeoutMs']) if (config[key] !== undefined && !isWhole(config[key], 1, MAX_TIMER_MS)) throw new Refusal(`${key} must be a positive whole number up to ${MAX_TIMER_MS}`);
     const seen = new Set();
     for (const check of config.checks) {
         if (!check || typeof check !== 'object' || Array.isArray(check)) throw new Refusal('every check must be an object');
@@ -966,7 +969,9 @@ function validateOptions(options) {
     if (Boolean(options.repo) !== Boolean(options.sha)) throw new Refusal('--repo and --sha go together');
     if (options.repo && !validRepo(options.repo)) throw new Refusal('--repo must be OWNER/NAME');
     if (options.sha && !SHA_RE.test(options.sha)) throw new Refusal('--sha is not a commit sha');
-    if (options.deadlineMs !== undefined && !(Number(options.deadlineMs) > 0)) throw new Refusal('--deadline-ms must be a positive number');
+    if (options.deadlineMs !== undefined && !(/^\d+$/.test(options.deadlineMs) && isWhole(Number(options.deadlineMs), 1, MAX_TIMER_MS))) {
+        throw new Refusal(`--deadline-ms must be a positive whole number up to ${MAX_TIMER_MS}`);
+    }
 }
 
 const HELP = `usage: node verify-shipped.js run --config FILE [--repo OWNER/NAME --sha SHA] [--out receipt.json]
