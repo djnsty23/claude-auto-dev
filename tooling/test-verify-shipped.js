@@ -329,6 +329,8 @@ async function main() {
             ['a fractional expectStatus', { type: 'http', url: u('/ok'), expectStatus: 200.5 }, /expectStatus must be a whole number/],
             ['a fractional sample', { type: 'sitemap', url: u('/sitemap'), sample: 2.5 }, /sample must be a whole number/],
             ['minLocs given as a string', { type: 'sitemap', url: u('/sitemap'), minLocs: '5' }, /minLocs must be a whole number/],
+            ['a zero sample, which can never pass', { type: 'sitemap', url: u('/sitemap'), sample: 0 }, /check a: sample must be a whole number of 1 or more/],
+            ['a zero minLocs', { type: 'sitemap', url: u('/sitemap-empty'), minLocs: 0 }, /check a: minLocs must be a whole number of 1 or more/],
             ['a zero width', { type: 'browser', url: u('/ok'), widths: [0] }, /widths must be a non-empty array of positive whole numbers/],
             ['a PR number carrying a query', { type: 'pr-merged', repo: 'o/app', number: '7?x=1' }, /number must be a positive whole number/],
             ['a versionPath climbing out', { type: 'release-tag', repo: 'o/app', versionPath: '../secrets' }, /versionPath must be a file path/],
