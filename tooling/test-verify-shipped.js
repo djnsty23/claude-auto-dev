@@ -347,6 +347,7 @@ async function main() {
             ['sampleStatus given as a string', { type: 'sitemap', url: u('/sitemap-redirect'), sampleStatus: '200' }, /check a: sampleStatus must be a whole number from 100 to 599/],
             ['a negative settleMs', { type: 'browser', url: u('/ok'), widths: [390], settleMs: -1 }, /check a: settleMs must be a whole number of 0 or more/],
             ['a zero timeoutMs', { type: 'http', url: u('/ok'), timeoutMs: 0 }, /check a: timeoutMs must be a positive whole number/],
+            ['a timeoutMs past the timer limit', { type: 'http', url: u('/ok'), timeoutMs: 2147483648 }, /check a: timeoutMs must be a positive whole number up to 2147483647/],
             ['a url that is not absolute http(s)', { type: 'http', url: 'file:///etc/passwd' }, /check a: url must be an absolute http\(s\) URL/],
             // A misspelt key used to be ignored, so the guard it meant was silently absent.
             ['a misspelt requiredText on a browser check', { type: 'browser', url: u('/ok'), widths: [390], requiredTxt: ['Checkout'] }, /check a: unknown key "requiredTxt" for type browser/],
@@ -384,6 +385,21 @@ async function main() {
         fs.writeFileSync(GH_LOG, '');
         const topTypo = await run({ expectcount: 1, checks: [{ id: 'a', type: 'commit-status', repo: 'o/app' }] });
         check('a misspelt top-level key is refused before running', topTypo.status === 2 && /unknown top-level key "expectcount"/.test(topTypo.stderr) && !/^CHECK /m.test(topTypo.stdout) && fs.readFileSync(GH_LOG, 'utf8') === '', `exit=${topTypo.status} ${topTypo.stderr}`);
+        // Past 2147483647 Node's timer overflows and fires after 1ms, so the run would end before any check.
+        const timerCases = [
+            ['config deadlineMs past the timer limit', { deadlineMs: 2147483648 }, [], /deadlineMs must be a positive whole number up to 2147483647/],
+            ['config timeoutMs past the timer limit', { timeoutMs: 2147483648 }, [], /timeoutMs must be a positive whole number up to 2147483647/],
+            ['--deadline-ms Infinity', {}, ['--deadline-ms', 'Infinity'], /--deadline-ms must be a positive whole number up to 2147483647/],
+            ['--deadline-ms past the timer limit', {}, ['--deadline-ms', '2147483648'], /--deadline-ms must be a positive whole number up to 2147483647/],
+            ['--deadline-ms with a fraction', {}, ['--deadline-ms', '1.5'], /--deadline-ms must be a positive whole number/],
+        ];
+        for (const [label, top, args, pattern] of timerCases) {
+            fs.writeFileSync(GH_LOG, '');
+            const r = await run({ ...top, checks: [{ id: 'a', type: 'commit-status', repo: 'o/app' }] }, { args });
+            check(`refused before running: ${label}`, r.status === 2 && pattern.test(r.stderr) && !/^CHECK /m.test(r.stdout) && fs.readFileSync(GH_LOG, 'utf8') === '', `exit=${r.status} ${r.stderr} ${r.stdout}`);
+        }
+        const atLimit = await run({ deadlineMs: 2147483647, checks: [{ id: 'a', type: 'commit-status', repo: 'o/app' }] }, { args: ['--deadline-ms', '2147483647'] });
+        check('a deadline at the timer limit is accepted and runs', atLimit.status === 0 && /^CHECK a: PASS/m.test(atLimit.stdout), `exit=${atLimit.status} ${atLimit.stderr} ${atLimit.stdout}`);
     }
 
     // The documented key list is the contract: read it from the header, so a documented key cannot be refused by accident.
