@@ -2004,12 +2004,37 @@ function checkArchiveMemberIdentity() {
   fs.writeFileSync(path.join(distinct, nfc), 'first independent file\n');
   try {
     fs.writeFileSync(path.join(distinct, nfd), 'second independent file\n', { flag: 'wx' });
-    check('W1 archive identity: canonical equivalence alone is insufficient', same([nfd], [nfc], distinct, 'darwin'), false);
+    const ids = [nfc, nfd].map((name) => {
+      const st = fs.lstatSync(path.join(distinct, name), { bigint: true });
+      return 'dev ' + st.dev + ' ino ' + st.ino;
+    }).join(' | ');
+    const equivalent = same([nfd], [nfc], distinct, 'darwin');
+    // A red here prints both files' 64-bit ids so a rounding collision can be told apart.
+    check('W1 archive identity: canonical equivalence alone is insufficient' + (equivalent ? ' [ids: ' + ids + ']' : ''), equivalent, false);
     check('W1 archive identity: both distinct Linux names survive exact comparison', same([nfd, nfc], [nfc, nfd], distinct, 'linux'), true);
   } catch (e) {
     if (e.code !== 'EEXIST') throw e;
     console.log('SKIP W1 distinct canonical names: this filesystem resolves NFC and NFD to the same file');
   }
+  // NTFS file ids exceed 2^53. Two distinct files written back to back can hold
+  // ids that differ only below Number precision (measured on this volume:
+  // 17169973579947495 and 17169973579947496 both read 17169973579947496).
+  // Stubbed stats honour the bigint option, so a Number comparison collides.
+  const rounding = path.join(dir, 'rounding');
+  const ids = { [nfc]: 17169973579947495n, [nfd]: 17169973579947496n };
+  const realLstat = fs.lstatSync;
+  try {
+    fs.lstatSync = function(file, options) {
+      const id = ids[path.basename(String(file))];
+      if (path.dirname(String(file)) !== rounding || id === undefined) return realLstat.apply(this, arguments);
+      const big = Boolean(options && options.bigint);
+      return { isFile: () => true, ino: big ? id : Number(id), dev: big ? 7n : 7 };
+    };
+    check('W1 archive identity: distinct ids that differ below Number precision are not the same member',
+      same([nfd], [nfc], rounding, 'darwin'), false);
+  } finally { fs.lstatSync = realLstat; }
+  check('W1 archive identity: rounding control, the two ids read equal as Numbers',
+    Number(17169973579947495n) === Number(17169973579947496n), true);
 }
 
 function run() {

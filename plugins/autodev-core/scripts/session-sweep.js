@@ -402,10 +402,13 @@ function sameArchiveMembers(actual, expected, wt, platform = process.platform) {
     seen.add(key);
     if (name === original) return true;
     try {
-      const source = fs.lstatSync(path.join(wt, original));
-      const alias = fs.lstatSync(path.join(wt, name));
-      return source.isFile() && alias.isFile() && source.ino > 0 &&
-        source.ino === alias.ino && source.dev === alias.dev;
+      // bigint: NTFS file ids exceed 2^53, and as Numbers two distinct files
+      // written back to back can round to the same id.
+      const source = fs.lstatSync(path.join(wt, original), { bigint: true });
+      const alias = fs.lstatSync(path.join(wt, name), { bigint: true });
+      const fileId = (st) => `${st.dev}:${st.ino}`;
+      return source.isFile() && alias.isFile() && source.ino > 0n &&
+        fileId(source) === fileId(alias);
     } catch { return false; }
   });
 }
