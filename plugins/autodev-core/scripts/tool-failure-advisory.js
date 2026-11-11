@@ -136,6 +136,35 @@ const RULES = [
             + 'then write the query. Note a column name is not a contract either: check '
             + 'what WRITES it before grouping by it.',
     },
+    {
+        // PROPOSED 2026-11-11 as a SEVENTH rule, over the cap on purpose: the
+        // one it should replace is tmp-path-split, and that removal is left to
+        // review rather than done here. Measured over 7 days (analyze-session-
+        // patterns --by-cost, 117,605 tool results): this class is the most
+        // expensive named class at 53.7 min, median 36.2s per hit (~0.62
+        // min/hit, above every rule in this file), and RISING, 13 sessions /
+        // 26 hits at the 2026-09-29 baseline against 24 / 86 now. Its remedy
+        // is already written in the analyzer's taxonomy and is not reaching
+        // anyone. tmp-path-split fell from 11 sessions to 1 and priced at 0.0
+        // min in the same run.
+        //
+        // The trap: a 30s CDP timeout reads as slowness, so the instinct is to
+        // retry the identical call, which waits another 30s and fails again.
+        // Signature matches session-error-classes.js browser-renderer-hung.
+        id: 'browser-renderer-hung',
+        tools: null,
+        signatures: [
+            /renderer may be frozen/i,
+            /No browser responded within the timeout/i,
+            /CDP sendCommand .* timed out/i,
+            /timed out after \d+s\.? The (?:preview|Browser pane)/i,
+        ],
+        advice: 'The page stopped responding; this is not a slow or wrong call. Retrying the '
+            + 'identical command waits out the same timeout and fails again, which is how '
+            + 'this class costs a median 36 seconds per hit. Read the console for the '
+            + 'script or loop that froze it, then reload the tab, open a fresh one, or '
+            + 'restart the browser surface before the next call.',
+    },
     // REMOVED 2026-08-26: agent-schema-violation, to keep the cap at six when
     // shell-exit-may-be-the-answer was added below. It was the cheapest rule
     // here by the file's own test — 0.02 min/hit and a 0.2s median, lowest of
