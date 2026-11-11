@@ -126,7 +126,7 @@ const prAt = (number, state, merged, day, base = 'main') => ({ number, state, me
 const b64 = (s) => Buffer.from(s).toString('base64');
 fs.writeFileSync(ROUTES, JSON.stringify({
     // The repo reads, so a 404 inside it is an answer. o/private has no route at all: GitHub hides a repo the token cannot see.
-    'repos/o/app': { full_name: 'o/app' },
+    'repos/o/app': { full_name: 'o/app', default_branch: 'main' },
     'repos/o/app/commits/HEAD': { sha: SHA_GOOD },
     [`repos/o/app/commits/${SHA_GOOD}`]: { sha: SHA_GOOD },
     [`repos/o/app/commits/${SHA_GOOD}/status`]: { statuses: [{ context: 'Vercel', state: 'success', description: 'Deployment has completed' }] },
@@ -139,8 +139,15 @@ fs.writeFileSync(ROUTES, JSON.stringify({
     [`repos/o/app/compare/${SHA_GOOD}...${SHA_WRONG}`]: { status: 'ahead', commits: [{ sha: SHA_WRONG }] },
     'repos/o/app/contents/VERSION': { content: b64('8.5.0\n') },
     'repos/o/app/git/ref/tags/v8.5.0': { ref: 'refs/tags/v8.5.0' },
-    'repos/o/app/pulls/7': { merged: true, state: 'closed' },
-    'repos/o/app/pulls/8': { merged: false, state: 'open' },
+    'repos/o/app/pulls/7': { merged: true, state: 'closed', base: { ref: 'main' } },
+    'repos/o/app/pulls/8': { merged: false, state: 'open', base: { ref: 'main' } },
+    // A stacked PR merged into another feature branch, not the default branch.
+    'repos/o/app/pulls/21': { merged: true, state: 'closed', base: { ref: 'feat-a' } },
+    'repos/o/app/pulls#o:stacked': [prAt(21, 'closed', true, '09', 'feat-a')],
+    // The default branch cannot be read (gh answers 503), so a merge cannot be placed.
+    'repos/o/nobase': 503,
+    'repos/o/nobase/pulls/7': { merged: true, state: 'closed', base: { ref: 'main' } },
+    'repos/o/nobase/pulls#o:feature': [prAt(7, 'closed', true, '01')],
     'repos/o/app/pulls#o:feature': [prAt(12, 'closed', true, '01')],
     'repos/o/app/pulls#o:abandoned': [prAt(13, 'closed', false, '01')],
     // A reused branch name: the old PR merged, a newer one from the same branch is open.
@@ -353,6 +360,8 @@ async function main() {
             ['settleMs on a sitemap read via http', { type: 'sitemap', url: u('/sitemap'), settleMs: 100 }, /check a: settleMs does nothing for a sitemap read via http/],
             ['headers on a sitemap read via browser', { type: 'sitemap', via: 'browser', url: u('/sitemap'), headers: { authorization: 'Bearer TOK' } }, /check a: headers does nothing for a sitemap read via browser/],
             ['a PR number and head together', { type: 'pr-merged', repo: 'o/app', number: 7, head: 'feature' }, /check a: pr-merged takes number or head, not both/],
+            ['a base given as a number', { type: 'pr-merged', repo: 'o/app', number: 7, base: 5 }, /check a: base must be a non-empty branch name/],
+            ['an empty base', { type: 'pr-merged', repo: 'o/app', number: 7, base: '' }, /check a: base must be a non-empty branch name/],
             ['a repo climbing out with ..', { type: 'commit-status', repo: '../x', sha: SHA_GOOD }, /check a: repo must be OWNER\/NAME/],
             ['a repo name made only of dots', { type: 'release-tag', repo: 'o/...' }, /check a: repo must be OWNER\/NAME/],
             ['a versionRepo climbing out with ..', { type: 'plugin-version', versionRepo: '../x' }, /check a: versionRepo must be OWNER\/NAME/],
@@ -413,7 +422,7 @@ async function main() {
             maxConsoleErrors: { maxConsoleErrors: 1 }, ignoreConsole: { ignoreConsole: ['x'] }, settleMs: { settleMs: 100 },
             pluginRoot: { pluginRoot: '~/plugin' }, minVersion: { minVersion: '1.2.3' }, versionRepo: { versionRepo: 'o/app' },
             'plugin-version.versionPath': { versionRepo: 'o/app', versionPath: 'VERSION' }, versionPath: { versionPath: 'VERSION' }, requiredFiles: { requiredFiles: ['a.js'] },
-            number: { number: 8 }, head: { number: undefined, head: 'feature' },
+            number: { number: 8 }, head: { number: undefined, head: 'feature' }, base: { base: 'main' },
         };
         const refusedKeys = [];
         let tried = 0;
@@ -545,6 +554,16 @@ async function main() {
     await single('an open PR alone by head branch fails', { type: 'pr-merged', ...appCheck, head: 'fresh' }, 'FAIL', 1, /PR 16 from fresh is still open/);
     await single('the newest PR closed unmerged over an older merge fails, naming the newest', { type: 'pr-merged', ...appCheck, head: 'reused2' }, 'FAIL', 1, /PR 20 from reused2 was closed without merging \(state closed\), and it is the newest PR from that branch/);
     await single('the newest PR merged over an older one closed unmerged passes, naming the newest', { type: 'pr-merged', ...appCheck, head: 'second-try' }, 'PASS', 0, /\| PR 22 merged from second-try$/);
+    await single('a PR number merged into a non-default base fails, naming the base', { type: 'pr-merged', ...appCheck, number: 21 }, 'FAIL', 1, /PR 21 merged into feat-a, not main$/);
+    await single('a head whose newest PR merged into a non-default base fails, naming the base', { type: 'pr-merged', ...appCheck, head: 'stacked' }, 'FAIL', 1, /PR 21 merged into feat-a, not main$/);
+    await single('a PR number merged into the base the check names passes', { type: 'pr-merged', ...appCheck, number: 21, base: 'feat-a' }, 'PASS', 0, /\| PR 21 merged$/);
+    await single('a merge into main fails when the check names another base', { type: 'pr-merged', ...appCheck, number: 7, base: 'release' }, 'FAIL', 1, /PR 7 merged into main, not release$/);
+    for (const [mode, extra] of [['number', { number: 7 }], ['head', { head: 'feature' }]]) {
+        fs.writeFileSync(GH_LOG, '');
+        await single(`by ${mode}, a default branch gh cannot read is INDETERMINATE`, { type: 'pr-merged', repo: 'o/nobase', ...extra }, 'INDETERMINATE', 2, /could not read the default branch of o\/nobase$/);
+        const reads = fs.readFileSync(GH_LOG, 'utf8').split('\n').filter((l) => l === 'repos/o/nobase').length;
+        check(`by ${mode}, the second attempt asks gh for the default branch again`, reads === 2, `${reads} reads of repos/o/nobase`);
+    }
     {
         // The fake serves oldest first unless the query asks for newest first, so the order must be asked for.
         fs.writeFileSync(GH_LOG, '');
