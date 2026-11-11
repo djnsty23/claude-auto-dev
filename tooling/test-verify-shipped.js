@@ -131,6 +131,16 @@ fs.writeFileSync(ROUTES, JSON.stringify({
     [`repos/o/mixed/commits/${SHA_WRONG}/status`]: { statuses: [{ context: 'Vercel', state: 'failure', description: 'Build failed' }, { context: 'ci/e2e', state: 'success', description: 'Canceled by Ignored Build Step' }] },
     [`repos/o/mixed/compare/${SHA_GOOD}...${SHA_OLD}`]: { status: 'ahead', commits: [{ sha: SHA_OLD }] },
     [`repos/o/mixed/commits/${SHA_OLD}/status`]: { statuses: [{ context: 'Vercel', state: 'failure', description: 'Ignored Build Step crashed' }] },
+    // Two Production successes: GitHub leaves the older one at success after the newer one went live.
+    'repos/o/superseded/deployments?environment=Production&per_page=30': [{ id: 30, sha: SHA_GOOD }, { id: 31, sha: SHA_OLD }],
+    'repos/o/superseded/deployments/30/statuses?per_page=1': [{ state: 'success' }],
+    'repos/o/superseded/deployments/31/statuses?per_page=1': [{ state: 'success' }],
+    // The expected sha's own deployment, newer than the live one, in each state that is not live.
+    'repos/o/states/deployments?environment=Production&per_page=30': [{ id: 40, sha: SHA_WRONG }, { id: 41, sha: SHA_OLD }, { id: 42, sha: SHA_SKIPPED }, { id: 43, sha: SHA_GOOD }],
+    'repos/o/states/deployments/40/statuses?per_page=1': [{ state: 'in_progress' }],
+    'repos/o/states/deployments/41/statuses?per_page=1': [{ state: 'failure' }],
+    'repos/o/states/deployments/42/statuses?per_page=1': [{ state: 'inactive' }],
+    'repos/o/states/deployments/43/statuses?per_page=1': [{ state: 'success' }],
 }));
 
 // A fake playwright driver. It fetches the real local page, and treats the page's own script text as what ran.
@@ -332,7 +342,11 @@ async function main() {
     await single('an unknown status context is INDETERMINATE', { type: 'commit-status', ...appCheck, context: 'Nonesuch' }, 'INDETERMINATE', 2, /no status matching/);
     await single('commit status says when the build was skipped', { type: 'commit-status', ...appCheck, sha: SHA_SKIPPED }, 'PASS', 0, /build skipped/);
     await single('gh auth failure is INDETERMINATE', { type: 'commit-status', repo: 'o/denied' }, 'INDETERMINATE', 2, /could not read the head/);
-    await single('deployed sha matches production', { type: 'deployed-sha', ...appCheck }, 'PASS', 0, /Production aaaaaaaa success/);
+    await single('deployed sha matches production', { type: 'deployed-sha', ...appCheck }, 'PASS', 0, /Production aaaaaaaa success, the newest live deployment/);
+    await single('an older success under a newer live deployment fails with both shas', { type: 'deployed-sha', repo: 'o/superseded', sha: SHA_OLD }, 'FAIL', 1, /Production is at aaaaaaaa, a newer live deployment than the expected bbbbbbbb/);
+    await single('the expected deployment still in progress is INDETERMINATE', { type: 'deployed-sha', repo: 'o/states', sha: SHA_WRONG }, 'INDETERMINATE', 2, /Production cccccccc in_progress \(still deploying\)/);
+    await single('the expected deployment that failed fails', { type: 'deployed-sha', repo: 'o/states', sha: SHA_OLD }, 'FAIL', 1, /Production bbbbbbbb failure/);
+    await single('the expected deployment that is inactive fails', { type: 'deployed-sha', repo: 'o/states', sha: SHA_SKIPPED }, 'FAIL', 1, /Production dddddddd inactive/);
     await single('a skipped build ahead of production passes and says so', { type: 'deployed-sha', ...appCheck, sha: SHA_SKIPPED }, 'PASS', 0, /skipped their build/);
     {
         const r = await run({ checks: [{ id: 'X1', type: 'commit-status', ...appCheck }] }, { args: ['--repo', 'o/app', '--sha', SHA_OLD] });
