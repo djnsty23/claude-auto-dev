@@ -347,6 +347,20 @@ check('module: exit codes other than 1 and 2 are not this rule',
 check('module: a Bash-only rule, so it does not fire for a browser tool',
   adviseOnToolFailure('mcp__claude-in-chrome__computer', EXIT_ANSWER, true) === null);
 
+// browser-renderer-hung: tool-agnostic like the other browser rules, so it is
+// driven with a browser tool name. The fixture is the real message from the
+// 2026-11-11 sweep. The negative is a SUCCESSFUL call carrying the same text.
+const HUNG_ERR = 'Error: Error capturing screenshot: CDP sendCommand "Page.captureScreenshot" timed out after 30000ms on tab 686487495. The renderer may be frozen or unresponsive.';
+check('module: advises on a hung renderer',
+  (adviseOnToolFailure('mcp__Claude_Browser__computer', HUNG_ERR, true) || {}).id === 'browser-renderer-hung');
+check('module: silent on a hung-renderer text from a call that SUCCEEDED',
+  adviseOnToolFailure('mcp__Claude_Browser__computer', HUNG_ERR, false) === null);
+check('module: a Bash command timeout is not a hung renderer',
+  (adviseOnToolFailure('Bash', 'Error: Exit code 143 Command timed out after 2m 0s', true) || {}).id !== 'browser-renderer-hung');
+const hungHook = advise({ tool_name: 'mcp__Claude_Browser__computer', tool_input: {}, tool_response: HUNG_ERR });
+check('the hook emits the hung-renderer advisory end to end',
+  /stopped responding/.test(hungHook.ctx || ''), String(hungHook.ctx).slice(0, 80));
+
 // `unless` must be OPTIONAL — the other six rules carry none, and a matcher that
 // required it would silence all of them. Mutation-checked: deleting the
 // `rule.unless &&` guard makes this fail.
