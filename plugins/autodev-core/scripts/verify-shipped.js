@@ -200,6 +200,7 @@ const COMMON_KEYS = ['id', 'type', 'repo'];
 const TOP_KEYS = ['expectCount', 'deadlineMs', 'timeoutMs', 'checks'];
 
 const isWhole = (v, min, max = Infinity) => Number.isInteger(v) && v >= min && v <= max;
+const hasOwn = (object, key) => Object.prototype.hasOwnProperty.call(object, key);
 // Node's timers overflow above this and fire after 1ms, so a larger deadline or timeout would end the run at once.
 const MAX_TIMER_MS = 2147483647;
 const isText = (v) => typeof v === 'string' && v.length > 0;
@@ -274,7 +275,8 @@ function validateConfig(config) {
         if (typeof check.id !== 'string' || !ID_RE.test(check.id)) throw new Refusal(`invalid check id: ${JSON.stringify(check.id)}`);
         if (seen.has(check.id)) throw new Refusal(`duplicate check id: ${check.id}`);
         seen.add(check.id);
-        const spec = TYPES[check.type];
+        // Own properties only: "constructor" or "__proto__" must read as an unknown type, not as Object's.
+        const spec = hasOwn(TYPES, check.type) ? TYPES[check.type] : null;
         if (!spec) throw new Refusal(`check ${check.id}: unknown type ${JSON.stringify(check.type)}`);
         validateKeys(check);
         for (const field of spec.required) if (check[field] === undefined) throw new Refusal(`check ${check.id}: ${check.type} needs ${field}`);
@@ -284,7 +286,7 @@ function validateConfig(config) {
 
 /** Every key must belong to the check's type and hold a value of its kind. */
 function validateKeys(check) {
-    const accepted = [...COMMON_KEYS, ...KEYS[check.type]];
+    const accepted = [...COMMON_KEYS, ...(hasOwn(KEYS, check.type) ? KEYS[check.type] : [])];
     for (const key of Object.keys(check)) {
         if (!accepted.includes(key)) throw new Refusal(`check ${check.id}: unknown key ${JSON.stringify(key)} for type ${check.type} (accepted: ${accepted.join(', ')})`);
         const kind = KINDS[key];
@@ -448,6 +450,8 @@ function parseLocs(xml) {
 
 /** A sitemap <loc> must be an absolute http(s) URL. A relative one resolves against whatever page reads it. */
 function isAbsoluteHttp(raw) {
+    // new URL() stringifies whatever it gets, so ["https://x"] would read as a URL.
+    if (typeof raw !== 'string') return false;
     try { const u = new URL(raw); return u.protocol === 'http:' || u.protocol === 'https:'; } catch { return false; }
 }
 
@@ -955,7 +959,7 @@ function parseArgs(argv) {
     for (let i = 0; i < argv.length; i++) {
         const arg = argv[i];
         if (arg === '--help' || arg === '-h') { options.help = true; continue; }
-        if (flags[arg]) {
+        if (hasOwn(flags, arg)) {
             if (argv[i + 1] === undefined) throw new Refusal(`${arg} needs a value`);
             options[flags[arg]] = argv[++i];
             continue;
