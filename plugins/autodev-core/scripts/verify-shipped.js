@@ -61,7 +61,7 @@
  *                    minTextLen, minH1, maxOverflowPx, maxConsoleErrors, ignoreConsole, settleMs, timeoutMs
  *   plugin-version:  pluginRoot, minVersion, versionRepo, versionPath, requiredFiles
  *   release-tag:     versionPath
- *   pr-merged:       number, head
+ *   pr-merged:       number, head, base
  *
  * What the keys mean, with their defaults:
  *   commit-status   repo is required. context="Vercel". allowSkipped=false: a build the
@@ -83,7 +83,9 @@
  *                   versionRepo, requiredFiles is a list. Needs minVersion or versionRepo.
  *   release-tag     repo is required. versionPath="VERSION".
  *   pr-merged       repo is required, and number or head, not both. By head only the newest PR
- *                   from that branch is graded: it passes only when that PR merged.
+ *                   from that branch is graded: it passes only when that PR merged. In both modes
+ *                   the merge counts only into base (default: the repo's default branch), and a
+ *                   default branch gh cannot read is INDETERMINATE.
  * Counts, sizes and statuses are whole numbers. timeoutMs (per probe, in ms) is a positive one.
  *
  * LIMITS. Headless only, and no config field can change that. At most two
@@ -191,7 +193,7 @@ const KEYS = {
     browser: ['url', 'widths', 'requiredText', 'forbiddenText', 'forbiddenSelector', 'finalUrlPattern', 'minTextLen', 'minH1', 'maxOverflowPx', 'maxConsoleErrors', 'ignoreConsole', 'settleMs', 'timeoutMs'],
     'plugin-version': ['pluginRoot', 'minVersion', 'versionRepo', 'versionPath', 'requiredFiles'],
     'release-tag': ['versionPath'],
-    'pr-merged': ['number', 'head'],
+    'pr-merged': ['number', 'head', 'base'],
 };
 const COMMON_KEYS = ['id', 'type', 'repo'];
 const TOP_KEYS = ['expectCount', 'deadlineMs', 'timeoutMs', 'checks'];
@@ -224,6 +226,7 @@ const KINDS = {
     context: [isText, 'must be a non-empty string'],
     environment: [isText, 'must be a non-empty string'],
     head: [isText, 'must be a non-empty string'],
+    base: [isText, 'must be a non-empty branch name'],
     pluginRoot: [isText, 'must be a non-empty string'],
     requiredFiles: [(v) => Array.isArray(v) && v.every(isText), 'must be an array of non-empty strings'],
     minLocs: [(v) => isWhole(v, 0), 'must be a whole number of 0 or more'],
@@ -673,11 +676,38 @@ async function checkReleaseTag(run, check) {
     return tag.notFound ? failed(`tag v${remote.version} is absent`) : indeterminate(tag.unavailable);
 }
 
+/** The repo's default branch. Only an answer is shared: a failed read is forgotten, so the retry asks gh again. */
+async function defaultBranch(run, repo) {
+    if (!run.defaultBranches) run.defaultBranches = new Map();
+    if (!run.defaultBranches.has(repo)) run.defaultBranches.set(repo, ghJson(run, `repos/${repo}`));
+    const pending = run.defaultBranches.get(repo);
+    const res = await pending;
+    if (!res.ok || !res.data || !isText(res.data.default_branch)) {
+        if (run.defaultBranches.get(repo) === pending) run.defaultBranches.delete(repo);
+        return { error: `could not read the default branch of ${repo}` };
+    }
+    return { branch: res.data.default_branch };
+}
+
+/** A merge ships only into the branch that deploys: the check's base, else the repo's default branch. */
+async function mergedIntoBase(run, check, number, base, value) {
+    if (!isText(base)) return indeterminate(`gh named no base branch for PR ${number}`);
+    let target = check.base;
+    if (target === undefined) {
+        const found = await defaultBranch(run, check.repo);
+        if (found.error) return indeterminate(found.error);
+        target = found.branch;
+    }
+    if (base !== target) return failed(`PR ${number} merged into ${base}, not ${target}`);
+    return pass(value);
+}
+
 async function checkPrMerged(run, check) {
     if (check.number) {
         const pr = await ghJson(run, `repos/${check.repo}/pulls/${check.number}`);
         if (!pr.ok) return pr.notFound ? notFoundUnlessHidden(run, check.repo, `PR ${check.number} not found`) : indeterminate(pr.unavailable);
-        return pr.data.merged ? pass(`PR ${check.number} merged`) : failed(`PR ${check.number} state ${pr.data.state}, not merged`);
+        if (!pr.data.merged) return failed(`PR ${check.number} state ${pr.data.state}, not merged`);
+        return mergedIntoBase(run, check, check.number, pr.data.base && pr.data.base.ref, `PR ${check.number} merged`);
     }
     const owner = check.repo.split('/')[0];
     // Only the newest PR from the branch says what it holds now: a reused branch name carries an old merge
@@ -689,7 +719,7 @@ async function checkPrMerged(run, check) {
     if (!newest) return failed(`0 merged PRs from ${check.head}`);
     if (newest.state === 'open') return failed(`PR ${newest.number} from ${check.head} is still open, so the branch has not shipped`);
     if (!newest.merged_at) return failed(`PR ${newest.number} from ${check.head} was closed without merging (state ${newest.state}), and it is the newest PR from that branch`);
-    return pass(`PR ${newest.number} merged from ${check.head}`);
+    return mergedIntoBase(run, check, newest.number, newest.base && newest.base.ref, `PR ${newest.number} merged from ${check.head}`);
 }
 
 function loadBrowserDriver(run) {
