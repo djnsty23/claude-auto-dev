@@ -31,12 +31,29 @@
  * APPEND SAFETY. Each ledger is rotated under `<ledger>.write-lock`
  * (ledger-lock.js), the lock the ledger's own writers take. The order is
  * archive first, hot file second: a crash between them leaves a line in BOTH
- * places (a duplicate in history), never in neither. A failure replacing the
- * hot file removes the archives this run made. A writer that appends without
- * the lock cannot be excluded, so just before the replace the file is
- * re-measured and any bytes appended since the read are carried into the new
- * hot file. The rewrite is a temp file plus rename. A file that is shorter
- * than it was read refuses the rewrite.
+ * places (a duplicate in history), never in neither. A failure before the hot
+ * file is replaced removes the archives this run made; once it is replaced the
+ * archives stand, and a later failure is reported (exit 2), never undone.
+ * Many writers append WITHOUT the lock, and those cannot be excluded:
+ *   - The new hot file is staged in a temp file first. Then the ledger is
+ *     re-measured and any bytes appended since the read are copied into the
+ *     temp file, and only then is it renamed over the ledger, so the window
+ *     between the last measure and the rename is one rename call.
+ *   - A descriptor on the old ledger is held across the rename (POSIX). An
+ *     append that lands in the old file after the last measure, or from a
+ *     writer that opened the ledger before the rename and writes after it, is
+ *     drained from that descriptor into the new hot file (one O_APPEND write
+ *     per drain) until the old file's size holds still for a few short checks.
+ *     A drained line can land AFTER lines appended to the new file in the
+ *     meantime: lines are independent records, so order across that boundary
+ *     is not kept.
+ *   - NOT guaranteed: a writer that opened the ledger before the rename and is
+ *     descheduled for longer than that settle (tens of milliseconds) before
+ *     its write still writes into the replaced file, and that line is lost.
+ *   - On Windows no descriptor is held across the rename (it would block this
+ *     process's own rename), so there the drain does not run and only the
+ *     pre-rename carry applies.
+ * A file that is shorter than it was read refuses the rewrite.
  *
  * WHAT IT TOUCHES. Only `*.jsonl` files directly in the state dir
  * (--dir, else $AUTODEV_LEDGER_DIR, else `<config dir>/autodev`), not
@@ -55,7 +72,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const zlib = require('node:zlib');
 const crypto = require('node:crypto');
-const { withLedgerLock, writeAtomic } = require('./ledger-lock.js');
+const { withLedgerLock, renameReplacing } = require('./ledger-lock.js');
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 const TS_FIELDS = ['at', 'ts', 'timestamp', 'time', 'date', 'createdAt', 'created_at', 'startedAt', 'started_at', 'recordedAt', 'sentAt', 'when'];
@@ -171,56 +188,123 @@ function nextArchiveName(dir, base, month) {
     return archiveName(base, month, MAX_PARTS + 1);
 }
 
+// After the rename the old inode is drained until its size holds still this many
+// checks in a row, DRAIN_GAP_MS apart; a ledger still growing after
+// DRAIN_MAX_CHECKS checks is reported, not waited on forever.
+const DRAIN_STABLE_CHECKS = 3;
+const DRAIN_GAP_MS = 5;
+const DRAIN_MAX_CHECKS = 200;
+const sleeper = new Int32Array(new SharedArrayBuffer(4));
+const sleep = (ms) => Atomics.wait(sleeper, 0, 0, ms);
+// Windows cannot rename over a file this process holds open, so only POSIX
+// keeps the drain descriptor across the rename.
+const DRAIN_AFTER_RENAME = process.platform !== 'win32';
+
+/** Read bytes [from, to) of an open file. */
+function readRange(fd, from, to) {
+    const out = Buffer.alloc(to - from);
+    let got = 0;
+    while (got < out.length) {
+        const n = fs.readSync(fd, out, got, out.length - got, from + got);
+        if (n === 0) break;
+        got += n;
+    }
+    return got === out.length ? out : out.subarray(0, got);
+}
+
 /**
  * Rotate one ledger. Returns { file, ok, rotated, counts, perMonth, archives, why }.
- * `dryRun` measures and changes nothing.
+ * `dryRun` measures and changes nothing. `hooks` is a test seam:
+ * hooks.beforeRename(file) runs after the last size check, just before the
+ * rename; hooks.afterRename(file) runs just after it, before the drain.
  */
-function rotateFile(file, { cutoffMs, dryRun = false, waitMs = 10000 } = {}) {
+function rotateFile(file, { cutoffMs, dryRun = false, waitMs = 10000, hooks = {} } = {}) {
     const dir = path.dirname(file);
     const base = path.basename(file, '.jsonl');
     const result = { file, ok: true, rotated: false, counts: null, perMonth: {}, archives: [], why: null };
     const body = () => {
-        const buf = fs.readFileSync(file);
-        const part = partition(buf.toString('latin1'), cutoffMs);
-        result.counts = part.counts;
-        result.perMonth = Object.fromEntries([...part.old].map(([m, ls]) => [m, ls.length]));
-        if (part.counts.old === 0) return;
-        if (dryRun) {
-            result.archives = [...part.old.keys()].sort().map((m) => nextArchiveName(dir, base, m));
-            return;
-        }
-        const made = [];
+        // One descriptor on the ledger's inode for the whole run: the read, the
+        // re-measures and, after the rename, the drain all see the same file.
+        const oldFd = fs.openSync(file, 'r');
+        let fdOpen = true;
+        const closeOld = () => { if (fdOpen) { fdOpen = false; fs.closeSync(oldFd); } };
         try {
-            for (const m of [...part.old.keys()].sort()) made.push(writeArchive(dir, base, m, part.old.get(m)));
-            let hot = Buffer.from(part.hot.join('\n') + (part.hot.length && part.complete ? '\n' : ''), 'latin1');
-            // Bytes a writer that takes no lock appended since the read belong to the hot file.
-            let seen = buf.length;
-            for (let pass = 0; ; pass++) {
-                const size = fs.statSync(file).size;
-                if (size < seen) throw Object.assign(new Error('the ledger shrank while it was being rotated'), { code: 'SHRANK' });
-                if (size === seen) break;
-                if (pass >= 5) throw Object.assign(new Error('the ledger kept growing while it was being rotated'), { code: 'GREW' });
-                const tail = Buffer.alloc(size - seen);
-                const fd = fs.openSync(file, 'r');
-                try { fs.readSync(fd, tail, 0, tail.length, seen); } finally { fs.closeSync(fd); }
-                hot = Buffer.concat([hot, tail]);
-                seen = size;
+            const buf = fs.readFileSync(oldFd);
+            const part = partition(buf.toString('latin1'), cutoffMs);
+            result.counts = part.counts;
+            result.perMonth = Object.fromEntries([...part.old].map(([m, ls]) => [m, ls.length]));
+            if (part.counts.old === 0) return;
+            if (dryRun) {
+                result.archives = [...part.old.keys()].sort().map((m) => nextArchiveName(dir, base, m));
+                return;
             }
-            writeAtomic(file, hot);
-        } catch (e) {
-            for (const name of made) { try { fs.unlinkSync(path.join(dir, name)); } catch { /* already gone */ } }
-            throw e;
+            const made = [];
+            const tmp = `${file}.${crypto.randomUUID()}.tmp`;
+            let seen = buf.length;
+            try {
+                for (const m of [...part.old.keys()].sort()) made.push(writeArchive(dir, base, m, part.old.get(m)));
+                // The new hot file is staged first, so the last size check sits right before the rename.
+                const tfd = fs.openSync(tmp, 'wx');
+                try {
+                    fs.writeFileSync(tfd, Buffer.from(part.hot.join('\n') + (part.hot.length && part.complete ? '\n' : ''), 'latin1'));
+                    // Bytes a writer that takes no lock appended since the read belong to the hot file.
+                    for (let pass = 0; ; pass++) {
+                        const size = fs.fstatSync(oldFd).size;
+                        if (size < seen) throw Object.assign(new Error('the ledger shrank while it was being rotated'), { code: 'SHRANK' });
+                        if (size === seen) break;
+                        if (pass >= 5) throw Object.assign(new Error('the ledger kept growing while it was being rotated'), { code: 'GREW' });
+                        const tail = readRange(oldFd, seen, size);
+                        fs.writeFileSync(tfd, tail);
+                        seen += tail.length;
+                    }
+                } finally { fs.closeSync(tfd); }
+                if (!DRAIN_AFTER_RENAME) closeOld();
+                if (hooks.beforeRename) hooks.beforeRename(file);
+                renameReplacing(tmp, file);
+            } catch (e) {
+                try { fs.unlinkSync(tmp); } catch { /* published or never created */ }
+                for (const name of made) { try { fs.unlinkSync(path.join(dir, name)); } catch { /* already gone */ } }
+                throw e;
+            }
+            // The rename is the commit: from here the archives stand whatever happens.
+            result.rotated = true;
+            result.archives = made;
+            if (!DRAIN_AFTER_RENAME) return;
+            try {
+                if (hooks.afterRename) hooks.afterRename(file);
+                // An unlocked writer that opened the ledger before the rename writes into
+                // the old inode. Move whatever it gains into the new hot file, one
+                // O_APPEND write per drain, until its size holds still.
+                let stable = 0;
+                for (let checks = 0; stable < DRAIN_STABLE_CHECKS; checks++) {
+                    if (checks >= DRAIN_MAX_CHECKS) throw Object.assign(new Error('the replaced ledger kept growing'), { code: 'DRAIN_UNSETTLED' });
+                    const size = fs.fstatSync(oldFd).size;
+                    if (size > seen) {
+                        const tail = readRange(oldFd, seen, size);
+                        fs.appendFileSync(file, tail);
+                        seen += tail.length;
+                        stable = 0;
+                    } else {
+                        stable++;
+                        if (stable < DRAIN_STABLE_CHECKS) sleep(DRAIN_GAP_MS);
+                    }
+                }
+            } catch (e) {
+                throw Object.assign(new Error(`rotated, but draining the replaced ledger failed: ${e.message}`), { code: `DRAIN_FAILED (${e.code || e.message})`, committed: true });
+            }
+        } finally {
+            closeOld();
         }
-        result.rotated = true;
-        result.archives = made;
     };
     try {
         if (dryRun) body();
         else withLedgerLock(file, body, { waitMs });
     } catch (e) {
         result.ok = false;
-        result.rotated = false;
-        result.archives = [];
+        if (!e.committed) {
+            result.rotated = false;
+            result.archives = [];
+        }
         result.why = e.code === 'LEDGER_LOCKED' ? `locked (${e.why || 'held'})` : (e.code || e.message);
     }
     return result;
@@ -284,7 +368,9 @@ function main(argv, env = process.env) {
         const r = rotateFile(path.join(dir, name), { cutoffMs, dryRun: a.dryRun });
         if (!r.ok) {
             failed++;
-            out.push(`  ${name}: NOT rotated: ${r.why}`);
+            out.push(r.rotated
+                ? `  ${name}: rotated to ${r.archives.join(', ')}, but ${r.why}`
+                : `  ${name}: NOT rotated: ${r.why}`);
             continue;
         }
         const c = r.counts;
