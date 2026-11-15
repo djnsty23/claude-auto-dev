@@ -230,6 +230,22 @@ expectSilentAllow('13b. env armed, run_in_background is 1: silent allow',
         run({ payload: bash({ description: 'radar' }, { tool_name: 'Monitor' }), headless: '1' }));
 }
 
+// 16. THE WIRING. Every case above pipes JSON straight into the hook, so none
+//     of them proves the harness sends a Monitor call here at all. hooks.json
+//     must route both tool names to all three guards, or block 15 is inert.
+{
+    const hooksJson = JSON.parse(require('fs').readFileSync(
+        path.resolve(__dirname, '..', 'plugins', 'autodev-core', 'hooks', 'hooks.json'), 'utf8'));
+    const groups = (hooksJson.hooks && hooksJson.hooks.PreToolUse) || [];
+    for (const guard of ['coordinator-write-guard.js', 'headless-guard.js', 'shared-install-guard.js']) {
+        const owning = groups.filter((g) => (g.hooks || []).some((h) => (h.args || []).some((a) => String(a).endsWith(`/hooks/${guard}`))));
+        const reaches = (tool) => owning.some((g) => new RegExp(`^(?:${g.matcher})$`).test(tool));
+        const seen = JSON.stringify(owning.map((g) => g.matcher));
+        check(`16. hooks.json routes Bash to ${guard}`, owning.length > 0 && reaches('Bash'), seen);
+        check(`16. hooks.json routes Monitor to ${guard}`, owning.length > 0 && reaches('Monitor'), seen);
+    }
+}
+
 // The population, not a bare verdict: what was driven, and how.
 console.log(`\n${tally(pass, fail, infra)}`);
 console.log(`subject: ${path.relative(path.resolve(__dirname, '..'), HOOK)}, `
