@@ -325,6 +325,16 @@ const payload = (command, cwd) => JSON.stringify({ tool_name: 'Bash', tool_input
     silent('empty stdin', '');
     silent('no command', JSON.stringify({ tool_name: 'Bash', tool_input: {}, cwd: fx.wt }));
     silent('an allowed command in a shared tree', payload('npm run build', fx.wt));
+    const monPayload = (command, cwd) => JSON.stringify({ tool_name: 'Monitor', tool_input: { command, description: 'radar' }, cwd });
+    for (const [label, cmd, cwd] of [['npm install in shared wt', 'npm install', fx.wt], ...deny]) {
+        const r = runNode(HOOK, [], monPayload(cmd, cwd));
+        let dec = null;
+        try { dec = JSON.parse(r.stdout).hookSpecificOutput; } catch { /* checked below */ }
+        check(`8. Monitor denies: ${label}`, !!(dec && dec.permissionDecision === 'deny' && r.exit === 0 && r.stderr === ''), `${r.exit} ${r.stdout}${r.stderr}`);
+    }
+    for (const [label, cmd, cwd] of allow.slice(0, 6)) {
+        silent(`Monitor allows: ${label}`, monPayload(cmd, cwd));
+    }
     cleanup(fx);
 }
 
