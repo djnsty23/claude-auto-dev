@@ -305,13 +305,20 @@ function directCalls(text, spans) {
         if (name === 'statSync' && !resolve(text, spans, target, m.index).some((e) => /['"]\.reclaim['"]/.test(e))) continue;
         calls.push({ at: m.index, arg: target, args, op: name === 'readFileSync' || name === 'statSync' ? 'read' : KIND[name], via: name });
     }
-    // The core helper replaces the complete destination. Follow this shipped
-    // import just like writeFileSync so moving I/O into it cannot hide a writer.
+    // The core helpers replace the complete destination. Follow these shipped
+    // imports just like writeFileSync/renameSync so moving I/O into them cannot hide a writer.
     if (/const\s*\{[^}]*\bwriteAtomic\b[^}]*\}\s*=\s*require\(['"]\.\/ledger-lock\.js['"]\)/.test(text)) {
         const atomic = /(?<![\w$.])writeAtomic\s*\(/g;
         while ((m = atomic.exec(text))) {
             const args = argsAt(text, m.index + m[0].length - 1);
             if (args[0]) calls.push({ at: m.index, arg: args[0], args, op: 'rewrite', via: 'writeAtomic' });
+        }
+    }
+    if (/const\s*\{[^}]*\brenameReplacing\b[^}]*\}\s*=\s*require\(['"]\.\/ledger-lock\.js['"]\)/.test(text)) {
+        const replacing = /(?<![\w$.])renameReplacing\s*\(/g;
+        while ((m = replacing.exec(text))) {
+            const args = argsAt(text, m.index + m[0].length - 1);
+            if (args[1]) calls.push({ at: m.index, arg: args[1], args, op: 'replace', via: 'renameReplacing' });
         }
     }
     return calls;
@@ -592,6 +599,8 @@ const SHARED_LEDGER_WRITERS = [
     ['plugins/autodev-core/hooks/stop-workflow-wall-note.js', 'keyed-ledger caller'],
     ['plugins/autodev-core/scripts/headless-worker.js', 'withLedger'],
     ['plugins/autodev-core/scripts/keyed-ledger.js', 'write'],
+    // Reads through a descriptor it keeps for the post-rename drain, which the scan cannot follow.
+    ['plugins/autodev-core/scripts/ledger-rotate.js', 'body'],
     ['plugins/autodev-core/scripts/production-signals.js', 'main'],
     ['plugins/autodev-core/scripts/radar-learning.js', 'main'],
     ['plugins/autodev-core/scripts/unattended-worker.js', '(anonymous)'],

@@ -58,6 +58,18 @@ function now() {
     return Date.now() + (Number.isFinite(skew) ? skew : 0);
 }
 
+// Rename `from` over `to`, retrying the transient Windows denials (a scanner or
+// another reader holding the target) a bounded number of times.
+function renameReplacing(from, to) {
+    for (let attempt = 0; ; attempt++) {
+        try { fs.renameSync(from, to); return; }
+        catch (e) {
+            if (!RETRY_CODES.has(e.code) || attempt >= RETRY_MS.length) throw e;
+            sleep(RETRY_MS[attempt]);
+        }
+    }
+}
+
 // Same bounded replacement policy as keyed-ledger. A failed publish keeps the
 // old file intact and removes only this call's unique staging file.
 function writeAtomic(file, data) {
@@ -65,13 +77,7 @@ function writeAtomic(file, data) {
     const tmp = file + '.' + crypto.randomUUID() + '.tmp';
     try {
         fs.writeFileSync(tmp, data, 'utf8');
-        for (let attempt = 0; ; attempt++) {
-            try { fs.renameSync(tmp, file); break; }
-            catch (e) {
-                if (!RETRY_CODES.has(e.code) || attempt >= RETRY_MS.length) throw e;
-                sleep(RETRY_MS[attempt]);
-            }
-        }
+        renameReplacing(tmp, file);
     } finally {
         try { fs.unlinkSync(tmp); } catch { /* published or never created */ }
     }
@@ -355,4 +361,4 @@ function withLedgerLock(file, fn, { waitMs = 10000 } = {}) {
     finally { held.release(); }
 }
 
-module.exports = { withLedgerLock, writeAtomic, acquireLock, releaseLock, judgeOwner, OWNERLESS_MS };
+module.exports = { withLedgerLock, writeAtomic, renameReplacing, acquireLock, releaseLock, judgeOwner, OWNERLESS_MS };

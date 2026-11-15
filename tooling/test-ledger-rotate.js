@@ -19,6 +19,10 @@
  *   R11 epoch seconds, epoch milliseconds and a date-only stamp are read; months are UTC and split archives
  *   R12 an appender that takes the ledger lock, running while the rotator runs, loses nothing
  *   R13 bad arguments are exit 2
+ *   R14 an unlocked append after the last size check, just before the rename, survives in the hot file
+ *   R15 an unlocked writer that opened the ledger before the rename and writes after it loses nothing
+ *       (POSIX: the rotator drains the replaced inode; Windows holds no descriptor across a rename)
+ *   R16 a failure after the rename keeps the archives (no old line lost) and is reported, not rolled back
  *
  * Run: node tooling/test-ledger-rotate.js
  */
@@ -271,6 +275,70 @@ try {
         check('R11 months are UTC, so the +02:00 stamp is July', ls(dir).filter((x) => x.endsWith('.gz')).join(',') === 'mixed.2026-06.jsonl.gz,mixed.2026-07.jsonl.gz');
         check('R11 the recent line stays', getText(f) === lines[4] + '\n');
         check('R11 parseStamp rejects what is not a stamp', rot.parseStamp('x') === null && rot.parseStamp(5) === null && rot.parseStamp(true) === null && rot.parseStamp(NaN) === null);
+    }
+
+    // R14: an unlocked append lands after the last size check, before the rename.
+    {
+        const dir = fresh();
+        const lines = [row(1, OLD_SEP), row(2, RECENT)];
+        const f = put(dir, 'events.jsonl', lines.join('\n') + '\n');
+        const late = row('late-a', RECENT);
+        let ran = 0;
+        const res = rot.rotateFile(f, { cutoffMs: Date.parse(NOW) - 30 * 86400000, hooks: {
+            beforeRename: (file) => { ran++; fs.appendFileSync(file, late + '\n'); },
+        } });
+        check('R14 the seam ran once, just before the rename', ran === 1, ran);
+        check('R14 the rotation succeeded', res.ok === true && res.rotated === true, JSON.stringify(res));
+        if (process.platform !== 'win32') {
+            check('R14 the line appended just before the rename is in the hot file, once',
+                getText(f) === [lines[1], late].join('\n') + '\n', JSON.stringify(getText(f)));
+        }
+        check('R14 the old line is archived once', gunzip(path.join(dir, 'events.2026-09.jsonl.gz')) === lines[0] + '\n');
+    }
+
+    // R15: a writer opens the old ledger before the rename and writes after it.
+    if (process.platform !== 'win32') {
+        const dir = fresh();
+        const lines = [row(1, OLD_SEP), row(2, RECENT)];
+        const f = put(dir, 'events.jsonl', lines.join('\n') + '\n');
+        const late = row('late-b', RECENT);
+        const early = row('new-file', RECENT);
+        let wfd = null;
+        const res = rot.rotateFile(f, { cutoffMs: Date.parse(NOW) - 30 * 86400000, hooks: {
+            beforeRename: (file) => { wfd = fs.openSync(file, 'a'); },
+            afterRename: (file) => {
+                // A writer that opens after the rename appends to the new file first.
+                fs.appendFileSync(file, early + '\n');
+                fs.writeSync(wfd, late + '\n');
+                fs.closeSync(wfd);
+            },
+        } });
+        check('R15 the seams ran', wfd !== null, String(wfd));
+        check('R15 the rotation succeeded', res.ok === true && res.rotated === true, JSON.stringify(res));
+        const hot = getText(f).split('\n').filter(Boolean);
+        check('R15 the line written to the replaced inode is drained into the hot file, once',
+            hot.filter((l) => l === late).length === 1, JSON.stringify(hot));
+        check('R15 the hot file holds exactly the recent, the new-file and the drained lines',
+            [...hot].sort().join('\n') === [lines[1], early, late].sort().join('\n'), JSON.stringify(hot));
+        check('R15 the old line is archived once', gunzip(path.join(dir, 'events.2026-09.jsonl.gz')) === lines[0] + '\n');
+        check('R15 no temp files are left behind', ls(dir).every((x) => !x.endsWith('.tmp') && !x.endsWith('.write-lock')), ls(dir).join(','));
+    }
+
+    // R16: a failure after the rename is reported and does not unlink the archives.
+    if (process.platform !== 'win32') {
+        const dir = fresh();
+        const lines = [row(1, OLD_SEP), row(2, RECENT)];
+        const f = put(dir, 'events.jsonl', lines.join('\n') + '\n');
+        const res = rot.rotateFile(f, { cutoffMs: Date.parse(NOW) - 30 * 86400000, hooks: {
+            afterRename: () => { throw Object.assign(new Error('drain plant'), { code: 'EIO' }); },
+        } });
+        check('R16 the failure is reported, with the rotation still standing',
+            res.ok === false && res.rotated === true && /DRAIN_FAILED/.test(res.why) && /EIO/.test(res.why)
+            && res.archives.join(',') === 'events.2026-09.jsonl.gz', JSON.stringify(res));
+        check('R16 the archive is kept, so the old line is not lost', fs.existsSync(path.join(dir, 'events.2026-09.jsonl.gz'))
+            && gunzip(path.join(dir, 'events.2026-09.jsonl.gz')) === lines[0] + '\n', ls(dir).join(','));
+        check('R16 the hot file is the new one', getText(f) === lines[1] + '\n', JSON.stringify(getText(f)));
+        check('R16 the lock is released', !fs.existsSync(f + '.write-lock'));
     }
 
     // R12: a locking appender running during rotation.
