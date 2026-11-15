@@ -476,7 +476,7 @@ function payloadFor(w) {
             if (w.matcher === 'AskUserQuestion') {
                 return tool('AskUserQuestion', { questions: [{ question: 'Which one?', header: 'Pick', multiSelect: false, options: [{ label: 'A (Recommended)', description: 'first' }, { label: 'B', description: 'second' }] }] });
             }
-            if (w.matcher === 'Bash') return tool('Bash', { command: 'git status' });
+            if (w.matcher === 'Bash' || w.matcher === 'Bash|Monitor') return tool('Bash', { command: 'git status' });
             if (w.matcher === 'ArtifactData') return tool('ArtifactData', { action: 'get', url: 'https://claude.ai/artifact/fixture', collection: 'c', doc_id: 'd' });
             if (w.matcher === 'Write|Edit') return tool('Write', { file_path: path.join(CWD, 'notes.md'), content: 'x' });
             return tool('Read', { file_path: path.join(CWD, 'README.md') });
