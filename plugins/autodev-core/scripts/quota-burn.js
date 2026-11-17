@@ -155,6 +155,13 @@ function responseKey(j) {
     return id || req ? id + '|' + req : null;
 }
 
+/** The advisor_message entries of a usage block's iterations, or []. */
+function advisorIterationsOf(u) {
+    return Array.isArray(u.iterations)
+        ? u.iterations.filter((it) => it && it.type === 'advisor_message')
+        : [];
+}
+
 function* transcripts(dir) {
     let entries;
     try { entries = fs.readdirSync(dir, { withFileTypes: true }); } catch { return; }
@@ -210,13 +217,26 @@ function main() {
     }
 
     const byModel = new Map();
-    let cost = 0;
+    let cost = 0, advisorIterations = 0, advisorUnknownModel = 0;
     for (const { u, model } of responses.values()) {
         const { cost: c, known } = priceUsage(u, model);
         if (!known) unknownModel++;
         cost += c;
         const k = model || '(unknown)';
         byModel.set(k, (byModel.get(k) || 0) + c);
+        // Advisor calls ride inside the executor's response as
+        // usage.iterations[] entries of type advisor_message, each with its own
+        // model. The top-level usage is the sum of the NON-advisor iterations
+        // only ([measured 2026-11-18] 1,061 of 1,061 rows), so advisor tokens
+        // are extra spend, priced at the advisor's model, never the executor's.
+        for (const it of advisorIterationsOf(u)) {
+            const a = priceUsage(it, it.model || null);
+            advisorIterations++;
+            if (!a.known) advisorUnknownModel++;
+            cost += a.cost;
+            const ak = it.model || '(unknown)';
+            byModel.set(ak, (byModel.get(ak) || 0) + a.cost);
+        }
     }
 
     const population = {
@@ -226,6 +246,7 @@ function main() {
         repeatedRows: rows - responses.size,
         rowsWithoutResponseId: unkeyed,
         unreadable, responsesPricedAtFallbackRate: unknownModel,
+        advisorIterations, advisorIterationsPricedAtFallbackRate: advisorUnknownModel,
     };
 
     if (has('json')) {
@@ -251,8 +272,10 @@ function main() {
         + ' usage row(s) in window (' + (rows - responses.size) + ' repeated a response, '
         + unkeyed + ' had no response id and count alone), ' + files
         + ' transcript(s) read, ' + skipped + ' skipped by mtime, ' + unreadable + ' unreadable');
-    if (unknownModel) {
-        console.log('  !! ' + unknownModel + ' response(s) had an unrecognised model and were priced at the');
+    console.log('  advisor calls : ' + advisorIterations + ' advisor iteration(s) priced at their own model');
+    if (unknownModel || advisorUnknownModel) {
+        console.log('  !! ' + (unknownModel + advisorUnknownModel)
+            + ' response(s) or advisor call(s) had an unrecognised model and were priced at the');
         console.log('     HIGHEST published rate. Over-reporting is the safe direction for a tripwire.');
     }
     console.log('');
@@ -264,4 +287,4 @@ function main() {
 // Behind require.main so work-cost.js can require the price table without
 // running a window scan in its own process.
 if (require.main === module) main();
-module.exports = { priceUsage, ratesFor, windowStart, transcripts, responseKey };
+module.exports = { priceUsage, ratesFor, windowStart, transcripts, responseKey, advisorIterationsOf };
