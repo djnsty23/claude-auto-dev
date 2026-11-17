@@ -19,10 +19,13 @@
 // Scope, stated so it is not mistaken for coverage. Every story here is a
 // well-formed object with no `blockedBy`. Dependency graphs and the sprint
 // container are covered by test-prd-states.js and the prd-container suites.
-// A NON-OBJECT entry (null, false) is out of scope on purpose: summarise() reads
-// `s && s.passes` and counts a null entry as pending while isOutstanding(null)
-// is false. That disagreement is a finding to settle in prd-states.js, not a
-// law to encode here.
+// A NON-OBJECT entry (null, false, 0, 'x', [], 42) gets only the laws every
+// reader already agrees on (L12): never done, never ready, always invalid in the
+// plan, never complete, and still counted. WHICH bucket it lands in, and whether
+// it is actionable, is deliberately not asserted: summarise() counts null as
+// pending with outstanding 0, and isActionable('x') is true while workPlan()
+// calls the same entry malformed. That disagreement is a finding to settle in
+// prd-states.js, not a law to encode here.
 //
 // Run: node tooling/test-laws-prd-states.js
 
@@ -123,8 +126,12 @@ for (let len = 0; len <= MAX_LEN; len++) {
         // from deferred and nothing from done.
         const wantOut = seq.filter((l) => l.remaining === true).length;
         const unknown = seq.filter((l) => l.remaining === null).length;
+        // Exact whenever the table settles every value in the set. With an
+        // unrecognised value present the table says nothing about whether a human
+        // owes it, so only the bounds are derivable and only the bounds are asserted.
         check('L5 outstanding counts the remaining work and never deferred or done',
-            c.outstanding >= wantOut && c.outstanding <= wantOut + unknown,
+            unknown === 0 ? c.outstanding === wantOut
+                : c.outstanding >= wantOut && c.outstanding <= wantOut + unknown,
             () => `${tag()} outstanding=${c.outstanding}, table says ${wantOut} (+${unknown} unsettled)`);
 
         const plan = S.workPlan({ stories });
@@ -168,17 +175,52 @@ for (let len = 0; len <= MAX_LEN; len++) {
     }
 }
 
+// ------------------------------------- non-object entries: the agreed laws
+
+const NON_OBJECT = [null, false, 0, 'x', [], 42];
+// One non-object entry inserted at every position of every set of length
+// 0..2: 6 * (1*1 + 20*2 + 400*3) = 7446. A literal, like the floor above.
+const EXPECTED_MALFORMED_POPULATION = 7446;
+let malformedPopulation = 0;
+for (let len = 0; len <= 2; len++) {
+    for (const seq of sequences(len)) {
+        for (const bad of NON_OBJECT) {
+            for (let at = 0; at <= len; at++) {
+                malformedPopulation++;
+                const entries = seq.map(story);
+                entries.splice(at, 0, bad);
+                const stories = Object.fromEntries(entries.map((e, i) => [`S${i}`, e]));
+                const badId = `S${at}`;
+                const tag = () => `[${entries.map((e) => e === bad ? `<${show(bad)}>` : show(e.passes === undefined && !('passes' in e) ? ABSENT : e.passes)).join(', ')}]`;
+                const c = S.summarise(stories);
+                const plan = S.workPlan({ stories });
+                check('L12 a non-object entry is never done or archivable', !S.isDone(bad) && !S.isArchivable(bad), tag);
+                check('L12 a non-object entry is never ready and always invalid in the plan',
+                    !plan.ready.some(([id]) => id === badId) && plan.invalid.some((x) => x.id === badId), tag);
+                check('L12 a set with a non-object entry is never complete', plan.complete === false, tag);
+                const sum = BUCKETS.reduce((n, b) => n + c[b], 0);
+                check('L12 a non-object entry is still counted: buckets sum to the entry count',
+                    sum === entries.length && c.total === entries.length, () => `${tag()} sum=${sum} total=${c.total}`);
+                const wantDone = seq.filter((l) => l.done).length;
+                check('L12 a non-object entry never adds to done', c.done === wantDone, () => `${tag()} done=${c.done}, want ${wantDone}`);
+            }
+        }
+    }
+}
+
 // ------------------------------------------------------------------ report
 
 const floorOk = population === EXPECTED_POPULATION && ALPHABET.length === EXPECTED_ALPHABET
-    && lettersSeen.size === EXPECTED_ALPHABET;
+    && lettersSeen.size === EXPECTED_ALPHABET && malformedPopulation === EXPECTED_MALFORMED_POPULATION;
 const broken = [...laws].filter(([, l]) => l.broken);
 const evaluations = [...laws.values()].reduce((n, l) => n + l.held + l.broken, 0);
 console.log(`prd-states laws: ${population} story sets of length 0..${MAX_LEN} over ${ALPHABET.length} values `
-    + `(${KNOWN.length} known incl. absent, ${UNRECOGNISED.length} unrecognised), ${laws.size} laws, ${evaluations} evaluations`);
+    + `(${KNOWN.length} known incl. absent, ${UNRECOGNISED.length} unrecognised), plus ${malformedPopulation} sets with one of `
+    + `${NON_OBJECT.length} non-object entries, ${laws.size} laws, ${evaluations} evaluations`);
 if (!floorOk) {
     console.error(`POPULATION FLOOR: enumerated ${population} sets over ${lettersSeen.size} values, `
-        + `expected ${EXPECTED_POPULATION} over ${EXPECTED_ALPHABET}`);
+        + `expected ${EXPECTED_POPULATION} over ${EXPECTED_ALPHABET}; non-object sets ${malformedPopulation}, `
+        + `expected ${EXPECTED_MALFORMED_POPULATION}`);
 }
 for (const [name, l] of broken) console.error(`  x ${name}: broken in ${l.broken} of ${l.held + l.broken}, first ${l.first}`);
 if (broken.length || !floorOk) {
