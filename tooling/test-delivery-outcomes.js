@@ -319,6 +319,35 @@ try {
     check(closed.status === 'abandoned', `a follow-up whose PR closed unmerged is abandoned: ${closed.status} (${closed.reason})`);
     const unreadFu = D.computeOutcome('fu', followUp([pr(903)]), { now: NOW, prFacts: factsOf });
     check(unreadFu.accepted === null && unreadFu.status === 'unknown', `an unreadable PR is unknown, never abandoned: ${unreadFu.status} (${unreadFu.reason})`);
+
+    // An advisor call rides in usage.iterations[] as an advisor_message entry with
+    // its own model, outside the top-level usage. One response as three rows: two
+    // repeat the advisor entry, the last carries none. It is priced once, at Fable
+    // 5.2's $40 per MTok output, and is not a response of its own.
+    const advTop = { output_tokens: 0 };
+    const advRow = (iterations) => JSON.stringify({ type: 'assistant', requestId: 'req_adv',
+        message: { id: 'msg_adv', model: 'claude-opus-5', usage: { ...advTop, ...(iterations ? { iterations } : {}) } } });
+    const advIts = [{ type: 'message', ...advTop }, { type: 'advisor_message', model: 'claude-fable-5-2', input_tokens: 0, output_tokens: 1e6 }];
+    const advText = [advRow(advIts), advRow(advIts), advRow(null)].join('\n') + '\n';
+    const advPriced = D.transcriptCost([advText]);
+    check(advPriced && advPriced.cost === 40 && advPriced.responses === 1 && advPriced.advisorCalls === 1,
+        `an advisor call is priced once per response at its own model: ${JSON.stringify(advPriced)}, expected cost 40, 1 response, 1 advisor call`);
+    // A session cost cached before advisor calls were priced is re-priced, even
+    // though the transcript is unchanged. One cached under the current basis is reused.
+    const advProjects = path.join(scratch, 'adv-projects');
+    const ADV_ID = 'dddddddd-0000-4000-8000-000000000000';
+    fs.mkdirSync(path.join(advProjects, 'slug'), { recursive: true });
+    fs.writeFileSync(path.join(advProjects, 'slug', `${ADV_ID}.jsonl`), advText);
+    const advCache = {};
+    const advRec = { cliSessionId: ADV_ID };
+    const firstCost = D.sessionCoster(advProjects, advCache).costOf(advRec);
+    const stale = { ...advCache[ADV_ID], cost: 0 }; delete stale.basis;
+    const restale = D.sessionCoster(advProjects, { [ADV_ID]: stale });
+    const repriced = restale.costOf(advRec);
+    const fresh = D.sessionCoster(advProjects, { [ADV_ID]: { ...advCache[ADV_ID], cost: 7 } });
+    const reused = fresh.costOf(advRec);
+    check(firstCost === 40 && repriced === 40 && restale.tally.priced === 1 && reused === 7 && fresh.tally.reused === 1,
+        `a cached cost from before advisor pricing is re-priced: first ${firstCost}, stale ${repriced} (priced ${restale.tally.priced}), current ${reused} (reused ${fresh.tally.reused}); expected 40, 40 (1), 7 (1)`);
 } catch (e) {
     failures.push(`threw: ${e.stack || e.message}`);
 } finally {
