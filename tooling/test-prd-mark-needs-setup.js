@@ -205,6 +205,27 @@ const FLAT = () => ({
     check('nested: summarise via storiesOf sees it', S.summarise(S.storiesOf(prd)).needsSetup === 1);
 }
 
+// ---------------------------------------------------------------- malformed
+// A non-object story entry is malformed (prd-states.js isStoryObject). Mark
+// and clear refuse it with exit 2 and leave the file byte-identical. Before
+// the guard, null and 'x' crashed with a TypeError and [] exited 0 printing
+// "-> needs-setup (was null)" while nothing was written.
+{
+    const BAD = { 'BAD-NULL': null, 'BAD-STR': 'x', 'BAD-ARR': [], 'BAD-NUM': 42, 'BAD-FALSE': false };
+    let refused = 0;
+    for (const [id] of Object.entries(BAD)) {
+        for (const args of [[id, 'Needs a key from https://example.com/keys'], [id, '--clear']]) {
+            const f = fixture({ stories: { 'S1-001': { title: 'pending', passes: null }, ...BAD } });
+            const before = fs.readFileSync(f, 'utf8');
+            const r = run(f, ...args);
+            const ok = r.code === 2 && r.text === before && /malformed story/.test(r.err) && !/TypeError/.test(r.err);
+            if (ok) refused++;
+            check(`malformed ${id} ${args[1] === '--clear' ? 'clear' : 'mark'}: refused with exit 2, file untouched`, ok, `exit ${r.code} ${r.err.trim()}`);
+        }
+    }
+    console.log(`  population: ${Object.keys(BAD).length} malformed entries x 2 commands, ${refused} refused`);
+}
+
 // ---------------------------------------------------------------- formatting
 {
     const f = fixture(FLAT(), { indent: 4 });

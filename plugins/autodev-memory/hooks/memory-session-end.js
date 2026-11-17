@@ -66,11 +66,15 @@ try {
                     }
                     if (!stories) stories = (prd.stories && typeof prd.stories === 'object') ? prd.stories : {};
                     // Match core's isStoryObject(): a non-object entry is
-                    // malformed, never done and never outstanding. Without the
-                    // guard a null entry threw on `.passes` and lost the whole
-                    // summary, and 'x', [] or 42 were listed as pending work.
-                    const entries = Object.entries(stories)
-                        .filter(([, v]) => !!v && typeof v === 'object' && !Array.isArray(v));
+                    // malformed, never done and never pending. Without the guard
+                    // a null entry threw on `.passes` and lost the whole summary,
+                    // and 'x', [] or 42 were listed as pending work. It is NOT
+                    // dropped silently either: core counts it as unrecognised and
+                    // never reads the sprint complete, so the summary names it
+                    // below, or a prd of only malformed entries reads as finished.
+                    const isStory = (v) => !!v && typeof v === 'object' && !Array.isArray(v);
+                    const malformed = Object.entries(stories).filter(([, v]) => !isStory(v)).map(([k]) => k);
+                    const entries = Object.entries(stories).filter(([, v]) => isStory(v));
                     const done = entries.filter(([, v]) => v.passes === true);
                     // DELIBERATE DUPLICATE of autodev-core's prd-states.js
                     // isOutstanding(). ${CLAUDE_PLUGIN_ROOT} resolves per plugin, so
@@ -126,8 +130,10 @@ try {
                         completed = completed ? `${completed} ${note}` : note;
                     }
                     if (completed) summary.completed = completed;
-                    if (pending.length > 0) {
-                        summary.nextSteps = `${pending.length} tasks remaining: `
+                    if (malformed.length > 0) groups.push(['MALFORMED, not a story object, fix prd.json by hand', malformed]);
+                    const remaining = pending.length + malformed.length;
+                    if (remaining > 0) {
+                        summary.nextSteps = `${remaining} tasks remaining: `
                             + groups.map(([label, ids]) => `${ids.length} ${label} (${ids.join(', ')})`).join('; ');
                     }
                 } catch { /* non-critical */ }
