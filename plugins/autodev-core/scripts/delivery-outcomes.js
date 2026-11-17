@@ -258,6 +258,10 @@ function jsonlUnder(dir) {
     return out.sort();
 }
 
+// What a cached session cost was priced under. 2 adds advisor calls; a cache
+// entry with another basis is re-priced.
+const COST_BASIS = 2;
+
 /** List-price cost of transcript texts: the last usage row of each response, priced once. */
 function transcriptCost(texts) {
     const last = new Map(); let n = 0;
@@ -267,13 +271,25 @@ function transcriptCost(texts) {
             let j; try { j = JSON.parse(line); } catch { continue; }
             const m = j && j.message;
             if (!m || !m.usage) continue;
-            last.set(responseKey(j) || `row${n++}`, { u: m.usage, model: m.model || null });
+            // Advisor calls ride in usage.iterations[] as advisor_message entries,
+            // each with its own model, and are NOT in the top-level usage
+            // ([measured 2026-11-18] 1,061 of 1,061 rows). Every row of a response
+            // repeats them; a later row without them keeps the ones already seen.
+            const key = responseKey(j) || `row${n++}`;
+            const prev = last.get(key);
+            const its = Array.isArray(m.usage.iterations)
+                ? m.usage.iterations.filter((it) => it && it.type === 'advisor_message') : [];
+            last.set(key, { u: m.usage, model: m.model || null,
+                advisor: its.length || !prev ? its : prev.advisor });
         }
     }
     if (!last.size) return null;
-    let cost = 0;
-    for (const { u, model } of last.values()) cost += priceUsage(u, model).cost;
-    return { cost: round(cost), responses: last.size };
+    let cost = 0, advisorCalls = 0;
+    for (const { u, model, advisor } of last.values()) {
+        cost += priceUsage(u, model).cost;
+        for (const it of advisor) { cost += priceUsage(it, it.model || null).cost; advisorCalls++; }
+    }
+    return { cost: round(cost), responses: last.size, advisorCalls };
 }
 
 /**
@@ -306,14 +322,16 @@ function sessionCoster(projectsDir, cache, { budgetMs = COST_BUDGET_MS, clock = 
         let sig;
         try { sig = files.map((f) => { const st = fs.statSync(f); return `${st.size}:${Math.floor(st.mtimeMs)}`; }).join(','); } catch { tally.missing++; return null; }
         const hit = cache[id];
-        if (hit && hit.sig === sig && Number.isFinite(hit.cost)) { tally.reused++; return hit.cost; }
+        // A cost priced under an older basis (before advisor calls were priced)
+        // is stale even when the transcript has not changed.
+        if (hit && hit.sig === sig && hit.basis === COST_BASIS && Number.isFinite(hit.cost)) { tally.reused++; return hit.cost; }
         if (start === null) start = clock();
         else if (clock() - start >= budgetMs) { tally.skipped++; return null; }
         const texts = [];
         for (const f of files) { try { texts.push(fs.readFileSync(f, 'utf8')); } catch { tally.missing++; return null; } }
         const priced = transcriptCost(texts);
         if (!priced) { tally.missing++; return null; }
-        cache[id] = { sig, cost: priced.cost, responses: priced.responses };
+        cache[id] = { sig, basis: COST_BASIS, cost: priced.cost, responses: priced.responses };
         tally.priced++;
         return priced.cost;
     };
