@@ -320,6 +320,46 @@ const CURRENT_MODELS = {
         JSON.stringify(j.population));
 }
 
+// ------------------------------------------------- advisor iterations
+
+{
+    // An advisor call rides inside the executor's response as an
+    // usage.iterations[] entry of type advisor_message, with its own model. The
+    // top-level usage is the executor's iterations only, so the advisor is extra
+    // spend at the advisor's rate. The "message" iteration repeats the top level
+    // and must not be counted twice.
+    const top = { input_tokens: 0, output_tokens: 1e6 };
+    const usage = Object.assign({}, top, { iterations: [
+        Object.assign({ type: 'message' }, top),
+        { type: 'advisor_message', model: 'claude-fable-5-2', input_tokens: 1e6, output_tokens: 1e6 },
+    ] });
+    const cfg = fixture([
+        { timestamp: insideWindow, requestId: 'req_adv', message: { id: 'msg_adv', model: 'claude-opus-5-5', usage } },
+        // A second content-block row of the same response: still one advisor call.
+        { timestamp: insideWindow, requestId: 'req_adv', message: { id: 'msg_adv', model: 'claude-opus-5-5', usage } },
+    ]);
+    const { r, j } = run(cfg);
+    const exec = j && j.byModel['claude-opus-5-5'];
+    const adv = j && j.byModel['claude-fable-5-2'];
+    check('an advisor_message iteration is priced at its own model ($8 in + $40 out = $48)',
+        j && near(adv, 48, 1e-6), r.stdout + r.stderr);
+    check('the window cost is executor plus advisor, the message iteration not counted twice',
+        j && near(j.windowCost, exec + 48, 1e-6) && near(exec, 20, 1e-6), JSON.stringify(j && j.byModel));
+    check('the advisor call is counted once per API response',
+        j && j.population.advisorIterations === 1 && j.population.advisorIterationsPricedAtFallbackRate === 0,
+        JSON.stringify(j && j.population));
+}
+
+{
+    const usage = { input_tokens: 0, output_tokens: 0, iterations: [
+        { type: 'advisor_message', model: 'claude-advisor-9', input_tokens: 0, output_tokens: 1e6 },
+    ] };
+    const { j } = run(fixture([row(usage, 'claude-opus-5-5')]));
+    check('an advisor call on an unknown model is priced HIGH and counted as fallback',
+        j && near(j.byModel['claude-advisor-9'], 50, 1e-6) && j.population.advisorIterationsPricedAtFallbackRate === 1,
+        JSON.stringify(j));
+}
+
 // -------------------------------------------------------------------- report
 
 try { fs.rmSync(ROOT, { recursive: true, force: true }); } catch { /* leave it */ }
