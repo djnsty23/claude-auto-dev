@@ -13,14 +13,20 @@ const FAILED = false;
 const DEFERRED = 'deferred';
 const NEEDS_SETUP = 'needs-setup';
 
+// A non-object entry is malformed: unrecognised, never actionable or
+// outstanding. Same guard as isStoryObject() in prd-states.js.
+function isStoryObject(story) {
+    return !!story && typeof story === 'object' && !Array.isArray(story);
+}
+
 function isActionable(story) {
-    if (!story) return false;
+    if (!isStoryObject(story)) return false;
     const p = story.passes;
     return p === PENDING || p === undefined || p === FAILED;
 }
 
 function isOutstanding(story) {
-    if (!story) return false;
+    if (!isStoryObject(story)) return false;
     const p = story.passes;
     return p === PENDING || p === undefined || p === FAILED || p === NEEDS_SETUP;
 }
@@ -46,7 +52,8 @@ export function summarise(stories) {
         done: 0, pending: 0, failed: 0, deferred: 0, needsSetup: 0, unrecognised: 0,
     };
     for (const s of all) {
-        const p = s && s.passes;
+        if (!isStoryObject(s)) { counts.unrecognised++; continue; }
+        const p = s.passes;
         if (p === DONE) counts.done++;
         else if (p === PENDING || p === undefined) counts.pending++;
         else if (p === FAILED) counts.failed++;
