@@ -109,6 +109,13 @@ function claudeSide() {
     let output = 0;
     let cacheRead = 0;
     let turns = 0;
+    // Advisor calls ride in usage.iterations[] as advisor_message entries, each
+    // with its own model, and are NOT in the top-level usage ([measured
+    // 2026-11-18] 1,061 of 1,061 rows). Every row of a response repeats them, so
+    // they count once per message id plus request id. A row with neither id
+    // counts alone.
+    const advisor = { calls: 0, input: 0, output: 0, cacheRead: 0 };
+    const advisorSeen = new Set();
     for (const f of files) {
         try {
             for (const line of fs.readFileSync(f, 'utf8').split('\n')) {
@@ -121,10 +128,25 @@ function claudeSide() {
                 input += u.input_tokens || 0;
                 output += u.output_tokens || 0;
                 cacheRead += u.cache_read_input_tokens || 0;
+                const its = Array.isArray(u.iterations)
+                    ? u.iterations.filter((it) => it && it.type === 'advisor_message') : [];
+                if (!its.length) continue;
+                const id = (o.message && o.message.id) || '';
+                const key = id || o.requestId ? id + '|' + (o.requestId || '') : null;
+                if (key && advisorSeen.has(key)) continue;
+                if (key) advisorSeen.add(key);
+                for (const it of its) {
+                    advisor.calls += 1;
+                    advisor.input += it.input_tokens || 0;
+                    advisor.output += it.output_tokens || 0;
+                    advisor.cacheRead += it.cache_read_input_tokens || 0;
+                }
             }
         } catch { /* skip */ }
     }
-    return { sessions: files.length, turns, input, output, cacheRead };
+    // The advisor's tokens are Claude-side tokens too, so the totals include them.
+    return { sessions: files.length, turns, input: input + advisor.input,
+        output: output + advisor.output, cacheRead: cacheRead + advisor.cacheRead, advisor };
 }
 
 if (argv.includes('--selftest')) {
@@ -149,6 +171,8 @@ console.log('CLAUDE side  (cost of ASKING)');
 console.log('  transcripts : ' + c.sessions + '   turns: ' + n(c.turns));
 console.log('  input       : ' + n(c.input) + '   cache read: ' + n(c.cacheRead));
 console.log('  output      : ' + n(c.output));
+console.log('  advisor     : ' + n(c.advisor.calls) + ' calls, input ' + n(c.advisor.input)
+    + ', cache read ' + n(c.advisor.cacheRead) + ', output ' + n(c.advisor.output) + ' (inside the figures above)');
 console.log('');
 console.log('GPT side  (cost of the WORK, invisible in the Claude client)');
 console.log('  sessions    : ' + g.sessions);
