@@ -117,6 +117,9 @@ function mark(prd, id, reason) {
         return { code: 2, changed: false, message: `${id}: no such story (${n} read from the file)` };
     }
     const story = container[id];
+    if (!S.isStoryObject(story)) {
+        return { code: 2, changed: false, message: `${id}: malformed story, expected an object but found ${Array.isArray(story) ? 'an array' : JSON.stringify(story)}. Fix prd.json by hand; nothing was written.` };
+    }
     if (S.isDone(story)) {
         return { code: 2, changed: false, message: `${id}: passes is true — done work is not blocked on anyone` };
     }
@@ -144,6 +147,9 @@ function clear(prd, id) {
         return { code: 2, changed: false, message: `${id}: no such story (${Object.keys(stories).length} read from the file)` };
     }
     const story = container[id];
+    if (!S.isStoryObject(story)) {
+        return { code: 2, changed: false, message: `${id}: malformed story, expected an object but found ${Array.isArray(story) ? 'an array' : JSON.stringify(story)}. Fix prd.json by hand; nothing was written.` };
+    }
     if (!S.needsSetup(story)) {
         return { code: 2, changed: false, message: `${id}: passes is ${JSON.stringify(story.passes === undefined ? null : story.passes)}, not "needs-setup" — nothing to clear` };
     }
