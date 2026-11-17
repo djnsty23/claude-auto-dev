@@ -79,11 +79,24 @@ const bucketLabel = (i) => {
 };
 
 function blank() {
-    return { files: 0, reqs: 0, in: 0, read: 0, w5: 0, w1h: 0, out: 0, cost: 0, prompts: [] };
+    return { files: 0, reqs: 0, in: 0, read: 0, w5: 0, w1h: 0, out: 0, cost: 0, prompts: [],
+        advCalls: 0, advCost: 0, advOutCost: 0, advModels: {} };
+}
+
+// List-price cost of one usage block, or 0 when the model has no PRICES row.
+function costOf(u, model) {
+    const p = priceOf(model);
+    if (!p) return { cost: 0, outCost: 0 };
+    const cc = u.cache_creation || {};
+    const outCost = (u.output_tokens || 0) * p.out / 1e6;
+    const cost = ((u.input_tokens || 0) * p.in
+        + (u.cache_read_input_tokens || 0) * (p.read ?? p.in * READ_MULT)
+        + (cc.ephemeral_5m_input_tokens || 0) * p.in * W5_MULT
+        + (cc.ephemeral_1h_input_tokens || 0) * p.in * W1H_MULT) / 1e6 + outCost;
+    return { cost, outCost };
 }
 
 function addUsage(bin, u, model) {
-    const p = priceOf(model);
     const cc = u.cache_creation || {};
     const inTok = u.input_tokens || 0;
     const read = u.cache_read_input_tokens || 0;
@@ -92,10 +105,25 @@ function addUsage(bin, u, model) {
     const out = u.output_tokens || 0;
     bin.reqs++; bin.in += inTok; bin.read += read; bin.w5 += w5; bin.w1h += w1h; bin.out += out;
     bin.prompts.push(inTok + read + (u.cache_creation_input_tokens || 0));
-    if (p) {
-        bin.cost += (inTok * p.in + read * (p.read ?? p.in * READ_MULT) + w5 * p.in * W5_MULT
-            + w1h * p.in * W1H_MULT + out * p.out) / 1e6;
+    bin.cost += costOf(u, model).cost;
+}
+
+// Advisor calls ride inside the executor's row as usage.iterations[] entries of
+// type advisor_message, each with its own model. The top-level usage is the sum
+// of the NON-advisor iterations only ([measured 2026-11-18] 1,061 of 1,061 rows),
+// so each advisor call is extra spend at the advisor's own price. It adds to the
+// bin's cost but not to its calls, prompts or token means, which describe the
+// executor's requests.
+function addAdvisorIterations(bin, u) {
+    if (!Array.isArray(u.iterations)) return [];
+    const its = u.iterations.filter((it) => it && it.type === 'advisor_message');
+    for (const it of its) {
+        const { cost, outCost } = costOf(it, it.model);
+        bin.cost += cost; bin.advCost += cost; bin.advOutCost += outCost; bin.advCalls++;
+        const id = String(it.model);
+        bin.advModels[id] = (bin.advModels[id] || 0) + 1;
     }
+    return its;
 }
 
 // Recursive — a one-level glob is the documented failure mode above.
@@ -139,6 +167,12 @@ async function scan(file, bin, models, collectTiming) {
         if (!priceOf(o.message.model) && billable(u)) {
             const id = String(o.message.model);
             unpriced[id] = (unpriced[id] || 0) + 1;
+        }
+        for (const it of addAdvisorIterations(bin, u)) {
+            if (!priceOf(it.model) && billable(it)) {
+                const id = String(it.model) + ' (advisor)';
+                unpriced[id] = (unpriced[id] || 0) + 1;
+            }
         }
         models[o.message.model] = (models[o.message.model] || 0) + 1;
         const prompt = (u.input_tokens || 0) + (u.cache_read_input_tokens || 0)
@@ -243,7 +277,7 @@ if (require.main === module) (async () => {
     const report = (name, b, models) => {
         if (!b.reqs) { console.log(`\n=== ${name} ===\n  no model calls found`); return null; }
         const prompt = b.in + b.read + b.w5 + b.w1h;
-        const outCost = Object.entries(models).reduce((s, [m, n]) => {
+        const outCost = b.advOutCost + Object.entries(models).reduce((s, [m, n]) => {
             const p = priceOf(m); return s + (p ? (b.out / b.reqs) * n * p.out / 1e6 : 0);
         }, 0);
         console.log(`\n=== ${name} ===`);
@@ -255,6 +289,8 @@ if (require.main === module) (async () => {
         console.log(`  list-price cost   $${b.cost.toFixed(2)} ($${(b.cost / b.reqs).toFixed(4)}/call)`);
         console.log(`  output % of cost  ${((outCost / Math.max(0.0001, b.cost)) * 100).toFixed(0)}%`);
         console.log(`  models            ${Object.entries(models).sort((a, c) => c[1] - a[1]).map(([m, n]) => `${m}=${fmt(n)}`).join(', ')}`);
+        const adv = Object.entries(b.advModels).sort((a, c) => c[1] - a[1]).map(([m, n]) => `${m}=${fmt(n)}`).join(', ');
+        console.log(`  advisor calls     ${fmt(b.advCalls)}, $${b.advCost.toFixed(2)} of the cost above${adv ? ` (${adv})` : ''}`);
         return { prompt: prompt / b.reqs, perCall: b.cost / b.reqs };
     };
 
@@ -281,4 +317,4 @@ if (require.main === module) (async () => {
     }
     console.log('');
 })();
-module.exports = { priceOf, addUsage, blank };
+module.exports = { priceOf, addUsage, addAdvisorIterations, blank };

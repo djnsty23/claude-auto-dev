@@ -145,6 +145,36 @@ const opus = call('claude-opus-5-5', { input_tokens: 1000, output_tokens: M });
         `exit=${dflt.code}\n${dflt.out}`);
 }
 
+// ------------------------------------------------- advisor iterations
+
+{
+    // The executor row is Opus 5.5 with 1M output ($20). Its advisor call is a
+    // usage.iterations[] entry on Fable 5.2 with 1M output ($40), not in the
+    // top-level usage. The "message" iteration repeats the top level.
+    const top = { input_tokens: 1000, output_tokens: M };
+    const usage = Object.assign({}, top, { iterations: [
+        Object.assign({ type: 'message' }, top),
+        { type: 'advisor_message', model: 'claude-fable-5-2', input_tokens: 0, output_tokens: M },
+    ] });
+    const root = store([call('claude-opus-5-5', usage)], [opus]);
+    const r = run(root);
+    const main = sectionCost(r.out, '=== MAIN THREAD');
+    const side = sectionCost(r.out, '=== IN-SESSION SUBAGENTS');
+    check('an advisor_message iteration adds its own model\'s price to the section cost',
+        main !== null && side !== null && near(main - side, 40, 0.01), r.out);
+    check('the advisor call is reported on its own line and not as an executor call',
+        /files \/ calls\s+1 \/ 1/.test(r.out) && /advisor calls\s+1, \$40\.00 of the cost above \(claude-fable-5-2=1\)/.test(r.out),
+        r.out);
+    check('a priced advisor model leaves the run at exit 0', r.code === 0, `exit=${r.code}\n${r.err}`);
+
+    const unknown = store([call('claude-opus-5-5', { input_tokens: 1000, output_tokens: M, iterations: [
+        { type: 'advisor_message', model: 'claude-advisor-9', input_tokens: 0, output_tokens: M },
+    ] })], [opus]);
+    const u = run(unknown);
+    check('an unpriced advisor model is named under UNPRICED MODELS and exits 1',
+        u.code === 1 && /claude-advisor-9 \(advisor\)\s+1 calls/.test(u.out), `exit=${u.code}\n${u.out}`);
+}
+
 // -------------------------------------------------------------------- report
 
 try { fs.rmSync(ROOT, { recursive: true, force: true }); } catch { /* leave it */ }
