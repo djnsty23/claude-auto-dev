@@ -212,6 +212,14 @@ const CURRENT_MODELS = {
     }
     const s5 = tables['analyze-agent-cost']('claude-sonnet-5', { output_tokens: M });
     check('analyze-agent-cost: claude-sonnet-5 at its published $10 output', near(s5.cost, 10), JSON.stringify(s5));
+    // [measured 2026-11-17] claude-fable-5-2 had no row here and fell to the
+    // unknown-model Fable rate, so the burn read $50 per output MTok, not $40.
+    // It joins CURRENT_MODELS once analyze-agent-cost.js carries the row too.
+    const f52 = { i: tables['quota-burn']('claude-fable-5-2', { input_tokens: M }),
+        o: tables['quota-burn']('claude-fable-5-2', { output_tokens: M }),
+        r: tables['quota-burn']('claude-fable-5-2', { cache_read_input_tokens: M }) };
+    check('quota-burn: claude-fable-5-2 resolves known at 8/40/0.2',
+        f52.i.known && near(f52.i.cost, 8) && near(f52.o.cost, 40) && near(f52.r.cost, 0.20), JSON.stringify(f52));
     const unknown = burn.ratesFor('claude-opus-5-9');
     check('an unknown sibling keeps the fail-loud Fable rate', !unknown.known && unknown.rates.out === 50,
         JSON.stringify(unknown));
