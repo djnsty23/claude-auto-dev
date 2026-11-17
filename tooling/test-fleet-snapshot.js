@@ -122,6 +122,19 @@ check('branches ahead of the trunk is printed when known', /7 branches ahead of 
 check('transcript ages are humanised', /12 min ago/.test(html) && /5 h ago/.test(html));
 check('a repo with no recent transcripts says so', /none written in 24 h/.test(html));
 
+// ---- unrecognised: every story the total counts is in exactly one segment ------
+{
+    const { prdBar, prdCounts } = require(SUBJECT);
+    const prdOf = (stories) => prdCounts(summarise(stories), []);
+    // One of every state, plus an unknown value and two malformed entries.
+    const p = prdOf({ a: { passes: true }, b: { passes: null }, c: { passes: false }, d: { passes: 'deferred' }, e: { passes: 'needs-setup' }, g: { passes: 'maybe' }, h: null, i: 'x' });
+    const bar = prdBar(p);
+    const segSum = [...bar.matchAll(/title="[a-z ]+ (\d+)"/g)].reduce((n, m) => n + Number(m[1]), 0);
+    check('unrecognised: fixture control, summarise reports 3 unrecognised of 8', p.unrecognised === 3 && p.total === 8, JSON.stringify(p));
+    check('unrecognised: the bar names it as its own segment', /<b class="mono">3<\/b> unrecognised/.test(bar), bar);
+    check('unrecognised: the segments sum to the total, so no story is drawn nowhere', segSum === p.total, `segments ${segSum} of ${p.total}`);
+}
+
 // ---- themes: tokens defined on bare :root before any media block ---------------
 const rootIdx = html.indexOf(':root{--paper');
 const mediaIdx = html.indexOf('@media (prefers-color-scheme:dark)');

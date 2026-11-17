@@ -130,7 +130,7 @@ function repoFacts(repoPath) {
             try {
                 const st = storiesOf(JSON.parse(raw)); const s = summarise(st);
                 const next = nextActionable(st);
-                prd = { done: s.done, pending: s.pending, failed: s.failed, deferred: s.deferred, needsSetup: s.needsSetup, total: s.total, next };
+                prd = prdCounts(s, next);
             } catch (e) { prd = null; }
         }
     }
@@ -162,9 +162,17 @@ function verdictChip(v) {
     return '<span class="chip ' + cls + '">' + word + '</span>';
 }
 
+/** The trunk prd counts the panel draws: every summarise() bucket, unrecognised included. */
+function prdCounts(s, next) {
+    return { done: s.done, pending: s.pending, failed: s.failed, deferred: s.deferred, needsSetup: s.needsSetup, unrecognised: s.unrecognised, total: s.total, next };
+}
+
 function prdBar(p) {
     if (!p) return '<p class="muted mono">no prd.json at the trunk</p>';
-    const segs = [['done', p.done, 'good'], ['pending', p.pending, 'accent'], ['failed', p.failed, 'crit'], ['deferred', p.deferred, 'muted'], ['needs setup', p.needsSetup, 'warn']].filter(([, n]) => n > 0);
+    // unrecognised is a sixth segment: an unknown passes value or a malformed
+    // (non-object) entry. Without it such a story counted in the total and in
+    // no segment, so the bar and its "of N" disagreed.
+    const segs = [['done', p.done, 'good'], ['pending', p.pending, 'accent'], ['failed', p.failed, 'crit'], ['deferred', p.deferred, 'muted'], ['needs setup', p.needsSetup, 'warn'], ['unrecognised', p.unrecognised, 'crit']].filter(([, n]) => n > 0);
     const bar = segs.map(([k, n, c]) => '<i class="seg ' + c + '" style="flex:' + n + '" title="' + k + ' ' + n + '"></i>').join('');
     const legend = segs.map(([k, n]) => '<span><b class="mono">' + n + '</b> ' + k + '</span>').join('');
     // A FAILED story is work an agent may retry, which is why it belongs in this
@@ -271,7 +279,7 @@ function render(d) {
         + '</div>';
 }
 
-module.exports = { gather, render, repoPanel, prdBar, esc, nextActionable };
+module.exports = { gather, render, repoPanel, prdBar, prdCounts, esc, nextActionable };
 
 const USAGE = 'Usage: node fleet-snapshot.js --out <file.html> | --json | --data <snapshot.json> --out <file.html>';
 
