@@ -65,7 +65,12 @@ try {
                         }
                     }
                     if (!stories) stories = (prd.stories && typeof prd.stories === 'object') ? prd.stories : {};
-                    const entries = Object.entries(stories);
+                    // Match core's isStoryObject(): a non-object entry is
+                    // malformed, never done and never outstanding. Without the
+                    // guard a null entry threw on `.passes` and lost the whole
+                    // summary, and 'x', [] or 42 were listed as pending work.
+                    const entries = Object.entries(stories)
+                        .filter(([, v]) => !!v && typeof v === 'object' && !Array.isArray(v));
                     const done = entries.filter(([, v]) => v.passes === true);
                     // DELIBERATE DUPLICATE of autodev-core's prd-states.js
                     // isOutstanding(). ${CLAUDE_PLUGIN_ROOT} resolves per plugin, so

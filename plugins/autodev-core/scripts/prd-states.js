@@ -42,6 +42,20 @@ const NEEDS_SETUP = 'needs-setup';
 const VALID = [DONE, PENDING, FAILED, DEFERRED, NEEDS_SETUP];
 
 /**
+ * A story is a plain object. Anything else in the container (null, false, 0,
+ * a string, an array) is MALFORMED, and every reader here reads it one way,
+ * the way workPlan() always did: counted as unrecognised, never actionable,
+ * never outstanding, never done, and it keeps a sprint from reading complete.
+ *
+ * Before this guard each reader guessed: summarise() put null in pending and
+ * false in failed, while isActionable('x') was true because a string has no
+ * `passes` and undefined reads as pending. The predicates fail closed instead.
+ */
+function isStoryObject(story) {
+    return !!story && typeof story === 'object' && !Array.isArray(story);
+}
+
+/**
  * A state that permits engineering work. Readiness also requires satisfied
  * dependencies; use workPlan() when choosing the next story.
  *
@@ -50,7 +64,7 @@ const VALID = [DONE, PENDING, FAILED, DEFERRED, NEEDS_SETUP];
  * to do it. This is the state predicate used inside workPlan().
  */
 function isActionable(story) {
-    if (!story) return false;
+    if (!isStoryObject(story)) return false;
     const p = story.passes;
     // undefined counts as pending: a story authored without the key is work
     // nobody started, not a story that does not exist to the tooling.
@@ -72,7 +86,7 @@ function workPlan(prd) {
     const hasStory = (id) => Object.prototype.hasOwnProperty.call(stories, id);
 
     for (const [id, story] of entries) {
-        if (!story || typeof story !== 'object' || Array.isArray(story)) {
+        if (!isStoryObject(story)) {
             invalid.push({ id, reason: 'malformed story: expected an object' });
             continue;
         }
@@ -162,7 +176,7 @@ function workPlan(prd) {
  */
 function dependencyProblems(prd) {
     const stories = Object.fromEntries(Object.entries(storiesOf(prd)).map(([id, story]) => [id,
-        story && typeof story === 'object' && !Array.isArray(story) ? { ...story, passes: null } : story]));
+        isStoryObject(story) ? { ...story, passes: null } : story]));
     const plan = workPlan({ stories });
     return [...plan.invalid, ...plan.graphProblems];
 }
@@ -175,23 +189,23 @@ function dependencyProblems(prd) {
  * waiting on him. This is the predicate reports and dashboards want.
  */
 function isOutstanding(story) {
-    if (!story) return false;
+    if (!isStoryObject(story)) return false;
     const p = story.passes;
     return p === PENDING || p === undefined || p === FAILED || p === NEEDS_SETUP;
 }
 
 /** A decision NOT to do the work. Never remaining, never outstanding. */
 function isDeferred(story) {
-    return !!story && story.passes === DEFERRED;
+    return isStoryObject(story) && story.passes === DEFERRED;
 }
 
 function isDone(story) {
-    return !!story && story.passes === DONE;
+    return isStoryObject(story) && story.passes === DONE;
 }
 
 /** Blocked on a person or an external system, not on engineering time. */
 function needsSetup(story) {
-    return !!story && story.passes === NEEDS_SETUP;
+    return isStoryObject(story) && story.passes === NEEDS_SETUP;
 }
 
 /**
@@ -214,7 +228,9 @@ function summarise(stories) {
         done: 0, pending: 0, failed: 0, deferred: 0, needsSetup: 0, unrecognised: 0,
     };
     for (const s of all) {
-        const p = s && s.passes;
+        // A malformed entry is unrecognised, like a value nobody knows.
+        if (!isStoryObject(s)) { counts.unrecognised++; continue; }
+        const p = s.passes;
         if (p === DONE) counts.done++;
         else if (p === PENDING || p === undefined) counts.pending++;
         else if (p === FAILED) counts.failed++;
@@ -310,6 +326,6 @@ function storiesOf(prd) {
 
 module.exports = {
     DONE, PENDING, FAILED, DEFERRED, NEEDS_SETUP, VALID,
-    isActionable, isOutstanding, isDeferred, isDone, needsSetup, isArchivable,
+    isStoryObject, isActionable, isOutstanding, isDeferred, isDone, needsSetup, isArchivable,
     summarise, storiesOf, workPlan, dependencyProblems,
 };

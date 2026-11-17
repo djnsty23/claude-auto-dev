@@ -19,13 +19,12 @@
 // Scope, stated so it is not mistaken for coverage. Every story here is a
 // well-formed object with no `blockedBy`. Dependency graphs and the sprint
 // container are covered by test-prd-states.js and the prd-container suites.
-// A NON-OBJECT entry (null, false, 0, 'x', [], 42) gets only the laws every
-// reader already agrees on (L12): never done, never ready, always invalid in the
-// plan, never complete, and still counted. WHICH bucket it lands in, and whether
-// it is actionable, is deliberately not asserted: summarise() counts null as
-// pending with outstanding 0, and isActionable('x') is true while workPlan()
-// calls the same entry malformed. That disagreement is a finding to settle in
-// prd-states.js, not a law to encode here.
+// A NON-OBJECT entry (null, false, 0, 'x', [], 42) is MALFORMED, and L12 holds
+// every reader to the one reading workPlan() always had: counted in
+// `unrecognised` and in no other bucket, never actionable, never outstanding,
+// never done, never ready, always invalid in the plan, never complete. Before
+// that reading was settled, summarise() counted null as pending and false as
+// failed, and isActionable('x') was true.
 //
 // Run: node tooling/test-laws-prd-states.js
 
@@ -203,6 +202,17 @@ for (let len = 0; len <= 2; len++) {
                     sum === entries.length && c.total === entries.length, () => `${tag()} sum=${sum} total=${c.total}`);
                 const wantDone = seq.filter((l) => l.done).length;
                 check('L12 a non-object entry never adds to done', c.done === wantDone, () => `${tag()} done=${c.done}, want ${wantDone}`);
+                const wrongBuckets = BUCKETS.filter((b) => c[b] !== seq.filter((l) => l.bucket === b).length + (b === 'unrecognised' ? 1 : 0));
+                check('L12 a non-object entry lands in unrecognised and no other bucket', wrongBuckets.length === 0,
+                    () => `${tag()} wrong: ${wrongBuckets.map((b) => `${b}=${c[b]}`).join(', ')}`);
+                check('L12 a non-object entry is never actionable, outstanding, deferred or needs-setup',
+                    !S.isActionable(bad) && !S.isOutstanding(bad) && !S.isDeferred(bad) && !S.needsSetup(bad), tag);
+                const wantActionable = seq.filter((l) => l.actionable).length;
+                const wantOut = seq.filter((l) => l.remaining === true).length;
+                const unsettled = seq.filter((l) => l.remaining === null).length;
+                check('L12 a non-object entry adds nothing to the actionable or outstanding counts',
+                    c.actionable === wantActionable && c.outstanding >= wantOut && c.outstanding <= wantOut + unsettled,
+                    () => `${tag()} actionable=${c.actionable} want ${wantActionable}, outstanding=${c.outstanding} want ${wantOut}..${wantOut + unsettled}`);
             }
         }
     }

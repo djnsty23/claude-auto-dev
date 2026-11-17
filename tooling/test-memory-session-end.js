@@ -284,6 +284,31 @@ function run(dir, sessionId) {
                 (steps.match(/S1-00\d/g) || []).length === 4, steps);
         }
 
+        // A NON-OBJECT story entry is malformed, read as core's isStoryObject()
+        // reads it: never done, never outstanding. Before the guard a null entry
+        // threw on `.passes` and lost the whole summary, and 'x', [] and 42 were
+        // listed as pending work.
+        {
+            const dir = project({
+                'prd.json': JSON.stringify({
+                    stories: {
+                        'S1-001': { title: 'done', passes: true },
+                        'S1-002': { title: 'pending', passes: null },
+                        'BAD-NULL': null, 'BAD-FALSE': false, 'BAD-ZERO': 0,
+                        'BAD-STR': 'x', 'BAD-ARR': [], 'BAD-NUM': 42,
+                    },
+                }),
+            });
+            const sid = withHome(() => loadDb().startSession(dir));
+            carrier.write(dir, 'sess-nonobj', sid);
+            run(dir, 'sess-nonobj');
+            const row = readSession(sid);
+            const steps = row?.next_steps || '';
+            check('non-object entries: the summary is still written, with the done story', /S1-001: done/.test(row?.completed || ''), row?.completed);
+            check('  only the real pending story is remaining', /1 tasks remaining: 1 pending \(S1-002\)/.test(steps), steps);
+            check('  no non-object entry is named anywhere', !/BAD-/.test(steps + (row?.completed || '')), steps);
+        }
+
         {
             const dir = project({
                 'prd.json': '{"sprints":[{"stories":{"__proto__":{"title":"waiting","passes":null},"GOOD":{"title":"done","passes":true}}}]}',
