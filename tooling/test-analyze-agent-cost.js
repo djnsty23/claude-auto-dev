@@ -167,6 +167,21 @@ const opus = call('claude-opus-5-5', { input_tokens: 1000, output_tokens: M });
         r.out);
     check('a priced advisor model leaves the run at exit 0', r.code === 0, `exit=${r.code}\n${r.err}`);
 
+    // One response written as three content-block rows, each repeating the
+    // whole usage. The first is a streaming partial with less advisor output.
+    // The advisor call counts once, at the full row's cost.
+    const blockRow = (advOut) => JSON.stringify({
+        type: 'assistant', timestamp: '2026-11-17T10:00:00.000Z', requestId: 'req_1',
+        message: { id: 'msg_1', model: 'claude-opus-5-5', usage: Object.assign({}, top, { iterations: [
+            { type: 'advisor_message', model: 'claude-fable-5-2', input_tokens: 0, output_tokens: advOut },
+        ] }) },
+    });
+    const split = run(store([blockRow(M / 2), blockRow(M), blockRow(M)], [opus]));
+    check('an advisor call repeated across a response\'s rows counts once, at its largest cost',
+        /advisor calls\s+1, \$40\.00 of the cost above \(claude-fable-5-2=1\)/.test(split.out)
+        && near(sectionCost(split.out, '=== MAIN THREAD') - sectionCost(split.out, '=== IN-SESSION SUBAGENTS'), 2 * 20 + 40, 0.05),
+        split.out);
+
     const unknown = store([call('claude-opus-5-5', { input_tokens: 1000, output_tokens: M, iterations: [
         { type: 'advisor_message', model: 'claude-advisor-9', input_tokens: 0, output_tokens: M },
     ] })], [opus]);
