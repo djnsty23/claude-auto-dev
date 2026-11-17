@@ -505,6 +505,9 @@ echo 'x\\y'`, win],
             a: { passes: true }, b: { passes: null }, c: { passes: false }, d: { passes: 'deferred' },
             e: { passes: 'needs-setup' }, f: {}, g: { passes: 'maybe' }, h: null,
         } },
+        nonObjectEntries: { stories: {
+            a: { passes: null }, n: null, f: false, z: 0, s: 'x', arr: [], num: 42,
+        } },
         nested: { sprints: [
             { id: 1, stories: { 'S1-001': { passes: true }, 'S1-002': { passes: null } } },
             { id: 2, stories: { 'S1-002': { passes: true }, 'S2-001': { passes: false } } },
@@ -527,9 +530,10 @@ echo 'x\\y'`, win],
 
     const tally = { redacted: 2, denied: 1, rewritten: 0 };
     const line = status.formatStatus({ counts: status.summarise(status.storiesOf(fixtures.flatAllStates)), tally });
-    // 3 pending: `b` (null), `f` (no passes key) and `h` (a null story), which
-    // is what prd-states.js counts too; the parity check above is the authority.
-    check('status names every non-zero state', /3 pending/.test(line) && /1 failed/.test(line) && /1 needs-setup/.test(line) && /1 deferred/.test(line) && /1 UNRECOGNISED/.test(line) && /1\/8 done/.test(line), line);
+    // 2 pending: `b` (null) and `f` (no passes key). `h` (a null story) is
+    // malformed and joins `g` as unrecognised, which is what prd-states.js
+    // counts too; the parity check above is the authority.
+    check('status names every non-zero state', /2 pending/.test(line) && /1 failed/.test(line) && /1 needs-setup/.test(line) && /1 deferred/.test(line) && /2 UNRECOGNISED/.test(line) && /1\/8 done/.test(line), line);
     check('status carries the tally', /redacted 2 · denied 1 · rewrote 0/.test(line), line);
     check('status without prd.json says so', /no prd\.json/.test(status.formatStatus({ counts: null, tally })));
     check('status with an empty prd says no stories found', /no stories found/.test(status.formatStatus({ counts: status.summarise({}), tally })));
