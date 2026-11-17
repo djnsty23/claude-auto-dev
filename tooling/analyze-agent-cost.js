@@ -27,6 +27,9 @@
 //   node tooling/analyze-agent-cost.js [mainSampleSize]
 //   AGENT_COST_ROOT=<dir> node tooling/analyze-agent-cost.js   (for testing)
 //
+// Exit 0 when every model with calls has a price, 1 when any model with calls
+// is unpriced (its cost would read as $0), 2 when the run cannot report at all.
+//
 // Dollar figures are LIST-PRICE EQUIVALENTS for comparing surfaces against each
 // other. Under a subscription they are not a bill.
 
@@ -37,12 +40,22 @@ const readline = require('readline');
 const HOME = process.env.HOME || process.env.USERPROFILE;
 const ROOT = process.env.AGENT_COST_ROOT
     || path.join(HOME, '.claude', 'projects');
-const MAIN_SAMPLE = Number(process.argv[2] || 8);
+const USAGE = [
+    'Usage: node tooling/analyze-agent-cost.js [mainSampleSize]',
+    '  mainSampleSize   positive integer: scan the N largest main sessions (default 8)',
+    '  AGENT_COST_ROOT  overrides the transcript store (default ~/.claude/projects)',
+].join('\n');
+// A non-numeric first argument such as --help once ran the whole analysis with
+// NaN as the sample size. Anything but a positive integer prints usage instead.
+const ARG = process.argv[2];
+const MAIN_SAMPLE = ARG === undefined ? 8 : (/^[1-9][0-9]*$/.test(ARG) ? Number(ARG) : null);
 
 // $/1M tokens. Keep in sync with the model table in the `claude-api` skill.
 // `read` overrides the 0.1x read multiplier. Haiku 5.5 is [measured 2026-10-08]
-// from Claude Code's own costUSD (costBasis "list"), not published.
+// from Claude Code's own costUSD (costBasis "list"), not published. Fable 5.2 is
+// the skill's published table (cached 2026-11-03): $8 / $40, cache reads $0.20.
 const PRICES = {
+    'claude-fable-5-2': { in: 8, out: 40, read: 0.20 },
     'claude-fable-5-1': { in: 10, out: 50, read: 0.25 }, 'claude-opus-5-5': { in: 4, out: 20, read: 0.20 },
     'claude-sonnet-5-5': { in: 2, out: 10, read: 0.20 }, 'claude-haiku-5-5': { in: 0.10, out: 0.50, read: 0.01 },
     'claude-fable-5': { in: 10, out: 50 }, 'claude-mythos-5': { in: 10, out: 50 },
@@ -98,6 +111,13 @@ function walk(dir, out) {
 
 const MAIN = blank(), SIDE = blank();
 const mainModels = {}, sideModels = {};
+// Model ids seen with billable tokens and no PRICES row. Their calls cost $0 in
+// every figure below, so the run names them and exits 1 rather than print a
+// total that silently leaves them out. A row with no tokens at all (Claude
+// Code's "<synthetic>" records) costs $0 under any price and is not counted.
+const unpriced = {};
+const billable = (u) => (u.input_tokens || 0) + (u.cache_read_input_tokens || 0)
+    + (u.cache_creation_input_tokens || 0) + (u.output_tokens || 0) > 0;
 const latency = LAT_BUCKETS.slice(0, -1).map(() => []);
 const decile = Array.from({ length: 10 }, () => ({ read: 0, write: 0, reqs: 0 }));
 
@@ -116,6 +136,10 @@ async function scan(file, bin, models, collectTiming) {
         if (!u || o.type !== 'assistant') { if (ts) prevTs = ts; continue; }
 
         addUsage(bin, u, o.message.model);
+        if (!priceOf(o.message.model) && billable(u)) {
+            const id = String(o.message.model);
+            unpriced[id] = (unpriced[id] || 0) + 1;
+        }
         models[o.message.model] = (models[o.message.model] || 0) + 1;
         const prompt = (u.input_tokens || 0) + (u.cache_read_input_tokens || 0)
             + (u.cache_creation_input_tokens || 0);
@@ -151,10 +175,17 @@ const fmt = (n) => Math.round(n).toLocaleString('en-US');
 
 // Behind require.main so test-quota-burn.js can grade the price table.
 if (require.main === module) (async () => {
+    if (MAIN_SAMPLE === null) {
+        const help = ARG === '--help' || ARG === '-h';
+        (help ? console.log : console.error)(USAGE);
+        process.exitCode = help ? 0 : 2;
+        return;
+    }
     if (!fs.existsSync(ROOT)) {
         console.error(`\nNo transcript store at ${ROOT}`);
         console.error('Set AGENT_COST_ROOT to point at one.\n');
-        process.exit(2);
+        process.exitCode = 2;
+        return;
     }
 
     const all = [];
@@ -182,7 +213,8 @@ if (require.main === module) (async () => {
         console.error('directory walk stopped too shallow, not that no subagent ever ran.');
         console.error('Verify with:  find "$ROOT" -path "*/subagents/*" -name "*.jsonl" | head');
         console.error('');
-        process.exit(2);
+        process.exitCode = 2;
+        return;
     }
 
     for (const { f } of mains.slice(0, MAIN_SAMPLE)) await scan(f, MAIN, mainModels, true);
@@ -238,6 +270,14 @@ if (require.main === module) (async () => {
         console.log('');
         console.log('  Read with the output%-of-cost figures above: when cost is input-dominated,');
         console.log('  a 2x-priced model belongs on the SMALL-context surface, not the main loop.');
+    }
+
+    const missing = Object.entries(unpriced).sort((a, c) => c[1] - a[1]);
+    if (missing.length) {
+        console.log('\n=== UNPRICED MODELS (counted at $0 above, so every cost is too low) ===');
+        for (const [id, n] of missing) console.log(`  ${id.padEnd(28)} ${fmt(n)} calls`);
+        console.log('  Add a PRICES row for each, from the model table in the claude-api skill.');
+        process.exitCode = 1;
     }
     console.log('');
 })();
