@@ -305,8 +305,23 @@ function run(dir, sessionId) {
             const row = readSession(sid);
             const steps = row?.next_steps || '';
             check('non-object entries: the summary is still written, with the done story', /S1-001: done/.test(row?.completed || ''), row?.completed);
-            check('  only the real pending story is remaining', /1 tasks remaining: 1 pending \(S1-002\)/.test(steps), steps);
-            check('  no non-object entry is named anywhere', !/BAD-/.test(steps + (row?.completed || '')), steps);
+            check('  the real pending story is pending, and no non-object entry is', /1 pending \(S1-002\)/.test(steps), steps);
+            check('  every non-object entry is named MALFORMED and counted as remaining',
+                /7 tasks remaining: /.test(steps)
+                && /6 MALFORMED[^(]*\(BAD-NULL, BAD-FALSE, BAD-ZERO, BAD-STR, BAD-ARR, BAD-NUM\)/.test(steps), steps);
+            check('  and none is listed as completed', !/BAD-/.test(row?.completed || ''), row?.completed);
+        }
+
+        // FAIL CLOSED: a prd whose only entries are malformed must not write a
+        // summary that reads as nothing remaining. Core never reads it complete.
+        {
+            const dir = project({ 'prd.json': JSON.stringify({ stories: { 'ONLY-NULL': null, 'ONLY-STR': 'x' } }) });
+            const sid = withHome(() => loadDb().startSession(dir));
+            carrier.write(dir, 'sess-allbad', sid);
+            run(dir, 'sess-allbad');
+            const steps = readSession(sid)?.next_steps || '';
+            check('only malformed entries: the summary still says work remains',
+                /2 tasks remaining: 2 MALFORMED[^(]*\(ONLY-NULL, ONLY-STR\)/.test(steps), steps);
         }
 
         {
