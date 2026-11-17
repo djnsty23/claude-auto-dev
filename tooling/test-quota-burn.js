@@ -174,10 +174,13 @@ const block = (id, usage) =>
 // cache read. Both price tables must resolve each one KNOWN at exactly this
 // rate. A new model id goes here first, and the suite fails until both tables
 // carry it. Haiku 5.5 is [measured 2026-10-08] from Claude Code's own costUSD
-// (costBasis "list"), the other three are published.
+// (costBasis "list"), the others are published. [measured 2026-11-17]
+// claude-fable-5-2 was missing from both tables: agent-cost read it as $0 and
+// quota-burn as the $10 / $50 fallback.
 const CURRENT_MODELS = {
     'claude-opus-5-5': [4, 20, 0.20],
     'claude-sonnet-5-5': [2, 10, 0.20],
+    'claude-fable-5-2': [8, 40, 0.20],
     'claude-fable-5-1': [10, 50, 0.25],
     'claude-haiku-5-5': [0.10, 0.50, 0.01],
 };

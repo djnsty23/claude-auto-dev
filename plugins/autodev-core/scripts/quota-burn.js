@@ -39,12 +39,14 @@ const PROJECTS = path.join(CFG, 'projects');
 // [verified 2026-08-28 against the claude-api skill's pricing tables]
 // `read` overrides the 0.1x read multiplier where the published read rate
 // differs from it. Haiku 5.5 is [measured 2026-10-08] from Claude Code's own
-// costUSD (costBasis "list"), not published.
+// costUSD (costBasis "list"), not published. Fable 5.2 is the skill's published
+// table (cached 2026-11-03): $8 / $40, cache reads $0.20.
 //
 // The 1h write multiplier is not decoration here: sessions on the 1-hour TTL pay
 // 2x on every cache write, and treating those as 1.25x understates a long
 // session's cost by a wide margin.
 const RATES = {
+    'claude-fable-5-2': { in: 8, out: 40, read: 0.20 },
     'claude-fable-5-1': { in: 10, out: 50, read: 0.25 },
     'claude-opus-5-5': { in: 4, out: 20, read: 0.20 },
     'claude-sonnet-5-5': { in: 2, out: 10, read: 0.20 },
