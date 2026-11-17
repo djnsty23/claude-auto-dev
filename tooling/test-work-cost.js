@@ -385,6 +385,34 @@ check('--repo adds a repo no session named', /"--repo","acme\/other"/.test(argvL
 }
 
 {
+    // An advisor call rides in usage.iterations[] as an advisor_message entry
+    // with its own model, outside the top-level usage. One response written as
+    // three rows: two repeat the advisor entry, the last row carries none. The
+    // call is priced once, at Fable 5.2's $40 per MTok output, and is not a
+    // response of its own. The "message" iteration repeats the top level.
+    ghData(GH_ALL);
+    const top = { output_tokens: 0 };
+    const withAdv = { ...top, iterations: [{ type: 'message', ...top },
+        { type: 'advisor_message', model: 'claude-fable-5-2', input_tokens: 0, output_tokens: 1e6 }] };
+    const cfg = config({ 'proj/A.jsonl': [
+        usageRow('A', REPO_DIR, ago(H), 'ma', 'ra', 'claude-opus-5', withAdv),
+        usageRow('A', REPO_DIR, ago(H), 'ma', 'ra', 'claude-opus-5', withAdv),
+        usageRow('A', REPO_DIR, ago(H), 'ma', 'ra', 'claude-opus-5', top),
+    ] });
+    const { j: ja } = run(cfg, ['--json']);
+    check('an advisor call is priced once per response at its own model',
+        ja && Math.abs(ja.cost.cost - 40) < 1e-6 && ja.population.advisorCalls === 1
+        && ja.population.responses === 1 && ja.population.advisorFallbackPriced === 0,
+        JSON.stringify(ja && { cost: ja.cost, population: ja.population }));
+
+    const cfgU = config({ 'proj/B.jsonl': [usageRow('B', REPO_DIR, ago(H), 'mb', 'rb', 'claude-opus-5',
+        { output_tokens: 0, iterations: [{ type: 'advisor_message', model: 'claude-advisor-9', output_tokens: 10 }] })] });
+    const { j: jb } = run(cfgU, ['--json']);
+    check('an advisor call on an unknown model is counted as fallback-priced',
+        jb?.population?.advisorFallbackPriced === 1 && jb.cost.cost > 0, JSON.stringify(jb?.population));
+}
+
+{
     // One repo readable, one not: measured, and the unreadable one is named.
     ghData({ 'acme/widgets': GH_ALL['acme/widgets'] });
     const { r } = run(CFG, ['--repo', 'acme/missing']);

@@ -191,7 +191,8 @@ function newSession(id) {
 function scan(projects, sinceMs) {
     const sessions = new Map();
     const responses = new Map();
-    const pop = { transcriptsRead: 0, transcriptsSkipped: 0, unreadable: 0, usageRows: 0, repeatedRows: 0, fallbackPriced: 0 };
+    const pop = { transcriptsRead: 0, transcriptsSkipped: 0, unreadable: 0, usageRows: 0, repeatedRows: 0, fallbackPriced: 0,
+        advisorCalls: 0, advisorFallbackPriced: 0 };
     const sessionOf = (id) => {
         if (!sessions.has(id)) sessions.set(id, newSession(id));
         return sessions.get(id);
@@ -223,9 +224,17 @@ function scan(projects, sinceMs) {
             if (msg.usage) {
                 pop.usageRows++;
                 const key = msg.id ? msg.id + '|' + (j.requestId || '') : f + ':' + lineNo;
-                if (responses.has(key)) pop.repeatedRows++;
+                const prev = responses.get(key);
+                if (prev) pop.repeatedRows++;
+                // Advisor calls ride in usage.iterations[] as advisor_message
+                // entries, each with its own model, and are NOT in the top-level
+                // usage ([measured 2026-11-18] 1,061 of 1,061 rows). Every row of
+                // the response repeats them; a row without them keeps the ones seen.
+                const its = Array.isArray(msg.usage.iterations)
+                    ? msg.usage.iterations.filter((it) => it && it.type === 'advisor_message') : [];
                 // The LAST row of a response carries its final output count.
-                responses.set(key, { s, u: msg.usage, model: msg.model || null });
+                responses.set(key, { s, u: msg.usage, model: msg.model || null,
+                    advisor: its.length || !prev ? its : prev.advisor });
             }
             for (const c of Array.isArray(msg.content) ? msg.content : []) {
                 if (!c) continue;
@@ -244,7 +253,7 @@ function scan(projects, sinceMs) {
             }
         }
     }
-    for (const { s, u, model } of responses.values()) {
+    for (const { s, u, model, advisor } of responses.values()) {
         const p = priceUsage(u, model);
         if (!p.known) pop.fallbackPriced++;
         s.responses++;
@@ -252,6 +261,17 @@ function scan(projects, sinceMs) {
         const family = familyOf(model);
         s.byTier[family] = (s.byTier[family] || 0) + p.cost;
         for (const k of Object.keys(s.tokens)) s.tokens[k] += p.tokens[k];
+        // Each advisor call is extra spend at its own model's rate, in its own
+        // model's tier. It is not a response of the session.
+        for (const it of advisor) {
+            const a = priceUsage(it, it.model || null);
+            pop.advisorCalls++;
+            if (!a.known) pop.advisorFallbackPriced++;
+            s.cost += a.cost;
+            const af = familyOf(it.model);
+            s.byTier[af] = (s.byTier[af] || 0) + a.cost;
+            for (const k of Object.keys(s.tokens)) s.tokens[k] += a.tokens[k];
+        }
     }
     pop.responses = responses.size;
     return { sessions: [...sessions.values()].filter((s) => s.responses > 0), pop };
@@ -543,7 +563,8 @@ function printHuman(r, top) {
         `WORK COST  list-price equivalent, NOT a bill  |  PRs merged in the last ${r.window.days} day(s), since ${r.window.since.slice(0, 16)}Z`,
         `transcripts: ${p.transcriptsRead} read, ${p.transcriptsSkipped} older than the span, ${p.unreadable} unreadable`,
         `usage rows: ${p.usageRows} in the span, ${p.repeatedRows} repeated a row of the same response, `
-            + `${p.responses} responses priced (${p.fallbackPriced} at the fallback rate)`,
+            + `${p.responses} responses priced (${p.fallbackPriced} at the fallback rate), `
+            + `${p.advisorCalls} advisor calls priced at their own model (${p.advisorFallbackPriced} at the fallback rate)`,
         `sessions: ${p.sessions} with usage, ${p.linkedToMerged} linked to a merged PR (${p.via.create} by gh pr create, `
             + `${p.via.branch} by commit branch, ${p.via.checkout} by the branch it ran on, ${p.via.merge} by gh pr merge only), `
             + `${p.onlyNotMerged} linked only to `
