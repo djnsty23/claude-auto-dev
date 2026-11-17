@@ -114,16 +114,37 @@ function addUsage(bin, u, model) {
 // so each advisor call is extra spend at the advisor's own price. It adds to the
 // bin's cost but not to its calls, prompts or token means, which describe the
 // executor's requests.
-function addAdvisorIterations(bin, u) {
+//
+// Claude Code writes one row per content block and each repeats the response's
+// whole usage, iterations included: [measured 2026-11-18] 1,064 advisor-bearing
+// rows came from 210 responses. So advisor calls are counted once per response
+// (message id plus request id), from the row whose advisor cost is largest. A
+// row with neither id counts alone. Returns the iterations newly counted.
+function addAdvisorIterations(bin, u, key) {
     if (!Array.isArray(u.iterations)) return [];
     const its = u.iterations.filter((it) => it && it.type === 'advisor_message');
+    if (!its.length) return [];
+    const tally = { cost: 0, outCost: 0, models: {} };
     for (const it of its) {
         const { cost, outCost } = costOf(it, it.model);
-        bin.cost += cost; bin.advCost += cost; bin.advOutCost += outCost; bin.advCalls++;
+        tally.cost += cost; tally.outCost += outCost;
         const id = String(it.model);
-        bin.advModels[id] = (bin.advModels[id] || 0) + 1;
+        tally.models[id] = (tally.models[id] || 0) + 1;
     }
-    return its;
+    if (!bin.advSeen) bin.advSeen = new Map();
+    const prev = key ? bin.advSeen.get(key) : null;
+    if (prev && prev.cost >= tally.cost) return [];
+    if (key) bin.advSeen.set(key, tally);
+    const swap = (t, sign) => {
+        bin.cost += sign * t.cost; bin.advCost += sign * t.cost; bin.advOutCost += sign * t.outCost;
+        for (const [id, n] of Object.entries(t.models)) {
+            bin.advModels[id] = (bin.advModels[id] || 0) + sign * n;
+            bin.advCalls += sign * n;
+        }
+    };
+    if (prev) swap(prev, -1);
+    swap(tally, 1);
+    return prev ? [] : its;
 }
 
 // Recursive — a one-level glob is the documented failure mode above.
@@ -168,7 +189,8 @@ async function scan(file, bin, models, collectTiming) {
             const id = String(o.message.model);
             unpriced[id] = (unpriced[id] || 0) + 1;
         }
-        for (const it of addAdvisorIterations(bin, u)) {
+        const key = o.message.id || o.requestId ? (o.message.id || '') + '|' + (o.requestId || '') : null;
+        for (const it of addAdvisorIterations(bin, u, key)) {
             if (!priceOf(it.model) && billable(it)) {
                 const id = String(it.model) + ' (advisor)';
                 unpriced[id] = (unpriced[id] || 0) + 1;
