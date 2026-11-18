@@ -121,6 +121,9 @@ const USAGE = [
     'settle, deferred: an ended run whose supervisor wrote CAPACITY_DEFERRED (capacity refused or a tripped crash',
     '        breaker) settles --unreported as result deferred, with that line as its reason. claude never started,',
     '        so it is its own result, never done, stopped, failed or unreported: the task is retried, not failed.',
+    '        A run that met the account usage limit before any work (last result event the limit, num_turns at',
+    '        most 1, no tool_use block, no report) settles deferred too, with blocker usage-limit, and',
+    '        usage-limit-hold holds its relaunch until the reset. A limit met mid-run stays unreported.',
     'settle --started-at <iso>: settle exactly the record of that code with that startedAt. Refused as unknown-record',
     '        when no record matches and already-settled when it is settled. Without it, the newest unsettled record.',
     'ask:    a worker asks by writing <report dir>/<CODE>/ask.json and keeps working. status shows ask=open',
@@ -1137,7 +1140,28 @@ const { lastResultEvent, usageLimit } = limitHolds;
 // limit" and settled as "exited 1 and REPORT.md does not exist", so the ranking
 // filed an account limit as a worker that left no report. One had run 96 turns and
 // two were launched after the wall. usageLimit (usage-limit-hold.js) names such an
-// ending. The result stays `unreported` so salvage and requeue still apply.
+// ending. A run that did work before the wall stays `unreported`, so salvage and
+// requeue still apply. One that met the wall before any work settles `deferred`.
+
+/**
+ * True when a log shows a run that did no work: its last result event has an integer
+ * num_turns of at most 1, and no assistant event carries a tool_use content block.
+ * `[measured 2026-11-16]` a nightly worker started at the weekly limit ran 1 turn and
+ * 0 tokens. Its log has `parent_tool_use_id` and `server_tool_use` keys, so only a
+ * parsed content block counts. A line that mentions tool_use and does not parse counts
+ * as work, which keeps the old ending.
+ */
+function didNoWork(logText) {
+    const last = lastResultEvent(logText);
+    if (!last || !Number.isInteger(last.num_turns) || last.num_turns > 1) return false;
+    for (const line of String(logText || '').split(/\r?\n/)) {
+        if (!line.includes('tool_use')) continue;
+        let j; try { j = JSON.parse(line); } catch { return false; }
+        const content = j && j.message && j.message.content;
+        if (Array.isArray(content) && content.some((c) => c && c.type === 'tool_use')) return false;
+    }
+    return true;
+}
 
 /** The LAST `RESULT <code> <state>: <sentence>` line for this exact code, or null. */
 function parseResult(reportText, code) {
@@ -1527,6 +1551,17 @@ function settleUnreported(rec, code, exit, refusal = null, records = []) {
         Object.assign(rec, { state: 'settled', result: 'deferred', reason, sentence: null, exit, settledAt, blocker: supervisor });
         return { code, state: 'deferred', reason, sentence: null, exit, report: rec.report, settledAt, blocker: supervisor };
     }
+    // [measured 2026-11-16] three nightly runs started at the weekly limit, ran 1 turn
+    // and 0 tokens, and settled unreported, so the ledger failed the task and the judge
+    // escalated it. Like a capacity deferral, the worker never worked: reconcile
+    // requeues the task, and usage-limit-hold reads this blocker to hold the relaunch
+    // until the reset.
+    if (limit && !supervisor && !retry && !other && reportText === null && didNoWork(logText)) {
+        const reason = `exited ${exit} at the account usage limit (${limit}) before doing any work`;
+        const blocker = { status: 'usage-limit', text: limit };
+        Object.assign(rec, { state: 'settled', result: 'deferred', reason, sentence: null, exit, settledAt, blocker });
+        return { code, state: 'deferred', reason, sentence: null, exit, report: rec.report, settledAt, blocker };
+    }
     const blocker = supervisor || (limit && { status: 'usage-limit', text: limit })
         || (reportText !== null && !retry && reportBlocker(reportText)) || { status: 'unknown' };
     Object.assign(rec, { state: 'settled', result: 'unreported', reason, sentence: null, exit, settledAt, blocker });
@@ -1596,6 +1631,6 @@ module.exports = {
     askFiles, askNote, askState, scratchDirFor, priorRunFiles, moveAside, readLedger, settle, start,
     outboxRoot, defaultOutbox, workerPaths, syncOutbox, reportCandidates, adoptReport, misplacedReport, reportWriteNote,
     HEAVY_TOOLS, droppedTools, namedTools, parseKeepTools, toolProfile, attemptIdFor, supervise,
-    parseArgs, composePrompt, buildArgv, buildEnv, runAuthority, parseSecrets, spawnPlan, resolveClaudeBin, exitCodeOf, parseResult,
+    didNoWork, parseArgs, composePrompt, buildArgv, buildEnv, runAuthority, parseSecrets, spawnPlan, resolveClaudeBin, exitCodeOf, parseResult,
     livenessFromError, pidLiveness, pidImage, isSupervisorImage, supervisorLiveness, bootAt, pruneSettled, laterRuns, recordStatus, lostReason, lostGateStep, run,
 };
