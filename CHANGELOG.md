@@ -1,5 +1,18 @@
 # Changelog
 
+## [8.203.0]
+
+### Headless workers
+
+- `headless-worker.js` settles a run that met the usage limit before any work
+  as `deferred`, not `unreported`. Such a run never worked, so the task returns
+  to the queue instead of being closed as failed. A limit met mid-run keeps the
+  unreported ending.
+- `acceptance-receipt` links the product's dependencies before `verify` runs
+  its checks, through `shared-install.js link`. A check that needs a dependency
+  no longer fails on a fresh detached tree. The receipt records each install
+  root's state in a `dependencies` field.
+
 ## [8.202.0]
 
 ### Headless workers
