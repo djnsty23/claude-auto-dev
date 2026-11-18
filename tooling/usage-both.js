@@ -105,17 +105,16 @@ function gptSide() {
 function claudeSide() {
     const base = path.join(os.homedir(), '.claude', 'projects');
     const files = recent(walk(base, [], 0));
-    let input = 0;
-    let output = 0;
-    let cacheRead = 0;
-    let turns = 0;
+    // Every content-block row of a response repeats the response's full usage
+    // ([measured 2026-11-18] 132,824 usage rows from 62,616 responses over 7
+    // days), so a response counts once, keyed on message id plus request id,
+    // with the LAST row's usage. A row with neither id counts alone.
+    //
     // Advisor calls ride in usage.iterations[] as advisor_message entries, each
-    // with its own model, and are NOT in the top-level usage ([measured
-    // 2026-11-18] 1,061 of 1,061 rows). Every row of a response repeats them, so
-    // they count once per message id plus request id. A row with neither id
-    // counts alone.
-    const advisor = { calls: 0, input: 0, output: 0, cacheRead: 0 };
-    const advisorSeen = new Set();
+    // with its own model, and are NOT in the top-level usage (1,061 of 1,061
+    // rows). A later row of a response without them keeps the ones seen.
+    const responses = new Map();
+    let anon = 0;
     for (const f of files) {
         try {
             for (const line of fs.readFileSync(f, 'utf8').split('\n')) {
@@ -124,28 +123,32 @@ function claudeSide() {
                 try { o = JSON.parse(line); } catch { continue; }
                 const u = (o.message && o.message.usage) || o.usage;
                 if (!u) continue;
-                turns += 1;
-                input += u.input_tokens || 0;
-                output += u.output_tokens || 0;
-                cacheRead += u.cache_read_input_tokens || 0;
                 const its = Array.isArray(u.iterations)
                     ? u.iterations.filter((it) => it && it.type === 'advisor_message') : [];
-                if (!its.length) continue;
                 const id = (o.message && o.message.id) || '';
-                const key = id || o.requestId ? id + '|' + (o.requestId || '') : null;
-                if (key && advisorSeen.has(key)) continue;
-                if (key) advisorSeen.add(key);
-                for (const it of its) {
-                    advisor.calls += 1;
-                    advisor.input += it.input_tokens || 0;
-                    advisor.output += it.output_tokens || 0;
-                    advisor.cacheRead += it.cache_read_input_tokens || 0;
-                }
+                const key = id || o.requestId ? id + '|' + (o.requestId || '') : 'anon:' + (anon++);
+                const prev = responses.get(key);
+                responses.set(key, { u, advisor: its.length || !prev ? its : prev.advisor });
             }
         } catch { /* skip */ }
     }
+    let input = 0;
+    let output = 0;
+    let cacheRead = 0;
+    const advisor = { calls: 0, input: 0, output: 0, cacheRead: 0 };
+    for (const { u, advisor: its } of responses.values()) {
+        input += u.input_tokens || 0;
+        output += u.output_tokens || 0;
+        cacheRead += u.cache_read_input_tokens || 0;
+        for (const it of its) {
+            advisor.calls += 1;
+            advisor.input += it.input_tokens || 0;
+            advisor.output += it.output_tokens || 0;
+            advisor.cacheRead += it.cache_read_input_tokens || 0;
+        }
+    }
     // The advisor's tokens are Claude-side tokens too, so the totals include them.
-    return { sessions: files.length, turns, input: input + advisor.input,
+    return { sessions: files.length, turns: responses.size, input: input + advisor.input,
         output: output + advisor.output, cacheRead: cacheRead + advisor.cacheRead, advisor };
 }
 
