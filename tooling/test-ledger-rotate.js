@@ -23,6 +23,9 @@
  *   R15 an unlocked writer that opened the ledger before the rename and writes after it loses nothing
  *       (POSIX: the rotator drains the replaced inode; Windows holds no descriptor across a rename)
  *   R16 a failure after the rename keeps the archives (no old line lost) and is reported, not rolled back
+ *   R17 an unlocked append between the read and the staged hot file is carried into it, once, on every
+ *       platform (the pre-rename carry, the only append safety Windows has)
+ *   R18 with no --dir the ledger dir is $AUTODEV_LEDGER_DIR, else <CLAUDE_CONFIG_DIR>/autodev
  *
  * Run: node tooling/test-ledger-rotate.js
  */
@@ -339,6 +342,57 @@ try {
             && gunzip(path.join(dir, 'events.2026-09.jsonl.gz')) === lines[0] + '\n', ls(dir).join(','));
         check('R16 the hot file is the new one', getText(f) === lines[1] + '\n', JSON.stringify(getText(f)));
         check('R16 the lock is released', !fs.existsSync(f + '.write-lock'));
+    }
+
+    // R17: an unlocked writer appends after the read, while the archive and the
+    // new hot file are being written. The plant fires when the rotator opens its
+    // staged hot file (`<ledger>.<uuid>.tmp`, 'wx'), which is after the read and
+    // before the first re-measure, so the carry loop must copy the appended bytes.
+    {
+        const dir = fresh();
+        const lines = [row(1, OLD_SEP), row(2, RECENT)];
+        const f = put(dir, 'events.jsonl', lines.join('\n') + '\n');
+        const late = row('late-c', RECENT);
+        const realOpen = fs.openSync;
+        let planted = 0;
+        fs.openSync = function (p, flags) {
+            const s = String(p);
+            if (flags === 'wx' && s.startsWith(f + '.') && s.endsWith('.tmp')) { planted++; fs.appendFileSync(f, late + '\n'); }
+            return realOpen.apply(this, arguments);
+        };
+        let res;
+        try { res = rot.rotateFile(f, { cutoffMs: Date.parse(NOW) - 30 * 86400000 }); } finally { fs.openSync = realOpen; }
+        check('R17 the plant ran once, after the read and before the re-measure', planted === 1, planted);
+        check('R17 the rotation succeeded', res.ok === true && res.rotated === true, JSON.stringify(res));
+        check('R17 the line appended after the read is in the hot file, once, after the recent line',
+            getText(f) === [lines[1], late].join('\n') + '\n', JSON.stringify(getText(f)));
+        check('R17 the old line is archived once and the late line is not', gunzip(path.join(dir, 'events.2026-09.jsonl.gz')) === lines[0] + '\n');
+        check('R17 no temp files are left behind', ls(dir).every((x) => !x.endsWith('.tmp') && !x.endsWith('.write-lock')), ls(dir).join(','));
+    }
+
+    // R18: the default ledger dir. Every run here names its dir explicitly, so no
+    // run can reach the real config dir's ledgers.
+    {
+        const viaEnv = fresh();
+        const cfg = fresh();
+        check('R18 stateDir reads $AUTODEV_LEDGER_DIR first',
+            rot.stateDir({ AUTODEV_LEDGER_DIR: viaEnv, CLAUDE_CONFIG_DIR: cfg }) === path.resolve(viaEnv));
+        check('R18 stateDir falls back to <CLAUDE_CONFIG_DIR>/autodev',
+            rot.stateDir({ CLAUDE_CONFIG_DIR: cfg }) === path.resolve(cfg, 'autodev'));
+        const lines = [row(1, OLD_SEP), row(2, RECENT)];
+        const f = put(viaEnv, 'events.jsonl', lines.join('\n') + '\n');
+        const r = run([], env({ AUTODEV_LEDGER_DIR: viaEnv, CLAUDE_CONFIG_DIR: cfg }));
+        check('R18 a run with no --dir rotates the ledgers in $AUTODEV_LEDGER_DIR',
+            r.status === 0 && getText(f) === lines[1] + '\n' && gunzip(path.join(viaEnv, 'events.2026-09.jsonl.gz')) === lines[0] + '\n', r.stdout + r.stderr);
+        check('R18 and names that dir in its summary', r.stdout.includes(path.resolve(viaEnv)), r.stdout);
+        const auto = path.join(cfg, 'autodev');
+        fs.mkdirSync(auto);
+        const g = put(auto, 'peer-sends.jsonl', lines.join('\n') + '\n');
+        const noEnv = env({ CLAUDE_CONFIG_DIR: cfg });
+        delete noEnv.AUTODEV_LEDGER_DIR;
+        const r2 = run([], noEnv);
+        check('R18 with no $AUTODEV_LEDGER_DIR it rotates <CLAUDE_CONFIG_DIR>/autodev',
+            r2.status === 0 && getText(g) === lines[1] + '\n' && fs.existsSync(path.join(auto, 'peer-sends.2026-09.jsonl.gz')) && r2.stdout.includes(path.resolve(auto)), r2.stdout + r2.stderr);
     }
 
     // R12: a locking appender running during rotation.
