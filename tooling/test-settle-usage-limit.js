@@ -29,7 +29,9 @@ const env = { ...process.env, AUTODEV_CAPACITY: 'off', AUTODEV_BUDGET_LEDGER: pa
 let total = 0; let failed = 0;
 function check(name, ok, detail = '') { total++; if (!ok) failed++; console.log(`${ok ? 'ok' : 'FAIL'} ${name}${ok ? '' : `: ${detail}`}`); }
 const write = (f, t) => { fs.mkdirSync(path.dirname(f), { recursive: true }); fs.writeFileSync(f, t); };
-const event = (text, isError) => JSON.stringify({ type: 'result', subtype: 'success', is_error: isError, num_turns: 1, result: text });
+// 40 turns: these runs met the limit mid-run, so they stay unreported. A run that met
+// it before any work settles deferred, in test-settle-usage-limit-defer.js.
+const event = (text, isError) => JSON.stringify({ type: 'result', subtype: 'success', is_error: isError, num_turns: 40, result: text });
 const WEEKLY = "You've hit your weekly limit · resets Nov 11, 1am (Europe/Bucharest)";
 const SESSION = "You've hit your session limit · resets 5:50am (Europe/Bucharest)";
 const ledger = path.join(base, 'headless-workers.json');
