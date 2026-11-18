@@ -20,6 +20,9 @@
  * and per criterion the check command, its exit code, and a bounded evidence
  * summary. The verifier runs every check itself, in a clean detached worktree of
  * the result commit it creates in a temp directory and removes afterwards.
+ * Before the checks run, that tree gets the main checkout's node_modules through
+ * shared-install.js link (hardlinks, never an install), and the receipt records
+ * each install root's state under `dependencies`.
  *
  * THE PASS RULE (RUBRIC_VERSION). A criterion passes when its check exits 0 and,
  * when it names `expect:`, a line of the FULL output stream matches it. The match
@@ -71,6 +74,7 @@ const path = require('node:path');
 const crypto = require('node:crypto');
 const { spawnSync } = require('node:child_process');
 const claudePaths = require('./claude-paths.js');
+const sharedInstall = require('./shared-install.js');
 
 const USAGE = [
     'Usage: node acceptance-receipt.js verify --task-id <id> [--head <sha>] [--timeout-sec 600] [--ledger <file>]',
@@ -380,6 +384,29 @@ function storeReceipt(dir, receipt) {
 
 // ------------------------------------------------------------------ verify
 
+/**
+ * Give the clean checkout the product's installed dependencies before any check
+ * runs. `[measured 2026-11-16]` a product's checks in the fresh tree printed
+ * "playwright-core: not installed" and "'next' is not recognized", so no
+ * criterion that needs a dependency could pass. shared-install.js link hardlinks
+ * the main checkout's node_modules when the lockfiles match, and the receipt
+ * records each root's state. It never installs: a root it cannot share stays
+ * as it is, and its checks run without it.
+ */
+function linkDependencies(wt) {
+    try {
+        const r = sharedInstall.run({ cmd: 'link', target: wt, main: null });
+        return { exit: r.exit, note: r.note || null, roots: r.roots.map((x) => ({ root: x.root, state: x.state, reason: String(x.reason || '').slice(0, 300) })) };
+    } catch (e) {
+        return { exit: 2, error: String(e.message).slice(0, 300), roots: [] };
+    }
+}
+
+/** Remove the links before the tree goes, so no recursive delete walks a recreated junction. */
+function unlinkDependencies(wt) {
+    try { sharedInstall.run({ cmd: 'unshare', target: wt, main: null }); } catch { /* the worktree removal below still runs */ }
+}
+
 function verify(rec, { head = null, timeoutMs = CHECK_TIMEOUT_MS, dir = stateDir() } = {}) {
     if (process.env.AUTODEV_HEADLESS === '1') fault('verifier-in-worker', 'verify runs in the coordinator, never inside a headless worker');
     const attemptId = attemptOf(rec);
@@ -396,16 +423,19 @@ function verify(rec, { head = null, timeoutMs = CHECK_TIMEOUT_MS, dir = stateDir
     const scratch = fs.mkdtempSync(path.join(os.tmpdir(), 'acceptance-'));
     const wt = path.join(scratch, 'tree');
     const results = [];
+    let dependencies = null;
     try {
         const add = git(rec.repo, ['worktree', 'add', '--detach', '--quiet', wt, cand.commit], FETCH_TIMEOUT_MS);
         if (add.status !== 0) fault('worktree-failed', `git worktree add exited ${add.status}: ${add.stderr}`);
         const actual = git(wt, ['rev-parse', 'HEAD^{tree}']).stdout;
         if (actual !== cand.tree) fault('worktree-failed', `the clean checkout holds tree ${actual}, not ${cand.tree}`);
+        dependencies = linkDependencies(wt);
         for (const c of crit.criteria) {
             const evidence = runCheck(c.check, wt, { expect: c.expect, timeoutMs, scratch });
             results.push({ id: c.id, text: c.text, check: c.check, expect: c.expect, pass: evidence.pass, evidence });
         }
     } finally {
+        if (dependencies) unlinkDependencies(wt);
         git(rec.repo, ['worktree', 'remove', '--force', wt]);
         try { fs.rmSync(scratch, { recursive: true, force: true }); } catch { /* best effort: prune below drops the registration */ }
         git(rec.repo, ['worktree', 'prune']);
@@ -414,12 +444,12 @@ function verify(rec, { head = null, timeoutMs = CHECK_TIMEOUT_MS, dir = stateDir
     const receipt = {
         schema: 1, rubricVersion: RUBRIC_VERSION, taskId: rec.taskId, attemptId, repo: rec.repo,
         candidate: cand, briefFile: rec.briefFile, briefSha256: brief.sha256, report: rec.report, reportSha256,
-        authority, criteria: results, complete: results.every((r) => r.pass),
+        authority, dependencies, criteria: results, complete: results.every((r) => r.pass),
         failed: results.filter((r) => !r.pass).map((r) => r.id),
         verifiedAt: new Date().toISOString(), verifier: { pid: process.pid, node: process.version },
     };
     const stored = storeReceipt(dir, receipt);
-    return { receipt: stored.sha256, file: stored.file, complete: receipt.complete, failed: receipt.failed, tree: cand.tree, attemptId,
+    return { receipt: stored.sha256, file: stored.file, complete: receipt.complete, failed: receipt.failed, tree: cand.tree, attemptId, dependencies,
         criteria: results.map((r) => ({ id: r.id, pass: r.pass, exit: r.evidence.exit, bytes: r.evidence.bytes, lines: r.evidence.lines, truncated: r.evidence.truncated, expect: r.evidence.expect })) };
 }
 
