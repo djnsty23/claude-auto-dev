@@ -193,6 +193,19 @@ const payload = (command, cwd) => JSON.stringify({ tool_name: 'Bash', tool_input
     cleanup(fx);
 }
 
+// 2e. The same lockfile checked out with CRLF (core.autocrlf=true, a Windows runner) is not a divergence.
+{
+    const fx = fixture('e');
+    const file = path.join(fx.wt, 'package-lock.json');
+    const lf = fs.readFileSync(file, 'utf8');
+    write(file, lf.replace(/\n/g, '\r\n'));
+    const r = cli('link', fx.wt, '--json');
+    const out = r.exit === 0 ? JSON.parse(r.stdout) : null;
+    check('2e. a CRLF copy of the same lockfile is shared, exit 0', lf.includes('\n') && !lf.includes('\r') && out && out.roots[0].state === 'shared',
+        `${r.exit} ${r.stdout}${r.stderr}`);
+    cleanup(fx);
+}
+
 // 3. PLANTED A, after a link: the lockfile changes under a shared tree.
 {
     const fx = fixture('c');
