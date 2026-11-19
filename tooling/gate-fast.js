@@ -59,6 +59,15 @@
  * on this tier with that suite red. A diff that cannot be read against the
  * base is INDETERMINATE, never an empty selection.
  *
+ * COVERAGE OF THE DIFF. `check:coverage` stays deferred: it grades a receipt only
+ * a full `npm test` publishes. When the diff changes a plugin source, the touched
+ * suites run under NODE_V8_COVERAGE and coverage-diff.js grades every plugin
+ * function the diff ADDED: one no touched suite enters, or an added source none
+ * loads, is FAIL unless the diff raises the release gate's ceiling by as much.
+ * `[measured 2026-11-18]` #556 added readRange() and sleep() to ledger-rotate.js,
+ * merged on this tier, and the win32 release census read 39 against 37. A diff
+ * that changes no plugin source pays nothing: the suites run as before.
+ *
  * THE RUN RECORD. In a git checkout each run writes
  * `<config dir>/autodev/locks/fast-gate.runs/<runId>.json`: the head it read
  * before the first step, whether the tree was dirty, and every step and
@@ -77,6 +86,7 @@ const { spawn, spawnSync } = require('child_process');
 const { readGateChain } = require('./gate-lock.js');
 const { createTail } = require('./gate-steps.js');
 const touchedSuites = require('./touched-suites.js');
+const coverageDiff = require('./coverage-diff.js');
 
 const argv = process.argv.slice(2);
 const has = (f) => argv.includes(f);
@@ -186,13 +196,13 @@ function isRepoRoot(root) {
 }
 
 /** One suite as a child process, with its output tail. A timeout is INDETERMINATE, not a verdict. */
-function runSuite(suite, root) {
+function runSuite(suite, root, extraEnv = null) {
     return new Promise((resolve) => {
         const started = Date.now();
         const tail = createTail();
         let child;
         try {
-            child = spawn(process.execPath, [suite], { cwd: root, env: suiteEnv(), stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true });
+            child = spawn(process.execPath, [suite], { cwd: root, env: { ...suiteEnv(), ...(extraEnv || {}) }, stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true });
         } catch (e) {
             resolve({ name: suite, status: 'INDETERMINATE', code: null, ms: 0, tail: { text: `could not spawn: ${e.message}`, bytes: 0, truncated: false } });
             return;
@@ -260,7 +270,8 @@ function evidenceRow(r, index, of) {
 function render(ran, deferred, total, touched = null) {
     const lines = [];
     const suites = touched && touched.ran ? touched.ran : [];
-    const all = [...ran, ...suites];
+    const cov = touched && touched.coverage ? [{ name: 'coverage of the diff', status: touched.coverage.status }] : [];
+    const all = [...ran, ...suites, ...cov];
     const failed = all.filter((r) => r.status === 'FAIL');
     const indet = all.filter((r) => r.status === 'INDETERMINATE');
 
@@ -279,6 +290,7 @@ function render(ran, deferred, total, touched = null) {
     if (touched && touched.error) lines.push(`  touched suites: INDETERMINATE, ${touched.error}`);
     else if (touched) lines.push(`  touched suites: ${suites.length} of ${touched.suites} selected by ${touched.files} changed file(s) since ${String(touched.base).slice(0, 12)}, all run.`);
     else lines.push('  touched suites: not a git checkout, none selected.');
+    if (touched && touched.coverage) lines.push('  ' + coverageDiff.render(touched.coverage));
     lines.push('');
     if (failed.length) {
         lines.push(`  FAIL — ${failed.length} step(s) or touched suite(s) failed: ${failed.map((f) => f.name).join(', ')}`);
@@ -446,8 +458,32 @@ async function main() {
         if (p.error) touched = { error: p.error };
         else {
             const list = p.selected.map((s) => s.suite);
-            const out = await pool(list, SUITE_CONCURRENCY, (s) => runSuite(s, root));
-            touched = { base: p.base, files: p.touched.length, suites: p.suites, selected: p.selected, ran: out };
+            const src = coverageDiff.changedSources(root, p.touched);
+            let out;
+            let coverage;
+            if (src.changed.length) {
+                // One coverage directory per suite, outside the tree, folded and deleted as
+                // each suite closes: a hub-file diff selects most suites, and raw dumps run
+                // to megabytes per suite.
+                const covRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'gate-fast-cov-'));
+                const want = new Set(src.changed);
+                const census = { dumps: 0, unreadable: 0, files: {} };
+                try {
+                    out = await pool(list, SUITE_CONCURRENCY, async (s) => {
+                        const dir = path.join(covRoot, path.basename(s, '.js'));
+                        const r = await runSuite(s, root, { NODE_V8_COVERAGE: dir });
+                        coverageDiff.foldDir(dir, src.attr, want, census);
+                        fs.rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+                        return r;
+                    });
+                } finally { fs.rmSync(covRoot, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 }); }
+                coverage = coverageDiff.grade({ root, base: p.base, changed: src.changed, census, suitesRan: list.length });
+            } else {
+                out = await pool(list, SUITE_CONCURRENCY, (s) => runSuite(s, root));
+                coverage = coverageDiff.grade({ root, base: p.base, changed: [], census: null, suitesRan: list.length });
+            }
+            coverage.refused = src.refused;
+            touched = { base: p.base, files: p.touched.length, suites: p.suites, selected: p.selected, ran: out, coverage };
         }
     }
 
@@ -460,7 +496,8 @@ async function main() {
     }
 
     const suitesRan = touched && touched.ran ? touched.ran : [];
-    const every = [...ran, ...suitesRan];
+    const covRow = touched && touched.coverage ? [{ name: 'coverage of the diff', status: touched.coverage.status }] : [];
+    const every = [...ran, ...suitesRan, ...covRow];
     if (every.some((r) => r.status === 'FAIL')) process.exitCode = 1;
     else if ((touched && touched.error) || every.some((r) => r.status === 'INDETERMINATE')) process.exitCode = 2;
     else process.exitCode = 0;
@@ -471,7 +508,8 @@ async function main() {
             steps: ran.map(({ name, status, code, ms }) => ({ name, status, code, ms })),
             deferredSteps: deferred.map((d) => d.name || d.raw),
             touched: touched && (touched.error ? { error: touched.error }
-                : { base: touched.base, files: touched.files, suites: suitesRan.map(({ name, status, code, ms }) => ({ name, status, code, ms })) }),
+                : { base: touched.base, files: touched.files, suites: suitesRan.map(({ name, status, code, ms }) => ({ name, status, code, ms })),
+                    coverage: touched.coverage }),
         }, null, 2));
     } else {
         console.log('\ngate:fast — the cheap steps of `npm run gate`, run independently\n');
@@ -494,6 +532,7 @@ async function main() {
                 base: touched.base, files: touched.files, suites: touched.suites,
                 selected: touched.selected.map((s) => ({ suite: s.suite, because: s.because.slice(0, 5) })),
                 evidence: suitesRan.map((r, i) => evidenceRow(r, i + 1, suitesRan.length)),
+                coverage: touched.coverage,
             },
         };
         try { console.log(`  run record: ${path.basename(writeRecord(rec))}`); } catch (e) { console.error(`gate-fast: run record NOT written: ${e.message}`); }
