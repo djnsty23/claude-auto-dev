@@ -22,8 +22,8 @@
  * WHAT IS LINKED. Each tracked package-lock.json is an install root. A root is
  * linked only when ALL of these hold, and otherwise the worktree is told to
  * run its own install:
- *   1. the worktree's package-lock.json is byte-identical to the main
- *      checkout's at the same path;
+ *   1. the worktree's package-lock.json is identical to the main checkout's
+ *      at the same path, line endings aside (a CRLF checkout matches);
  *   2. the main checkout's node_modules is a real directory and its hidden
  *      lockfile (node_modules/.package-lock.json) agrees with that lockfile,
  *      so the tree being shared is what the lockfile describes;
@@ -121,7 +121,10 @@ function resolveTrees(target, mainOpt) {
     return { wt, main, isMain: sameDir(wt, main) };
 }
 
-const sha = (file) => crypto.createHash('sha256').update(fs.readFileSync(file)).digest('hex');
+// A lockfile's hash ignores line endings. `[measured 2026-11-19]` with core.autocrlf=true (the GitHub
+// Windows runner's default) a fresh checkout of a commit holds the lockfile as CRLF while npm keeps the
+// main checkout's copy LF, so a byte hash called one commit's lockfile "different" from itself.
+const sha = (file) => crypto.createHash('sha256').update(fs.readFileSync(file, 'utf8').replace(/\r\n/g, '\n')).digest('hex');
 
 /** Install roots: directories, relative to the top, holding a tracked package-lock.json. */
 function installRoots(wt) {
