@@ -211,19 +211,47 @@ async function main() {
     const sc = JSON.parse(s.stdout).findings.filter((f) => f.rule === 'csp-missing').map((f) => f.path);
     check('csp-missing: a sibling app\'s vercel.json does not cover another app', s.status === 1 && sc.length === 1 && sc[0] === 'apps/b/package.json', seen(s));
 
-    const covered = repo('csp-covered', {
-      'package.json': JSON.stringify({ private: true }),
-      'vercel.json': JSON.stringify({ headers: [{ source: '/(.*)', headers: [{ key: 'Content-Security-Policy', value: "script-src 'self'" }] }] }),
-      'web/package.json': JSON.stringify({ dependencies: { vite: '7.0.0' } }),
-      'next-app/package.json': JSON.stringify({ dependencies: { next: '16.0.0' } }),
-      'next-app/next.config.ts': "import { csp } from './headers';\nexport default { headers: async () => [{ source: '/(.*)', headers: [{ key: 'Content-Security-Policy', value: csp }] }] };\n",
-      'spa/package.json': JSON.stringify({ dependencies: { vite: '7.0.0' } }),
-      'spa/index.html': `<head><meta http-equiv="Content-Security-Policy" content="script-src 'self'"></head>\n`,
-      'docs-site/package.json': JSON.stringify({ dependencies: { astro: '5.0.0' } }),
-      'docs-site/astro.config.mjs': 'export default { security: { csp: true } };\n',
-    });
-    const c = await run(['--root', covered, '--json']);
-    check('csp-missing: an ancestor vercel.json, next.config, a meta policy in index.html and astro csp each still count', c.status === 0 && !rules(c).has('csp-missing'), seen(c));
+    // One repo per CSP source, each holding a single app and nothing else that
+    // could cover it: a shared repo let one ancestor vercel.json cover every app,
+    // so the other sources could break without any case going red.
+    const VITE = JSON.stringify({ dependencies: { vite: '7.0.0' } });
+    const HEADER = JSON.stringify({ headers: [{ source: '/(.*)', headers: [{ key: 'Content-Security-Policy', value: "script-src 'self'" }] }] });
+    const sources = {
+      'an ancestor vercel.json': {
+        'package.json': JSON.stringify({ private: true }),
+        'vercel.json': HEADER,
+        'web/package.json': VITE,
+      },
+      'a next.config': {
+        'package.json': JSON.stringify({ dependencies: { next: '16.0.0' } }),
+        'next.config.ts': "import { csp } from './headers';\nexport default { headers: async () => [{ source: '/(.*)', headers: [{ key: 'Content-Security-Policy', value: csp }] }] };\n",
+      },
+      'a meta policy in index.html': {
+        'package.json': VITE,
+        'index.html': `<head><meta http-equiv="Content-Security-Policy" content="script-src 'self'"></head>\n`,
+      },
+      'astro csp': {
+        'package.json': JSON.stringify({ dependencies: { astro: '5.0.0' } }),
+        'astro.config.mjs': 'export default { security: { csp: true } };\n',
+      },
+      'a served _headers': {
+        'package.json': VITE,
+        'public/_headers': "/*\n  Content-Security-Policy: script-src 'self'\n",
+      },
+      'Next middleware': {
+        'package.json': JSON.stringify({ dependencies: { next: '16.0.0' } }),
+        'src/middleware.ts': "export function middleware() { const r = NextResponse.next(); r.headers.set('Content-Security-Policy', csp); return r; }\n",
+      },
+      'a SvelteKit server hook': {
+        'package.json': JSON.stringify({ dependencies: { '@sveltejs/kit': '2.0.0' } }),
+        'svelte.config.js': 'export default {};\n',
+        'src/hooks.server.ts': "export const handle = async ({ event, resolve }) => { const r = await resolve(event); r.headers.set('Content-Security-Policy', csp); return r; };\n",
+      },
+    };
+    for (const [label, files] of Object.entries(sources)) {
+      const c = await run(['--root', repo(`csp-covered-${label.replace(/\W+/g, '-')}`, files), '--json']);
+      check(`csp-missing: ${label} alone covers its app`, c.status === 0 && !rules(c).has('csp-missing'), seen(c));
+    }
   }
 
   // --------------------------------------------- Vercel api/ functions are route handlers
