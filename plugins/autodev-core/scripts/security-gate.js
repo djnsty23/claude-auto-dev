@@ -131,6 +131,25 @@ function setsCsp(dir, f, text) {
 }
 
 /**
+ * A function Vercel deploys from the api/ folder beside a vercel.json. Vercel
+ * turns every file under <project>/api/ into a function except one whose name,
+ * or a folder above it inside api/, starts with _ or . (helpers and shared
+ * code). `[measured 2026-11-26]` a repo serving 25 such functions from a
+ * subfolder read "0 route handlers", so no route rule ran on any of them.
+ */
+function isVercelFunction(p, vercelRoots) {
+  for (const r of vercelRoots) {
+    const prefix = r ? `${r}/api/` : 'api/';
+    if (p.startsWith(prefix)) return !p.slice(prefix.length).split('/').some((s) => /^[_.]/.test(s));
+  }
+  return false;
+}
+
+/** A file showing the tree deploys a web surface: a host config or a web framework config. */
+const isDeployConfig = (p) => !/(^|\/)node_modules\//.test(p) && !C.isTestPath(p)
+  && (/(^|\/)(?:vercel\.json|netlify\.toml)$/.test(p) || FRAMEWORK_CONFIG.test(p.slice(p.lastIndexOf('/') + 1)));
+
+/**
  * files: Map of repo-relative path (forward slashes) to text, or null for a
  * file present but not read (binary or too large). Returns every raw finding
  * and the population it examined.
@@ -145,7 +164,9 @@ function scanFiles(files) {
 
   const migrations = read.filter((p) => /(^|\/)supabase\/migrations\/.+\.sql$/i.test(p));
   const code = read.filter((p) => C.isCode(p));
-  const routes = code.filter((p) => C.isRoute(p) && !C.isTestPath(p));
+  const vercelRoots = all.filter((p) => /(^|\/)vercel\.json$/.test(p) && !/(^|\/)node_modules\//.test(p)).map(dirOf);
+  const routes = code.filter((p) => (C.isRoute(p) || isVercelFunction(p, vercelRoots)) && !C.isTestPath(p));
+  const deployConfigs = all.filter(isDeployConfig);
 
   for (const p of read) {
     const text = files.get(p);
@@ -233,6 +254,7 @@ function scanFiles(files) {
       webApps: apps,
       manifests: manifests.length,
       routes: routes.length,
+      deployConfigs,
     },
   };
 }
@@ -278,6 +300,9 @@ function plantedSample() {
   // Names the header without setting it, which must not count as the app's policy.
   files.set('infra/edge/README.md', 'Put a Content-Security-Policy header in front of the service.');
   files.set('app/admin/page.tsx', "export default async function A() { const { data } = await supabase.auth.getUser(); return data.user ? 'ok' : null; }");
+  // A Vercel function with no auth: route-no-auth must reach it (checked by path in runControl).
+  files.set('vercel.json', '{}');
+  files.set('api/open.js', 'export default async function handler(req, res) { res.json(await db.all()); }');
   files.set('ext/manifest.json', JSON.stringify({
     manifest_version: 3,
     background: { service_worker: 'bg.js' },
@@ -329,6 +354,9 @@ function cleanSample() {
   files.set('app/api/backup/route.ts', "export async function GET() { await sb.auth.getUser(); const { data } = await sb.from('scans').select('id, code').range(0, 999); return Response.json(data); }");
   files.set('lib/stripe-revenue.ts', 'export const revenue = cachedRead(() => stripe.charges.list({ limit: 100 }));');
   files.set('app/admin/page.tsx', "export default async function A() { const { data } = await supabase.auth.getUser(); if (!(await isAdmin(data.user))) return null; return 'ok'; }");
+  // A helper beside Vercel functions is not deployed as one, so it is no route.
+  files.set('vercel.json', '{}');
+  files.set('api/_db.js', 'export default async function all() { return db.all(); }');
   // Placeholders measured in real repos, which must stay silent.
   files.set('docs/setup.md', [
     `KEY="${['-----BEGIN', 'PRIVATE', 'KEY-----'].join(' ')}\\n...\\n-----END PRIVATE KEY-----"`,
@@ -349,7 +377,9 @@ function cleanSample() {
 const STATIC_RULES = Object.keys(C.RULES).filter((r) => !r.startsWith('live-'));
 
 function runControl() {
-  const planted = new Set(scanFiles(plantedSample()).findings.map((f) => f.rule));
+  const plantedFindings = scanFiles(plantedSample()).findings;
+  const planted = new Set(plantedFindings.map((f) => f.rule));
+  const fnMissed = plantedFindings.some((f) => f.rule === 'route-no-auth' && f.path === 'api/open.js') ? [] : ['route-no-auth (Vercel api/ function)'];
   const missed = STATIC_RULES.filter((r) => !planted.has(r));
   const noise = scanFiles(cleanSample()).findings;
   // The live rules have their own planted responses.
@@ -373,10 +403,10 @@ function runControl() {
   const metaMissed = lateMeta.some((f) => f.rule === 'live-csp-script') ? [] : ['live-csp-script (meta policy after <script>)'];
   const total = STATIC_RULES.length + Object.keys(C.RULES).length - STATIC_RULES.length;
   return {
-    ok: missed.length === 0 && liveMissed.length === 0 && metaMissed.length === 0 && noise.length === 0 && liveClean.length === 0 && liveMeta.length === 0,
+    ok: missed.length === 0 && liveMissed.length === 0 && metaMissed.length === 0 && fnMissed.length === 0 && noise.length === 0 && liveClean.length === 0 && liveMeta.length === 0,
     fired: total - missed.length - liveMissed.length,
     total,
-    missed: [...missed, ...liveMissed, ...metaMissed],
+    missed: [...missed, ...liveMissed, ...metaMissed, ...fnMissed],
     noise: [...noise, ...liveClean, ...liveMeta].map((f) => `${f.rule} ${f.path}`),
   };
 }
@@ -613,6 +643,13 @@ async function main(argv) {
     inviteOnly: has('--invite-only') || config.inviteOnly === true,
   });
   problems.push(...live.problems);
+  // Nothing graded is not a pass: a tree that deploys a web surface and showed
+  // the gate no route and no web app was never read by the route or CSP rules.
+  const pop = scan.population;
+  if (pop.routes === 0 && pop.webApps.length === 0 && pop.deployConfigs.length) {
+    const more = pop.deployConfigs.length > 3 ? ` and ${pop.deployConfigs.length - 3} more` : '';
+    problems.push(`the tree deploys a web surface (${pop.deployConfigs.slice(0, 3).join(', ')}${more}) but the gate counted 0 route handlers and 0 web apps, so no route or CSP rule ran`);
+  }
   if (!control.ok) problems.push(`the control failed (missed: ${control.missed.join(', ') || 'none'}; noise: ${control.noise.join(', ') || 'none'})`);
 
   const { kept, waived } = applyWaivers([...scan.findings, ...live.findings], files, config.allow || []);
@@ -629,7 +666,7 @@ async function main(argv) {
   const p = scan.population;
   const apps = p.webApps.map((a) => `${a.framework} at ${a.dir}`).join(', ') || 'none';
   console.log(`security-gate: ${p.files} files from ${source}, ${p.read} read as text`);
-  console.log(`population: ${p.code} code files, ${p.routes} route handlers, ${p.migrations} Supabase migrations (${p.tables} public tables, ${p.definerMentions} SECURITY DEFINER), ${p.manifests} extension manifests, web apps: ${apps}, ${live.lines.length} live requests`);
+  console.log(`population: ${p.code} code files, ${p.routes} route handlers, ${p.migrations} Supabase migrations (${p.tables} public tables, ${p.definerMentions} SECURITY DEFINER), ${p.manifests} extension manifests, web apps: ${apps}, ${p.deployConfigs.length} deploy configs, ${live.lines.length} live requests`);
   for (const l of live.lines) console.log(`  live: ${l}`);
   console.log(controlLine);
   for (const f of [...errors, ...warns]) {
