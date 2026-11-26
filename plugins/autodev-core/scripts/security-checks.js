@@ -29,7 +29,7 @@ const RULES = {
   'sql-policy-true': { severity: 'warn', what: 'A write-capable policy is USING (true) or WITH CHECK (true).' },
   'sql-view-definer': { severity: 'warn', what: 'A public view without security_invoker bypasses RLS.' },
   'sql-grant-missing': { severity: 'warn', what: 'A public table has no explicit GRANT (Supabase stops auto-granting new tables from 2026-10-30).' },
-  'csp-missing': { severity: 'error', what: 'A web app sets no Content-Security-Policy anywhere in its source.' },
+  'csp-missing': { severity: 'error', what: 'A web app sets no Content-Security-Policy in any file that can set one for it (framework config, middleware or proxy, host config, entry meta).' },
   'html-sink': { severity: 'warn', what: 'An HTML or code sink runs whatever text reaches it.' },
   'message-origin': { severity: 'warn', what: 'A window message listener never checks the origin.' },
   'route-no-auth': { severity: 'warn', what: 'A server route shows no authentication or signature check.' },

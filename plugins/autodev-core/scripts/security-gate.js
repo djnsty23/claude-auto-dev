@@ -100,6 +100,36 @@ function readJson(text) {
   }
 }
 
+const CSP_NAME = /content-security-policy|contentSecurityPolicy/i;
+const FRAMEWORK_CONFIG = /^(?:(?:next|astro|nuxt|svelte|vite|remix|react-router)\.config|gatsby-(?:config|node|ssr))\.[cm]?[jt]s$/;
+const META_CSP = /http-equiv\s*=\s*["']?content-security-policy/i;
+
+/**
+ * True when f is a file that can set a response header (or a meta policy) for
+ * the web app at dir, and it sets a CSP. Only these count: the framework
+ * config at the app dir, middleware or proxy at the app dir or its src/, a
+ * server hook, a host config (vercel.json, netlify.toml) at the app dir or an
+ * ancestor, a _headers file the host serves, and a meta policy in an entry
+ * index.html. A README, a script or another service's infra under a root app
+ * names the header without setting it for this app, and used to satisfy the
+ * rule: `[measured 2026-11-26]` a root Next app with no CSP read GREEN because
+ * an infra README and check script beside it mentioned the header.
+ */
+function setsCsp(dir, f, text) {
+  if (!text) return false;
+  const d = dirOf(f);
+  const name = f.slice(d ? d.length + 1 : 0);
+  const rel = dir === '' ? f : f.startsWith(`${dir}/`) ? f.slice(dir.length + 1) : null;
+  if (/^(?:vercel\.json|netlify\.toml)$/.test(name)) return under(d, dir) && CSP_NAME.test(text);
+  if (rel === null) return false;
+  if (/^(?:public\/|static\/)?_headers$/.test(rel)) return CSP_NAME.test(text);
+  if (/^(?:public\/)?index\.html?$/.test(rel)) return META_CSP.test(text);
+  if (FRAMEWORK_CONFIG.test(rel)) return CSP_NAME.test(text) || (/^astro\./.test(rel) && /\bcsp\s*:/.test(text));
+  if (/^(?:src\/)?(?:middleware|proxy)\.[cm]?[jt]s$/.test(rel)) return CSP_NAME.test(text);
+  if (/^(?:src\/hooks\.server|app\/entry\.server)\.[cm]?[jt]sx?$/.test(rel)) return CSP_NAME.test(text);
+  return false;
+}
+
 /**
  * files: Map of repo-relative path (forward slashes) to text, or null for a
  * file present but not read (binary or too large). Returns every raw finding
@@ -179,8 +209,7 @@ function scanFiles(files) {
     if (!fw) continue;
     const dir = dirOf(p);
     apps.push({ dir: dir || '.', framework: fw });
-    const hasCsp = read.some((f) => (under(dir, f) || /(^|\/)(vercel|netlify)\.(json|toml)$/.test(f) || /(^|\/)_headers$/.test(f))
-      && !C.isTestPath(f) && (/content-security-policy|contentSecurityPolicy/i.test(files.get(f)) || (/(^|\/)astro\.config\.[cm]?[jt]s$/.test(f) && /\bcsp\s*:/.test(files.get(f)))));
+    const hasCsp = read.some((f) => !C.isTestPath(f) && setsCsp(dir, f, files.get(f)));
     if (!hasCsp) findings.push({ rule: 'csp-missing', severity: C.RULES['csp-missing'].severity, path: p, line: 1, message: `The ${fw} app at ${dir || '.'} sets no Content-Security-Policy in any file.`, fix: 'Set a nonce-based policy in middleware or the server, and prove it live with --url.' });
   }
 
@@ -246,6 +275,8 @@ function plantedSample() {
   files.set('app/api/cron/tick/route.ts', "export async function GET() { await fetch('https://example.com/x'); return Response.json({}); }");
   files.set('app/api/backup/route.ts', "export async function GET() { const { data } = await sb.from('scans').select('id, code'); return Response.json(data); }");
   files.set('lib/stripe-revenue.ts', 'export const revenue = () => stripe.charges.list({ limit: 100 });');
+  // Names the header without setting it, which must not count as the app's policy.
+  files.set('infra/edge/README.md', 'Put a Content-Security-Policy header in front of the service.');
   files.set('app/admin/page.tsx', "export default async function A() { const { data } = await supabase.auth.getUser(); return data.user ? 'ok' : null; }");
   files.set('ext/manifest.json', JSON.stringify({
     manifest_version: 3,
