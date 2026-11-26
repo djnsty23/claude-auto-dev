@@ -226,6 +226,48 @@ async function main() {
     check('csp-missing: an ancestor vercel.json, next.config, a meta policy in index.html and astro csp each still count', c.status === 0 && !rules(c).has('csp-missing'), seen(c));
   }
 
+  // --------------------------------------------- Vercel api/ functions are route handlers
+  {
+    const fns = repo('vercel-fns', {
+      'package.json': JSON.stringify({ private: true }),
+      'vercel.json': JSON.stringify({ cleanUrls: true }),
+      'api/open.js': 'export default async function handler(req, res) { res.json(await db.all()); }\n',
+      'site/vercel.json': JSON.stringify({ cleanUrls: true }),
+      'site/index.html': '<p>hi</p>\n',
+      'site/api/feed.js': 'export default async function handler(req, res) { res.json(await db.feed()); }\n',
+      // Vercel does not deploy a file or folder whose name starts with _ or .
+      'site/api/_lib.js': 'export default function helper() { return 1; }\n',
+      'site/api/_shared/db.js': 'export default function db() { return 1; }\n',
+      'site/api/__tests__/feed.test.js': 'export default function t() {}\n',
+      'site/api/notes.md': 'not code\n',
+      // An api/ folder with no vercel.json beside or above it is not a Vercel function root.
+      'tools/api/x.js': 'export default function x() {}\n',
+    });
+    const r = await run(['--root', fns, '--json']);
+    const j = JSON.parse(r.stdout);
+    const auth = j.findings.filter((f) => f.rule === 'route-no-auth').map((f) => f.path).sort();
+    check('Vercel api/ functions beside a vercel.json are route handlers', j.population.routes === 2, j.population);
+    check('route-no-auth runs on Vercel functions and skips _ and test files', JSON.stringify(auth) === JSON.stringify(['api/open.js', 'site/api/feed.js']), auth);
+    const human = await run(['--root', fns]);
+    check('the population line counts the Vercel functions', /population: \d+ code files, 2 route handlers/.test(human.stdout), human.stdout.slice(0, 400));
+  }
+
+  // ----------------------------------- a web deploy with nothing graded is not GREEN
+  {
+    const empty = repo('deploy-unread', {
+      'package.json': JSON.stringify({ private: true }),
+      'public/vercel.json': JSON.stringify({ cleanUrls: true }),
+      'public/index.html': '<p>hi</p>\n',
+    });
+    const r = await run(['--root', empty]);
+    check('a vercel.json deploy with 0 route handlers and 0 web apps exits 2, not 0', r.status === 2 && /verdict: INDETERMINATE/.test(r.stdout), seen(r));
+    check('the indeterminate line names the deploy file and the counts', /INDETERMINATE .*public\/vercel\.json.*0 route handlers and 0 web apps/.test(r.stdout), r.stdout.slice(-600));
+    check('the population is printed on the indeterminate run', /population: \d+ code files, 0 route handlers.*web apps: none/.test(r.stdout), r.stdout.slice(0, 400));
+    const lib = repo('no-deploy', { 'package.json': JSON.stringify({ private: true }), 'src/index.js': 'module.exports = 1;\n' });
+    const l = await run(['--root', lib]);
+    check('a library with no deploy config and no routes stays GREEN', l.status === 0, seen(l));
+  }
+
   // --------------------------------------------- ignored vs committed .env
   {
     const dir = repo('envfile', { ...CLEAN_APP, '.gitignore': 'node_modules/\n', '.env.production': 'X=1\n' });
