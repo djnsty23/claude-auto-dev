@@ -184,6 +184,48 @@ async function main() {
     check('the human report ends RED', /verdict: RED/.test(human.stdout), human.stdout.slice(-300));
   }
 
+  // ------------------------------------- csp-missing counts only header-capable files
+  // A root app reads every file under it as "under the app dir", so a README or
+  // another service's infra script that names the header used to satisfy the rule.
+  {
+    const CSP_NOTE = 'Set a Content-Security-Policy header in front of the service.\n';
+    const docsOnly = repo('csp-docs-only', {
+      'package.json': JSON.stringify({ dependencies: { next: '16.0.0' } }),
+      'next.config.mjs': 'export default { poweredByHeader: false };\n',
+      'src/proxy.ts': 'export function proxy() { return NextResponse.next(); }\n',
+      'infra/edge/README.md': CSP_NOTE,
+      'infra/edge/scripts/check.sh': 'curl -sI https://x | grep -i content-security-policy\n',
+      'infra/edge/caddy/Caddyfile': 'header Content-Security-Policy "default-src \'self\'"\n',
+    });
+    const r = await run(['--root', docsOnly, '--json']);
+    const csp = JSON.parse(r.stdout).findings.filter((f) => f.rule === 'csp-missing');
+    check('csp-missing: a root Next app with the header named only in docs and infra scripts is RED', r.status === 1 && csp.length === 1 && csp[0].path === 'package.json', seen(r));
+
+    const sibling = repo('csp-sibling', {
+      'apps/a/package.json': JSON.stringify({ dependencies: { vite: '7.0.0' } }),
+      'apps/a/vercel.json': JSON.stringify({ headers: [{ source: '/(.*)', headers: [{ key: 'Content-Security-Policy', value: "script-src 'self'" }] }] }),
+      'apps/b/package.json': JSON.stringify({ dependencies: { vite: '7.0.0' } }),
+      'apps/b/vite.config.ts': 'export default {};\n',
+    });
+    const s = await run(['--root', sibling, '--json']);
+    const sc = JSON.parse(s.stdout).findings.filter((f) => f.rule === 'csp-missing').map((f) => f.path);
+    check('csp-missing: a sibling app\'s vercel.json does not cover another app', s.status === 1 && sc.length === 1 && sc[0] === 'apps/b/package.json', seen(s));
+
+    const covered = repo('csp-covered', {
+      'package.json': JSON.stringify({ private: true }),
+      'vercel.json': JSON.stringify({ headers: [{ source: '/(.*)', headers: [{ key: 'Content-Security-Policy', value: "script-src 'self'" }] }] }),
+      'web/package.json': JSON.stringify({ dependencies: { vite: '7.0.0' } }),
+      'next-app/package.json': JSON.stringify({ dependencies: { next: '16.0.0' } }),
+      'next-app/next.config.ts': "import { csp } from './headers';\nexport default { headers: async () => [{ source: '/(.*)', headers: [{ key: 'Content-Security-Policy', value: csp }] }] };\n",
+      'spa/package.json': JSON.stringify({ dependencies: { vite: '7.0.0' } }),
+      'spa/index.html': `<head><meta http-equiv="Content-Security-Policy" content="script-src 'self'"></head>\n`,
+      'docs-site/package.json': JSON.stringify({ dependencies: { astro: '5.0.0' } }),
+      'docs-site/astro.config.mjs': 'export default { security: { csp: true } };\n',
+    });
+    const c = await run(['--root', covered, '--json']);
+    check('csp-missing: an ancestor vercel.json, next.config, a meta policy in index.html and astro csp each still count', c.status === 0 && !rules(c).has('csp-missing'), seen(c));
+  }
+
   // --------------------------------------------- ignored vs committed .env
   {
     const dir = repo('envfile', { ...CLEAN_APP, '.gitignore': 'node_modules/\n', '.env.production': 'X=1\n' });
