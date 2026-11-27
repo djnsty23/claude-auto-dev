@@ -689,8 +689,12 @@ const OVERLAY_CSS = [
     '.le[data-variant="bar"] .panel{margin:0 12px 8px;align-self:flex-start}',
     '.le[data-variant="dot"] .pill{padding:0;width:36px;justify-content:center}.le[data-variant="dot"] .pill .count,.le[data-variant="dot"] .pill .eta{display:none}',
     // An ask's state shows in every corner, a side one included, where the count alone is hidden.
-    '.le[data-ask-state][data-corner]:not([data-variant="dot"]) .count{display:inline;max-width:min(62vw,320px);overflow:hidden;text-overflow:ellipsis}',
+    '.le[data-ask-state][data-corner]:not([data-variant="dot"]) .count{display:inline;max-width:min(62vw,320px);overflow-x:clip;overflow-y:visible;text-overflow:ellipsis}',
     '.le[data-ask-state][data-corner="right"] .eta,.le[data-ask-state][data-corner="left"] .eta{display:none}',
+    // A side tab that shows an ask's state is a whole pill, kept inside the viewport with a gutter, so its words are never cut at the edge.
+    '.le[data-ask-state][data-corner="right"]:not([data-variant="dot"]){right:12px}.le[data-ask-state][data-corner="left"]:not([data-variant="dot"]){left:12px}',
+    '.le[data-ask-state][data-corner="right"]:not([data-variant="dot"]) .pill,.le[data-ask-state][data-corner="left"]:not([data-variant="dot"]) .pill{border-radius:18px;border-width:1px}',
+    '.le[data-ask-state][data-corner="right"]:not([data-variant="dot"]) .panel{margin-right:0}.le[data-ask-state][data-corner="left"]:not([data-variant="dot"]) .panel{margin-left:0}',
     '.le[data-variant="dot"] .dot{width:12px;height:12px;box-shadow:0 0 0 4px color-mix(in srgb,var(--le-accent) 25%,transparent)}',
     // The ask box, the asks and the drawn choices.
     '.head{display:flex;align-items:center;justify-content:space-between;gap:8px;margin:0 0 8px}.head .h{margin:0}',
@@ -937,14 +941,24 @@ function overlayClient(window, document, config, kit) {
         node.setAttribute('data-on', '');
     };
     // The badge is fixed to the viewport, so it follows its element on every scroll and resize.
+    // It sits outside the preview outline (3px out, 2px wide), above the element, or below it with
+    // no room above, so it never covers the words being previewed.
     var badgeOn = null;
+    var BADGE_CLEAR = 9;
     var placeBadge = function (el) {
         if (el) badgeOn = el;
         else if (!badgeOn || badge.getAttribute('data-on') === null) return;
-        var r = badgeOn.getBoundingClientRect();
-        badge.style.left = r.left + 'px';
-        badge.style.top = r.top + 'px';
         badge.setAttribute('data-on', '');
+        var r = badgeOn.getBoundingClientRect();
+        var h = badge.offsetHeight || 20;
+        var w = badge.offsetWidth || 60;
+        var top = r.top - BADGE_CLEAR - h;
+        if (top < 4) top = r.bottom + BADGE_CLEAR;
+        var left = r.left - 5;
+        var vw = window.innerWidth || 0;
+        if (vw) left = Math.min(left, vw - w - 4);
+        badge.style.left = Math.max(4, left) + 'px';
+        badge.style.top = top + 'px';
     };
     var onPageMove = function (e) {
         if (!pointing || e.isTrusted !== true) return;
