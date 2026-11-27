@@ -537,6 +537,10 @@ async function proxySuite() {
   const waiting = await request(downPort, '/');
   check('a dev server that is not up yet gets a page that reloads by itself', waiting.status === 502 && waiting.body.includes('http-equiv="refresh"') && /did not answer \/: ECONNREFUSED/.test(downLogs.join('\n')), [waiting.status, downLogs]);
   await shut(down);
+  const quiet = le.createProxy({ upstream: new URL(`http://127.0.0.1:${dead}`), getState: () => ({}) });
+  const quietPort = await listen(quiet);
+  same('a proxy given no logger answers the same way', (await request(quietPort, '/')).status, 502);
+  await shut(quiet);
   same('nothing is left open on either side of the proxy', [proxy.liveEditSockets.size, Boolean(await until(() => up.sockets.size === 0))], [0, true]);
   await shut(proxy);
   await shut(up.server);
