@@ -602,6 +602,10 @@ async function overlaySuite() {
   same('a row of choices wraps inside the panel, so none is cut off on a phone', /\.a2-row\{[^}]*flex-wrap:wrap/.test(le.OVERLAY_CSS), true);
   same('an ask waiting for a pick does not say where the choices are, since each layout puts them elsewhere', api.panel.textContent.includes('Pick one of the choices'), true);
   const byId = (id) => dom.nodes.find((x) => x.attrs['data-id'] === id && x.parentElement);
+  // Seen at 390 on a real page: two trusted taps on a swatch sent nothing, because each poll rebuilt every button.
+  const drawnSection = api.surfacesEl.children[0];
+  await api.pollFeed();
+  same('a poll with nothing new keeps the drawn buttons, so a tap that spans it still lands', [api.surfacesEl.children.length, api.surfacesEl.children[0] === drawnSection], [1, true]);
   byId('v1').listeners.click(forged());
   await flush();
   same('an untrusted tap on a choice sends nothing and previews nothing', [dom.posts('action').length, ctaText.nodeValue], [0, 'Book now']);
