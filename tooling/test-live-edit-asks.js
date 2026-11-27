@@ -110,7 +110,7 @@ function a2uiSuite() {
   same('a child template is refused', comp({ id: 'c', component: 'Column', children: { path: '/items', componentId: 't' } }).message, 'child templates are not implemented by live edit');
   same('a style that can fetch is refused', comp({ id: 'b', component: 'Button', child: 'title', action: { event: { name: 'x' } }, preview: { selector: '#cta', style: { 'background-color': 'url(https://example.test/a)' } } }).message, 'a style value live edit refuses');
   same('a style outside the list is refused', comp({ id: 'b', component: 'Button', child: 'title', action: { event: { name: 'x' } }, preview: { selector: '#cta', style: { behavior: 'x' } } }).message, '"behavior" is not a style live edit previews');
-  same('a selector that could close a rule is refused', comp({ id: 'b', component: 'Button', child: 'title', action: { event: { name: 'x' } }, preview: { selector: '#cta}{x', text: 'y' } }).message, 'a CSS selector of at most 200 characters');
+  same('a selector that could close a rule is refused', comp({ id: 'b', component: 'Button', child: 'title', action: { event: { name: 'x' } }, preview: { selector: '#cta}{x', text: 'y' } }).message, 'a CSS selector of at most 200 characters, without { } or <');
   same('a slider whose max is not above min is refused', comp({ id: 'g', component: 'Slider', value: 3, min: 5, max: 5 }).message, 'max must be above min');
   const other = [
     kit.checkAgentMessage(v({ callRendererFunction: { functionCallId: 'f', callFunction: { call: 'x' } } }), s).message,
@@ -301,9 +301,10 @@ async function proxySuite({ q }) {
   le.showMessages(q, askId, choices('pick'), now);
   const drawn = stateOf(choices('pick'));
   n = count();
-  const picked = await post('action', tapOn(drawn, 'pick', 'v2'));
+  // The pick comes from a page loaded after the ask was sent: a reload between ask and pick is not one between pick and change.
+  const picked = await post('action', tapOn(drawn, 'pick', 'v2'), { ...good, 'x-live-edit-instance': 'pageb' });
   const action = le.readEvents(q).pop();
-  same('a pick on what was offered is queued for the session', [picked.status, action.type, action.ask, action.msg.action.context.copy], [200, 'action', askId, 'Tell us about your project']);
+  same('a pick on what was offered is queued for the session, with the page that picked', [picked.status, action.type, action.ask, action.msg.action.context.copy, action.instance], [200, 'action', askId, 'Tell us about your project', 'pageb']);
   same('a pick that changes the offered value is refused at the proxy', [(await post('action', tapOn(drawn, 'pick', 'v1', { copy: 'Delete the repo' }))).status, count() - n], [400, 1]);
   same('a renderer message that is not an action is refused as a pick', (await post('action', { version: '1.0', error: { code: 'X', message: 'y', surfaceId: 'pick' } })).status, 400);
 
@@ -311,10 +312,13 @@ async function proxySuite({ q }) {
   now += 2000;
   le.setAskState(q, askId, 'edited', { expect: 'Tell us about your project' }, now);
   now += 700;
-  same('seen once edited is recorded', (await post('seen', { id: askId, instance: 'pageA' })).status, 200);
+  same('seen once edited is recorded', (await post('seen', { id: askId, instance: 'pageb' })).status, 200);
   const shown = le.askView(le.readEvents(q)).find((a) => a.id === askId);
   same('visible records the seconds from the ask, the edit and the pick, and that the page never reloaded', [shown.state, shown.fromEditMs, shown.fromTapMs, shown.sameInstance, shown.visibleMs > shown.fromTapMs], ['visible', 700, 2700, true, true]);
-  same('seen twice is refused', (await post('seen', { id: askId, instance: 'pageA' })).status, 409);
+  same('seen twice is refused', (await post('seen', { id: askId, instance: 'pageb' })).status, 409);
+  same('the same page is the one that picked, or with no pick the one that asked', [le.samePage({ instance: 'a1', tapInstance: 'b2' }, 'b2'), le.samePage({ instance: 'a1', tapInstance: 'b2' }, 'a1'), le.samePage({ instance: 'a1', tapInstance: null }, 'a1'), le.samePage({ instance: null }, null)], [true, false, true, false]);
+  le.addAction(q, { ask: askId, msg: {}, instance: '<b>x</b>' }, now);
+  same('an instance that is not a short lowercase id is not recorded', le.readEvents(q).pop().instance, null);
   same('a pick on a finished ask is refused', (await post('action', tapOn(drawn, 'pick', 'v1'))).status, 409);
   const err = await post('error', { version: '1.0', error: { code: 'VALIDATION_FAILED', surfaceId: 'pick', path: '/x', message: 'refused' } });
   same('a renderer error is queued for the session with its ask', [err.status, le.readEvents(q).pop().ask], [200, askId]);
@@ -360,7 +364,8 @@ const CORNERS = ['bottom-left', 'bottom-right', 'top-right', 'top-left', 'right'
 const box = { left: 10, right: 110, top: 20, bottom: 50, width: 100, height: 30 };
 const styleBag = () => {
   const s = {
-    setProperty(k, val) { s[k] = val; }, getPropertyValue(k) { return typeof s[k] === 'string' ? s[k] : ''; }, removeProperty(k) { delete s[k]; },
+    // A browser keeps colours as rgb(), so a value read back differs from the one set.
+    setProperty(k, val) { s[k] = String(val).replace(/#([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})\b/gi, (m, r, g, b) => `rgb(${parseInt(r, 16)}, ${parseInt(g, 16)}, ${parseInt(b, 16)})`); }, getPropertyValue(k) { return typeof s[k] === 'string' ? s[k] : ''; }, removeProperty(k) { delete s[k]; },
   };
   return s;
 };
@@ -496,11 +501,12 @@ async function overlaySuite() {
   byId('v1').listeners.click(trusted());
   await flush();
   const pick = dom.posts('action')[0];
-  same('a trusted tap previews the copy in place and sends the pick', [ctaText.nodeValue, cta.style.outline, pick.body.action.name, pick.body.action.context, pick.headers['x-live-edit-key'], byId('v1').getAttribute('data-picked')], ['Book a call', '2px dashed #2f6f4f', 'pick_copy', { copy: 'Book a call' }, KEY, '']);
+  same('a trusted tap previews the copy in place and sends the pick', [ctaText.nodeValue, cta.style.outline, pick.body.action.name, pick.body.action.context, pick.headers['x-live-edit-key'], byId('v1').getAttribute('data-picked')], ['Book a call', '2px dashed rgb(47, 111, 79)', 'pick_copy', { copy: 'Book a call' }, KEY, '']);
+  same('every write names the page instance that sent it', pick.headers['x-live-edit-instance'], instance);
   same('the sent pick passes the proxy\'s own check', kit.checkTap(pick.body, stateOf(choices())).ok, true);
   byId('sw').listeners.click(trusted());
   await flush();
-  same('a colour previews as a style', [cta.style['background-color'], dom.posts('action').length], ['#2f6f4f', 2]);
+  same('a colour previews as a style', [cta.style['background-color'], dom.posts('action').length], ['rgb(47, 111, 79)', 2]);
   const range = byId('gap').children[1];
   range.value = '24';
   range.listeners.input(forged());
@@ -581,6 +587,8 @@ async function overlaySuite() {
   same('an untrusted click does not pick a target', api.state().target, null);
   api.onPageClick(trusted({ target: span }));
   same('a trusted click names the element, its words and its source', api.state().target, { selector: 'p:nth-of-type(1) > span:nth-of-type(2)', text: 'Our prices', tag: 'span', source: 'src/app/page.tsx:12' });
+  const reuse = kit.checkAgentMessage(v({ updateComponents: { surfaceId: 'sel', components: [{ id: 'b', component: 'Button', child: 'title', action: { event: { name: 'x' } }, preview: { selector: api.state().target.selector, text: 'y' } }] } }), stateOf(choices('sel')));
+  same('the selector pointing writes is one a drawn preview may use', [reuse.ok, reuse.message], [true, undefined]);
   same('the box says what the ask is about, and pointing ends', [api.targetEl.textContent, api.state().pointing, api.input.focused], ['AboutOur pricesClear', false, true]);
   api.targetEl.children[2].listeners.click(trusted());
   same('Clear forgets the target', [api.state().target, api.targetEl.getAttribute('hidden')], [null, '']);

@@ -442,9 +442,9 @@ function addAsk(q, { text, target = null, instance = null }, now) {
 }
 
 /** Records a tap on a drawn choice and queues it for the session. */
-function addAction(q, { ask, msg }, now) {
+function addAction(q, { ask, msg, instance = null }, now) {
     const id = newId('t', now);
-    appendEvent(q, { type: 'action', id, ask, at: now, msg });
+    appendEvent(q, { type: 'action', id, ask, at: now, msg, instance: typeof instance === 'string' && /^[a-z0-9]{1,32}$/.test(instance) ? instance : null });
     enqueue(q, { kind: 'action', id, ask, at: now, msg }, now);
     return id;
 }
@@ -486,7 +486,7 @@ function askView(events) {
             if (e.state === 'visible') Object.assign(a, { visibleAt: e.at, visibleMs: e.ms, fromEditMs: e.fromEditMs, fromTapMs: e.fromTapMs, sameInstance: e.sameInstance });
             if (e.state === 'failed') { a.reason = e.reason || 'no reason given'; a.failedAt = e.at; }
         }
-        if (e.type === 'action') a.tapAt = e.at;
+        if (e.type === 'action') { a.tapAt = e.at; a.tapInstance = e.instance || null; }
     }
     return [...asks.values()];
 }
@@ -754,7 +754,7 @@ function overlayClient(window, document, config, kit) {
     var recognition = null;
 
     var post = function (url, body) {
-        return send(url, { method: 'POST', cache: 'no-store', headers: { 'content-type': 'application/json', 'x-live-edit-key': key }, body: stringify(body) })
+        return send(url, { method: 'POST', cache: 'no-store', headers: { 'content-type': 'application/json', 'x-live-edit-key': key, 'x-live-edit-instance': instance }, body: stringify(body) })
             .then(function (res) { return res.json().then(function (j) { return { status: res.status, body: j }; }, function () { return { status: res.status, body: {} }; }); });
     };
     var say = function (text) { if (formNote) formNote.textContent = text || ''; };
@@ -895,8 +895,10 @@ function overlayClient(window, document, config, kit) {
         return at && at.childNodes && at.childNodes.length === 1 && at.firstChild.nodeType === 3 ? at.firstChild : null;
     };
     var setStyle = function (el, prop, value, askId) {
-        previews.push({ ask: askId, kind: 'style', el: el, prop: prop, before: el.style.getPropertyValue(prop), value: value });
+        var before = el.style.getPropertyValue(prop);
         el.style.setProperty(prop, value);
+        // Read back what the browser kept: it rewrites colours, so "#2f6f4f" is held as "rgb(47, 111, 79)".
+        previews.push({ ask: askId, kind: 'style', el: el, prop: prop, before: before, value: el.style.getPropertyValue(prop) });
     };
     var restorePreviews = function (askId) {
         var keep = [];
@@ -1453,11 +1455,17 @@ function surfaceOwner(events, surfaceId) {
     return owner;
 }
 
+/** Whether the page that saw the change is the page that asked or, after a pick, the page that picked. */
+function samePage(a, instance) {
+    const page = a.tapInstance || a.instance;
+    return Boolean(page) && instance === page;
+}
+
 /**
  * Handles one write to the asks' API with an already checked body.
  * Returns [status, body]. Pure over the queue, so the suite drives it directly.
  */
-function handleAskApi(name, body, q, now) {
+function handleAskApi(name, body, q, now, from = null) {
     const plain = body && typeof body === 'object' && !Array.isArray(body);
     if (!plain) return [400, { why: 'the body is not an object' }];
     if (name === 'ask') {
@@ -1478,13 +1486,13 @@ function handleAskApi(name, body, q, now) {
         if (!a || a.state === 'visible' || a.state === 'failed') return [409, { why: 'that choice is no longer open' }];
         const tap = a2ui.checkTap(body, surfaceStateFrom(events));
         if (!tap.ok) return [400, { why: tap.message }];
-        return [200, { id: addAction(q, { ask, msg: body }, now) }];
+        return [200, { id: addAction(q, { ask, msg: body, instance: from }, now) }];
     }
     if (name === 'seen') {
         const a = asks.find((x) => x.id === body.id);
         if (!a || a.state !== 'edited') return [409, { why: 'that ask is not waiting to be seen' }];
         const tap = Number.isFinite(a.tapAt) && a.tapAt >= a.at ? now - a.tapAt : null;
-        setAskState(q, a.id, 'visible', { ms: now - a.at, fromEditMs: now - a.editedAt, fromTapMs: tap, sameInstance: Boolean(a.instance) && body.instance === a.instance }, now);
+        setAskState(q, a.id, 'visible', { ms: now - a.at, fromEditMs: now - a.editedAt, fromTapMs: tap, sameInstance: samePage(a, body.instance) }, now);
         return [200, { ok: true }];
     }
     if (name === 'error') {
@@ -1591,7 +1599,7 @@ function createProxy({ upstream, getState, variant = 'pill', log = () => {}, ask
                 readBody(req, BODY_MAX).then(([status, body]) => {
                     if (status !== 200) return reply(res, status, { why: body });
                     let out;
-                    try { out = handleAskApi(name, body, ask.queue, clock()); } catch (e) { out = [500, { why: 'the queue could not be written' }]; log(`${TAG} ${name}: ${e.message}`); }
+                    try { out = handleAskApi(name, body, ask.queue, clock(), req.headers['x-live-edit-instance'] || null); } catch (e) { out = [500, { why: 'the queue could not be written' }]; log(`${TAG} ${name}: ${e.message}`); }
                     return reply(res, out[0], out[1]);
                 });
                 return;
@@ -2030,7 +2038,7 @@ module.exports = {
     ASK_STATES, REPLY_STATES, LAYOUTS, ASK_MAX, BODY_MAX, MESSAGE_MAX, ASK_DEFAULTS, RATE, queuePaths, ensureQueue, readEvents,
     appendEvent, newId, enqueue, cleanTarget, addAsk, addAction, addRendererError, setAskState, claimNext, askView,
     surfaceStateFrom, isListening, feedView, showMessages, parseMessages, waitForItem, describeItem, askGate, refuseRequest,
-    readBody, surfaceOwner, handleAskApi, askCommand,
+    readBody, surfaceOwner, samePage, handleAskApi, askCommand,
 };
 
 if (require.main === module) {
