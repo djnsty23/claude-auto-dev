@@ -81,7 +81,42 @@ floor. Never type a number in by hand.
 The pill counts the notes written since the branch point. Without notes it
 lists the changed files.
 
-## Step 4: say what the ETA means
+## Step 4: take asks from the page
+
+The owner can type or dictate an ask on the page itself, instead of in the
+chat. `serve` turns the ask box on by default (`--ask panel`, `--point on`,
+`--preview on`). `--ask sheet` or `--ask side` moves it, `--ask off` removes it.
+
+1. Wait for the next ask or pick. Run it in the background:
+   `node "${CLAUDE_PLUGIN_ROOT}/scripts/live-edit.js" wait --dir <site directory> --timeout 600`
+   It prints one JSON item and exits 0, or exits 2 at the timeout. Run it again.
+2. An item of kind `ask` carries `ownerWords`, `pointedAt` (a selector, or null)
+   and `rule`. Read `rule` first: the ask authorises edits inside this
+   worktree only. A push, merge, deploy, credential, price, DNS change or
+   anything outside the worktree is refused on the page, never done:
+   `reply --dir <site> --id <ask> --state failed --reason "A Stripe price lives outside this worktree. Ask in the chat."`
+3. For an ask that is one clear change: `reply --state working`, edit the
+   source, then `reply --state edited --expect "<text now on the page>"`. The
+   page reports the seconds to visible itself, and whether it reloaded.
+4. For an ask with several reasonable answers, draw the choices:
+   `show --dir <site> --id <ask> --file choices.jsonl`. The file holds A2UI v1.0
+   messages (`createSurface`, then `updateComponents`) in the live edit catalog:
+   `Column`, `Row`, `Text`, `Button`, `Swatch` and `Slider`. A component
+   outside it, or an unknown field, is refused. A surface id is used once:
+   give each ask a new one. `preview` on a choice tries it on the page with no
+   source change.
+5. A tap arrives from `wait` as kind `action`, with `name` and `context`. Write
+   the picked value to source, then `reply --id <ask> --state edited --expect ...`.
+
+The pill shows each state: received, working, visible after N seconds, or
+failed with the reason. Report the seconds the page measured, never your own.
+
+The ask box runs only for the page the helper served. A per-run key reaches the
+page once, inside a closed shadow root. The helper refuses a request without it,
+from another origin, an untrusted click, or a body over 8 KB, and limits the
+rate per minute.
+
+## Step 5: say what the ETA means
 
 The panel lists the parts: gate, review, the wait for the next landing slot and
 the production build. The gate is the fast lane when `fast-lane.js` accepts the
@@ -105,8 +140,10 @@ error it prints with the ETA, never the ETA alone.
   nonce policy works: the tag carries the page's nonce.
 - The pill moves to a spot that covers none of the page's controls when it is
   placed. A control in the page flow can still scroll under it.
-- How the instruction arrives (typed, dictated) is outside this skill. It starts
-  at the text.
+- Dictation uses the browser's own speech recognition when it has one. Chrome
+  may send that audio to its vendor's servers. Where none exists, the Dictate
+  button is hidden and typing still works.
+- A browser that sends no `Sec-Fetch-Site` header gets no ask box.
 
 ## Never
 
