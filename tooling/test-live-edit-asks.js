@@ -261,6 +261,13 @@ async function proxySuite({ q }) {
   same('a ticket older than a minute gets no key', keyIn(await request(port, `/__live-edit/overlay.js?t=${stale}`, { headers: asScript })), 'null');
   const byScript = await request(port, '/', { headers: { 'sec-fetch-dest': 'empty', 'sec-fetch-mode': 'cors', 'sec-fetch-site': 'same-origin' } });
   same('a page script that fetches the page gets no ticket, so it cannot earn the key', [ticketOf(byScript), byScript.body.includes('/__live-edit/overlay.js')], [undefined, true]);
+  const inject = (chunks) => { const inj = le.injector('<K>', '<L>'); return Buffer.concat([...chunks.map((c) => inj.push(Buffer.from(c, 'utf8'))), inj.end()]).toString('utf8'); };
+  same('a framework page head and one with a byte order mark get the keyed tag', [inject(['<!DOCTYPE html><html lang="en" class="font_a-module__x__variable"><head><title>x</title>']).includes('<head><K>'), inject(['\uFEFF<!doctype html>\n<html>\n  <head>']).includes('<head><K>')], [true, true]);
+  // The review's three inputs, verbatim in shape: each put the keyed tag where a page script ran first or could read it.
+  const scriptFirst = inject(['<html><script>window.fetch=wrap</script><head><title>x</title>']);
+  const commented = inject(['<html><!-- <head> --><head>']);
+  const longFirst = inject(['<p>' + 'a'.repeat(256 * 1024), '<script>x</script><head>']);
+  same('a script, a comment or a long prefix before the head gets the plain tag, never the keyed one', [scriptFirst.includes('<K>'), scriptFirst.includes('<L>'), commented.includes('<K>'), longFirst.includes('<K>'), longFirst.endsWith('<L>')], [false, true, false, false, true]);
   same('a frame and a request with no fetch metadata get no ticket', [ticketOf(await request(port, '/', { headers: { ...asPage, 'sec-fetch-dest': 'iframe', 'sec-fetch-site': 'cross-site' } })), ticketOf(await request(port, '/'))], [undefined, undefined]);
   const headless = http.createServer((req, res) => { res.writeHead(200, { 'content-type': 'text/html' }); res.end('<script>window.x = 1</script><p>no head</p>'); });
   const hport = await listen(headless);
@@ -326,7 +333,7 @@ async function proxySuite({ q }) {
   now += 2000;
   le.setAskState(q, askId, 'edited', { expect: 'Tell us about your project' }, now);
   now += 700;
-  same('seen once edited is recorded', (await post('seen', { id: askId, instance: 'pageb' })).status, 200);
+  same('seen once edited is recorded', (await post('seen', { id: askId, instance: 'pageb', already: false })).status, 200);
   const closing = le.readEvents(q).filter((e) => e.type === 'a2ui').pop();
   same('a visible ask deletes its choices in the log, so no page draws them again and they leave the cap', [le.surfaceStateFrom(le.readEvents(q)).surfaces.has('pick'), closing.msg.deleteSurface, closing.ask], [false, { surfaceId: 'pick' }, askId]);
   const shown = le.askView(le.readEvents(q)).find((a) => a.id === askId);
@@ -336,6 +343,11 @@ async function proxySuite({ q }) {
   le.setAskState(q, was, 'edited', { expect: 'Book now' }, now);
   const wasSeen = le.handleAskApi('seen', { id: was, instance: 'pagec', already: true }, q, now + 500);
   const wasView = le.askView(le.readEvents(q)).find((a) => a.id === was);
+  const blind = le.addAsk(q, { text: 'Say Book now' }, now);
+  le.setAskState(q, blind, 'edited', { expect: 'Book now' }, now);
+  le.handleAskApi('seen', { id: blind, instance: 'paged' }, q, now + 500);
+  const blindView = le.askView(le.readEvents(q)).find((a) => a.id === blind);
+  same('a page with nothing to compare (a reload, another tab) gets the ask visible with no seconds claimed', [blindView.state, blindView.visibleMs, blindView.already], ['visible', null, null]);
   same('text that was on the page before the ask is visible with no seconds claimed', [wasSeen[0], wasView.state, wasView.visibleMs, wasView.fromEditMs, wasView.already], [200, 'visible', null, null, true]);
   same('the same page is the one that picked, or with no pick the one that asked', [le.samePage({ instance: 'a1', tapInstance: 'b2' }, 'b2'), le.samePage({ instance: 'a1', tapInstance: 'b2' }, 'a1'), le.samePage({ instance: 'a1', tapInstance: null }, 'a1'), le.samePage({ instance: null }, null)], [true, false, true, false]);
   le.addAction(q, { ask: askId, msg: {}, instance: '<b>x</b>' }, now);
@@ -606,6 +618,11 @@ async function overlaySuite() {
   same('once the page itself rewrites them, seen is sent with the page\'s instance', dom.posts('seen').map((p) => p.body), [{ id: 'a1', instance, already: false }]);
   api.checkVisible();
   same('seen is sent once', dom.posts('seen').length, 1);
+  feed = feedOf([{ id: 'a6', text: 'x', at: t0, state: 'edited', expect: 'Book a call', editedAt: Date.now() }]);
+  await api.pollFeed();
+  api.checkVisible();
+  await flush();
+  same('a page that did not send the ask cannot tell if the text was there, so it says null', dom.posts('seen').filter((p) => p.body.id === 'a6').map((p) => p.body.already), [null]);
 
   feed = feedOf([{ ...edited, state: 'visible', visibleAt: Date.now(), visibleMs: 5400, fromTapMs: 3200, sameInstance: true }]);
   await api.pollFeed();
@@ -613,6 +630,9 @@ async function overlaySuite() {
   feed = feedOf([{ id: 'a2', text: 'x', at: t0, state: 'visible', visibleAt: Date.now(), visibleMs: 4100, sameInstance: false }]);
   await api.pollFeed();
   same('a change that needed a reload says so', api.pill.textContent, 'Visible after 4.1 s, after a reload');
+  feed = feedOf([{ id: 'a5', text: 'x', at: t0, state: 'visible', visibleAt: Date.now(), visibleMs: null, fromEditMs: null, fromTapMs: null, sameInstance: false }]);
+  await api.pollFeed();
+  same('a visible ask with no timing says so and shows no seconds', api.pill.textContent, 'Visible. No timing: this page did not see it change');
   feed = feedOf([{ id: 'a3', text: 'x', at: t0, state: 'failed', reason: 'the file is generated', failedAt: Date.now() }]);
   await api.pollFeed();
   same('failed says the reason', [api.pill.textContent, api.wrap.getAttribute('data-ask-state')], ['Failed: the file is generated', 'failed']);

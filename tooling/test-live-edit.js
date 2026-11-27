@@ -484,7 +484,8 @@ async function proxySuite() {
     same('a long page with no head is not held back for ever', [first.length, flushed.length, hold.end().toString()], [0, big.length + 3, TAG]);
     const late = le.injector(TAG);
     late.push(big);
-    same('a head after the flush still gets the tag, once', [late.push(Buffer.from('<head>')).toString(), late.push(Buffer.from('<head>')).toString(), late.end().toString()], ['<head>' + TAG, '<head>', '']);
+    // Found in review: a head past the flush came after page content that had already been let through, so the tag goes at the end.
+    same('a head after the flush gets the tag at the end, once', [late.push(Buffer.from('<head>')).toString(), late.push(Buffer.from('<head>')).toString(), late.end().toString()], ['<head>', '<head>', TAG]);
   }
 
   same('only this machine\'s names are loopback', ['localhost:3417', '127.0.0.1', '[::1]:80', 'app.localhost:3000', 'LOCALHOST', 'evil.example', 'localhost.evil.example', '', undefined].map(le.loopbackHost), [true, true, true, true, true, false, false, false, false]);

@@ -501,7 +501,7 @@ function askView(events) {
         if (e.type === 'state') {
             a.state = e.state;
             if (e.state === 'edited') { a.editedAt = e.at; a.expect = e.expect || null; }
-            if (e.state === 'visible') Object.assign(a, { visibleAt: e.at, visibleMs: e.ms, fromEditMs: e.fromEditMs, fromTapMs: e.fromTapMs, sameInstance: e.sameInstance, already: e.already === true });
+            if (e.state === 'visible') Object.assign(a, { visibleAt: e.at, visibleMs: e.ms, fromEditMs: e.fromEditMs, fromTapMs: e.fromTapMs, sameInstance: e.sameInstance, already: e.already === true ? true : e.already === false ? false : null });
             if (e.state === 'failed') { a.reason = e.reason || 'no reason given'; a.failedAt = e.at; }
         }
         if (e.type === 'action') { a.tapAt = e.at; a.tapInstance = e.instance || null; }
@@ -1099,6 +1099,7 @@ function overlayClient(window, document, config, kit) {
         if (a.state === 'edited') return 'Edited. Waiting for the page to show it.';
         if (a.state === 'visible') {
             var reload = a.sameInstance === false ? ', after a reload' : '';
+            if (!Number.isFinite(a.visibleMs)) return 'Visible. No timing: this page did not see it change';
             return Number.isFinite(a.fromTapMs) ? 'Visible ' + seconds(a.fromTapMs) + ' after your pick' + reload : 'Visible after ' + seconds(a.visibleMs) + reload;
         }
         if (a.state === 'failed') return 'Failed: ' + (a.reason || 'no reason given');
@@ -1145,7 +1146,8 @@ function overlayClient(window, document, config, kit) {
             if (!a.expect || !landed || bodyText().indexOf(a.expect) === -1) continue;
             reported[a.id] = true;
             // The text was on the page before the owner asked or tapped, so no seconds can be claimed for it.
-            var already = typeof beforeText[a.id] === 'string' && beforeText[a.id].indexOf(a.expect) !== -1;
+            // A page with no snapshot (a reload, another tab) cannot tell, so it says null and no seconds are claimed.
+            var already = typeof beforeText[a.id] === 'string' ? beforeText[a.id].indexOf(a.expect) !== -1 : null;
             sent.push(post(ask.seenUrl, { id: a.id, instance: instance, already: already }));
         }
         return sent.length;
@@ -1557,10 +1559,11 @@ function handleAskApi(name, body, q, now, from = null) {
     if (name === 'seen') {
         const a = asks.find((x) => x.id === body.id);
         if (!a || a.state !== 'edited') return [409, { why: 'that ask is not waiting to be seen' }];
-        // Text that was on the page before the ask proves nothing about the edit, so no seconds are claimed for it.
-        if (body.already === true) { finishAsk(q, a.id, 'visible', { ms: null, fromEditMs: null, fromTapMs: null, already: true, sameInstance: samePage(a, body.instance) }, now); return [200, { ok: true }]; }
+        // Seconds are claimed only when the page saw the text was not there before. Text already on the page,
+        // or a page with no snapshot to compare (a reload, another tab), proves nothing about the edit.
+        if (body.already !== false) { finishAsk(q, a.id, 'visible', { ms: null, fromEditMs: null, fromTapMs: null, already: body.already === true ? true : null, sameInstance: samePage(a, body.instance) }, now); return [200, { ok: true }]; }
         const tap = Number.isFinite(a.tapAt) && a.tapAt >= a.at ? now - a.tapAt : null;
-        finishAsk(q, a.id, 'visible', { ms: now - a.at, fromEditMs: now - a.editedAt, fromTapMs: tap, sameInstance: samePage(a, body.instance) }, now);
+        finishAsk(q, a.id, 'visible', { ms: now - a.at, fromEditMs: now - a.editedAt, fromTapMs: tap, already: false, sameInstance: samePage(a, body.instance) }, now);
         return [200, { ok: true }];
     }
     if (name === 'error') {
@@ -1574,27 +1577,39 @@ function handleAskApi(name, body, q, now, from = null) {
 /**
  * A byte-safe inserter: returns { push(chunk) -> Buffer, end() -> Buffer }.
  * The tag goes right after the opening <head> tag, because a streamed page
- * may never close its body. A page with no head gets it at the end.
+ * may never close its body. Only a head with nothing but a byte order mark, a
+ * doctype and <html> before it gets `tag`: anything else there (a script, a
+ * comment, a head past the first 256 KB) could run before it or hide it, so
+ * that page gets `lateTag`, as does a page with no head, at the end.
  */
+const CLEAN_PREFIX = /^(?:\xEF\xBB\xBF)?\s*(?:<!doctype[^>]*>\s*)?(?:<html(?:\s[^>]*)?>\s*)?$/i;
 function injector(tag, lateTag = tag) {
     let held = '';
-    let done = false;
+    let state = 'hold';
     return {
         push(chunk) {
-            if (done) return chunk;
+            if (state !== 'hold') return chunk;
             held += chunk.toString('latin1');
             const m = /<head(?:\s[^>]*)?>/i.exec(held);
-            if (!m && held.length < 256 * 1024) return Buffer.alloc(0);
-            const cut = m ? m.index + m[0].length : held.length;
-            const out = Buffer.from(held.slice(0, cut) + (m ? tag : '') + held.slice(cut), 'latin1');
-            done = Boolean(m);
+            if (!m) {
+                if (held.length < 256 * 1024) return Buffer.alloc(0);
+                // Too long to be a clean prefix: pass it on and put the tag at the end.
+                const out = Buffer.from(held, 'latin1');
+                held = '';
+                state = 'late';
+                return out;
+            }
+            const cut = m.index + m[0].length;
+            const chosen = CLEAN_PREFIX.test(held.slice(0, m.index)) ? tag : lateTag;
+            const out = Buffer.from(held.slice(0, cut) + chosen + held.slice(cut), 'latin1');
             held = '';
+            state = 'done';
             return out;
         },
         end() {
-            const out = Buffer.from(done ? '' : held + lateTag, 'latin1');
+            const out = Buffer.from(state === 'done' ? '' : held + lateTag, 'latin1');
             held = '';
-            done = true;
+            state = 'done';
             return out;
         },
     };
