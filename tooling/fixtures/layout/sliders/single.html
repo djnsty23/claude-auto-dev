@@ -1,0 +1,25 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>slider with one slide: skipped and counted</title>
+<style>
+  * { box-sizing: border-box; }
+  body { margin: 0; font: 16px/1.4 system-ui, sans-serif; color: #1d1d1f; }
+  main { padding: 16px; max-width: 1100px; margin: 0 auto; }
+  .slide { height: 360px; background: linear-gradient(135deg, #2980b9, #6dd5fa); border-radius: 12px; }
+  .bar { display: flex; justify-content: center; gap: 12px; margin-top: 12px; }
+  .bar button { min-width: 44px; min-height: 44px; }
+</style>
+</head>
+<body>
+<main>
+  <h1>One slide</h1>
+  <section aria-roledescription="carousel" aria-label="Featured">
+    <div class="slide" aria-roledescription="slide" aria-label="1 of 1"></div>
+    <div class="bar"><button type="button" aria-label="Previous slide" disabled>&#8249;</button><button type="button" aria-label="Next slide" disabled>&#8250;</button></div>
+  </section>
+</main>
+</body>
+</html>

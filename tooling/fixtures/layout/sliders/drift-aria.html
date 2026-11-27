@@ -1,0 +1,72 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>slider plant: frame and controls jump between slides (ARIA)</title>
+<style>
+  * { box-sizing: border-box; }
+  body { margin: 0; font: 16px/1.4 system-ui, sans-serif; color: #1d1d1f; }
+  main { padding: 16px; max-width: 1100px; margin: 0 auto; }
+  h1 { font-size: 24px; margin: 0 0 16px; }
+  /* The defect: slide 1 is a tall photo with the controls laid OVER it;
+     slide 2 is a shorter diagram with a legend and the controls BELOW it.
+     The frame has no fixed size, so it follows whichever slide is showing. */
+  .hero { position: relative; border-radius: 12px; overflow: hidden; background: #f2f2f2; }
+  .slide[hidden] { display: none; }
+  .photo { position: relative; height: 520px; background: linear-gradient(135deg, #34495e, #8e44ad); }
+  .diagram { height: 300px; margin: 16px; background: repeating-linear-gradient(90deg, #dfe6e9 0 40px, #b2bec3 40px 80px); }
+  .legend { margin: 0 16px 8px; font-size: 14px; }
+  .bar { display: flex; align-items: center; justify-content: center; gap: 12px; padding: 12px; }
+  .over { position: absolute; left: 0; right: 0; bottom: 0; }
+  .bar button { min-width: 44px; min-height: 44px; border: 1px solid #555; border-radius: 22px; background: #fff; font-size: 18px; }
+  .bar [role="tablist"] { display: flex; gap: 6px; }
+  .bar [role="tab"] { min-width: 44px; min-height: 44px; border-radius: 22px; }
+  .bar [role="tab"][aria-selected="true"] { background: #222; color: #fff; }
+  p.after { margin-top: 24px; }
+</style>
+</head>
+<body>
+<main>
+  <h1>Products that pay for themselves</h1>
+  <section class="hero" aria-roledescription="carousel" aria-label="Highlights">
+    <div class="slide" aria-roledescription="slide" aria-label="1 of 2">
+      <div class="photo" role="img" aria-label="photo">
+        <div class="bar over">
+          <button type="button" aria-label="Previous slide" data-go="-1">&#8249;</button>
+          <div role="tablist"><button role="tab" aria-selected="true" aria-label="Slide 1" data-to="0">1</button><button role="tab" aria-selected="false" aria-label="Slide 2" data-to="1">2</button></div>
+          <button type="button" aria-label="Next slide" data-go="1">&#8250;</button>
+        </div>
+      </div>
+    </div>
+    <div class="slide" aria-roledescription="slide" aria-label="2 of 2" hidden>
+      <div class="diagram" role="img" aria-label="diagram"></div>
+      <p class="legend">Legend: grey bands are weeks, dark bands are orders.</p>
+      <div class="bar">
+        <button type="button" aria-label="Previous slide" data-go="-1">&#8249;</button>
+        <div role="tablist"><button role="tab" aria-selected="false" aria-label="Slide 1" data-to="0">1</button><button role="tab" aria-selected="true" aria-label="Slide 2" data-to="1">2</button></div>
+        <button type="button" aria-label="Next slide" data-go="1">&#8250;</button>
+      </div>
+    </div>
+  </section>
+  <p class="after">Text below the slider moves whenever the frame changes height.</p>
+</main>
+<script>
+  (function () {
+    var root = document.querySelector('[aria-roledescription="carousel"]');
+    var slides = root.querySelectorAll('.slide');
+    var at = 0;
+    function show(i) {
+      at = (i + slides.length) % slides.length;
+      slides.forEach(function (s, k) { s.hidden = k !== at; });
+    }
+    root.addEventListener('click', function (e) {
+      var b = e.target.closest('button');
+      if (!b) return;
+      if (b.dataset.go) show(at + Number(b.dataset.go));
+      if (b.dataset.to) show(Number(b.dataset.to));
+    });
+  })();
+</script>
+</body>
+</html>

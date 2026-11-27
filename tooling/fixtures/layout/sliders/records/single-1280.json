@@ -1,0 +1,30 @@
+{
+ "page": "single",
+ "width": 1280,
+ "sliders": {
+  "status": "MEASURED",
+  "reason": null,
+  "sha": "316d01ccc164",
+  "found": 1,
+  "sliders": [
+   {
+    "id": 0,
+    "sel": "html > body > main > section",
+    "lm": "main",
+    "lib": "aria",
+    "how": "aria-roledescription",
+    "slides": 1,
+    "controls": {
+     "prev": true,
+     "next": true,
+     "dots": 0,
+     "inSlide": false
+    },
+    "ok": [],
+    "status": "SKIPPED",
+    "reason": "1 slide, nothing to compare",
+    "samples": []
+   }
+  ]
+ }
+}

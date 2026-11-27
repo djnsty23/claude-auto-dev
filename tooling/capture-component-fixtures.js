@@ -33,6 +33,10 @@ const SWEEP = require(path.join(ROOT, 'plugins', 'autodev-core', 'scripts', 'uns
 const CHECKS = require(path.join(ROOT, 'plugins', 'autodev-core', 'scripts', 'layout-checks.js'));
 
 const WIDTHS = [390, 414, 1280];
+// --sliders: the slider pages, at the two widths the slider rule is asked at.
+const SLIDER_DIR = path.join(ROOT, 'tooling', 'fixtures', 'layout', 'sliders');
+const SLIDER_PAGES = ['drift-aria', 'drift-generic', 'fixed', 'none', 'single'];
+const SLIDER_WIDTHS = [390, 1280];
 const LAYOUT_DIR = path.join(ROOT, 'tooling', 'fixtures', 'layout');
 const LAYOUT_PAGES = ['clean', 'defect-clip', 'defect-occlusion', 'defect-overflow'];
 // Width -> viewport height, as the layout fixtures were first captured.
@@ -71,12 +75,49 @@ function serve(port, dir) {
     return new Promise((resolve) => server.listen(port, '127.0.0.1', () => resolve(server)));
 }
 
+/**
+ * --sliders: drive each slider page through capture() (which runs the slider
+ * leg) and keep only the slider record. The suite joins each record to a
+ * committed component snapshot of the same width, so the harvest() fixtures
+ * stay untouched.
+ */
+async function captureSliders(pw, port) {
+    const out = path.join(SLIDER_DIR, 'records');
+    const server = await serve(port, SLIDER_DIR);
+    const browser = await pw.chromium.launch({ headless: true });
+    fs.mkdirSync(out, { recursive: true });
+    let n = 0;
+    try {
+        for (const page of SLIDER_PAGES) {
+            for (const w of SLIDER_WIDTHS) {
+                const ctx = await browser.newContext(SWEEP.contextOptions(w));
+                const pg = await ctx.newPage();
+                const cap = await SWEEP.capture(pg, `http://127.0.0.1:${port}/${page}.html`, w, { label: `${page}-${w}` });
+                const rec = { page, width: w, sliders: cap.snapshot.sliders };
+                fs.writeFileSync(path.join(out, `${page}-${w}.json`), JSON.stringify(rec, null, 1) + '\n');
+                const r = CHECKS.analyse(cap.snapshot);
+                const c = r.counts && r.counts.sliders;
+                const drift = r.findings.filter((f) => f.code === CHECKS.CODES.SLIDER_DRIFT).map((f) => f.note).join(' | ');
+                console.log(`${(page + '-' + w).padEnd(20)} ${SWEEP.sliderLine(c)}${drift ? '  ' + drift : ''}`);
+                await ctx.close();
+                n++;
+            }
+        }
+    } finally {
+        await browser.close();
+        server.close();
+    }
+    console.log(`${n} slider records written`);
+    return 0;
+}
+
 async function main(argv) {
     const layout = argv.includes('--layout');
     if (argv.includes('--help') || argv.includes('-h')) {
         console.log('usage: node tooling/capture-component-fixtures.js --playwright <playwright package dir> [--layout] [--port 7392] [--list]');
         console.log(`captures ${plan(false).length} snapshots into tooling/fixtures/layout/components/snapshots`);
         console.log(`--layout captures ${plan(true).length} into tooling/fixtures/layout/snapshots instead (port 7391)`);
+        console.log(`--sliders captures ${SLIDER_PAGES.length * SLIDER_WIDTHS.length} slider records into tooling/fixtures/layout/sliders/records instead (port 7393)`);
         return 0;
     }
     if (argv.includes('--list')) { for (const [n, p, w] of plan(layout)) console.log(`${n}  ${p}  @${w}`); return 0; }
@@ -84,6 +125,7 @@ async function main(argv) {
     if (i < 0 || !argv[i + 1]) { console.error('needs --playwright <dir of a playwright package>'); return 2; }
     const pw = require(path.resolve(argv[i + 1]));
     const pi = argv.indexOf('--port');
+    if (argv.includes('--sliders')) return captureSliders(pw, pi >= 0 ? Number(argv[pi + 1]) : 7393);
     const port = pi >= 0 ? Number(argv[pi + 1]) : (layout ? 7391 : 7392);
     const out = layout ? path.join(LAYOUT_DIR, 'snapshots') : OUT;
     const server = await serve(port, layout ? LAYOUT_DIR : DIR);

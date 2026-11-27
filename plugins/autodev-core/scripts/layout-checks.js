@@ -78,6 +78,8 @@
  * about the verdict.
  */
 
+const SLIDERS = require('./slider-drift.js');
+
 const DEFAULTS = {
     // Sub-pixel layout noise. Fractional rects are normal; 1px is not a defect.
     overflowTolerancePx: 1,
@@ -136,6 +138,11 @@ const DEFAULTS = {
     // Repeated siblings whose spacing spreads wider than this break rhythm.
     rhythmTolPx: 8,
     rhythmMinRepeats: 3,
+
+    // ---- slider rule, judged from snapshot.sliders (slider-drift.js)
+    // A slider's frame height or width, or a control's position, spreading
+    // wider than this between slides is a frame that jumps on every change.
+    sliderDriftTolPx: 1,
 };
 
 // An ancestor that lets the reader scroll to the content ABSORBS the overflow
@@ -170,6 +177,7 @@ const CODES = {
     TAP_TARGET: 'TAP-TARGET',
     TRUNCATED_TEXT: 'TRUNCATED-TEXT',
     RHYTHM: 'RHYTHM',
+    SLIDER_DRIFT: 'SLIDER-DRIFT',
 };
 
 // The component codes, and the subset that applies only on a touch width. A
@@ -560,6 +568,10 @@ function analyse(snapshot, options) {
     // old fixture reads n/a for them rather than a confident zero.
     const comp = analyseComponents(snapshot, T);
     if (comp) findings.push(...comp.findings);
+    // --- the slider rule. null when the capture did not drive sliders (every
+    // snapshot taken before slider-drift.js existed), so it reads n/a.
+    const sl = snapshot.sliders ? SLIDERS.judgeSliders(snapshot.sliders, T, vp.requestedWidth) : null;
+    if (sl) findings.push(...sl.findings);
 
     const sawText = texts.length > 0;
     const counts = {
@@ -571,6 +583,7 @@ function analyse(snapshot, options) {
         textCovered: sawText,
         exempt,
         components: comp ? comp.counts : null,
+        sliders: sl ? sl.counts : null,
     };
 
     return {

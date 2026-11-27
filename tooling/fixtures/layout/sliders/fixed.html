@@ -1,0 +1,65 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>slider control: fixed ratio, controls in one place (embla-style markup)</title>
+<style>
+  * { box-sizing: border-box; }
+  body { margin: 0; font: 16px/1.4 system-ui, sans-serif; color: #1d1d1f; }
+  main { padding: 16px; max-width: 1100px; margin: 0 auto; }
+  /* The fix: the frame owns its size (aspect-ratio), every slide fills it,
+     and the controls live outside the slides, so nothing moves. */
+  .embla { position: relative; }
+  .embla__viewport { overflow: hidden; aspect-ratio: 16 / 9; border-radius: 12px; }
+  .embla__container { display: flex; height: 100%; transition: transform 300ms ease; }
+  .embla__slide { flex: 0 0 100%; min-width: 0; height: 100%; display: flex; align-items: center; justify-content: center; }
+  .embla__slide:nth-child(1) { background: linear-gradient(135deg, #34495e, #8e44ad); }
+  .embla__slide:nth-child(2) { background: #ecf0f1; }
+  .embla__slide:nth-child(3) { background: #f39c12; }
+  .embla__slide .short { width: 60%; height: 40%; background: #bdc3c7; }
+  .embla__controls { display: flex; align-items: center; justify-content: space-between; margin-top: 12px; }
+  .embla__controls button { min-width: 44px; min-height: 44px; border: 1px solid #555; border-radius: 22px; background: #fff; }
+  .embla__dots { display: flex; gap: 6px; }
+  .embla__dot.is-selected { background: #222; color: #fff; }
+  @media (prefers-reduced-motion: reduce) { .embla__container { transition: none; } }
+</style>
+</head>
+<body>
+<main>
+  <h1>Fixed frame</h1>
+  <div class="embla">
+    <div class="embla__viewport">
+      <div class="embla__container">
+        <div class="embla__slide is-selected"><span>A tall photo, cropped to the frame</span></div>
+        <div class="embla__slide"><div class="short"></div></div>
+        <div class="embla__slide"><span>Third</span></div>
+      </div>
+    </div>
+    <div class="embla__controls">
+      <button type="button" class="embla__prev" aria-label="Previous">&#8249;</button>
+      <div class="embla__dots"><button type="button" class="embla__dot is-selected" aria-label="Go to slide 1">1</button><button type="button" class="embla__dot" aria-label="Go to slide 2">2</button><button type="button" class="embla__dot" aria-label="Go to slide 3">3</button></div>
+      <button type="button" class="embla__next" aria-label="Next">&#8250;</button>
+    </div>
+  </div>
+  <p>Below the slider, never moved by it.</p>
+</main>
+<script>
+  (function () {
+    var track = document.querySelector('.embla__container');
+    var slides = track.children;
+    var dots = document.querySelectorAll('.embla__dot');
+    var at = 0;
+    function show(i) {
+      at = (i + slides.length) % slides.length;
+      track.style.transform = 'translateX(' + (-100 * at) + '%)';
+      Array.prototype.forEach.call(slides, function (s, k) { s.classList.toggle('is-selected', k === at); });
+      dots.forEach(function (d, k) { d.classList.toggle('is-selected', k === at); });
+    }
+    document.querySelector('.embla__next').addEventListener('click', function () { show(at + 1); });
+    document.querySelector('.embla__prev').addEventListener('click', function () { show(at - 1); });
+    dots.forEach(function (d, k) { d.addEventListener('click', function () { show(k); }); });
+  })();
+</script>
+</body>
+</html>
