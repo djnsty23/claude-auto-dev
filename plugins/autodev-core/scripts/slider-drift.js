@@ -113,8 +113,21 @@ function sliderHarvest(o) {
         var list = sel ? Array.prototype.slice.call(root.querySelectorAll(sel)) : [];
         return list.filter(function (s) { return !CLONE.test(cls(s)); });
     }
+    // A control the sweep may press: it must not submit a form or leave the
+    // page, because a sweep can run signed in with nobody watching.
+    function safe(el) {
+        var tag = el.tagName;
+        if (tag === 'A') return (el.getAttribute('href') || '').charAt(0) === '#';
+        var inForm = !!(el.form || (el.closest && el.closest('form')));
+        if (tag === 'BUTTON') {
+            var t = (el.getAttribute('type') || '').toLowerCase();
+            return t === 'button' || (!inForm && t !== 'submit');
+        }
+        if (tag === 'INPUT') return (el.getAttribute('type') || '').toLowerCase() === 'radio';
+        return !el.querySelector('a[href]:not([href^="#"]), button[type="submit"], input[type="submit"]');
+    }
     function clickables(scope) {
-        return Array.prototype.slice.call(scope.querySelectorAll(CLICKABLE));
+        return Array.prototype.slice.call(scope.querySelectorAll(CLICKABLE)).filter(safe);
     }
     function controlsIn(scope, slides) {
         var inSlide = function (el) { return slides.some(function (s) { return s.contains(el) && s !== el; }); };
@@ -148,6 +161,8 @@ function sliderHarvest(o) {
 
     // ------------------------------------------------------------ find
     function genericSlides(el) {
+        // A block that takes input is a form or a wizard, not a slider.
+        if (el.querySelector('input:not([type="radio"]):not([type="hidden"]), select, textarea')) return null;
         var kids = Array.prototype.slice.call(el.children).filter(function (k) { return k.tagName !== 'SCRIPT' && k.tagName !== 'STYLE'; });
         if (kids.length < 2) {
             // A transform track: one child that holds the slides.
@@ -347,56 +362,119 @@ async function measureSliders(page, options) {
     try {
         found = await page.evaluate(sliderSource({ op: 'find' }));
     } catch (e) {
-        return { status: 'UNMEASURED', reason: 'slider harvest failed: ' + String((e && e.message) || e).split('\n')[0], sha: sliderSha(), found: null, sliders: [] };
+        return { status: 'UNMEASURED', reason: 'slider harvest failed: ' + firstLine(e), sha: sliderSha(), found: null, sliders: [] };
     }
     if (!found || !Array.isArray(found.sliders)) {
         return { status: 'UNMEASURED', reason: 'the slider harvest returned nothing', sha: sliderSha(), found: null, sliders: [] };
     }
     const out = { status: 'MEASURED', reason: null, sha: sliderSha(), found: found.sliders.length, sliders: [] };
-    for (const s of found.sliders) {
-        const rec = { id: s.id, sel: s.sel, lm: s.lm, lib: s.lib, how: s.how, slides: s.slides, controls: s.controls, ok: s.ok || [], status: null, reason: null, samples: [] };
-        out.sliders.push(rec);
-        if (out.sliders.length > o.maxSliders) { rec.status = 'UNMEASURED'; rec.reason = `over the ${o.maxSliders}-slider cap`; continue; }
-        if (s.slides < 2) { rec.status = 'SKIPPED'; rec.reason = `${s.slides} slide${s.slides === 1 ? '' : 's'}, nothing to compare`; continue; }
-        if (!s.visible) { rec.status = 'UNMEASURED'; rec.reason = 'not visible at this width'; continue; }
-        if (s.pause) {
-            try { await page.locator(`[data-unslop-ctl="${s.id}:pause"]`).first().click({ timeout: o.clickTimeoutMs }); rec.paused = true; } catch { rec.paused = false; }
-        }
-        let st = await settledState(page, s.id, o);
-        if (!st) { rec.status = 'UNMEASURED'; rec.reason = `did not hold still within ${o.settleMs}ms`; continue; }
-        if (st.active < 0) { rec.status = 'UNMEASURED'; rec.reason = 'no active slide could be identified'; continue; }
-        const seen = new Set([st.active]);
-        rec.samples.push(sampleOf(st));
-        let stuck = 0;
-        for (let step = 0; step < o.maxSteps && seen.size < st.slides; step++) {
-            let target = null;
-            if (st.next) target = `${s.id}:next`;
-            else if (st.dotCount >= 2) {
-                let k = 0;
-                while (k < st.dotCount && seen.has(k)) k++;
-                if (k < st.dotCount) target = `${s.id}:dot:${k}`;
-            }
-            if (!target) { rec.reason = 'no visible next control or dot left to press'; break; }
+    const home = pageOf(page.url());
+    // Second line of defence behind safe(): while the leg runs, a request that
+    // could write (anything but GET, HEAD or OPTIONS) is aborted and counted.
+    const guard = await guardWrites(page);
+    try {
+        for (const s of found.sliders) {
+            const rec = { id: s.id, sel: s.sel, lm: s.lm, lib: s.lib, how: s.how, slides: s.slides, controls: s.controls, ok: s.ok || [], status: null, reason: null, samples: [] };
+            out.sliders.push(rec);
+            if (out.navigated) { rec.status = 'UNMEASURED'; rec.reason = 'the page navigated away during the slider leg'; continue; }
+            if (out.sliders.length > o.maxSliders) { rec.status = 'UNMEASURED'; rec.reason = `over the ${o.maxSliders}-slider cap`; continue; }
+            if (s.slides < 2) { rec.status = 'SKIPPED'; rec.reason = `${s.slides} slide${s.slides === 1 ? '' : 's'}, nothing to compare`; continue; }
+            if (!s.visible) { rec.status = 'UNMEASURED'; rec.reason = 'not visible at this width'; continue; }
             try {
-                await page.locator(`[data-unslop-ctl="${target}"]`).first().click({ timeout: o.clickTimeoutMs });
+                await walk(page, s, rec, o, () => pageOf(page.url()) !== home);
             } catch (e) {
-                rec.reason = `pressing ${target.split(':').slice(1).join(' ')} failed: ` + String((e && e.message) || e).split('\n')[0];
-                break;
+                rec.status = 'UNMEASURED';
+                rec.reason = 'slider walk failed: ' + firstLine(e);
             }
-            // Off the control, so a hover style is not read as drift.
-            try { await page.mouse.move(0, 0); } catch { /* no pointer on this page */ }
-            const next = await settledState(page, s.id, o);
-            if (!next) { rec.reason = `did not hold still within ${o.settleMs}ms after a press`; break; }
-            if (next.active === st.active) { if (++stuck >= 2) { rec.reason = 'the control did not change the active slide'; break; } } else stuck = 0;
-            st = next;
-            if (!seen.has(st.active)) { seen.add(st.active); rec.samples.push(sampleOf(st)); }
+            if (pageOf(page.url()) !== home) {
+                out.navigated = true;
+                rec.status = 'UNMEASURED';
+                rec.reason = 'a control navigated away from the page';
+                rec.samples = [];
+            }
         }
-        rec.covered = seen.size;
-        rec.status = seen.size >= 2 ? 'MEASURED' : 'UNMEASURED';
-        if (rec.status === 'MEASURED' && seen.size < s.slides && !rec.reason) rec.reason = `reached ${seen.size} of ${s.slides} slides`;
-        if (rec.status === 'UNMEASURED' && !rec.reason) rec.reason = 'only one slide was reached';
+    } finally {
+        out.blockedWrites = await guard.stop();
     }
     return out;
+}
+
+/** Walk one slider through its own controls, filling rec. */
+async function walk(page, s, rec, o, left) {
+    if (s.pause) {
+        // state() tags the controls, the pause one included, so read once first.
+        await page.evaluate(sliderSource({ op: 'state', id: s.id }));
+        try { await page.locator(`[data-unslop-ctl="${s.id}:pause"]`).first().click({ timeout: o.clickTimeoutMs }); rec.paused = true; } catch { rec.paused = false; }
+        if (left()) return;
+    }
+    let st = await settledState(page, s.id, o);
+    if (!st) { rec.status = 'UNMEASURED'; rec.reason = `did not hold still within ${o.settleMs}ms`; return; }
+    if (st.active < 0) { rec.status = 'UNMEASURED'; rec.reason = 'no active slide could be identified'; return; }
+    const seen = new Set([st.active]);
+    rec.samples.push(sampleOf(st));
+    let stuck = 0;
+    for (let step = 0; step < o.maxSteps && seen.size < st.slides; step++) {
+        let target = null;
+        if (st.next) target = `${s.id}:next`;
+        else if (st.dotCount >= 2) {
+            // Dot k is taken to show slide k. Where a dot stands for a page of
+            // several slides the walk stops early and the record says how far
+            // it got ("reached N of M"), so the assumption fails honestly.
+            let k = 0;
+            while (k < st.dotCount && seen.has(k)) k++;
+            if (k < st.dotCount) target = `${s.id}:dot:${k}`;
+        }
+        if (!target) { rec.reason = 'no visible next control or dot left to press'; break; }
+        try {
+            await page.locator(`[data-unslop-ctl="${target}"]`).first().click({ timeout: o.clickTimeoutMs });
+        } catch (e) {
+            rec.reason = `pressing ${target.split(':').slice(1).join(' ')} failed: ` + firstLine(e);
+            break;
+        }
+        if (left()) return;
+        // Off the control, so a hover style is not read as drift.
+        try { await page.mouse.move(0, 0); } catch { /* no pointer on this page */ }
+        const next = await settledState(page, s.id, o);
+        if (!next) { rec.reason = `did not hold still within ${o.settleMs}ms after a press`; break; }
+        if (next.active === st.active) { if (++stuck >= 2) { rec.reason = 'the control did not change the active slide'; break; } } else stuck = 0;
+        st = next;
+        if (!seen.has(st.active)) { seen.add(st.active); rec.samples.push(sampleOf(st)); }
+    }
+    rec.covered = seen.size;
+    rec.status = seen.size >= 2 ? 'MEASURED' : 'UNMEASURED';
+    if (rec.status === 'MEASURED' && seen.size < s.slides && !rec.reason) rec.reason = `reached ${seen.size} of ${s.slides} slides`;
+    if (rec.status === 'UNMEASURED' && !rec.reason) rec.reason = 'only one slide was reached';
+}
+
+const firstLine = (e) => String((e && e.message) || e).split('\n')[0];
+
+/** The page a URL shows, without its hash: a hash link stays on the page. */
+function pageOf(url) {
+    return String(url || '').split('#')[0];
+}
+
+const READ_ONLY = new Set(['GET', 'HEAD', 'OPTIONS']);
+
+/**
+ * Abort every request that could write while the slider leg runs. A page
+ * without route() (a test double) gets a guard that counts nothing.
+ * @returns {Promise<{stop: () => Promise<number|null>}>}
+ */
+async function guardWrites(page) {
+    if (!page || typeof page.route !== 'function') return { stop: async () => null };
+    let blocked = 0;
+    const handler = (route) => {
+        if (READ_ONLY.has(route.request().method())) return route.fallback();
+        blocked++;
+        return route.abort('blockedbyclient');
+    };
+    try { await page.route('**/*', handler); } catch { return { stop: async () => null }; }
+    return {
+        stop: async () => {
+            try { await page.unroute('**/*', handler); } catch { /* the page closed */ }
+            return blocked;
+        },
+    };
 }
 
 /** Spread of one number over the samples, with the slides at each end. */
@@ -453,7 +531,7 @@ function judgeSliders(rec, T, width) {
     return { findings, counts };
 }
 
-module.exports = { LIMITS, sliderSource, sliderSha, sameState, settledState, measureSliders, spreadOf, judgeSliders };
+module.exports = { LIMITS, sliderSource, pageOf, guardWrites, sliderSha, sameState, settledState, measureSliders, spreadOf, judgeSliders };
 
 if (require.main === module) {
     console.log('slider-drift.js - a library. unslop-sweep.js sweep runs it at every width.');

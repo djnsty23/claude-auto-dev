@@ -1,0 +1,12 @@
+{
+ "page": "unsafe",
+ "width": 1280,
+ "sliders": {
+  "status": "MEASURED",
+  "reason": null,
+  "sha": "07e36eaa385a",
+  "found": 0,
+  "sliders": [],
+  "blockedWrites": 0
+ }
+}

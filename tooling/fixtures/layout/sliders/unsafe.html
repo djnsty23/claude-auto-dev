@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>slider look-alikes the sweep must never press</title>
+<style>
+  * { box-sizing: border-box; }
+  body { margin: 0; font: 16px/1.4 system-ui, sans-serif; color: #1d1d1f; }
+  main { padding: 16px; max-width: 1100px; margin: 0 auto; }
+  .steps > .off, .story > .off { display: none; }
+  fieldset { border: 1px solid #ccc; border-radius: 8px; padding: 16px; }
+  figure { margin: 0; height: 240px; background: linear-gradient(135deg, #2980b9, #6dd5fa); border-radius: 12px; }
+  .bar { display: flex; gap: 12px; margin-top: 12px; }
+  .bar > * { min-width: 44px; min-height: 44px; display: inline-flex; align-items: center; justify-content: center; }
+</style>
+</head>
+<body>
+<main>
+  <h1>Not sliders</h1>
+  <!-- A three-step form: its Back and Next buttons submit, so pressing them would post. -->
+  <form method="post" action="/submitted.html">
+    <div class="wizard">
+      <div class="steps">
+        <fieldset><legend>Step 1</legend><label>Name <input name="name"></label></fieldset>
+        <fieldset class="off"><legend>Step 2</legend><label>Email <input name="email"></label></fieldset>
+        <fieldset class="off"><legend>Step 3</legend><label>Note <textarea name="note"></textarea></label></fieldset>
+      </div>
+      <div class="bar"><button>Back</button><button>Next</button></div>
+    </div>
+  </form>
+  <!-- A script-driven wizard outside any form: its buttons are type=button, so
+       only the input fields mark it as a form and not a slider. -->
+  <div class="wizard">
+    <div class="steps">
+      <section><label>Company <input name="company"></label></section>
+      <section class="off"><label>Size <select name="size"><option>1-10</option></select></label></section>
+      <section class="off"><label>Goal <input name="goal"></label></section>
+    </div>
+    <div class="bar"><button type="button">Back</button><button type="button">Next</button></div>
+  </div>
+  <!-- Stacked figures, each carrying previous and next links to another page. -->
+  <section class="story">
+    <figure><div class="bar"><a href="/elsewhere.html?step=-1">Previous</a><a href="/elsewhere.html?step=1">Next</a></div></figure>
+    <figure class="off"><div class="bar"><a href="/elsewhere.html?step=0">Previous</a><a href="/elsewhere.html?step=2">Next</a></div></figure>
+    <figure class="off"><div class="bar"><a href="/elsewhere.html?step=1">Previous</a><a href="/elsewhere.html?step=3">Next</a></div></figure>
+  </section>
+</main>
+</body>
+</html>

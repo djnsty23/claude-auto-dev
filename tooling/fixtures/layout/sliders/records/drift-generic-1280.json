@@ -4,7 +4,7 @@
  "sliders": {
   "status": "MEASURED",
   "reason": null,
-  "sha": "316d01ccc164",
+  "sha": "07e36eaa385a",
   "found": 1,
   "sliders": [
    {
@@ -96,6 +96,7 @@
     ],
     "covered": 3
    }
-  ]
+  ],
+  "blockedWrites": 0
  }
 }

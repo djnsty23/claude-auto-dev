@@ -673,8 +673,17 @@ async function capture(page, url, width, opts) {
     }
     // Sliders last: driving them clicks the page, which would change the
     // snapshot, the axe run and the screenshot above.
-    if (snapshot && o.sliders !== false) snapshot.sliders = await SLIDERS.measureSliders(page, o.sliderLimits);
-    return { snapshot, finalUrl: page.url(), status: resp ? resp.status() : null, axe, axeById, shot };
+    // The URL is read before the slider leg: a control that navigates must not
+    // turn into a redirect for the route bookkeeping.
+    const finalUrl = page.url();
+    if (snapshot && o.sliders !== false) {
+        try {
+            snapshot.sliders = await SLIDERS.measureSliders(page, o.sliderLimits);
+        } catch (e) {
+            snapshot.sliders = { status: 'UNMEASURED', reason: 'slider leg failed: ' + String((e && e.message) || e).split('\n')[0], sha: SLIDERS.sliderSha(), found: null, sliders: [] };
+        }
+    }
+    return { snapshot, finalUrl, status: resp ? resp.status() : null, axe, axeById, shot };
 }
 
 /** Share of differing pixels between two PNGs, measured in the browser. */

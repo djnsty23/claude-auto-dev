@@ -35,7 +35,7 @@ const CHECKS = require(path.join(ROOT, 'plugins', 'autodev-core', 'scripts', 'la
 const WIDTHS = [390, 414, 1280];
 // --sliders: the slider pages, at the two widths the slider rule is asked at.
 const SLIDER_DIR = path.join(ROOT, 'tooling', 'fixtures', 'layout', 'sliders');
-const SLIDER_PAGES = ['drift-aria', 'drift-generic', 'fixed', 'none', 'single'];
+const SLIDER_PAGES = ['drift-aria', 'drift-generic', 'fixed', 'none', 'single', 'unsafe'];
 const SLIDER_WIDTHS = [390, 1280];
 const LAYOUT_DIR = path.join(ROOT, 'tooling', 'fixtures', 'layout');
 const LAYOUT_PAGES = ['clean', 'defect-clip', 'defect-occlusion', 'defect-overflow'];

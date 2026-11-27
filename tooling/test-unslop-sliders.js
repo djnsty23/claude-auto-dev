@@ -63,7 +63,7 @@ let SLIDERS = null;
 try { SLIDERS = require(SLIDER_FILE); } catch (e) { SLIDERS = null; }
 check('slider-drift.js loads', !!SLIDERS);
 
-const PAGES = ['drift-aria', 'drift-generic', 'fixed', 'none', 'single'];
+const PAGES = ['drift-aria', 'drift-generic', 'fixed', 'none', 'single', 'unsafe'];
 const WIDTHS = [390, 1280];
 // What each page must read, per width. Written from the pages, not the judge.
 const EXPECT = {
@@ -72,6 +72,9 @@ const EXPECT = {
     fixed: { found: 1, measured: 1, skipped: 0, unmeasured: 0, drift: 0, covered: 3 },
     none: { found: 0, measured: 0, skipped: 0, unmeasured: 0, drift: 0 },
     single: { found: 1, measured: 0, skipped: 1, unmeasured: 0, drift: 0 },
+    // A POST form wizard and stacked figures whose controls are links away:
+    // neither may be pressed, so neither is a slider.
+    unsafe: { found: 0, measured: 0, skipped: 0, unmeasured: 0, drift: 0 },
 };
 
 const clone = (x) => JSON.parse(JSON.stringify(x));
@@ -82,12 +85,13 @@ function judged(sliders, w, opt) {
     s.sliders = sliders;
     return CHECKS.analyse(s, opt);
 }
+const firstLineOf = (e) => String((e && e.message) || e).split(/\r?\n/)[0];
 const driftOf = (r) => (r.findings || []).filter((f) => f.code === 'SLIDER-DRIFT');
 
 // ------------------------------------------------------------ fixtures are real
 
 const files = fs.existsSync(RECORDS) ? fs.readdirSync(RECORDS).filter((f) => f.endsWith('.json')) : [];
-check('10 slider records are committed (5 pages x 390, 1280)', files.length === 10, files);
+check('12 slider records are committed (6 pages x 390, 1280)', files.length === 12, files);
 for (const f of files) {
     const r = JSON.parse(fs.readFileSync(path.join(RECORDS, f), 'utf8'));
     check(`${f}: was taken by the CURRENT sliderHarvest (re-run capture-component-fixtures.js --sliders after editing it)`,
@@ -162,18 +166,27 @@ section('threshold and exemptions', () => {
  * A fake page. `sliders` is what op 'find' returns; `states[id]` is the list
  * of states the slider walks through, advanced by a click on next or a dot.
  * `stuck` keeps the state on click; `jitter` never settles.
+ * Like the page, a control carries its tag only once op 'state' has run for
+ * its slider, so a click before that finds nothing and fails.
+ * `navigates` sends the page elsewhere on a click of that slider's next;
+ * `stateThrows` makes every state read of that slider throw.
  */
 function fakePage(spec) {
     const at = {};
     const log = [];
+    const tagged = new Set();
+    let url = 'http://127.0.0.1:1/page.html';
     let reads = 0;
     const page = {
         log,
+        url: () => url,
         evaluate: async (src) => {
             if (spec.throws) throw new Error('Execution context was destroyed\nmore');
             if (spec.empty) return undefined;
             const o = JSON.parse(src.slice(src.lastIndexOf(')(') + 2, -1));
             if (o.op === 'find') return { sliders: spec.sliders };
+            if (spec.stateThrows === o.id) throw new Error('Execution context was destroyed\nmore');
+            tagged.add(o.id);
             const list = spec.states[o.id];
             const st = clone(list[Math.min(at[o.id] || 0, list.length - 1)]);
             if (spec.jitter) st.box.h += reads++;
@@ -186,6 +199,9 @@ function fakePage(spec) {
             if (spec.clickFails) throw new Error('element is not visible\nretrying');
             const m = /="(\d+):(\w+)(?::(\d+))?"/.exec(sel);
             const id = Number(m[1]);
+            if (!tagged.has(id)) throw new Error('locator.click: Timeout exceeded, no element carries this tag');
+            if (spec.navigates === id && m[2] === 'next') { url = 'http://127.0.0.1:1/other.html'; return; }
+            if (spec.hashNav === id) url = url.split('#')[0] + '#slide-' + ((at[id] || 0) + 1);
             if (m[2] === 'pause') return;
             if (spec.stuck) return;
             if (m[2] === 'dot') at[id] = Number(m[3]);
@@ -242,6 +258,34 @@ async function driverTests() {
     check('driver: a harvest that throws is UNMEASURED with the first line of the error', r.status === 'UNMEASURED' && r.reason === 'slider harvest failed: Execution context was destroyed' && r.found === null, r);
     r = await SLIDERS.measureSliders(fakePage({ empty: true }));
     check('driver: a harvest that returns nothing is UNMEASURED, not found 0', r.status === 'UNMEASURED' && r.found === null, r);
+    // Never leave the page or write to the app.
+    p = fakePage({ sliders: [slider(0), slider(1)], states: { 0: [st(0, 300), st(1, 300)], 1: [st(0, 300), st(1, 300)] }, navigates: 0 });
+    r = await SLIDERS.measureSliders(p, fast);
+    check('driver: a control that leaves the page makes that slider UNMEASURED with no samples', r.sliders[0].status === 'UNMEASURED' && r.sliders[0].reason === 'a control navigated away from the page' && r.sliders[0].samples.length === 0, r.sliders[0]);
+    check('driver: and every later slider UNMEASURED without a press', r.sliders[1].status === 'UNMEASURED' && /navigated away during the slider leg/.test(r.sliders[1].reason) && !p.log.some((l) => /"1:/.test(l)), [r.sliders[1], p.log]);
+    p = fakePage({ sliders: [slider(0)], states: { 0: [st(0, 300), st(1, 300), st(2, 300)] }, hashNav: 0 });
+    r = await SLIDERS.measureSliders(p, fast);
+    check('driver: a hash change stays on the page and is measured', r.sliders[0].status === 'MEASURED' && r.sliders[0].covered === 3 && /#slide-/.test(p.url()), [r.sliders[0], p.url()]);
+    check('pageOf: drops the hash only', SLIDERS.pageOf('http://a/b?c=1#d') === 'http://a/b?c=1' && SLIDERS.pageOf('http://a/b') === 'http://a/b');
+    p = fakePage({ sliders: [slider(0), slider(1)], states: { 0: [st(0, 300)], 1: [st(0, 300), st(1, 300), st(2, 300)] }, stateThrows: 0 });
+    r = await SLIDERS.measureSliders(p, fast).catch((e) => ({ threw: firstLineOf(e), sliders: [] }));
+    check('driver: a slider whose walk throws is UNMEASURED and the next one is still measured', r.status === 'MEASURED' && r.sliders[0].status === 'UNMEASURED' && r.sliders[0].reason === 'slider walk failed: Execution context was destroyed' && r.sliders[1].status === 'MEASURED', r.threw || r.sliders.map((s) => [s.status, s.reason]));
+
+    // The write guard, on a page double that records route() and replays requests through it.
+    const routes = [];
+    const gp = { route: async (pat, h) => { routes.push(h); }, unroute: async (pat, h) => { routes.splice(routes.indexOf(h), 1); } };
+    const g = await SLIDERS.guardWrites(gp);
+    const sent = [];
+    for (const method of ['GET', 'POST', 'HEAD', 'PUT', 'OPTIONS', 'DELETE']) {
+        await routes[0]({ request: () => ({ method: () => method }), fallback: async () => sent.push(method + ' passed'), abort: async () => sent.push(method + ' aborted') });
+    }
+    const blocked = await g.stop();
+    check('guardWrites: reads pass, POST PUT DELETE are aborted and counted, the route is removed',
+        sent.join() === 'GET passed,POST aborted,HEAD passed,PUT aborted,OPTIONS passed,DELETE aborted' && blocked === 3 && routes.length === 0, { sent, blocked, routes: routes.length });
+    check('guardWrites: a page without route() counts nothing (n/a, not 0)', (await (await SLIDERS.guardWrites({})).stop()) === null);
+    r = await SLIDERS.measureSliders(fakePage({ sliders: [], states: {} }), fast);
+    check('driver: a page without route() records blockedWrites n/a', r.blockedWrites === null && r.found === 0, r);
+
     check('sameState: a moved control is a different state', !SLIDERS.sameState(st(0, 300), st(0, 300, { next: { x: 251, y: 250, w: 44, h: 44 } })) && SLIDERS.sameState(st(0, 300), st(0, 300)));
     check('sliderSource: serialises an operation the page can run', /^\(function sliderHarvest\(o\)/.test(SLIDERS.sliderSource({ op: 'find' })) && /\)\(\{"op":"find"\}\)$/.test(SLIDERS.sliderSource({ op: 'find' })));
     const cli = spawnSync(process.execPath, [SLIDER_FILE], { encoding: 'utf8' });
@@ -287,6 +331,34 @@ module.exports = { chromium: { launch: async () => ({
     const res2 = await SWEEP.sweep({ base: 'http://localhost:3999', out: path.join(tmp, 'sweep2'), 'routes-file': list, playwright: fake, 'no-axe': true, 'no-sliders': true, quiet: true, widths: '390' });
     check('sweep --no-sliders: the slider leg reads n/a, not 0', res2.captures[0].result.counts.sliders === null, res2.captures[0].result.counts.sliders);
     check('RULE_WEIGHT ranks SLIDER-DRIFT', SWEEP.RULE_WEIGHT['SLIDER-DRIFT'] === 3);
+
+    // capture(): the URL is read before the slider leg, and a leg that throws
+    // costs only the slider record, never the capture.
+    const capPage = (urlThrowsAfter) => {
+        let url = 'about:blank';
+        let urlReads = 0;
+        let tagged = false;
+        return {
+            goto: async (u) => { url = u; return { status: () => 200 }; },
+            waitForLoadState: async () => {}, waitForTimeout: async () => {},
+            url: () => { if (urlThrowsAfter && ++urlReads > urlThrowsAfter) throw new Error('Target page, context or browser has been closed\nmore'); return url; },
+            evaluate: async (src) => {
+                if (src.startsWith('(function sliderHarvest')) {
+                    if (/"op":"find"/.test(src)) return { sliders: [slider(0)] };
+                    tagged = true;
+                    return st(0, 300);
+                }
+                return JSON.parse(fs.readFileSync(path.join(SNAPS, 'components-clean-390.json'), 'utf8'));
+            },
+            mouse: { move: async () => {} },
+            locator: () => ({ first: () => ({ click: async () => { if (!tagged) throw new Error('untagged'); url = 'http://localhost:3999/login'; } }) }),
+        };
+    };
+    const cap = await SWEEP.capture(capPage(0), 'http://localhost:3999/', 390, {});
+    check('capture: a slider control that navigates is not recorded as a redirect', cap.finalUrl === 'http://localhost:3999/' && cap.snapshot.sliders.sliders[0].reason === 'a control navigated away from the page', [cap.finalUrl, cap.snapshot.sliders.sliders[0]]);
+    const cap2 = await SWEEP.capture(capPage(1), 'http://localhost:3999/', 390, {}).catch((e) => ({ threw: firstLineOf(e) }));
+    check('capture: a slider leg that throws keeps the capture and reads UNMEASURED with the reason',
+        !!cap2.snapshot && cap2.finalUrl === 'http://localhost:3999/' && cap2.snapshot.sliders.status === 'UNMEASURED' && cap2.snapshot.sliders.reason === 'slider leg failed: Target page, context or browser has been closed', cap2.threw || (cap2.snapshot && cap2.snapshot.sliders));
     fs.rmSync(tmp, { recursive: true, force: true });
 }
 
@@ -296,7 +368,9 @@ async function liveTests() {
     const dir = process.env.UNSLOP_PLAYWRIGHT;
     if (!dir) { console.log('live leg: not run (set UNSLOP_PLAYWRIGHT=<dir of a playwright package> to re-capture every page in a headless browser)'); return; }
     const pw = require(path.resolve(dir));
+    const requests = [];
     const server = http.createServer((req, res) => {
+        requests.push(req.method + ' ' + req.url);
         const file = path.join(DIR, path.basename(new URL(req.url, 'http://x').pathname));
         if (!file.endsWith('.html') || !fs.existsSync(file)) { res.writeHead(404); res.end(); return; }
         res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' });
@@ -304,13 +378,18 @@ async function liveTests() {
     });
     await new Promise((r) => server.listen(0, '127.0.0.1', r));
     const port = server.address().port;
-    const browser = await pw.chromium.launch({ headless: true });
+    let browser = null;
     try {
+        browser = await pw.chromium.launch({ headless: true });
         for (const page of PAGES) {
             for (const w of WIDTHS) {
                 const ctx = await browser.newContext(SWEEP.contextOptions(w));
                 const pg = await ctx.newPage();
+                const before = requests.length;
                 const cap = await SWEEP.capture(pg, `http://127.0.0.1:${port}/${page}.html`, w, {});
+                const sent = requests.slice(before);
+                check(`live ${page} @${w}: the sweep sent no write and left no page`,
+                    !sent.some((q) => !/^GET /.test(q) || /submitted|elsewhere/.test(q)) && pg.url() === `http://127.0.0.1:${port}/${page}.html`, { sent, url: pg.url() });
                 const r = CHECKS.analyse(cap.snapshot);
                 const c = r.counts && r.counts.sliders;
                 const e = EXPECT[page];
@@ -321,7 +400,7 @@ async function liveTests() {
             }
         }
     } finally {
-        await browser.close();
+        if (browser) await browser.close();
         server.close();
     }
 }
@@ -339,6 +418,6 @@ async function liveTests() {
         for (const f of failures) console.log('  x ' + f);
         process.exitCode = 1;
     } else {
-        console.log(`PASS  ${passed} assertions over ${files.length} real-browser slider records (2 plants, a fixed control, no slider, one slide), a scripted driver and a fake-browser sweep.`);
+        console.log(`PASS  ${passed} assertions over ${files.length} real-browser slider records (2 plants, a fixed control, no slider, one slide, unsafe look-alikes), a scripted driver and a fake-browser sweep.`);
     }
 })();
