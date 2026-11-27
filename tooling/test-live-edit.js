@@ -446,11 +446,11 @@ async function startUpstream() {
 }
 
 // Opens a raw upgrade through the proxy and resolves once the echo of `ping-1` came back, or the socket closed.
-const upgrade = (port, host, { path: url = '/hmr', halfOpen = false } = {}) => new Promise((resolve) => {
+const upgrade = (port, host, { path: url = '/hmr', halfOpen = false, origin = `http://${host}` } = {}) => new Promise((resolve) => {
   const socket = net.connect({ port, host: '127.0.0.1', allowHalfOpen: halfOpen });
   let head = '';
   let sent = false;
-  socket.on('connect', () => socket.write(`GET ${url} HTTP/1.1\r\nHost: ${host}\r\nConnection: Upgrade\r\nUpgrade: test\r\nOrigin: http://${host}\r\n\r\n`));
+  socket.on('connect', () => socket.write(`GET ${url} HTTP/1.1\r\nHost: ${host}\r\nConnection: Upgrade\r\nUpgrade: test\r\nOrigin: ${origin}\r\n\r\n`));
   socket.on('data', (d) => {
     head += d.toString('latin1');
     if (!sent && head.includes('\r\n\r\n')) { sent = true; socket.write('ping-1'); }
@@ -491,6 +491,10 @@ async function proxySuite() {
     le.upstreamHeaders({ host: 'localhost:3417', 'accept-encoding': 'gzip', origin: 'http://localhost:3417', referer: 'http://localhost:3417/page?x=1', cookie: 'a=b' }, new URL('http://localhost:4000')),
     { host: 'localhost:4000', origin: 'http://localhost:4000', referer: 'http://localhost:4000/page?x=1', cookie: 'a=b' });
   same('an origin that is not a URL is dropped', le.upstreamHeaders({ host: 'x', origin: 'null' }, new URL('http://localhost:4000')), { host: 'localhost:4000' });
+  // Found in review of PR 580: a foreign Origin was rewritten to the dev server's, so a page on another site reached it looking same-origin.
+  same('a foreign origin and referer are dropped, never rewritten to the dev server\'s',
+    le.upstreamHeaders({ host: 'localhost:3417', origin: 'https://evil.example', referer: 'https://evil.example/x' }, new URL('http://localhost:4000')), { host: 'localhost:4000' });
+  same('only an Origin that is this proxy is its own', [{ host: 'localhost:3417' }, { host: 'localhost:3417', origin: 'http://localhost:3417' }, { host: 'localhost:3417', origin: 'https://evil.example' }, { host: 'localhost:3417', origin: 'http://localhost:3418' }, { host: 'localhost:3417', origin: 'null' }].map(le.foreignOrigin), [false, false, true, true, true]);
   same('a command line quotes what holds a space', [le.commandLine(['npm', 'run', 'dev', '--', '--port', '4000']), le.commandLine(['node', 'a b.js', 'say "hi"'])], ['npm run dev -- --port 4000', 'node "a b.js" "say \\"hi\\""']);
 
   const up = await startUpstream();
@@ -525,6 +529,8 @@ async function proxySuite() {
   same('an unknown helper path is a 404, not a pass-through', [(await request(port, '/__live-edit/nope')).status, up.seen.some((s) => String(s.url).startsWith('/__live-edit'))], [404, false]);
   const foreign = await request(port, '/__live-edit/state', { headers: { host: 'evil.example' } });
   same('a foreign Host is refused before anything is read', [foreign.status, (await request(port, '/', { headers: { host: 'evil.example' } })).status, foreign.body.includes('changed')], [403, 403, false]);
+  const crossSite = await request(port, '/cross-site', { method: 'POST', body: 'x', headers: { origin: 'https://evil.example' } });
+  same('a request from a page on another site is refused and never reaches the dev server', [crossSite.status, up.seen.some((s) => s.url === '/cross-site')], [403, false]);
 
   const ws = await upgrade(port, `localhost:${port}`);
   const upgradeSeen = up.seen.find((s) => s.upgrade);
@@ -534,6 +540,8 @@ async function proxySuite() {
   check('and forgotten when it closes', Boolean(await until(() => proxy.liveEditSockets.size === 0)));
   const badWs = await upgrade(port, 'evil.example');
   same('an upgrade with a foreign Host is dropped', [badWs.echoed, badWs.head], [false, '']);
+  const crossWs = await upgrade(port, `localhost:${port}`, { path: '/hmr-cross', origin: 'https://evil.example' });
+  same('an upgrade from a page on another site is dropped and never reaches the dev server', [crossWs.echoed, crossWs.head, up.seen.some((s) => s.url === '/hmr-cross')], [false, '', false]);
   // Each end can be left half open by the other. Neither may keep the pair alive.
   const held = await upgrade(port, `localhost:${port}`, { path: '/hmr-held' });
   held.socket.destroy();
