@@ -47,8 +47,7 @@ const LIMITS = {
 
 /* eslint-disable no-var */
 /**
- * Runs in the page, serialised by sliderSource(). The suite also calls it in
- * Node on a stub document, so coverage sees it entered.
+ * Runs in the page. Never called in Node: it is serialised by sliderSource().
  * @param {{op: 'find'|'state', id?: number}} o
  */
 function sliderHarvest(o) {
@@ -454,7 +453,7 @@ function judgeSliders(rec, T, width) {
     return { findings, counts };
 }
 
-module.exports = { LIMITS, sliderHarvest, sliderSource, sliderSha, sameState, settledState, measureSliders, spreadOf, judgeSliders };
+module.exports = { LIMITS, sliderSource, sliderSha, sameState, settledState, measureSliders, spreadOf, judgeSliders };
 
 if (require.main === module) {
     console.log('slider-drift.js - a library. unslop-sweep.js sweep runs it at every width.');

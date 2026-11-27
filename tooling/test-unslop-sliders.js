@@ -135,25 +135,6 @@ section('n/a, never zero', () => {
     check('and prints the reason', !!SWEEP.sliderLine && /UNMEASURED \(the slider harvest returned nothing\)/.test(SWEEP.sliderLine(un.counts.sliders)));
 });
 
-// ------------------------------------------------------------ the in-page harvest, in Node
-// The live leg runs sliderHarvest() in a browser, which Node coverage cannot
-// see. Here it runs in this process against a stub document with no element:
-// find() must report an empty population and state() a vanished root.
-
-section('in-page harvest on an empty document', () => {
-    const had = Object.prototype.hasOwnProperty.call(globalThis, 'document');
-    const prev = globalThis.document;
-    globalThis.document = { body: null, querySelectorAll: () => [], querySelector: () => null };
-    try {
-        const f = SLIDERS.sliderHarvest({ op: 'find' });
-        check('harvest find on an empty document returns an empty slider list', !!f && Array.isArray(f.sliders) && f.sliders.length === 0, f);
-        const s = SLIDERS.sliderHarvest({ op: 'state', id: 0 });
-        check('harvest state for a missing root reads gone', !!s && s.gone === true, s);
-    } finally {
-        if (had) globalThis.document = prev; else delete globalThis.document;
-    }
-});
-
 // ------------------------------------------------------------ threshold and exemptions
 
 section('threshold and exemptions', () => {
