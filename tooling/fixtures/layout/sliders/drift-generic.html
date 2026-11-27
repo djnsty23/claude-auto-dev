@@ -1,0 +1,53 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>slider plant: the same defect, hand-built with no ARIA and no library</title>
+<style>
+  * { box-sizing: border-box; }
+  body { margin: 0; font: 16px/1.4 system-ui, sans-serif; color: #1d1d1f; }
+  main { padding: 16px; max-width: 1100px; margin: 0 auto; }
+  .gallery { position: relative; background: #f5f5f5; }
+  .frame { position: relative; }
+  .frame > figure { margin: 0; }
+  .frame > figure.off { display: none; }
+  .tall { height: 480px; background: linear-gradient(160deg, #16a085, #2c3e50); }
+  .short { height: 260px; background: repeating-linear-gradient(0deg, #eee 0 30px, #ccc 30px 60px); }
+  figcaption { padding: 8px 12px; font-size: 14px; }
+  .arrows { display: flex; justify-content: space-between; padding: 8px; }
+  .tall-wrap .arrows { position: absolute; left: 0; right: 0; top: 200px; }
+  .arrows button { width: 48px; height: 48px; border: 0; border-radius: 24px; background: #fff; font-size: 20px; }
+</style>
+</head>
+<body>
+<main>
+  <h1>Gallery</h1>
+  <div class="gallery">
+    <div class="frame">
+      <figure class="tall-wrap"><div class="tall"></div>
+        <div class="arrows"><button type="button" class="prev" title="previous">&#8592;</button><button type="button" class="next" title="next">&#8594;</button></div>
+      </figure>
+      <figure class="off"><div class="short"></div><figcaption>Floor plan, ground level, with the entrance on the left.</figcaption>
+        <div class="arrows"><button type="button" class="prev" title="previous">&#8592;</button><button type="button" class="next" title="next">&#8594;</button></div>
+      </figure>
+      <figure class="off"><div class="short"></div><figcaption>Floor plan, first level.</figcaption>
+        <div class="arrows"><button type="button" class="prev" title="previous">&#8592;</button><button type="button" class="next" title="next">&#8594;</button></div>
+      </figure>
+    </div>
+  </div>
+  <p>Below the gallery.</p>
+</main>
+<script>
+  (function () {
+    var figs = document.querySelectorAll('.frame > figure');
+    var at = 0;
+    function show(i) { at = (i + figs.length) % figs.length; figs.forEach(function (f, k) { f.classList.toggle('off', k !== at); }); }
+    document.querySelector('.frame').addEventListener('click', function (e) {
+      if (e.target.closest('.next')) show(at + 1);
+      if (e.target.closest('.prev')) show(at - 1);
+    });
+  })();
+</script>
+</body>
+</html>

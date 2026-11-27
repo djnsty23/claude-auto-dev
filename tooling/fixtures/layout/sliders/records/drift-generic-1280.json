@@ -1,0 +1,101 @@
+{
+ "page": "drift-generic",
+ "width": 1280,
+ "sliders": {
+  "status": "MEASURED",
+  "reason": null,
+  "sha": "316d01ccc164",
+  "found": 1,
+  "sliders": [
+   {
+    "id": 0,
+    "sel": "body > main > div.gallery > div.frame",
+    "lm": "main",
+    "lib": "generic",
+    "how": "stacked",
+    "slides": 3,
+    "controls": {
+     "prev": true,
+     "next": true,
+     "dots": 0,
+     "inSlide": true
+    },
+    "ok": [],
+    "status": "MEASURED",
+    "reason": null,
+    "samples": [
+     {
+      "active": 0,
+      "activeHow": "only-visible",
+      "box": {
+       "x": 106,
+       "y": 103.67,
+       "w": 1068,
+       "h": 480
+      },
+      "prev": {
+       "x": 114,
+       "y": 311.67,
+       "w": 48,
+       "h": 48
+      },
+      "next": {
+       "x": 1118,
+       "y": 311.67,
+       "w": 48,
+       "h": 48
+      },
+      "dots": null
+     },
+     {
+      "active": 1,
+      "activeHow": "only-visible",
+      "box": {
+       "x": 106,
+       "y": 103.67,
+       "w": 1068,
+       "h": 359.59
+      },
+      "prev": {
+       "x": 114,
+       "y": 407.27,
+       "w": 48,
+       "h": 48
+      },
+      "next": {
+       "x": 1118,
+       "y": 407.27,
+       "w": 48,
+       "h": 48
+      },
+      "dots": null
+     },
+     {
+      "active": 2,
+      "activeHow": "only-visible",
+      "box": {
+       "x": 106,
+       "y": 103.67,
+       "w": 1068,
+       "h": 359.59
+      },
+      "prev": {
+       "x": 114,
+       "y": 407.27,
+       "w": 48,
+       "h": 48
+      },
+      "next": {
+       "x": 1118,
+       "y": 407.27,
+       "w": 48,
+       "h": 48
+      },
+      "dots": null
+     }
+    ],
+    "covered": 3
+   }
+  ]
+ }
+}

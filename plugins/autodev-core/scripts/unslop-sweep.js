@@ -44,6 +44,7 @@ const zlib = require('zlib');
 const crypto = require('crypto');
 const CHECKS = require('./layout-checks.js');
 const PROBE = require('./layout-probe.js');
+const SLIDERS = require('./slider-drift.js');
 
 const DEFAULT_WIDTHS = [390, 414, 1280];
 const SHOT_MAX_HEIGHT = 6000;
@@ -54,7 +55,7 @@ const RULE_WEIGHT = {
     'DOC-SCROLL': 5, 'OVERFLOW-CULPRIT': 4, 'TEXT-OCCLUDED': 4, 'CLIPPED-TEXT': 3,
     'GLUED-CONTROLS': 3, 'DOUBLE-BORDER': 3, 'NO-GUTTER': 3, 'SHORT-BAR': 2,
     'ROW-HEIGHT': 2, 'ROW-CENTER': 2, 'ROW-BORDER': 2, 'ROW-RADIUS': 2, 'ROW-PADDING': 2,
-    'TAP-TARGET': 2, 'TRUNCATED-TEXT': 2, 'RHYTHM': 1,
+    'TAP-TARGET': 2, 'TRUNCATED-TEXT': 2, 'RHYTHM': 1, 'SLIDER-DRIFT': 3,
 };
 // The overflow, occlusion and clipping family, counted together on the scorecard.
 const OOC = new Set(['DOC-SCROLL', 'OVERFLOW-CULPRIT', 'CLIPPED-TEXT', 'TEXT-OCCLUDED']);
@@ -670,6 +671,9 @@ async function capture(page, url, width, opts) {
         const h = Math.min(SHOT_MAX_HEIGHT, (snapshot && snapshot.viewport && snapshot.viewport.scrollHeight) || 844);
         shot = await page.screenshot({ path: o.shotPath, fullPage: true, clip: { x: 0, y: 0, width, height: h }, animations: 'disabled' });
     }
+    // Sliders last: driving them clicks the page, which would change the
+    // snapshot, the axe run and the screenshot above.
+    if (snapshot && o.sliders !== false) snapshot.sliders = await SLIDERS.measureSliders(page, o.sliderLimits);
     return { snapshot, finalUrl: page.url(), status: resp ? resp.status() : null, axe, axeById, shot };
 }
 
@@ -789,7 +793,7 @@ async function sweep(args) {
                     const shotPath = path.join(out, 'shots', label + '.png');
                     let cap;
                     try {
-                        cap = await capture(page, new URL(r.path, base).href, width, { label, axeSource, shotPath });
+                        cap = await capture(page, new URL(r.path, base).href, width, { label, axeSource, shotPath, sliders: !args['no-sliders'] });
                     } catch (e) {
                         captures.push({ route: r.path, state: st.name, width, label, result: { status: 'UNMEASURED', reason: 'capture failed: ' + String(e.message || e).split('\n')[0], findings: [] } });
                         log(`  ${label}: capture failed`);
@@ -813,7 +817,7 @@ async function sweep(args) {
                         await dp.close();
                     }
                     captures.push({ route: r.path, state: st.name, width, label, redirectedTo, httpStatus: cap.status, shot: path.relative(out, shotPath).replace(/\\/g, '/'), result, axe: cap.axe, axeById: cap.axeById, pixelDiffPct });
-                    log(`  ${label}: ${result.status} ${result.findings ? result.findings.length : 0} findings${cap.axe != null ? `, axe ${cap.axe}` : ''}`);
+                    log(`  ${label}: ${result.status} ${result.findings ? result.findings.length : 0} findings${cap.axe != null ? `, axe ${cap.axe}` : ''}, ${sliderLine(result.counts && result.counts.sliders)}`);
                 }
                 await ctx.close();
             }
@@ -834,6 +838,13 @@ async function sweep(args) {
     fs.writeFileSync(path.join(out, 'findings.json'), JSON.stringify({ meta, captures: slim }, null, 1));
     fs.writeFileSync(path.join(out, 'scorecard.json'), JSON.stringify(card, null, 1));
     return { out, meta, captures: slim, card };
+}
+
+/** One capture's slider population, printed so 0 sliders never reads as clean by silence. */
+function sliderLine(c) {
+    if (!c) return 'sliders not run';
+    if (c.status !== 'MEASURED') return `sliders UNMEASURED (${c.reason})`;
+    return `sliders found ${c.found}, measured ${c.measured}, skipped ${c.skipped}, unmeasured ${c.unmeasured}, drift ${c.drift}`;
 }
 
 function slimResult(r) {
@@ -915,12 +926,21 @@ function printReport(data, opts) {
         const judged = measured.filter((c) => {
             const cs = c.result.counts;
             if (!cs) return false;
+            if (code === CHECKS.CODES.SLIDER_DRIFT) return !!(cs.sliders && cs.sliders.status === 'MEASURED');
             if (key) return cs.components && cs.components[key] != null;
             return true;
         }).length;
         const n = measured.reduce((s, c) => s + c.result.findings.filter((f) => f.code === code).length, 0);
         const hit = measured.filter((c) => c.result.findings.some((f) => f.code === code)).length;
         lines.push(`${code.padEnd(20)} ${String(n).padStart(8)}  ${String(hit).padStart(12)}  ${String(judged).padStart(6)}`);
+    }
+    lines.push('');
+    lines.push('sliders per width (found / measured / skipped / unmeasured / drift):');
+    for (const w of m.widths || []) {
+        const at = measured.filter((c) => c.width === w);
+        const sc = at.map((c) => c.result.counts && c.result.counts.sliders).filter((x) => x && x.status === 'MEASURED');
+        const sum = (k) => sc.reduce((n, x) => n + (x[k] || 0), 0);
+        lines.push(`  ${w}: ${sc.length ? `${sum('found')} / ${sum('measured')} / ${sum('skipped')} / ${sum('unmeasured')} / ${sum('drift')}` : 'not run'} over ${sc.length} of ${at.length} captures`);
     }
     const rows = rankFindings(caps);
     lines.push('');
@@ -1010,7 +1030,7 @@ function usage() {
   sweep         --base <local url> [--root <app>] [--out <dir>] [--widths 390,414,1280]
                 [--sitemap ..] [--routes-file ..] [--max-routes 60] [--samples 1]
                 [--email-env NAME --password-env NAME] [--login-path /login] [--signed-in-all]
-                [--init-storage <json>] [--cookies name=value,..] [--baseline <earlier out>] [--playwright <dir>] [--axe <file>|--no-axe]
+                [--init-storage <json>] [--cookies name=value,..] [--baseline <earlier out>] [--playwright <dir>] [--axe <file>|--no-axe] [--no-sliders]
                 [--sha <commit>] [--strict] [--quiet]
   report        <out> [--top 10] [--json]
   stories       <out> [--prd prd.json] [--write] [--sprint N]
@@ -1185,7 +1205,7 @@ module.exports = {
     discoverAppRoutes, findAppDir, isDynamic, patternRegex, parseSitemap, readRouteList, planRoutes,
     isLocalBase, findLoginSources, slugOf, scoreOf, rankFindings, componentOf, groupStories, mergeIntoPrd,
     flattenScorecard, compareScorecards, scorecardOf, makePairs, scorePairs, rng, validateVision, mergeVision,
-    contextOptions, loadBrowserDriver, capture, pixelDiff, signIn, sweep, printReport, printCompare, briefText, parseArgs,
+    contextOptions, loadBrowserDriver, capture, pixelDiff, signIn, sweep, printReport, printCompare, briefText, parseArgs, sliderLine,
     RULE_WEIGHT, RUBRIC, RUBRIC_RULES, DEFAULT_WIDTHS,
 };
 

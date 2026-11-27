@@ -1,0 +1,88 @@
+{
+ "page": "drift-aria",
+ "width": 1280,
+ "sliders": {
+  "status": "MEASURED",
+  "reason": null,
+  "sha": "316d01ccc164",
+  "found": 1,
+  "sliders": [
+   {
+    "id": 0,
+    "sel": "html > body > main > section.hero",
+    "lm": "main",
+    "lib": "aria",
+    "how": "aria-roledescription",
+    "slides": 2,
+    "controls": {
+     "prev": true,
+     "next": true,
+     "dots": 2,
+     "inSlide": true
+    },
+    "ok": [],
+    "status": "MEASURED",
+    "reason": null,
+    "samples": [
+     {
+      "active": 0,
+      "activeHow": "only-visible",
+      "box": {
+       "x": 106,
+       "y": 65.59,
+       "w": 1068,
+       "h": 520
+      },
+      "prev": {
+       "x": 537,
+       "y": 529.59,
+       "w": 44,
+       "h": 44
+      },
+      "next": {
+       "x": 699,
+       "y": 529.59,
+       "w": 44,
+       "h": 44
+      },
+      "dots": {
+       "x": 593,
+       "y": 529.59,
+       "w": 94,
+       "h": 44
+      }
+     },
+     {
+      "active": 1,
+      "activeHow": "only-visible",
+      "box": {
+       "x": 106,
+       "y": 65.59,
+       "w": 1068,
+       "h": 427.59
+      },
+      "prev": {
+       "x": 537,
+       "y": 437.19,
+       "w": 44,
+       "h": 44
+      },
+      "next": {
+       "x": 699,
+       "y": 437.19,
+       "w": 44,
+       "h": 44
+      },
+      "dots": {
+       "x": 593,
+       "y": 437.19,
+       "w": 94,
+       "h": 44
+      }
+     }
+    ],
+    "covered": 2
+   }
+  ]
+ }
+}

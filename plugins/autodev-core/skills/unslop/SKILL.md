@@ -52,6 +52,7 @@ finding, and overridable on `rendered-layout-gate.js` as `--<name> <n>`.
 | `TAP-TARGET` | an interactive element (with any positioned pseudo-element) is small | < `tapMinPx` 44 either axis, widths <= 767 |
 | `TRUNCATED-TEXT` | an ellipsis, a line clamp or a nowrap clip is hiding content | content exceeds its box by > 1 |
 | `RHYTHM` | 3+ repeated sibling blocks are spaced unevenly | spread > `rhythmTolPx` 8 |
+| `SLIDER-DRIFT` | a slider or carousel changes its frame size, or moves its previous, next or dot controls, between slides (every slide is activated through its own control) | spread > `sliderDriftTolPx` 1, the slider population printed per width, `--no-sliders` skips it |
 | `DOC-SCROLL`, `OVERFLOW-CULPRIT`, `CLIPPED-TEXT`, `TEXT-OCCLUDED` | the existing overflow and occlusion checks | see `rendered-layout-gate.js --how` |
 
 Correct shapes that look like defects are exempt and **counted**: a segmented

@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>no slider: near misses that must not be counted as sliders</title>
+<style>
+  * { box-sizing: border-box; }
+  body { margin: 0; font: 16px/1.4 system-ui, sans-serif; color: #1d1d1f; }
+  main { padding: 16px; max-width: 1100px; margin: 0 auto; }
+  /* A horizontal rail of cards with no controls: a scroller, not a slider. */
+  .rail { display: flex; gap: 12px; overflow-x: auto; scroll-snap-type: x mandatory; }
+  .rail > article { flex: 0 0 240px; scroll-snap-align: start; height: 140px; background: #eee; border-radius: 8px; padding: 12px; }
+  /* Tabs: a tablist with panels of different heights is not a slider. */
+  [role="tabpanel"][hidden] { display: none; }
+  .tabs [role="tab"] { min-height: 44px; }
+  /* A pager: previous and next links with nothing to slide. */
+  .pager { display: flex; justify-content: space-between; margin-top: 24px; }
+  .pager a { display: inline-block; min-height: 44px; padding: 10px; }
+</style>
+</head>
+<body>
+<main>
+  <h1>A page with no slider</h1>
+  <div class="rail">
+    <article>One</article><article>Two</article><article>Three</article><article>Four</article><article>Five</article>
+  </div>
+  <div class="tabs">
+    <div role="tablist" aria-label="Plans"><button role="tab" aria-selected="true">Monthly</button><button role="tab" aria-selected="false">Yearly</button></div>
+    <div role="tabpanel">Monthly plans, billed every month.</div>
+    <div role="tabpanel" hidden>Yearly plans.<br>Two months free.<br>Billed once.</div>
+  </div>
+  <ul>
+    <li>A list item</li>
+    <li>Another list item</li>
+  </ul>
+  <nav class="pager" aria-label="Pages"><a href="#p1">Previous page</a><a href="#p3">Next page</a></nav>
+</main>
+</body>
+</html>

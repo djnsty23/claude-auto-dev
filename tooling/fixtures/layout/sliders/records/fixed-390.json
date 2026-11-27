@@ -1,0 +1,116 @@
+{
+ "page": "fixed",
+ "width": 390,
+ "sliders": {
+  "status": "MEASURED",
+  "reason": null,
+  "sha": "316d01ccc164",
+  "found": 1,
+  "sliders": [
+   {
+    "id": 0,
+    "sel": "html > body > main > div.embla",
+    "lm": "main",
+    "lib": "embla",
+    "how": "library-class",
+    "slides": 3,
+    "controls": {
+     "prev": true,
+     "next": true,
+     "dots": 3,
+     "inSlide": false
+    },
+    "ok": [],
+    "status": "MEASURED",
+    "reason": null,
+    "samples": [
+     {
+      "active": 0,
+      "activeHow": "class",
+      "box": {
+       "x": 16,
+       "y": 103.67,
+       "w": 358,
+       "h": 257.38
+      },
+      "prev": {
+       "x": 16,
+       "y": 317.05,
+       "w": 44,
+       "h": 44
+      },
+      "next": {
+       "x": 330,
+       "y": 317.05,
+       "w": 44,
+       "h": 44
+      },
+      "dots": {
+       "x": 123,
+       "y": 317.05,
+       "w": 144,
+       "h": 44
+      }
+     },
+     {
+      "active": 1,
+      "activeHow": "class",
+      "box": {
+       "x": 16,
+       "y": 103.67,
+       "w": 358,
+       "h": 257.38
+      },
+      "prev": {
+       "x": 16,
+       "y": 317.05,
+       "w": 44,
+       "h": 44
+      },
+      "next": {
+       "x": 330,
+       "y": 317.05,
+       "w": 44,
+       "h": 44
+      },
+      "dots": {
+       "x": 123,
+       "y": 317.05,
+       "w": 144,
+       "h": 44
+      }
+     },
+     {
+      "active": 2,
+      "activeHow": "class",
+      "box": {
+       "x": 16,
+       "y": 103.67,
+       "w": 358,
+       "h": 257.38
+      },
+      "prev": {
+       "x": 16,
+       "y": 317.05,
+       "w": 44,
+       "h": 44
+      },
+      "next": {
+       "x": 330,
+       "y": 317.05,
+       "w": 44,
+       "h": 44
+      },
+      "dots": {
+       "x": 123,
+       "y": 317.05,
+       "w": 144,
+       "h": 44
+      }
+     }
+    ],
+    "covered": 3
+   }
+  ]
+ }
+}
