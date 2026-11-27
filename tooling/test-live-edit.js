@@ -58,6 +58,11 @@ const until = async (fn, ms = 8000) => {
   }
 };
 const cleanup = [];
+// The suite's own way to end a process tree, so a helper that fails to stop its child leaves nothing behind.
+const reap = (pid) => {
+  if (process.platform === 'win32') { spawnSync('taskkill', ['/pid', String(pid), '/T', '/F'], { windowsHide: true, stdio: 'ignore' }); return; }
+  for (const target of [-pid, pid]) { try { process.kill(target, 'SIGKILL'); return; } catch { /* that one is already gone */ } }
+};
 
 const cal = (parts = {}, top = {}) => ({
   kind: le.KIND, version: 1, repo: 'example-org/site', measuredAt: '2026-01-01T00:00:00.000Z', landMinutes: [37],
@@ -430,9 +435,10 @@ async function startUpstream() {
     sockets.add(socket);
     socket.on('error', () => {});
     socket.on('close', () => sockets.delete(socket));
-    socket.on('end', () => socket.destroy());
+    // /hmr-held never hangs up by itself, and /hmr-bye hangs up right after its echo.
+    if (req.url !== '/hmr-held') socket.on('end', () => socket.destroy());
     socket.write('HTTP/1.1 101 Switching Protocols\r\nUpgrade: test\r\nConnection: Upgrade\r\n\r\n');
-    socket.on('data', (d) => socket.write(d));
+    socket.on('data', (d) => { socket.write(d); if (req.url === '/hmr-bye') socket.end(); });
   });
   const port = await listen(server);
   cleanup.push(() => { for (const s of sockets) s.destroy(); server.close(); });
@@ -440,11 +446,11 @@ async function startUpstream() {
 }
 
 // Opens a raw upgrade through the proxy and resolves once the echo of `ping-1` came back, or the socket closed.
-const upgrade = (port, host) => new Promise((resolve) => {
-  const socket = net.connect(port, '127.0.0.1');
+const upgrade = (port, host, { path: url = '/hmr', halfOpen = false } = {}) => new Promise((resolve) => {
+  const socket = net.connect({ port, host: '127.0.0.1', allowHalfOpen: halfOpen });
   let head = '';
   let sent = false;
-  socket.on('connect', () => socket.write(`GET /hmr HTTP/1.1\r\nHost: ${host}\r\nConnection: Upgrade\r\nUpgrade: test\r\nOrigin: http://${host}\r\n\r\n`));
+  socket.on('connect', () => socket.write(`GET ${url} HTTP/1.1\r\nHost: ${host}\r\nConnection: Upgrade\r\nUpgrade: test\r\nOrigin: http://${host}\r\n\r\n`));
   socket.on('data', (d) => {
     head += d.toString('latin1');
     if (!sent && head.includes('\r\n\r\n')) { sent = true; socket.write('ping-1'); }
@@ -528,6 +534,15 @@ async function proxySuite() {
   check('and forgotten when it closes', Boolean(await until(() => proxy.liveEditSockets.size === 0)));
   const badWs = await upgrade(port, 'evil.example');
   same('an upgrade with a foreign Host is dropped', [badWs.echoed, badWs.head], [false, '']);
+  // Each end can be left half open by the other. Neither may keep the pair alive.
+  const held = await upgrade(port, `localhost:${port}`, { path: '/hmr-held' });
+  held.socket.destroy();
+  check('a tab that closes ends the pair, even if the dev server never hangs up', held.echoed && Boolean(await until(() => proxy.liveEditSockets.size === 0, 4000)), proxy.liveEditSockets.size);
+  for (const s of up.sockets) s.destroy();
+  const kept = await upgrade(port, `localhost:${port}`, { path: '/hmr-bye', halfOpen: true });
+  check('a dev server that hangs up ends the pair, even if the tab never does', kept.echoed && Boolean(await until(() => proxy.liveEditSockets.size === 0, 4000)), proxy.liveEditSockets.size);
+  kept.socket.destroy();
+  for (const s of proxy.liveEditSockets) s.destroy();
 
   const dead = await le.freePort();
   check('a free port is a real port', Number.isInteger(dead) && dead > 0 && await refused(dead));
@@ -583,10 +598,13 @@ async function serveSuite() {
   const child = await until(async () => { const r = await request(ownPort, '/'); return r.status === 200 ? r : null; }, 20000);
   check('it starts the dev server on a free port and fronts it', Boolean(child) && child.body === `<html><head>${TAG}</head><body>child</body></html>`, child && child.body);
   same('outside a branch the helper still answers, saying so', JSON.parse((await request(ownPort, '/__live-edit/state')).body).pill, 'not a branch');
-  const gone = new Promise((resolve) => own.child.once('exit', resolve));
+  const kid = own.child;
+  const gone = new Promise((resolve) => kid.once('exit', () => resolve(true)));
   own.close();
-  await gone;
-  check('close stops the dev server it started, and the listener', Boolean(await until(() => refused(Number(own.upstream.port)))) && await refused(ownPort));
+  // Bounded, so a close that stops nothing fails this check instead of hanging the suite.
+  const stopped = await Promise.race([gone, sleep(10000).then(() => false)]);
+  if (!stopped) reap(kid.pid);
+  check('close stops the dev server it started, and the listener', stopped && Boolean(await until(() => refused(Number(own.upstream.port)))) && await refused(ownPort), { stopped });
   same('stopping a child that already ended, or none, is a no-op', [le.stopTree(own.child), le.stopTree(null)], [undefined, undefined]);
 
   // A dev server that ends by itself takes the helper down with its exit code.
@@ -611,6 +629,7 @@ async function serveSuite() {
   await sleep(1500);
   const orphan = fs.existsSync(pidFile) ? Number(fs.readFileSync(pidFile, 'utf8')) : null;
   check('and leaves no dev server behind', orphan === null || Boolean(await until(() => !alive(orphan))), orphan);
+  if (orphan !== null && alive(orphan)) reap(orphan);
   await shut(squat);
 
   // The same through the command line, stopped the way a terminal stops it.
