@@ -494,6 +494,11 @@ async function overlaySuite() {
   await api.pollFeed();
   const surface = api.surfacesEl.children[0];
   same('the drawn choices open the panel and show each option', [api.wrap.getAttribute('data-open'), surface.getAttribute('data-surface'), ['Pick the hero button copy', 'Book a call', 'Tell us about your project', 'Forest', 'Gap16px', 'Use this gap'].every((t) => surface.textContent.includes(t)), api.state().after], ['true', 'hero', true, 2]);
+  // Seen at 390 on a real page: the pill sat in a side corner, where v1 hides its text, so a failed ask showed only a dot.
+  same('an ask\'s state shows on the pill in a side corner too', /\.le\[data-ask-state\]\[data-corner\]:not\(\[data-variant="dot"\]\) \.count\{display:inline/.test(le.OVERLAY_CSS), true);
+  // Seen at 390 on a real page: a row of four swatches ran past the panel edge and hid the last.
+  same('a row of choices wraps inside the panel, so none is cut off on a phone', /\.a2-row\{[^}]*flex-wrap:wrap/.test(le.OVERLAY_CSS), true);
+  same('an ask waiting for a pick does not say where the choices are, since each layout puts them elsewhere', api.panel.textContent.includes('Pick one of the choices'), true);
   const byId = (id) => dom.nodes.find((x) => x.attrs['data-id'] === id && x.parentElement);
   byId('v1').listeners.click(forged());
   await flush();
@@ -515,6 +520,12 @@ async function overlaySuite() {
   byId('apply').listeners.click(trusted());
   await flush();
   same('a trusted slide previews the spacing and the button sends the value', [hero.style.gap, byId('gap').textContent, dom.posts('action')[2].body.action.context], ['24px', 'Gap24px', { gap: 24 }]);
+  // Seen at 390 on a real page: the badge was placed once, so after a scroll it sat on the nav.
+  const boxTop = box.top;
+  box.top = 220;
+  (dom.listeners.scroll || (() => {}))();
+  same('the Preview badge follows its element when the page scrolls and never covers it', [api.badge.style.top, api.badge.style.height, api.badge.getAttribute('data-on')], ['220px', undefined, '']);
+  box.top = boxTop;
 
   const bad = { seq: 3, ask: 'a1', msg: v({ updateComponents: { surfaceId: 'hero', components: [{ id: 'x', component: 'Script', src: 'https://example.test/x.js' }] } }) };
   feed = feedOf([{ ...ask1, state: 'choices' }], [bad]);

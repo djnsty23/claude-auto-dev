@@ -621,6 +621,9 @@ const OVERLAY_CSS = [
     '.le[data-variant="bar"] .pill{border-radius:0;border-width:1px 0 0;justify-content:center;box-shadow:none;min-height:32px}',
     '.le[data-variant="bar"] .panel{margin:0 12px 8px;align-self:flex-start}',
     '.le[data-variant="dot"] .pill{padding:0;width:36px;justify-content:center}.le[data-variant="dot"] .pill .count,.le[data-variant="dot"] .pill .eta{display:none}',
+    // An ask's state shows in every corner, a side one included, where the count alone is hidden.
+    '.le[data-ask-state][data-corner]:not([data-variant="dot"]) .count{display:inline;max-width:min(62vw,320px);overflow:hidden;text-overflow:ellipsis}',
+    '.le[data-ask-state][data-corner="right"] .eta,.le[data-ask-state][data-corner="left"] .eta{display:none}',
     '.le[data-variant="dot"] .dot{width:12px;height:12px;box-shadow:0 0 0 4px color-mix(in srgb,var(--le-accent) 25%,transparent)}',
     // The ask box, the asks and the drawn choices.
     '.head{display:flex;align-items:center;justify-content:space-between;gap:8px;margin:0 0 8px}.head .h{margin:0}',
@@ -644,7 +647,7 @@ const OVERLAY_CSS = [
     '.asks li[data-s="visible"]{border-color:var(--le-accent)}.asks li[data-s="visible"] .st{color:var(--le-accent)}',
     '.asks li[data-s="failed"]{border-color:var(--le-warn)}.asks li[data-s="failed"] .st{color:var(--le-warn)}',
     '.surface{display:grid;gap:8px;margin:0 0 12px;padding:10px 0 0;border-top:1px solid var(--le-line)}',
-    '.a2-col{display:flex;flex-direction:column;gap:8px}.a2-row{display:flex;gap:8px;align-items:center}.a2-row[data-wrap]{flex-wrap:wrap}',
+    '.a2-col{display:flex;flex-direction:column;gap:8px}.a2-row{display:flex;flex-wrap:wrap;gap:8px;align-items:center}',
     '[data-align="start"]{align-items:flex-start}[data-align="center"]{align-items:center}[data-align="end"]{align-items:flex-end}[data-align="stretch"]{align-items:stretch}',
     '.a2-text{margin:0;overflow-wrap:anywhere}.a2-text-heading{font-size:14px;font-weight:650}.a2-text-caption{font-size:12px;color:var(--le-muted)}',
     '.a2-btn{appearance:none;font:inherit;text-align:left;color:var(--le-fg);background:var(--le-bg);border:1px solid var(--le-line);border-radius:10px;',
@@ -842,6 +845,16 @@ function overlayClient(window, document, config, kit) {
         node.style.height = r.height + 'px';
         node.setAttribute('data-on', '');
     };
+    // The badge is fixed to the viewport, so it follows its element on every scroll and resize.
+    var badgeOn = null;
+    var placeBadge = function (el) {
+        if (el) badgeOn = el;
+        else if (!badgeOn || badge.getAttribute('data-on') === null) return;
+        var r = badgeOn.getBoundingClientRect();
+        badge.style.left = r.left + 'px';
+        badge.style.top = r.top + 'px';
+        badge.setAttribute('data-on', '');
+    };
     var onPageMove = function (e) {
         if (!pointing || e.isTrusted !== true) return;
         var el = pageElement(e);
@@ -911,7 +924,7 @@ function overlayClient(window, document, config, kit) {
             }
         }
         previews = keep;
-        if (!previews.length) badge.removeAttribute('data-on');
+        if (!previews.length) { badge.removeAttribute('data-on'); badgeOn = null; }
     };
     var applyPreview = function (spec, askId) {
         restorePreviews(askId);
@@ -928,7 +941,7 @@ function overlayClient(window, document, config, kit) {
             setStyle(el, 'outline', '2px dashed #2f6f4f', askId);
             setStyle(el, 'outline-offset', '3px', askId);
         }
-        if (els.length) { outline(badge, els[0]); badge.style.height = ''; badge.style.width = ''; }
+        if (els.length) placeBadge(els[0]);
         return els.length;
     };
 
@@ -961,7 +974,7 @@ function overlayClient(window, document, config, kit) {
             var els = [];
             try { els = Array.prototype.slice.call(document.querySelectorAll(comp.preview.selector), 0, 20); } catch (err) { els = []; }
             for (var k = 0; k < els.length; k++) setStyle(els[k], comp.preview.property, v + (comp.unit || ''), surfaceAsk[surface.id]);
-            if (els.length) outline(badge, els[0]);
+            if (els.length) placeBadge(els[0]);
         }
     };
     var renderNode = function (surface, id, depth, path) {
@@ -972,7 +985,6 @@ function overlayClient(window, document, config, kit) {
         var kids = function (list) { for (var i = 0; i < list.length; i++) el.appendChild(renderNode(surface, list[i], depth + 1, trail)); };
         if (c.component === 'Column' || c.component === 'Row') {
             el = make('div', c.component === 'Column' ? 'a2-col' : 'a2-row');
-            if (c.wrap) el.setAttribute('data-wrap', '');
             kids(c.children);
         } else if (c.component === 'Text') {
             el = make('p', 'a2-text a2-text-' + (c.variant || 'body'), kit.asText(kit.resolve(surface, c.text)));
@@ -1032,7 +1044,7 @@ function overlayClient(window, document, config, kit) {
     var phrase = function (a) {
         if (a.state === 'received') return listening ? 'Received. The session picks it up next.' : 'Received. No session is listening yet.';
         if (a.state === 'working') return 'Working on it';
-        if (a.state === 'choices') return 'Pick one below';
+        if (a.state === 'choices') return 'Pick one of the choices';
         if (a.state === 'edited') return 'Edited. Waiting for the page to show it.';
         if (a.state === 'visible') {
             var reload = a.sameInstance === false ? ', after a reload' : '';
@@ -1305,7 +1317,8 @@ function overlayClient(window, document, config, kit) {
     };
 
     pill.addEventListener('click', function () { setOpen(!open); });
-    listen('resize', function () { place(true); });
+    listen('resize', function () { place(true); placeBadge(); });
+    listen('scroll', function () { placeBadge(); }, { capture: true, passive: true });
     var mount = function () {
         attach();
         if (window.MutationObserver) {
