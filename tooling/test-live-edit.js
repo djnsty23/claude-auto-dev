@@ -581,7 +581,7 @@ async function serveSuite() {
   const port = await le.freePort();
   const lines = [];
   const running = await le.serve({ dir: repo, port, upstream: up.url, base: 'origin/main', calibration: calFile, variant: 'bar', headline: 'direct' }, (l) => lines.push(l));
-  check('serve says where it listens and what it fronts', lines.length === 1 && lines[0] === `live-edit: http://localhost:${port} -> ${up.url}, overlay "bar", ask box off, changes since origin/main`, lines);
+  check('serve says where it listens and what it fronts', lines.length === 1 && lines[0] === `live-edit: http://localhost:${port} -> ${up.url}, overlay "bar", choices off, free-text ask box off, changes since origin/main`, lines);
   const page = await request(port, '/');
   same('a page through the helper carries the tag once', [page.status, count(page.body, '/__live-edit/overlay.js')], [200, 1]);
   const first = JSON.parse((await request(port, '/__live-edit/state')).body);
