@@ -339,6 +339,24 @@
     },
     {
       "plugin": "autodev-core",
+      "name": "live-edit",
+      "invocable": true,
+      "status": "proposed",
+      "evidence": {
+        "fires30d": {
+          "model": 0,
+          "typed": 0,
+          "preload": 0
+        },
+        "lastFired": null,
+        "listingBytes": null
+      },
+      "disposition": "retain",
+      "drill": false,
+      "reason": "New on 2026-11-27, so the 30-day census predates it. It owns the localhost edit loop and the on-page estimate of time to production. No other skill puts an overlay on a dev page or models landing time."
+    },
+    {
+      "plugin": "autodev-core",
       "name": "marketing-radar",
       "invocable": true,
       "status": "proposed",
