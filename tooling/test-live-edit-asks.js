@@ -206,6 +206,8 @@ async function queueSuite() {
 
 // ---------------------------------------------------------------------------
 const PAGE = '<!doctype html><html><head><title>t</title></head><body><button id="cta">Book now</button></body></html>';
+// What a browser sends for a top-level page load: the only request that earns a ticket.
+const asPage = { 'sec-fetch-dest': 'document', 'sec-fetch-mode': 'navigate', 'sec-fetch-site': 'none' };
 const request = (port, urlPath, { method = 'GET', headers = {}, body = null } = {}) => new Promise((resolve, reject) => {
   const req = http.request({ hostname: '127.0.0.1', port, path: urlPath, method, agent: false, headers: { host: `localhost:${port}`, ...headers } }, (res) => {
     const chunks = [];
@@ -242,21 +244,33 @@ async function proxySuite({ q }) {
   const asScript = { 'sec-fetch-dest': 'script', 'sec-fetch-site': 'same-origin', 'sec-fetch-mode': 'no-cors' };
   const ticketOf = (page) => (/overlay\.js\?t=([A-Za-z0-9_-]+)"><\/script>/.exec(page.body) || [])[1];
 
-  const page = await request(port, '/');
+  const page = await request(port, '/', { headers: asPage });
   const ticket = ticketOf(page);
-  same('each page gets a fresh ticket and is never kept', [Boolean(ticket), page.body.includes(' defer'), page.headers['cache-control'], page.headers.etag, page.headers['last-modified'], ticketOf(await request(port, '/')) !== ticket], [true, false, 'no-store', undefined, undefined, true]);
+  same('each page gets a fresh ticket and is never kept', [Boolean(ticket), page.body.includes(' defer'), page.headers['cache-control'], page.headers.etag, page.headers['last-modified'], ticketOf(await request(port, '/', { headers: asPage })) !== ticket], [true, false, 'no-store', undefined, undefined, true]);
   const keyIn = (script) => (/"key":(null|"[^"]*")/.exec(script.body) || [])[1];
   const first = await request(port, `/__live-edit/overlay.js?t=${ticket}`, { headers: asScript });
   same('the script the page asked for carries the key', [first.status, keyIn(first) === JSON.stringify(gate.key)], [200, true]);
   same('a ticket works once', keyIn(await request(port, `/__live-edit/overlay.js?t=${ticket}`, { headers: asScript })), 'null');
-  const fetchLike = await request(port, `/__live-edit/overlay.js?t=${ticketOf(await request(port, '/'))}`, { headers: { 'sec-fetch-dest': 'empty', 'sec-fetch-site': 'same-origin' } });
+  const fetchLike = await request(port, `/__live-edit/overlay.js?t=${ticketOf(await request(port, '/', { headers: asPage }))}`, { headers: { 'sec-fetch-dest': 'empty', 'sec-fetch-site': 'same-origin' } });
   same('a page script that fetches the overlay gets no key', keyIn(fetchLike), 'null');
-  same('a browser that sends no fetch metadata gets no key', keyIn(await request(port, `/__live-edit/overlay.js?t=${ticketOf(await request(port, '/'))}`)), 'null');
-  same('another site that loads the script gets no key', keyIn(await request(port, `/__live-edit/overlay.js?t=${ticketOf(await request(port, '/'))}`, { headers: { ...asScript, 'sec-fetch-site': 'cross-site' } })), 'null');
+  same('a browser that sends no fetch metadata gets no key', keyIn(await request(port, `/__live-edit/overlay.js?t=${ticketOf(await request(port, '/', { headers: asPage }))}`)), 'null');
+  same('another site that loads the script gets no key', keyIn(await request(port, `/__live-edit/overlay.js?t=${ticketOf(await request(port, '/', { headers: asPage }))}`, { headers: { ...asScript, 'sec-fetch-site': 'cross-site' } })), 'null');
   same('a made-up ticket gets no key', keyIn(await request(port, '/__live-edit/overlay.js?t=made-up', { headers: asScript })), 'null');
-  const stale = ticketOf(await request(port, '/'));
+  const stale = ticketOf(await request(port, '/', { headers: asPage }));
   now += 61e3;
   same('a ticket older than a minute gets no key', keyIn(await request(port, `/__live-edit/overlay.js?t=${stale}`, { headers: asScript })), 'null');
+  const byScript = await request(port, '/', { headers: { 'sec-fetch-dest': 'empty', 'sec-fetch-mode': 'cors', 'sec-fetch-site': 'same-origin' } });
+  same('a page script that fetches the page gets no ticket, so it cannot earn the key', [ticketOf(byScript), byScript.body.includes('/__live-edit/overlay.js')], [undefined, true]);
+  same('a frame and a request with no fetch metadata get no ticket', [ticketOf(await request(port, '/', { headers: { ...asPage, 'sec-fetch-dest': 'iframe', 'sec-fetch-site': 'cross-site' } })), ticketOf(await request(port, '/'))], [undefined, undefined]);
+  const headless = http.createServer((req, res) => { res.writeHead(200, { 'content-type': 'text/html' }); res.end('<script>window.x = 1</script><p>no head</p>'); });
+  const hport = await listen(headless);
+  cleanup.push(() => headless.close());
+  const hproxy = le.createProxy({ upstream: new URL(`http://127.0.0.1:${hport}`), getState: () => ({}), ask: { layout: 'panel', queue: q, clock } });
+  const hpport = await listen(hproxy);
+  const noHead = await request(hpport, '/', { headers: asPage });
+  same('a page with no head gets the tag after its own scripts, with no ticket', [ticketOf(noHead), noHead.body.indexOf('window.x') < noHead.body.indexOf('/__live-edit/overlay.js'), noHead.body.includes('/__live-edit/overlay.js')], [undefined, true, true]);
+  await shut(hproxy);
+  await shut(headless);
 
   const good = { origin, 'content-type': 'application/json', 'x-live-edit-key': gate.key, 'sec-fetch-site': 'same-origin' };
   const post = (name, body, headers = good) => request(port, `/__live-edit/${name}`, { method: 'POST', headers, body: typeof body === 'string' || Array.isArray(body) ? body : JSON.stringify(body) });
@@ -313,9 +327,16 @@ async function proxySuite({ q }) {
   le.setAskState(q, askId, 'edited', { expect: 'Tell us about your project' }, now);
   now += 700;
   same('seen once edited is recorded', (await post('seen', { id: askId, instance: 'pageb' })).status, 200);
+  const closing = le.readEvents(q).filter((e) => e.type === 'a2ui').pop();
+  same('a visible ask deletes its choices in the log, so no page draws them again and they leave the cap', [le.surfaceStateFrom(le.readEvents(q)).surfaces.has('pick'), closing.msg.deleteSurface, closing.ask], [false, { surfaceId: 'pick' }, askId]);
   const shown = le.askView(le.readEvents(q)).find((a) => a.id === askId);
   same('visible records the seconds from the ask, the edit and the pick, and that the page never reloaded', [shown.state, shown.fromEditMs, shown.fromTapMs, shown.sameInstance, shown.visibleMs > shown.fromTapMs], ['visible', 700, 2700, true, true]);
   same('seen twice is refused', (await post('seen', { id: askId, instance: 'pageb' })).status, 409);
+  const was = le.addAsk(q, { text: 'Say Book now' }, now);
+  le.setAskState(q, was, 'edited', { expect: 'Book now' }, now);
+  const wasSeen = le.handleAskApi('seen', { id: was, instance: 'pagec', already: true }, q, now + 500);
+  const wasView = le.askView(le.readEvents(q)).find((a) => a.id === was);
+  same('text that was on the page before the ask is visible with no seconds claimed', [wasSeen[0], wasView.state, wasView.visibleMs, wasView.fromEditMs, wasView.already], [200, 'visible', null, null, true]);
   same('the same page is the one that picked, or with no pick the one that asked', [le.samePage({ instance: 'a1', tapInstance: 'b2' }, 'b2'), le.samePage({ instance: 'a1', tapInstance: 'b2' }, 'a1'), le.samePage({ instance: 'a1', tapInstance: null }, 'a1'), le.samePage({ instance: null }, null)], [true, false, true, false]);
   le.addAction(q, { ask: askId, msg: {}, instance: '<b>x</b>' }, now);
   same('an instance that is not a short lowercase id is not recorded', le.readEvents(q).pop().instance, null);
@@ -326,7 +347,7 @@ async function proxySuite({ q }) {
   same('an endpoint that is not one is a 404', (await post('nope', {})).status, 404);
   same('the API refuses a body that is not an object, and a name it does not have', [le.handleAskApi('ask', 'x', q, now)[0], le.handleAskApi('other', {}, q, now)[0]], [400, 404]);
 
-  const reload = await request(port, '/');
+  const reload = await request(port, '/', { headers: asPage });
   const second = await request(port, `/__live-edit/overlay.js?t=${ticketOf(reload)}`, { headers: asScript });
   same('a reloaded page earns the same run\'s key again', keyIn(second) === JSON.stringify(gate.key), true);
   await shut(proxy);
@@ -347,7 +368,7 @@ async function proxySuite({ q }) {
   const off = le.createProxy({ upstream: new URL(up.url), getState: () => ({}), ask: { layout: 'off', queue: q } });
   const oport = await listen(off);
   const offPage = await request(oport, '/');
-  same('with the ask box off the page keeps the v1 tag and its own caching', [offPage.body.includes('<script src="/__live-edit/overlay.js" defer></script>'), offPage.headers.etag, (await request(oport, '/__live-edit/ask', { method: 'POST', headers: good, body: '{}' })).status], [true, '"v1"', 404]);
+  same('with the ask box off the page keeps the v1 tag and its own caching', [offPage.body.includes('<script src="/__live-edit/overlay.js" defer></script>'), offPage.headers.etag, (await request(oport, '/__live-edit/ask', { method: 'POST', headers: { ...good, origin: `http://localhost:${oport}` }, body: '{}' })).status], [true, '"v1"', 404]);
   await shut(off);
 
   const g = le.askGate({ clock: () => 0 });
@@ -425,6 +446,38 @@ const servedConfig = (ask) => JSON.parse(/\)\(window, document, (\{[\s\S]*?\}), 
 const textNode = (value) => ({ nodeType: 3, nodeValue: value, isConnected: true });
 const pageEl = (child, extra = {}) => ({ nodeType: 1, childNodes: [child], firstChild: child, style: styleBag(), getBoundingClientRect: () => box, ...extra });
 const feedOf = (asks, messages = [], extra = {}) => ({ reset: false, asks, messages, listening: true, ...extra });
+
+async function hostileSuite() {
+  console.log('a hostile page');
+  const config = servedConfig({ layout: 'panel', point: true, preview: true, key: KEY });
+  const dom = pageDom();
+  const ORIGIN = 'http://localhost:3437';
+  dom.window.location = { origin: ORIGIN };
+  let release = null;
+  const opened = [];
+  dom.window.fetch = (url, opts) => {
+    opened.push([url, opts]);
+    if (String(url).startsWith(ORIGIN + '/__live-edit/ask')) return new Promise((resolve) => { release = () => resolve(reply(200, { id: 'h1' })); });
+    if (String(url).startsWith(ORIGIN + '/__live-edit/feed')) return Promise.resolve(reply(200, feedOf([])));
+    if (String(url).startsWith(ORIGIN + '/__live-edit/state')) return Promise.resolve(reply(200, { ok: true, pill: 'x', changes: { count: 0, lines: [] } }));
+    return Promise.reject(new Error('not the helper'));
+  };
+  const api = le.overlayClient(dom.window, dom.document, config, kit.a2uiKit());
+  await flush();
+  api.input.value = 'Say hello';
+  api.sendBtn.listeners.click(trusted());
+  api.sendBtn.listeners.click(trusted());
+  await flush();
+  const asks = opened.filter(([u]) => String(u).endsWith('/__live-edit/ask'));
+  same('a second Send while the first is in flight sends nothing', [asks.length, api.sendBtn.disabled], [1, true]);
+  const keyed = opened.filter(([, o]) => o && o.headers && o.headers['x-live-edit-key'] === KEY);
+  same('every keyed request goes to the page\'s own origin, never a <base href>', keyed.length > 1 && keyed.every(([u]) => String(u).startsWith(ORIGIN + '/__live-edit/')), true);
+  same('its options and headers have no prototype, so a getter a page planted never reads the key', keyed.every(([, o]) => Object.getPrototypeOf(o) === null && Object.getPrototypeOf(o.headers) === null), true);
+  same('it is same-origin only and follows no redirect', [asks[0][1].mode, asks[0][1].credentials, asks[0][1].redirect], ['same-origin', 'same-origin', 'error']);
+  release();
+  await flush();
+  same('the Send button comes back once the helper answers', api.sendBtn.disabled, false);
+}
 
 async function overlaySuite() {
   console.log('the overlay\'s ask box');
@@ -533,6 +586,12 @@ async function overlaySuite() {
   const error = dom.posts('error')[0];
   same('a message outside the catalog is refused on the page too, and reported', [error.body.error.code, error.body.error.surfaceId, error.body.error.message, dom.nodes.some((x) => x.attrs['data-id'] === 'x'), api.state().after], ['VALIDATION_FAILED', 'hero', '"Script" is not in the live edit catalog', false, 3]);
 
+  const css = textNode('body{color:red}');
+  dom.page['#cta'] = [pageEl(css, { tagName: 'STYLE' })];
+  byId('v1').listeners.click(trusted());
+  await flush();
+  same('a preview never writes into a style element', css.nodeValue, 'body{color:red}');
+  dom.page['#cta'] = [cta];
   // The session edited the source. The preview of the same words does not count until the page rewrites them.
   byId('v1').listeners.click(trusted());
   await flush();
@@ -544,7 +603,7 @@ async function overlaySuite() {
   same('a preview showing the expected words is not the edit', dom.posts('seen').length, 0);
   api.onMutations([{ target: ctaText, oldValue: 'Book a call', addedNodes: [] }]);
   await flush();
-  same('once the page itself rewrites them, seen is sent with the page\'s instance', dom.posts('seen').map((p) => p.body), [{ id: 'a1', instance }]);
+  same('once the page itself rewrites them, seen is sent with the page\'s instance', dom.posts('seen').map((p) => p.body), [{ id: 'a1', instance, already: false }]);
   api.checkVisible();
   same('seen is sent once', dom.posts('seen').length, 1);
 
@@ -686,9 +745,21 @@ async function cliSuite({ site, q }) {
 
   out.length = 0;
   same('reply needs a known ask and a known state', [await le.main(['reply', '--dir', site, '--id', 'nope', '--state', 'edited'], ...io), await le.main(['reply', '--dir', site, '--id', id, '--state', 'shipped'], ...io)], [1, 1]);
+  same('edited without --expect is refused, since nothing else proves the change shows', [await le.main(['reply', '--dir', site, '--id', id, '--state', 'edited'], ...io), le.askView(le.readEvents(q)).find((a) => a.id === id).state === 'edited'], [1, false]);
   same('reply edited records what the page should show', [await le.main(['reply', '--dir', site, '--id', id, '--state', 'edited', '--expect', 'Footer 2027'], ...io), out.pop(), le.askView(le.readEvents(q)).find((a) => a.id === id).expect], [0, `live-edit: ${id} is edited, the page reports it visible once it shows "Footer 2027"`, 'Footer 2027']);
-  same('reply failed records the reason, or says none was given', [await le.main(['reply', '--dir', site, '--id', id, '--state', 'failed'], ...io), le.askView(le.readEvents(q)).find((a) => a.id === id).reason], [0, 'no reason given']);
   same('reply working is plain', [await le.main(['reply', '--dir', site, '--id', id, '--state', 'working'], ...io), out.pop()], [0, `live-edit: ${id} is working`]);
+  same('reply failed records the reason, or says none was given', [await le.main(['reply', '--dir', site, '--id', id, '--state', 'failed'], ...io), le.askView(le.readEvents(q)).find((a) => a.id === id).reason], [0, 'no reason given']);
+  same('a failed ask takes no more replies and no more choices', [await le.main(['reply', '--dir', site, '--id', id, '--state', 'working'], ...io), le.showMessages(q, id, choices('late'), Date.now()).ok], [1, false]);
+  le.enqueue(q, { kind: 'action', id: 'late-tap', ask: id, at: Date.now(), msg: {} }, Date.now());
+  const lateTap = await le.waitForItem(q, { timeoutMs: 1000 });
+  same('a pick claimed after its ask failed does not move the ask back to working', [lateTap && lateTap.id, le.askView(le.readEvents(q)).find((a) => a.id === id).state], ['late-tap', 'failed']);
+  const capped = [];
+  for (let i = 0; i < 10; i++) {
+    const each = le.addAsk(q, { text: `cap ${i}` }, Date.now());
+    capped.push(le.showMessages(q, each, choices(`cap${i}`), Date.now()).ok);
+    await le.main(['reply', '--dir', site, '--id', each, '--state', 'failed', '--reason', 'test'], ...io);
+  }
+  same('ten asks in a worktree\'s life each draw choices, since a finished ask frees its surface', capped, Array(10).fill(true));
   le.setAskState(q, id, 'visible', {}, Date.now());
   same('a visible ask takes no more replies', await le.main(['reply', '--dir', site, '--id', id, '--state', 'edited'], ...io), 1);
 
@@ -711,7 +782,7 @@ async function serveSuite({ site }) {
   const lines = [];
   const running = await le.serve({ dir: site, port, upstream: up.url, base: 'origin/main', variant: 'pill', headline: 'queue', ask: 'sheet', point: 'off', preview: 'on' }, (l) => lines.push(l));
   same('serve says which ask box it draws', lines[0].endsWith('ask box "sheet", changes since origin/main'), true);
-  const page = await request(port, '/');
+  const page = await request(port, '/', { headers: asPage });
   const t = /\?t=([A-Za-z0-9_-]+)/.exec(page.body)[1];
   const script = await request(port, `/__live-edit/overlay.js?t=${t}`, { headers: { 'sec-fetch-dest': 'script', 'sec-fetch-site': 'same-origin' } });
   same('the served page and script carry the layout and the switches', [/"layout":"sheet","point":false,"preview":true/.test(script.body), /"key":"[A-Za-z0-9_-]{32}"/.test(script.body)], [true, true]);
@@ -733,6 +804,7 @@ const watchdog = setTimeout(() => {
 
 (async () => {
   a2uiSuite();
+  await hostileSuite();
   const ctx = await queueSuite();
   await proxySuite(ctx);
   await overlaySuite();
