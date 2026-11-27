@@ -43,7 +43,11 @@
 // 34673906530). A platform with no entry here is NO VERDICT (exit 2) before the
 // suite runs, never a pass and never a regression: it has no floor to exceed.
 const FLOORS = {
-    darwin: { untested: 40, neverLoaded: 1, measured: '2026-09-08 at fcfb8fa' },
+    // `[inferred 2026-11-27]` +1 on every platform: slider-drift.js sliderHarvest()
+    // runs only inside a page after toString(), as layout-probe.js harvest() does.
+    // Measured on win32 by gate:fast as the one never-entered addition. Linux and
+    // darwin are inferred, since the function is platform-free.
+    darwin: { untested: 41, neverLoaded: 1, measured: '2026-09-08 at fcfb8fa, +1 2026-11-27' },
     // `[measured 2026-10-04]` ubuntu-latest CI runs 37166302077 and 37166303320
     // at 061a180, both green through the suite and listing the same 44. The last
     // graded linux run, ee675ab1 on 2026-10-02, scored 39. Main's own ubuntu
@@ -56,14 +60,14 @@ const FLOORS = {
     // only), and layout-probe.js harvestComponents(), which runs only inside a
     // page after toString(), as harvest() does. The other 38 all predate
     // ee675ab1. darwin keeps its own number: macOS CI does not run this step.
-    linux: { untested: 44, neverLoaded: 1, measured: '2026-10-04 at 061a180' },
+    linux: { untested: 45, neverLoaded: 1, measured: '2026-10-04 at 061a180, +1 2026-11-27' },
     // `[measured 2026-09-13]` on Windows 11 at 84e0a75: 1061 named functions, 93
     // never called, of which 57 are REFUSED_BY_DESIGN below and 36 are graded
     // (the linux buckets plus four POSIX-gated single functions), 1 never loaded.
     // `[measured 2026-09-28]` at 1264796: 37. The one added is tracking-parity.js
     // harvest(), which runs only inside a page after toString(), as layout-probe.js
     // harvest() does. Of the four this release added, the other three are driven by suites.
-    win32: { untested: 37, neverLoaded: 1, measured: '2026-09-28 at 1264796' },
+    win32: { untested: 38, neverLoaded: 1, measured: '2026-09-28 at 1264796, +1 2026-11-27' },
 };
 
 // CODE A PLATFORM REFUSES BY DESIGN, reported as its own population rather than
