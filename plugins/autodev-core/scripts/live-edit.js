@@ -394,15 +394,15 @@ const ERROR_CODES = ['VALIDATION_FAILED'];
  * rule `wait` prints covers what it misses.
  */
 const CONFIG_REACH = [
-    [/\bpackage(?:-lock)?\.json\b|\b(?:pnpm-lock\.yaml|yarn\.lock|bun\.lockb?|\.npmrc|\.yarnrc(?:\.yml)?)\b/i, 'the package manifest or lockfile'],
+    [/\bpackage(?:-lock)?\.json\b|\b(?:pnpm-lock\.yaml|yarn\.lock|bun\.lockb?)\b|(?:^|[\s/'"`(~])\.(?:npmrc|yarnrc(?:\.yml)?)\b/i, 'the package manifest or lockfile'],
     [/[\w.-]+\.config\.(?:[cm]?[jt]s|json)\b|\b(?:tsconfig|jsconfig)[\w.-]*\.json\b|\.babelrc\b|\.eslintrc|\.swcrc\b/i, 'build or framework config'],
     [/(?:^|[\s'"`(/\\])\.env(?:\.[\w-]+)?\b|\benvironment variables?\b|\benv vars?\b/i, 'environment files'],
-    [/\.github\b|\.husky\b|\.gitlab-ci|\bgit hooks?\b|\bpre-commit\b|\bvercel\.json\b|\bnetlify\.toml\b|\bDockerfile\b|\bdocker-compose|\bMakefile\b/i, 'CI, hooks or deploy config'],
+    [/\.github\b|\.husky\b|\.gitlab-ci|\bgit hooks?\b|\bpre-commit\b|\bvercel\.json\b|\bnetlify\.toml\b|\bDockerfile\b|\bdocker-compose|\bMakefile\b|(?:^|[\s/'"`(~])\.git(?:[/\\]|attributes\b|modules\b)/i, 'CI, hooks or deploy config'],
     [/\.claude\b|\.mcp\.json\b|\.vscode\b|(?:^|[\s/'"`(])\.(?:idea|cursor)\b|\bCLAUDE\.md\b|\bAGENTS\.md\b|\bsettings(?:\.local)?\.json\b/i, 'agent or editor settings'],
     [/\b(?:next|vite|webpack|tailwind|postcss|astro|nuxt|svelte|remix|eslint|babel|rollup|turbo)\s+config\b|\bmiddleware\.[cm]?[jt]s\b|\broute\.[cm]?[jt]s\b|\bprocess\.env\b|\bimport\.meta\.env\b/i, 'code that runs on the server or at build'],
     [/\b(?:fetch|eval|import|require|exec|spawn|child_process|XMLHttpRequest|sendBeacon|WebSocket)\(|\bcurl\s|\bwget\s|\|\s*(?:sh|bash)\b|<script\b|\bon[a-z]+\s*=\s*["'{]/i, 'code that executes'],
     [/\b(?:pre|post)install\b|\b(?:npm|pnpm|yarn|bun|npx)\s+(?:i|install|add|run|exec|x)\b|\bdependenc(?:y|ies)\b/i, 'installs or package scripts'],
-    [/(?:^|[\s'"`(])(?:\.\.[/\\]|~[/\\]|\/(?:etc|home|Users|root|usr|var|tmp|opt)\/|[a-z]:[/\\])|(?:^|[\s/'"`(~])\.(?:bash|zsh)rc\b|(?:^|[\s/'"`(~])\.profile\b/i, 'a path outside the worktree'],
+    [/(?:^|[\s'"`(])(?:\.\.[/\\]|~[/\\]|\/(?:etc|home|Users|root|usr|var|tmp|opt)\/|[a-z]:[/\\])|(?:^|[\s/'"`(~])\.(?:bash|zsh)rc\b|(?:^|[\s/'"`(~])\.profile\b|(?:^|[\s/'"`(~])\.ssh\b/i, 'a path outside the worktree'],
 ];
 
 /** The reason a page-channel ask is refused before the session acts on it, or null. */
