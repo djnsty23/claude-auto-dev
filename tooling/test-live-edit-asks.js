@@ -658,8 +658,14 @@ async function overlaySuite() {
   (dom.listeners.scroll || (() => {}))();
   same('an element at the right edge keeps its Preview badge inside the viewport', [api.badge.style.left, api.badge.style.top], ['326px', '189px']);
   box.left = boxLeft;
+  box.top = -400;
+  box.bottom = -370;
+  (dom.listeners.scroll || (() => {}))();
+  same('an element scrolled out of view takes its Preview badge with it, never pinned over the page', parseFloat(api.badge.style.top) < 0, true);
   delete dom.window.innerWidth;
   delete dom.window.innerHeight;
+  delete api.badge.offsetHeight;
+  delete api.badge.offsetWidth;
   box.top = boxTop;
   box.bottom = boxBottom;
 

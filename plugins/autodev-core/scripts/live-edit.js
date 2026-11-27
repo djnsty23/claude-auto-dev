@@ -955,7 +955,8 @@ function overlayClient(window, document, config, kit) {
         var top = r.top - BADGE_CLEAR - h;
         if (top < 4) top = r.bottom + BADGE_CLEAR;
         var vh = window.innerHeight || 0;
-        if (vh) top = Math.max(4, Math.min(top, vh - h - 4));
+        // Clamped only while the element is on screen: scrolled away, the badge leaves with it.
+        if (vh && r.bottom > 0 && r.top < vh) top = Math.max(4, Math.min(top, vh - h - 4));
         var left = r.left - 5;
         var vw = window.innerWidth || 0;
         if (vw) left = Math.min(left, vw - w - 4);
