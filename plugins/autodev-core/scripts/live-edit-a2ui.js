@@ -431,7 +431,8 @@ function a2uiKit() {
                 if (typeof v !== 'number' || !isFinite(v) || v < (range.min || 0) || v > range.max) return bad(p, 'outside the slider range ' + (range.min || 0) + ' to ' + range.max);
                 continue;
             }
-            if (!(v === null || typeof v === 'boolean' || (typeof v === 'number' && isFinite(v)) || (typeof v === 'string' && v.length <= MAX_TEXT))) return bad(p, 'a short plain value');
+            // Any other binding reads the data model the session drew, so the page may only echo that value back.
+            if (JSON.stringify(getPointer(s.data, d['@path'])) !== JSON.stringify(v)) return bad(p, 'not the value the session drew at ' + d['@path']);
         }
         return OK;
     };
