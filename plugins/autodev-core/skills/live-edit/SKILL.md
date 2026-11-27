@@ -100,7 +100,8 @@ chat. `serve` turns the ask box on by default (`--ask panel`, `--point on`,
    source, then `reply --state edited --expect "<text now on the page>"`.
    `--expect` is required: the page reports the change visible once that text
    shows, with the seconds and whether it reloaded. Text that was already on
-   the page before the ask is reported with no seconds.
+   the page before the ask, or a page that did not send the ask (a reload,
+   another tab), is reported visible with no seconds.
 4. For an ask with several reasonable answers, draw the choices:
    `show --dir <site> --id <ask> --file choices.jsonl`. The file holds A2UI v1.0
    messages (`createSurface`, then `updateComponents`) in the live edit catalog:
@@ -118,7 +119,8 @@ A visible or failed ask is final: its choices close on every page, and
 
 The ask box runs only for the page the helper served. A per-run key reaches the
 page once, inside a closed shadow root, and only on the browser's own page load:
-a page script's fetch, a frame and a page with no `<head>` get none. The helper
+a page script's fetch, a frame, and a page with a script, a comment or no
+`<head>` before the tag get none. The helper
 refuses a request without it, from another origin, an untrusted click, or a body
 over 8 KB, and limits the rate per minute.
 
