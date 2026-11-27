@@ -314,7 +314,8 @@ async function overlaySuite() {
   same('it mounts once on the root element, outside the page body', [dom.host().isConnected, dom.document.documentElement.children.length, api.host === dom.host()], [true, 1, true]);
   same('it starts idle, closed, as the chosen variant', [api.wrap.getAttribute('data-state'), api.wrap.getAttribute('data-open'), api.wrap.getAttribute('data-variant'), api.pill.getAttribute('aria-expanded')], ['idle', 'false', 'pill', 'false']);
   same('it polls the helper every two seconds without the cache', [dom.fetches[0], dom.intervals.length, dom.intervals[0][1]], [['/__live-edit/state', { cache: 'no-store' }], 1, 2000]);
-  check('a second copy on the same page is the first one', le.overlayClient(dom.window, dom.document, CONFIG) === api && dom.fetches.length === 1);
+  same('a second copy on the same page mounts nothing and hands back no handle', [le.overlayClient(dom.window, dom.document, CONFIG), dom.fetches.length, dom.document.documentElement.children.length], [true, 1, 1]);
+  same('the page sees a marker, never the handle', dom.window.__liveEditOverlay, true);
   check('the style lives inside the shadow root', dom.host().shadow.children[0].textContent === le.OVERLAY_CSS && dom.host().shadow.children[1] === api.wrap);
 
   await api.refresh();
@@ -375,8 +376,8 @@ async function overlaySuite() {
   sent.next = answer(READY);
   const source = le.overlayScript('bar');
   let threw = null;
-  try { vm.runInNewContext(source, { window: sent.window, document: sent.document }); } catch (e) { threw = e.message; }
-  const live = sent.window.__liveEditOverlay;
+  let live = null;
+  try { live = vm.runInNewContext(source, { window: sent.window, document: sent.document }); } catch (e) { threw = e.message; }
   same('the served script runs with nothing but window and document', [threw, Boolean(live)], [null, true]);
   if (live) {
     await live.refresh();
@@ -579,7 +580,7 @@ async function serveSuite() {
   const port = await le.freePort();
   const lines = [];
   const running = await le.serve({ dir: repo, port, upstream: up.url, base: 'origin/main', calibration: calFile, variant: 'bar', headline: 'direct' }, (l) => lines.push(l));
-  check('serve says where it listens and what it fronts', lines.length === 1 && lines[0] === `live-edit: http://localhost:${port} -> ${up.url}, overlay "bar", changes since origin/main`, lines);
+  check('serve says where it listens and what it fronts', lines.length === 1 && lines[0] === `live-edit: http://localhost:${port} -> ${up.url}, overlay "bar", ask box off, changes since origin/main`, lines);
   const page = await request(port, '/');
   same('a page through the helper carries the tag once', [page.status, count(page.body, '/__live-edit/overlay.js')], [200, 1]);
   const first = JSON.parse((await request(port, '/__live-edit/state')).body);
