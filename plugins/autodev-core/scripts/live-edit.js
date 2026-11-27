@@ -1210,6 +1210,9 @@ function overlayClient(window, document, config, kit) {
         return checkVisible();
     };
 
+    // What the drawn choices depend on: the last message applied and which asks are finished. A redraw replaces every
+    // button, so a tap whose press and release span one lands on a removed node: redraw only when this changes.
+    var drawnKey = null;
     var applyFeed = function (feed) {
         var fresh = false;
         if (feed.reset) { surfaces = kit.newState(); surfaceAsk = {}; after = 0; }
@@ -1235,7 +1238,8 @@ function overlayClient(window, document, config, kit) {
             var a = asks[k];
             if ((a.state === 'failed' && before[a.id] !== 'failed') || (a.state === 'visible' && before[a.id] !== 'visible')) restorePreviews(a.id);
         }
-        renderSurfaces();
+        var key = after + '|' + asks.map(function (x) { return x.id + (finished(x.id) ? ':done' : ''); }).join(',');
+        if (key !== drawnKey) { drawnKey = key; renderSurfaces(); }
         if (fresh) setOpen(true);
         drawAsks();
         drawPill();
