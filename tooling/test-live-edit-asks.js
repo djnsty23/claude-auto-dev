@@ -644,6 +644,22 @@ async function overlaySuite() {
   box.bottom = 32;
   (dom.listeners.scroll || (() => {}))();
   same('with no room above, the Preview badge sits below the outline', parseFloat(api.badge.style.top) >= box.bottom + 5, true);
+  // An element taller than the viewport leaves no room either side: the badge stays on screen.
+  dom.window.innerWidth = 390;
+  dom.window.innerHeight = 844;
+  box.bottom = 1200;
+  (dom.listeners.scroll || (() => {}))();
+  same('with no room above or below, the Preview badge stays inside the viewport', parseFloat(api.badge.style.top) + 22 <= 844 - 4, true);
+  const boxLeft = box.left;
+  api.badge.offsetWidth = 60;
+  box.top = 220;
+  box.bottom = 250;
+  box.left = 370;
+  (dom.listeners.scroll || (() => {}))();
+  same('an element at the right edge keeps its Preview badge inside the viewport', [api.badge.style.left, api.badge.style.top], ['326px', '189px']);
+  box.left = boxLeft;
+  delete dom.window.innerWidth;
+  delete dom.window.innerHeight;
   box.top = boxTop;
   box.bottom = boxBottom;
 
