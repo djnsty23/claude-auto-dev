@@ -28,8 +28,14 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 const D = require('./skill-dispositions.js');
+const T = require('./touched-suites.js');
 
 const ROOT = path.resolve(__dirname, '..');
+// What this suite grades, written as literals. skill-dispositions.js builds these
+// paths from segments, which touched-suites.js cannot follow. Without them gate:fast
+// never selected this suite, so a new skill with no manifest entry merged its fast
+// gate green and went red only in `npm test`.
+const GRADES = ['docs/skill-dispositions.json', 'SKILL.md', 'hooks.json'];
 const REQUIRED_DRILLS = ['production-radar', 'heal', 'security', 'adversarial-loop', 'setup-project', 'doppler', 'stripe'];
 
 const lines = [];
@@ -140,6 +146,13 @@ const manifest = D.readManifest();
 check(`population: ${inv.length} skill(s) on disk, at least 20`, inv.length >= 20);
 const c = D.classify(inv, manifest);
 check(`every skill classified: ${c.classified} entries for ${c.onDisk} skills`, c.problems.length === 0, c.problems.slice(0, 5).join('; '));
+// The fast gate runs only the suites whose reach holds a touched file, so every file
+// graded here has to be in this suite's reach.
+const tracked = T.trackedFiles(ROOT);
+const reach = tracked ? T.reachOf(ROOT, 'tooling/test-skill-dispositions.js', T.indexTree(tracked)) : new Set();
+const graded = [GRADES[0], ...inv.map((s) => `plugins/${s.plugin}/skills/${s.name}/SKILL.md`), ...new Set(wired.map((h) => `plugins/${h.plugin}/hooks/hooks.json`))];
+const unreached = tracked ? graded.filter((f) => !reach.has(f)) : ['the tracked files could not be listed'];
+check(`the fast gate selects this suite for each of the ${graded.length} file(s) it grades (${GRADES.join(', ')})`, graded.length >= 22 && unreached.length === 0, unreached.slice(0, 5).join('; '));
 const pending = manifest.skills.filter((e) => e.disposition !== 'retain');
 check(`no merge or retire applied ahead of the decision: ${pending.length} proposed, each still on disk`,
     pending.every((e) => e.status === 'proposed' && inv.some((s) => s.name === e.name)));
