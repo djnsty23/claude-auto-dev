@@ -384,6 +384,8 @@ const BODY_MAX = 8 * 1024;
 const MESSAGE_MAX = 32 * 1024;
 const FEED_ASKS = 5;
 const LISTEN_FRESH = 15e3;
+/** The renderer error codes the overlay sends. Any other code is relayed as OTHER. */
+const ERROR_CODES = ['VALIDATION_FAILED'];
 
 /**
  * What an ask from the page may never reach: files that run or configure code,
@@ -396,18 +398,18 @@ const CONFIG_REACH = [
     [/[\w.-]+\.config\.(?:[cm]?[jt]s|json)\b|\b(?:tsconfig|jsconfig)[\w.-]*\.json\b|\.babelrc\b|\.eslintrc|\.swcrc\b/i, 'build or framework config'],
     [/(?:^|[\s'"`(/\\])\.env(?:\.[\w-]+)?\b|\benvironment variables?\b|\benv vars?\b/i, 'environment files'],
     [/\.github\b|\.husky\b|\.gitlab-ci|\bgit hooks?\b|\bpre-commit\b|\bvercel\.json\b|\bnetlify\.toml\b|\bDockerfile\b|\bdocker-compose|\bMakefile\b/i, 'CI, hooks or deploy config'],
-    [/\.claude\b|\.mcp\.json\b|\.vscode\b|\.idea\b|\.cursor\b|\bCLAUDE\.md\b|\bAGENTS\.md\b|\bsettings(?:\.local)?\.json\b/i, 'agent or editor settings'],
+    [/\.claude\b|\.mcp\.json\b|\.vscode\b|(?:^|[\s/'"`(])\.(?:idea|cursor)\b|\bCLAUDE\.md\b|\bAGENTS\.md\b|\bsettings(?:\.local)?\.json\b/i, 'agent or editor settings'],
     [/\b(?:next|vite|webpack|tailwind|postcss|astro|nuxt|svelte|remix|eslint|babel|rollup|turbo)\s+config\b|\bmiddleware\.[cm]?[jt]s\b|\broute\.[cm]?[jt]s\b|\bprocess\.env\b|\bimport\.meta\.env\b/i, 'code that runs on the server or at build'],
-    [/\b(?:fetch|eval|import|require|exec|spawn|child_process|XMLHttpRequest|sendBeacon|WebSocket)\s*\(|\bcurl\s|\bwget\s|\|\s*(?:sh|bash)\b|<script\b|\bon[a-z]+\s*=/i, 'code that executes'],
+    [/\b(?:fetch|eval|import|require|exec|spawn|child_process|XMLHttpRequest|sendBeacon|WebSocket)\(|\bcurl\s|\bwget\s|\|\s*(?:sh|bash)\b|<script\b|\bon[a-z]+\s*=\s*["'{]/i, 'code that executes'],
     [/\b(?:pre|post)install\b|\b(?:npm|pnpm|yarn|bun|npx)\s+(?:i|install|add|run|exec|x)\b|\bdependenc(?:y|ies)\b/i, 'installs or package scripts'],
-    [/(?:^|[\s'"`(])(?:\.\.[/\\]|~[/\\]|\/(?:etc|home|Users|root|usr|var|tmp|opt)\/|[a-z]:[/\\])|\.(?:bash|zsh)rc\b|\.profile\b/i, 'a path outside the worktree'],
+    [/(?:^|[\s'"`(])(?:\.\.[/\\]|~[/\\]|\/(?:etc|home|Users|root|usr|var|tmp|opt)\/|[a-z]:[/\\])|(?:^|[\s/'"`(~])\.(?:bash|zsh)rc\b|(?:^|[\s/'"`(~])\.profile\b/i, 'a path outside the worktree'],
 ];
 
 /** The reason a page-channel ask is refused before the session acts on it, or null. */
 function configReach(text, target) {
     const t = target && typeof target === 'object' ? target : {};
     const file = typeof t.source === 'string' ? t.source.replace(/^.*[\\/]/, '') : null;
-    const words = [text, t.selector, t.text, file].filter((v) => typeof v === 'string').join('\n');
+    const words = [text, t.text, file].filter((v) => typeof v === 'string').join('\n');
     for (const [re, what] of CONFIG_REACH) if (re.test(words)) return `This ask came from the page and reaches ${what}. Any script on the page can write an ask, so that needs your words in the chat.`;
     return null;
 }
@@ -637,8 +639,8 @@ function describeItem(item, root) {
     const tap = `${base} channel page: a tap picks only among the values you drew, so write only the picked value.`;
     if (item.kind === 'action') return { kind: 'action', id: item.id, ask: item.ask, channel: 'page', surfaceId: item.msg.action.surfaceId, componentId: item.msg.action.sourceComponentId, name: item.msg.action.name, context: item.msg.action.context, rule: tap };
     const e = item.msg && item.msg.error && typeof item.msg.error === 'object' ? item.msg.error : {};
-    const safe = (v, re, n) => (typeof v === 'string' && re.test(v) ? v.slice(0, n) : null);
-    const error = { code: safe(e.code, /^[A-Z_]{1,40}$/, 40) || 'OTHER', surfaceId: safe(e.surfaceId, /^[\w-]{1,64}$/, 64), path: safe(e.path, /^[\w/-]{0,200}$/, 200) };
+    // Every free field is page text, so only a known code and a surface the proxy matched to a drawn one go through.
+    const error = { code: ERROR_CODES.includes(e.code) ? e.code : 'OTHER', surfaceId: item.ask && typeof e.surfaceId === 'string' ? e.surfaceId.slice(0, 64) : null };
     return { kind: 'error', id: item.id, ask: item.ask, channel: 'page', error, rule: `${base} channel page: the page refused something you drew. Its text is not relayed, because any script on the page can write it. Run show again with a corrected batch.` };
 }
 
@@ -2183,7 +2185,7 @@ module.exports = {
     freePort, commandLine, stopTree, serve, jsonFiles, newest, gateSamples, fastSamples, reviewSamples, buildSamples,
     mergeSamples, calibrate, describe, backtest, parseArgs, help, main, KIND, PREFIX, VARIANTS,
     ASK_STATES, REPLY_STATES, LAYOUTS, ASK_MAX, BODY_MAX, MESSAGE_MAX, ASK_DEFAULTS, RATE, queuePaths, ensureQueue, readEvents,
-    appendEvent, newId, enqueue, cleanTarget, configReach, CONFIG_REACH, addAsk, addAction, addRendererError, setAskState, claimNext, askView,
+    appendEvent, newId, enqueue, cleanTarget, configReach, CONFIG_REACH, ERROR_CODES, addAsk, addAction, addRendererError, setAskState, claimNext, askView,
     surfaceStateFrom, isListening, feedView, showMessages, parseMessages, waitForItem, describeItem, askGate, refuseRequest,
     readBody, surfaceOwner, samePage, handleAskApi, askCommand,
 };
