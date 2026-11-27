@@ -25,6 +25,13 @@
  *       The JSON the overlay draws: pending changes, lane and ETA.
  *   node live-edit.js note --dir SITE --text "what changed"
  *       One line per instruction, kept in the git dir, never in the tree.
+ *   node live-edit.js wait --dir SITE [--timeout 540]
+ *       Blocks until the page sends an ask or a pick, then prints it as JSON.
+ *       Exit 0 with an item, 2 at the deadline.
+ *   node live-edit.js reply --dir SITE --id ASK --state working|edited|failed [--expect TEXT] [--reason TEXT]
+ *   node live-edit.js show --dir SITE --id ASK --file MESSAGES
+ *       Draws choices on the page: A2UI v1.0 messages in live-edit's own catalog
+ *       (live-edit-a2ui.js). A message outside the catalog is refused whole.
  *   node live-edit.js calibrate --repo OWNER/NAME --out FILE [--locks-dir DIR] [--min-hold MIN]
  *                           [--fast-receipts PATH,..] [--review-receipts PATH,..] [--review-any-repo]
  *                           [--deployments FILE] [--merges FILE] [--land-minutes 37] [--since ISO]
@@ -53,18 +60,26 @@
  * A release record has minute resolution, so a gate sample is exact to a
  * minute. The landing minutes are local time, as a cron line is.
  *
- * EXIT. state, note, calibrate, backtest: 0 done, 1 bad arguments or an
- * unreadable input. serve: the dev server's exit code, or 1 when the port
+ * ASKS. With --ask (on by default) the overlay holds an ask box. The owner types
+ * or dictates a change, the proxy queues it in the worktree's git dir, and the
+ * session picks it up with `wait`. The ask's state comes back to the page
+ * through the proxy. Only the script tag the proxy injected gets the run's key:
+ * a page script, another site or another origin on this machine cannot ask.
+ *
+ * EXIT. state, note, reply, show, calibrate, backtest: 0 done, 1 bad arguments or an
+ * unreadable input. wait: 0 with an item, 2 at the deadline. serve: the dev server's exit code, or 1 when the port
  * cannot be bound.
  */
 'use strict';
 
+const crypto = require('crypto');
 const fs = require('fs');
 const http = require('http');
 const net = require('net');
 const os = require('os');
 const path = require('path');
 const { spawn, spawnSync } = require('child_process');
+const a2ui = require('./live-edit-a2ui.js');
 
 const TAG = 'live-edit:';
 const KIND = 'autodev-live-edit-calibration';
@@ -356,15 +371,222 @@ function computeState({ dir, baseRef = 'origin/main', calibrationFile = null, he
 }
 
 // ---------------------------------------------------------------------------
+// Asks from the page: a queue in this worktree's git dir, never in its tree.
+// The proxy writes an ask, `wait` hands it to the session, `reply` and `show`
+// answer it, and the page reads the answer back through the proxy's feed.
+// ---------------------------------------------------------------------------
+
+const ASK_STATES = ['received', 'working', 'choices', 'edited', 'visible', 'failed'];
+const REPLY_STATES = ['working', 'edited', 'failed'];
+const LAYOUTS = ['panel', 'sheet', 'side', 'off'];
+const ASK_MAX = 1000;
+const BODY_MAX = 8 * 1024;
+const MESSAGE_MAX = 32 * 1024;
+const FEED_ASKS = 5;
+const LISTEN_FRESH = 15e3;
+
+/** The queue's folders and files for the worktree holding `dir`, or null outside a repository. */
+function queuePaths(dir) {
+    const g = git(dir, ['rev-parse', '--absolute-git-dir']);
+    if (!g.ok) return null;
+    const root = path.join(g.stdout.trim(), 'live-edit');
+    return { root, inbox: path.join(root, 'inbox'), taken: path.join(root, 'taken'), events: path.join(root, 'events.jsonl'), listening: path.join(root, 'listening.json') };
+}
+
+function ensureQueue(q) {
+    for (const d of [q.inbox, q.taken]) fs.mkdirSync(d, { recursive: true });
+}
+
+/** Every event, oldest first. A torn line is skipped. */
+function readEvents(q) {
+    let text = '';
+    try { text = fs.readFileSync(q.events, 'utf8'); } catch { return []; }
+    const out = [];
+    for (const l of text.split('\n')) { if (!l) continue; try { out.push(JSON.parse(l)); } catch { /* a torn line is skipped */ } }
+    return out;
+}
+
+function appendEvent(q, event) {
+    ensureQueue(q);
+    fs.appendFileSync(q.events, JSON.stringify(event) + '\n');
+    return event;
+}
+
+function newId(prefix, now) {
+    return `${prefix}${now.toString(36)}${crypto.randomBytes(3).toString('hex')}`;
+}
+
+/** One file per item waiting for the session, named so a plain sort is arrival order. */
+function enqueue(q, item, now) {
+    ensureQueue(q);
+    const file = path.join(q.inbox, `${String(now).padStart(14, '0')}-${item.id}.json`);
+    fs.writeFileSync(`${file}.tmp`, JSON.stringify(item));
+    fs.renameSync(`${file}.tmp`, file);
+}
+
+/** Caps a pointed-at element's description. Page content, never part of the owner's words. */
+function cleanTarget(t) {
+    if (!t || typeof t !== 'object') return null;
+    const cap = (v, n) => (typeof v === 'string' ? v.replace(/\s+/g, ' ').trim().slice(0, n) : null);
+    const out = { selector: cap(t.selector, 200), text: cap(t.text, 200), tag: cap(t.tag, 20), source: cap(t.source, 300) };
+    return out.selector ? out : null;
+}
+
+/** Records an ask from the page and queues it for the session. Returns its id. */
+function addAsk(q, { text, target = null, instance = null }, now) {
+    const id = newId('a', now);
+    const event = { type: 'ask', id, at: now, text, target: cleanTarget(target), instance: typeof instance === 'string' ? instance.slice(0, 32) : null };
+    appendEvent(q, event);
+    enqueue(q, { kind: 'ask', id, at: now, text, target: event.target }, now);
+    return id;
+}
+
+/** Records a tap on a drawn choice and queues it for the session. */
+function addAction(q, { ask, msg }, now) {
+    const id = newId('t', now);
+    appendEvent(q, { type: 'action', id, ask, at: now, msg });
+    enqueue(q, { kind: 'action', id, ask, at: now, msg }, now);
+    return id;
+}
+
+/** A renderer error, from a page that refused a message the session drew. */
+function addRendererError(q, { ask, msg }, now) {
+    const id = newId('e', now);
+    appendEvent(q, { type: 'error', id, ask, at: now, msg });
+    enqueue(q, { kind: 'error', id, ask, at: now, msg }, now);
+    return id;
+}
+
+function setAskState(q, id, state, extra, now) {
+    return appendEvent(q, { type: 'state', id, state, at: now, ...extra });
+}
+
+/** The oldest waiting item, moved out of the inbox so no second `wait` takes it. Null when none is waiting. */
+function claimNext(q) {
+    let names = [];
+    try { names = fs.readdirSync(q.inbox).filter((n) => n.endsWith('.json')).sort(); } catch { return null; }
+    for (const name of names) {
+        const to = path.join(q.taken, name);
+        try { fs.renameSync(path.join(q.inbox, name), to); } catch { continue; }
+        try { return JSON.parse(fs.readFileSync(to, 'utf8')); } catch { continue; }
+    }
+    return null;
+}
+
+/** Each ask with its latest state and timings, oldest first. */
+function askView(events) {
+    const asks = new Map();
+    for (const e of events) {
+        if (e.type === 'ask') asks.set(e.id, { id: e.id, at: e.at, text: e.text, target: e.target || null, instance: e.instance || null, state: 'received' });
+        const a = asks.get(e.type === 'action' || e.type === 'a2ui' ? e.ask : e.id);
+        if (!a) continue;
+        if (e.type === 'state') {
+            a.state = e.state;
+            if (e.state === 'edited') { a.editedAt = e.at; a.expect = e.expect || null; }
+            if (e.state === 'visible') Object.assign(a, { visibleAt: e.at, visibleMs: e.ms, fromEditMs: e.fromEditMs, fromTapMs: e.fromTapMs, sameInstance: e.sameInstance });
+            if (e.state === 'failed') { a.reason = e.reason || 'no reason given'; a.failedAt = e.at; }
+        }
+        if (e.type === 'action') a.tapAt = e.at;
+    }
+    return [...asks.values()];
+}
+
+/** The surfaces the session drew, rebuilt from the log. */
+function surfaceStateFrom(events) {
+    const state = a2ui.newState();
+    for (const e of events) if (e.type === 'a2ui' && a2ui.checkAgentMessage(e.msg, state).ok) a2ui.apply(state, e.msg);
+    return state;
+}
+
+/** True while a `wait` is running for this worktree. */
+function isListening(q, now) {
+    const j = readJson(q.listening);
+    return Boolean(j && Number.isFinite(j.at) && now - j.at < LISTEN_FRESH);
+}
+
+/** What the page polls: the latest asks, and the drawn messages after `after`. */
+function feedView(events, after, listening) {
+    const messages = events.filter((e) => e.type === 'a2ui').map((e) => ({ seq: e.seq, ask: e.ask, msg: e.msg }));
+    const last = messages.length ? messages[messages.length - 1].seq : 0;
+    const reset = after > last;
+    return { last, reset, asks: askView(events).slice(-FEED_ASKS), messages: messages.filter((m) => m.seq > (reset ? 0 : after)), listening };
+}
+
+/**
+ * Validates and appends the session's drawn messages for `askId`. All of them
+ * are checked against the surfaces as they would stand before any is written,
+ * so a refused message leaves nothing half drawn. Returns { ok, count } or { ok: false, why }.
+ */
+function showMessages(q, askId, messages, now) {
+    const events = readEvents(q);
+    if (!askView(events).some((a) => a.id === askId)) return { ok: false, why: `no ask ${askId}` };
+    if (!Array.isArray(messages) || !messages.length) return { ok: false, why: 'no message to draw' };
+    const state = surfaceStateFrom(events);
+    for (let i = 0; i < messages.length; i++) {
+        if (JSON.stringify(messages[i] === undefined ? null : messages[i]).length > MESSAGE_MAX) return { ok: false, why: `message ${i + 1} is over ${MESSAGE_MAX} bytes` };
+        const r = a2ui.checkAgentMessage(messages[i], state);
+        if (!r.ok) return { ok: false, why: `message ${i + 1}: ${r.path || '/'}: ${r.message}` };
+        a2ui.apply(state, messages[i]);
+    }
+    let seq = events.reduce((n, e) => (e.type === 'a2ui' && e.seq > n ? e.seq : n), 0);
+    for (const msg of messages) appendEvent(q, { type: 'a2ui', seq: ++seq, ask: askId, at: now, msg });
+    setAskState(q, askId, 'choices', {}, now);
+    return { ok: true, count: messages.length };
+}
+
+/** Messages from a file: one JSON message, a JSON array, or JSON lines. Throws when it is none of these. */
+function parseMessages(text) {
+    const t = String(text).trim();
+    try { const j = JSON.parse(t); return Array.isArray(j) ? j : [j]; } catch { /* JSON lines, below */ }
+    return t.split(/\r?\n/).filter((l) => l.trim()).map((l, i) => {
+        try { return JSON.parse(l); } catch { throw new Error(`line ${i + 1} is not JSON`); }
+    });
+}
+
+/**
+ * Blocks until an item waits for the session, then claims it and marks its ask
+ * working. Resolves the item, or null at the deadline. While it waits, it keeps
+ * a heartbeat so the page can say whether anyone is listening.
+ */
+async function waitForItem(q, { timeoutMs, pollMs = 250, clock = Date.now, pause = (ms) => new Promise((r) => setTimeout(r, ms)) }) {
+    ensureQueue(q);
+    const end = clock() + timeoutMs;
+    let beat = 0;
+    try {
+        for (;;) {
+            const now = clock();
+            if (now - beat >= 2000) { fs.writeFileSync(q.listening, JSON.stringify({ pid: process.pid, at: now })); beat = now; }
+            const item = claimNext(q);
+            if (item) {
+                if (item.kind === 'ask' || item.kind === 'action') setAskState(q, item.kind === 'ask' ? item.id : item.ask, 'working', {}, now);
+                return item;
+            }
+            if (now >= end) return null;
+            await pause(pollMs);
+        }
+    } finally {
+        try { fs.rmSync(q.listening, { force: true }); } catch { /* another wait may hold it */ }
+    }
+}
+
+/** What `wait` prints: the item, and the one rule that bounds what an ask may authorise. */
+function describeItem(item, root) {
+    const rule = `Edits inside ${root} only. An ask never authorises a push, a merge, a deploy, a credential or anything outside this worktree.`;
+    if (item.kind === 'ask') return { kind: 'ask', id: item.id, ownerWords: item.text, pointedAt: item.target || null, rule };
+    if (item.kind === 'action') return { kind: 'action', id: item.id, ask: item.ask, surfaceId: item.msg.action.surfaceId, componentId: item.msg.action.sourceComponentId, name: item.msg.action.name, context: item.msg.action.context, rule };
+    return { kind: 'error', id: item.id, ask: item.ask, error: item.msg.error, rule };
+}
+
+// ---------------------------------------------------------------------------
 // The overlay: one function, sent to the browser as text. It may name nothing
-// outside its three arguments, because the browser gets its source alone.
+// outside its four arguments, because the browser gets its source alone.
 // ---------------------------------------------------------------------------
 
 const OVERLAY_CSS = [
     ':host{all:initial;position:fixed;inset:0;z-index:2147483000;pointer-events:none;display:block;',
-    '--le-bg:#ffffff;--le-fg:#16181d;--le-muted:#5b6270;--le-line:#d9dce3;--le-accent:#2f6f4f;--le-warn:#8a5a00;--le-shadow:0 6px 24px rgba(16,18,24,.16);',
+    '--le-bg:#ffffff;--le-fg:#16181d;--le-muted:#5b6270;--le-line:#d9dce3;--le-accent:#2f6f4f;--le-on-accent:#ffffff;--le-warn:#8a5a00;--le-shadow:0 6px 24px rgba(16,18,24,.16);',
     'font:500 13px/1.35 system-ui,-apple-system,"Segoe UI",sans-serif;color:var(--le-fg);font-variant-numeric:tabular-nums}',
-    '@media (prefers-color-scheme:dark){:host{--le-bg:#17191e;--le-fg:#eef0f4;--le-muted:#a3aab8;--le-line:#343943;--le-accent:#7fd3a4;--le-warn:#f0c36a;--le-shadow:0 6px 24px rgba(0,0,0,.5)}}',
+    '@media (prefers-color-scheme:dark){:host{--le-bg:#17191e;--le-fg:#eef0f4;--le-muted:#a3aab8;--le-line:#343943;--le-accent:#7fd3a4;--le-on-accent:#0d1a13;--le-warn:#f0c36a;--le-shadow:0 6px 24px rgba(0,0,0,.5)}}',
     '.le{position:absolute;display:flex;flex-direction:column;gap:8px;max-width:calc(100vw - 24px);pointer-events:none}',
     '.le[data-corner="bottom-left"]{left:12px;bottom:12px;align-items:flex-start;flex-direction:column-reverse}',
     '.le[data-corner="bottom-right"]{right:12px;bottom:12px;align-items:flex-end;flex-direction:column-reverse}',
@@ -376,17 +598,20 @@ const OVERLAY_CSS = [
     '.pill{pointer-events:auto;appearance:none;border:1px solid var(--le-line);background:var(--le-bg);color:var(--le-fg);',
     'font:inherit;min-height:36px;padding:0 12px;border-radius:18px;display:inline-flex;align-items:center;gap:8px;cursor:pointer;box-shadow:var(--le-shadow);white-space:nowrap}',
     '@media (pointer:coarse){.pill{min-height:44px}}',
-    '.pill:focus-visible{outline:2px solid var(--le-accent);outline-offset:2px}',
+    '.pill:focus-visible,.tb:focus-visible,.a2-btn:focus-visible{outline:2px solid var(--le-accent);outline-offset:2px}',
     '.dot{width:8px;height:8px;border-radius:50%;background:var(--le-accent);flex:none}',
     '.le[data-state="idle"] .dot{background:var(--le-muted)}.le[data-state="stale"] .dot,.le[data-state="unmeasured"] .dot{background:var(--le-warn)}',
+    '.le[data-ask-state="failed"] .dot{background:var(--le-warn)}.le[data-ask-state="received"] .dot,.le[data-ask-state="working"] .dot,.le[data-ask-state="edited"] .dot{animation:le-beat 1s ease-in-out infinite alternate}',
+    '@keyframes le-beat{from{transform:scale(.7)}to{transform:scale(1.25)}}',
     '.eta{color:var(--le-muted)}.eta b{color:var(--le-fg);font-weight:600}',
     '.panel{pointer-events:auto;box-sizing:border-box;width:min(340px,calc(100vw - 24px));max-height:min(70vh,520px);overflow:auto;background:var(--le-bg);',
     'border:1px solid var(--le-line);border-radius:12px;box-shadow:var(--le-shadow);padding:14px;display:none}',
+    '.le[data-ask] .panel{width:min(360px,calc(100vw - 24px));max-height:min(78vh,620px)}',
     '.le[data-open="true"] .panel{display:block;animation:le-in .16s ease-out}',
-    '@media (hover:hover){.le:hover .panel{display:block;animation:le-in .16s ease-out}}',
+    '@media (hover:hover){.le:not([data-ask]):hover .panel{display:block;animation:le-in .16s ease-out}}',
     // Transform only: a page in a background tab may never advance an animation, and a frozen first frame must still be readable.
     '@keyframes le-in{from{transform:translateY(4px)}to{transform:none}}',
-    '@media (prefers-reduced-motion:reduce){.le .panel{animation:none!important}}',
+    '@media (prefers-reduced-motion:reduce){.le .panel,.le .dot{animation:none!important}}',
     '.h{font-size:12px;font-weight:600;color:var(--le-muted);margin:0 0 6px}',
     '.big{font-size:20px;font-weight:650;margin:0}.sub{color:var(--le-muted);margin:2px 0 12px}',
     '.list{list-style:none;margin:0 0 12px;padding:0;display:grid;gap:4px}.list li{overflow-wrap:anywhere}',
@@ -397,28 +622,102 @@ const OVERLAY_CSS = [
     '.le[data-variant="bar"] .panel{margin:0 12px 8px;align-self:flex-start}',
     '.le[data-variant="dot"] .pill{padding:0;width:36px;justify-content:center}.le[data-variant="dot"] .pill .count,.le[data-variant="dot"] .pill .eta{display:none}',
     '.le[data-variant="dot"] .dot{width:12px;height:12px;box-shadow:0 0 0 4px color-mix(in srgb,var(--le-accent) 25%,transparent)}',
+    // The ask box, the asks and the drawn choices.
+    '.head{display:flex;align-items:center;justify-content:space-between;gap:8px;margin:0 0 8px}.head .h{margin:0}',
+    '.ask{display:grid;gap:8px;margin:0 0 12px}',
+    '.ask textarea{box-sizing:border-box;width:100%;min-height:64px;max-height:160px;resize:vertical;font:inherit;font-size:14px;color:var(--le-fg);background:var(--le-bg);',
+    'border:1px solid var(--le-line);border-radius:8px;padding:8px 10px}.ask textarea:focus-visible{outline:2px solid var(--le-accent);outline-offset:1px}',
+    '.ask textarea::placeholder{color:var(--le-muted)}',
+    '.tools{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,84px),1fr));gap:8px}',
+    '.tb{appearance:none;font:inherit;font-weight:600;min-height:36px;padding:0 12px;border-radius:8px;border:1px solid var(--le-line);background:var(--le-bg);color:var(--le-fg);',
+    'cursor:pointer;display:inline-flex;align-items:center;justify-content:center;white-space:nowrap}',
+    '.tb span,.pill span,.a2-btn span{text-box:trim-both cap alphabetic}',
+    '.tb[aria-pressed="true"]{border-color:var(--le-accent);box-shadow:inset 0 0 0 1px var(--le-accent)}',
+    '.tb.primary{background:var(--le-accent);border-color:var(--le-accent);color:var(--le-on-accent)}',
+    '.tb.x{min-height:32px;padding:0 10px;font-weight:500}',
+    '@media (pointer:coarse){.tb{min-height:44px}.tb.x{min-height:44px}}',
+    '.target{display:flex;align-items:center;gap:8px;font-size:12px;color:var(--le-muted);border:1px dashed var(--le-line);border-radius:8px;padding:6px 8px}',
+    '.target b{color:var(--le-fg);font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1;min-width:0}',
+    '.asks{list-style:none;margin:0 0 12px;padding:0;display:grid;gap:8px}',
+    '.asks li{display:grid;gap:2px;border-left:2px solid var(--le-line);padding-left:8px}',
+    '.asks .q{margin:0;overflow-wrap:anywhere}.asks .st{margin:0;font-size:12px;color:var(--le-muted)}',
+    '.asks li[data-s="visible"]{border-color:var(--le-accent)}.asks li[data-s="visible"] .st{color:var(--le-accent)}',
+    '.asks li[data-s="failed"]{border-color:var(--le-warn)}.asks li[data-s="failed"] .st{color:var(--le-warn)}',
+    '.surface{display:grid;gap:8px;margin:0 0 12px;padding:10px 0 0;border-top:1px solid var(--le-line)}',
+    '.a2-col{display:flex;flex-direction:column;gap:8px}.a2-row{display:flex;gap:8px;align-items:center}.a2-row[data-wrap]{flex-wrap:wrap}',
+    '[data-align="start"]{align-items:flex-start}[data-align="center"]{align-items:center}[data-align="end"]{align-items:flex-end}[data-align="stretch"]{align-items:stretch}',
+    '.a2-text{margin:0;overflow-wrap:anywhere}.a2-text-heading{font-size:14px;font-weight:650}.a2-text-caption{font-size:12px;color:var(--le-muted)}',
+    '.a2-btn{appearance:none;font:inherit;text-align:left;color:var(--le-fg);background:var(--le-bg);border:1px solid var(--le-line);border-radius:10px;',
+    'padding:10px 12px;min-height:44px;cursor:pointer;display:block;width:100%;box-sizing:border-box}',
+    '.a2-btn:hover{border-color:var(--le-accent)}.a2-btn[data-picked]{border-color:var(--le-accent);box-shadow:inset 0 0 0 1px var(--le-accent)}',
+    '.a2-btn.primary{background:var(--le-accent);border-color:var(--le-accent);color:var(--le-on-accent);text-align:center}',
+    '.a2-btn.borderless{border-color:transparent;background:transparent}',
+    '.a2-swatch{display:inline-flex;align-items:center;gap:8px;width:auto}.chip{width:20px;height:20px;border-radius:50%;flex:none;box-shadow:inset 0 0 0 1px rgba(0,0,0,.18)}',
+    '.a2-slider{display:grid;gap:4px}.a2-slider .cap{display:flex;justify-content:space-between;color:var(--le-muted);font-size:12px}',
+    '.a2-slider input{width:100%;min-height:32px;accent-color:var(--le-accent)}',
+    '.a2-missing{color:var(--le-muted)}',
+    '.mark{position:fixed;pointer-events:none;border:2px solid var(--le-accent);border-radius:4px;background:color-mix(in srgb,var(--le-accent) 10%,transparent);display:none}',
+    '.mark[data-on]{display:block}',
+    '.badge{position:fixed;pointer-events:none;background:var(--le-accent);color:var(--le-on-accent);font-size:11px;font-weight:600;padding:2px 6px;border-radius:6px;display:none}',
+    '.badge[data-on]{display:block}',
+    // Where the ask box lives. panel: the pill's own panel. sheet: a bottom sheet. side: a full-height side panel.
+    '.le[data-ask="sheet"][data-open="true"] .panel{position:fixed;left:0;right:0;bottom:0;margin:0 auto;width:min(560px,100vw);max-height:min(80vh,640px);border-radius:16px 16px 0 0;border-bottom-width:0}',
+    '.le[data-ask="side"][data-open="true"] .panel{position:fixed;top:0;right:0;bottom:0;margin:0;width:min(380px,100vw);max-height:none;border-radius:0;border-width:0 0 0 1px}',
 ].join('');
 
 /* eslint-disable no-var */
-function overlayClient(window, document, config) {
+/**
+ * The overlay, sent to the browser as text: it may name nothing outside its four
+ * arguments. `kit` is a2uiKit() in this process and the same function's source
+ * in the browser.
+ *
+ * Asks need `config.ask.key`, which the proxy hands only to the script tag it
+ * injected (see the ticket in createProxy). The tag is the first thing in <head>
+ * and has no defer, so this runs before any page script: the browser functions
+ * it keeps below are the real ones, the key lives in this closure only, the
+ * shadow root is closed, and every handler that sends anything requires a
+ * trusted event, which a page script cannot make.
+ */
+function overlayClient(window, document, config, kit) {
     if (window.__liveEditOverlay) return window.__liveEditOverlay;
+    window.__liveEditOverlay = true;
+    var send = window.fetch.bind(window);
+    var listen = window.addEventListener.bind(window);
+    var later = (window.setTimeout || function () { return 0; }).bind(window);
+    var stringify = JSON.stringify;
+    var clock = Date.now;
+    var Recognition = window.SpeechRecognition || window.webkitSpeechRecognition || null;
+    var ask = config.ask || null;
+    var key = ask ? ask.key : null;
+    var instance = Math.random().toString(36).slice(2, 10);
     var CONTROL = 'a,button,input,select,textarea,summary,label,[role="button"],[role="link"],[tabindex]';
+    var ACTIVE = ['received', 'working', 'choices', 'edited'];
     var make = function (tag, cls, text) {
         var node = document.createElement(tag);
         if (cls) node.className = cls;
         if (text !== undefined) node.textContent = text;
         return node;
     };
+    var labelled = function (cls, text) {
+        var b = make('button', cls);
+        b.setAttribute('type', 'button');
+        b.appendChild(make('span', '', text));
+        return b;
+    };
     var host = make('live-edit-overlay');
     host.setAttribute('aria-live', 'off');
-    var root = host.attachShadow ? host.attachShadow({ mode: 'open' }) : host;
+    var root = host.attachShadow ? host.attachShadow({ mode: 'closed' }) : host;
     var wrap = make('div', 'le');
     var pill = make('button', 'pill');
     var count = make('span', 'count', 'Live edit');
     var eta = make('span', 'eta', '');
     var panel = make('div', 'panel');
+    var info = make('div', 'info');
+    var mark = make('div', 'mark');
+    var badge = make('div', 'badge', 'Preview');
     var open = false;
     var placed = false;
+    var lastState = null;
     pill.setAttribute('type', 'button');
     pill.setAttribute('aria-expanded', 'false');
     pill.appendChild(make('span', 'dot'));
@@ -432,6 +731,476 @@ function overlayClient(window, document, config) {
     wrap.appendChild(pill);
     wrap.appendChild(panel);
     root.appendChild(wrap);
+
+    var setOpen = function (to) {
+        open = to;
+        wrap.setAttribute('data-open', String(open));
+        pill.setAttribute('aria-expanded', String(open));
+    };
+
+    // ---- the ask box --------------------------------------------------------
+    var input = null, sendBtn = null, pointBtn = null, micBtn = null, targetEl = null, formNote = null, asksEl = null, surfacesEl = null;
+    var target = null;
+    var pointing = false;
+    var asks = [];
+    var listening = false;
+    var after = 0;
+    var surfaces = kit ? kit.newState() : null;
+    var surfaceAsk = {};
+    var bound = [];
+    var previews = [];
+    var reported = {};
+    var lastMutationAt = 0;
+    var recognition = null;
+
+    var post = function (url, body) {
+        return send(url, { method: 'POST', cache: 'no-store', headers: { 'content-type': 'application/json', 'x-live-edit-key': key }, body: stringify(body) })
+            .then(function (res) { return res.json().then(function (j) { return { status: res.status, body: j }; }, function () { return { status: res.status, body: {} }; }); });
+    };
+    var say = function (text) { if (formNote) formNote.textContent = text || ''; };
+    var refusal = function (r) {
+        if (r.status === 403) return 'This page has no valid key: the helper restarted or the page is old. Reload the page to ask.';
+        if (r.status === 429) return 'Too many asks in a minute. Wait a moment and send again.';
+        if (r.status === 413) return 'That is too long for one ask.';
+        return 'The helper refused it: ' + ((r.body && r.body.why) || 'status ' + r.status);
+    };
+
+    var showTarget = function () {
+        if (!targetEl) return;
+        while (targetEl.firstChild) targetEl.removeChild(targetEl.firstChild);
+        if (!target) { targetEl.setAttribute('hidden', ''); return; }
+        targetEl.removeAttribute('hidden');
+        targetEl.appendChild(make('span', '', 'About'));
+        targetEl.appendChild(make('b', '', target.text || target.selector));
+        var clear = labelled('tb x', 'Clear');
+        clear.addEventListener('click', function (e) { if (e.isTrusted !== true) return; target = null; showTarget(); });
+        targetEl.appendChild(clear);
+    };
+
+    var sendAsk = function () {
+        var text = String(input.value || '').replace(/\s+/g, ' ').trim();
+        if (!text) { say('Type or dictate a change first.'); return Promise.resolve(null); }
+        if (text.length > ask.maxChars) { say('That is ' + text.length + ' characters. One ask holds ' + ask.maxChars + '.'); return Promise.resolve(null); }
+        say('Sending.');
+        return post(ask.askUrl, { text: text, target: target, instance: instance }).then(function (r) {
+            if (r.status !== 200) { say(refusal(r)); return null; }
+            input.value = '';
+            target = null;
+            showTarget();
+            say('');
+            asks.push({ id: r.body.id, text: text, state: 'received', at: clock() });
+            drawAsks();
+            drawPill();
+            return pollFeed();
+        }, function () { say('The live edit helper stopped. Start it again, then reload.'); return null; });
+    };
+
+    // ---- pointing at an element (B3) ----------------------------------------
+    var selectorFor = function (el) {
+        var parts = [];
+        for (var at = el, depth = 0; at && at.nodeType === 1 && at !== document.documentElement && depth < 5; at = at.parentElement, depth++) {
+            var tag = String(at.tagName || '').toLowerCase();
+            if (at.id && /^[A-Za-z][\w-]*$/.test(at.id)) { parts.unshift('#' + at.id); break; }
+            var n = 1;
+            for (var sib = at.previousElementSibling; sib; sib = sib.previousElementSibling) if (sib.tagName === at.tagName) n++;
+            parts.unshift(tag + ':nth-of-type(' + n + ')');
+        }
+        return parts.join(' > ');
+    };
+    // The source location where the dev build exposes one: an inspector attribute, or React's own debug record before React 19.
+    var sourceOf = function (el) {
+        for (var at = el, depth = 0; at && at.nodeType === 1 && depth < 6; at = at.parentElement, depth++) {
+            var file = at.getAttribute('data-inspector-relative-path') || at.getAttribute('data-source-file');
+            if (file) return file + ':' + (at.getAttribute('data-inspector-line') || at.getAttribute('data-source-line') || '?');
+            var keys = Object.keys(at);
+            for (var i = 0; i < keys.length; i++) {
+                if (keys[i].indexOf('__reactFiber$') !== 0) continue;
+                for (var f = at[keys[i]]; f; f = f.return) if (f._debugSource && f._debugSource.fileName) return f._debugSource.fileName + ':' + f._debugSource.lineNumber;
+            }
+        }
+        return null;
+    };
+    var describe = function (el) {
+        var text = String(el.innerText || el.textContent || '').replace(/\s+/g, ' ').trim();
+        return { selector: selectorFor(el), text: text.slice(0, 200), tag: String(el.tagName || '').toLowerCase(), source: sourceOf(el) };
+    };
+    var setPointing = function (on) {
+        pointing = on;
+        if (pointBtn) pointBtn.setAttribute('aria-pressed', String(on));
+        if (!on) mark.removeAttribute('data-on');
+        say(on ? 'Tap the part of the page this is about. Esc cancels.' : '');
+    };
+    var pageElement = function (e) {
+        var el = e.target;
+        return el && el !== host && el.nodeType === 1 ? el : null;
+    };
+    var outline = function (node, el) {
+        var r = el.getBoundingClientRect();
+        node.style.left = r.left + 'px';
+        node.style.top = r.top + 'px';
+        node.style.width = r.width + 'px';
+        node.style.height = r.height + 'px';
+        node.setAttribute('data-on', '');
+    };
+    var onPageMove = function (e) {
+        if (!pointing || e.isTrusted !== true) return;
+        var el = pageElement(e);
+        if (el) outline(mark, el);
+    };
+    var onPageClick = function (e) {
+        if (!ask || !ask.point || (!pointing && !e.altKey) || e.isTrusted !== true) return;
+        var el = pageElement(e);
+        if (!el) return;
+        e.preventDefault();
+        e.stopPropagation();
+        target = describe(el);
+        setPointing(false);
+        setOpen(true);
+        showTarget();
+        if (input.focus) input.focus();
+    };
+    var onPageKey = function (e) {
+        if (pointing && e.key === 'Escape' && e.isTrusted === true) setPointing(false);
+    };
+
+    // ---- dictation: fills the box, never sends ------------------------------
+    var dictate = function (e) {
+        if (e.isTrusted !== true) return;
+        if (recognition) { recognition.stop(); return; }
+        var rec = new Recognition();
+        var base = String(input.value || '').trim();
+        rec.lang = 'en-US';
+        rec.interimResults = true;
+        rec.continuous = false;
+        rec.onresult = function (ev) {
+            var heard = '';
+            for (var i = 0; i < ev.results.length; i++) heard += ev.results[i][0].transcript;
+            input.value = (base ? base + ' ' : '') + heard.trim();
+        };
+        rec.onerror = function (ev) {
+            say('Dictation stopped: ' + ev.error + '. Type the change instead.');
+            if (['not-allowed', 'service-not-allowed', 'network', 'language-not-supported'].indexOf(ev.error) !== -1 && micBtn) micBtn.setAttribute('hidden', '');
+        };
+        rec.onend = function () { recognition = null; micBtn.setAttribute('aria-pressed', 'false'); };
+        recognition = rec;
+        micBtn.setAttribute('aria-pressed', 'true');
+        say('Listening. Speak, then check the text and press Send.');
+        rec.start();
+    };
+
+    // ---- previews (B4) --------------------------------------------------------
+    var soleText = function (el) {
+        var at = el;
+        while (at && at.childNodes && at.childNodes.length === 1 && at.firstChild.nodeType === 1) at = at.firstChild;
+        return at && at.childNodes && at.childNodes.length === 1 && at.firstChild.nodeType === 3 ? at.firstChild : null;
+    };
+    var setStyle = function (el, prop, value, askId) {
+        previews.push({ ask: askId, kind: 'style', el: el, prop: prop, before: el.style.getPropertyValue(prop), value: value });
+        el.style.setProperty(prop, value);
+    };
+    var restorePreviews = function (askId) {
+        var keep = [];
+        for (var i = previews.length - 1; i >= 0; i--) {
+            var p = previews[i];
+            if (p.ask !== askId) { keep.unshift(p); continue; }
+            if (p.kind === 'text' && !p.touchedAt && p.node.nodeValue === p.value) p.node.nodeValue = p.before;
+            if (p.kind === 'style' && p.el.style.getPropertyValue(p.prop) === p.value) {
+                if (p.before) p.el.style.setProperty(p.prop, p.before); else p.el.style.removeProperty(p.prop);
+            }
+        }
+        previews = keep;
+        if (!previews.length) badge.removeAttribute('data-on');
+    };
+    var applyPreview = function (spec, askId) {
+        restorePreviews(askId);
+        var els = [];
+        try { els = Array.prototype.slice.call(document.querySelectorAll(spec.selector), 0, 20); } catch (err) { return 0; }
+        for (var i = 0; i < els.length; i++) {
+            var el = els[i];
+            if (typeof spec.text === 'string') {
+                var node = soleText(el);
+                if (node) { previews.push({ ask: askId, kind: 'text', node: node, before: node.nodeValue, value: spec.text }); node.nodeValue = spec.text; }
+            }
+            var props = spec.style ? Object.keys(spec.style) : [];
+            for (var k = 0; k < props.length; k++) if (kit.checkStyle(props[k], spec.style[props[k]], '').ok) setStyle(el, props[k], spec.style[props[k]], askId);
+            setStyle(el, 'outline', '2px dashed #2f6f4f', askId);
+            setStyle(el, 'outline-offset', '3px', askId);
+        }
+        if (els.length) { outline(badge, els[0]); badge.style.height = ''; badge.style.width = ''; }
+        return els.length;
+    };
+
+    // ---- drawing the session's choices (A2UI) ---------------------------------
+    var askOf = function (id) { for (var i = 0; i < asks.length; i++) if (asks[i].id === id) return asks[i]; return null; };
+    var finished = function (id) { var a = askOf(id); return Boolean(a && (a.state === 'visible' || a.state === 'failed')); };
+    var tap = function (surface, comp, el, e) {
+        if (e.isTrusted !== true) return null;
+        var msg = kit.actionMessage(surface, comp.id, clock());
+        var siblings = surfacesEl.querySelectorAll ? surfacesEl.querySelectorAll('[data-picked]') : [];
+        for (var i = 0; i < siblings.length; i++) siblings[i].removeAttribute('data-picked');
+        el.setAttribute('data-picked', '');
+        if (ask.preview && comp.preview) applyPreview(comp.preview, surfaceAsk[surface.id]);
+        say('Sent your pick.');
+        return post(ask.actionUrl, msg).then(function (r) {
+            if (r.status !== 200) { say(refusal(r)); return null; }
+            return pollFeed();
+        }, function () { say('The live edit helper stopped.'); return null; });
+    };
+    var slide = function (surface, comp, range, valueEl, e) {
+        if (e.isTrusted !== true) return;
+        var v = Number(range.value);
+        surface.data = kit.setPointer(surface.data, comp.value['@path'], v);
+        valueEl.textContent = v + (comp.unit || '');
+        for (var i = 0; i < bound.length; i++) {
+            if (bound[i].surface === surface) bound[i].el.textContent = kit.asText(kit.resolve(surface, bound[i].comp.text));
+        }
+        if (ask.preview && comp.preview) {
+            restorePreviews(surfaceAsk[surface.id]);
+            var els = [];
+            try { els = Array.prototype.slice.call(document.querySelectorAll(comp.preview.selector), 0, 20); } catch (err) { els = []; }
+            for (var k = 0; k < els.length; k++) setStyle(els[k], comp.preview.property, v + (comp.unit || ''), surfaceAsk[surface.id]);
+            if (els.length) outline(badge, els[0]);
+        }
+    };
+    var renderNode = function (surface, id, depth, path) {
+        var c = surface.components.get(id);
+        if (!c || depth > kit.MAX_DEPTH || path.indexOf(id) !== -1) return make('span', 'a2-missing', '...');
+        var trail = path.concat([id]);
+        var el;
+        var kids = function (list) { for (var i = 0; i < list.length; i++) el.appendChild(renderNode(surface, list[i], depth + 1, trail)); };
+        if (c.component === 'Column' || c.component === 'Row') {
+            el = make('div', c.component === 'Column' ? 'a2-col' : 'a2-row');
+            if (c.wrap) el.setAttribute('data-wrap', '');
+            kids(c.children);
+        } else if (c.component === 'Text') {
+            el = make('p', 'a2-text a2-text-' + (c.variant || 'body'), kit.asText(kit.resolve(surface, c.text)));
+            if (c.text && typeof c.text === 'object') bound.push({ surface: surface, comp: c, el: el });
+        } else if (c.component === 'Button') {
+            el = make('button', 'a2-btn' + (c.variant && c.variant !== 'default' ? ' ' + c.variant : ''));
+            el.setAttribute('type', 'button');
+            el.appendChild(renderNode(surface, c.child, depth + 1, trail));
+        } else if (c.component === 'Swatch') {
+            el = make('button', 'a2-btn a2-swatch');
+            el.setAttribute('type', 'button');
+            var chip = make('span', 'chip');
+            chip.style.backgroundColor = c.color;
+            el.appendChild(chip);
+            el.appendChild(make('span', '', c.label));
+        } else {
+            el = make('label', 'a2-slider');
+            var cap = make('span', 'cap');
+            var value = kit.resolve(surface, c.value);
+            var valueEl = make('b', '', (typeof value === 'number' ? value : c.min || 0) + (c.unit || ''));
+            cap.appendChild(make('span', '', c.label || ''));
+            cap.appendChild(valueEl);
+            var range = make('input');
+            range.setAttribute('type', 'range');
+            range.setAttribute('min', String(c.min || 0));
+            range.setAttribute('max', String(c.max));
+            range.setAttribute('step', String(c.steps ? (c.max - (c.min || 0)) / c.steps : 'any'));
+            range.value = String(typeof value === 'number' ? value : c.min || 0);
+            range.addEventListener('input', function (e) { slide(surface, c, range, valueEl, e); });
+            el.appendChild(cap);
+            el.appendChild(range);
+        }
+        if (c.action) el.addEventListener('click', function (e) { tap(surface, c, el, e); });
+        if (c.align) el.setAttribute('data-align', c.align);
+        if (c['@accessibility'] && c['@accessibility'].label) el.setAttribute('aria-label', c['@accessibility'].label);
+        el.setAttribute('data-id', c.id);
+        return el;
+    };
+    var renderSurfaces = function () {
+        if (!surfacesEl) return 0;
+        while (surfacesEl.firstChild) surfacesEl.removeChild(surfacesEl.firstChild);
+        bound = [];
+        var drawn = 0;
+        surfaces.surfaces.forEach(function (s) {
+            if (finished(surfaceAsk[s.id])) return;
+            var box = make('section', 'surface');
+            box.setAttribute('data-surface', s.id);
+            box.appendChild(renderNode(s, 'root', 0, []));
+            surfacesEl.appendChild(box);
+            drawn++;
+        });
+        return drawn;
+    };
+
+    // ---- the asks' states -----------------------------------------------------
+    var seconds = function (ms) { return Number.isFinite(ms) ? (Math.round(ms / 100) / 10) + ' s' : 'not measured'; };
+    var phrase = function (a) {
+        if (a.state === 'received') return listening ? 'Received. The session picks it up next.' : 'Received. No session is listening yet.';
+        if (a.state === 'working') return 'Working on it';
+        if (a.state === 'choices') return 'Pick one below';
+        if (a.state === 'edited') return 'Edited. Waiting for the page to show it.';
+        if (a.state === 'visible') {
+            var reload = a.sameInstance === false ? ', after a reload' : '';
+            return Number.isFinite(a.fromTapMs) ? 'Visible ' + seconds(a.fromTapMs) + ' after your pick' + reload : 'Visible after ' + seconds(a.visibleMs) + reload;
+        }
+        if (a.state === 'failed') return 'Failed: ' + (a.reason || 'no reason given');
+        return a.state;
+    };
+    var drawAsks = function () {
+        if (!asksEl) return;
+        while (asksEl.firstChild) asksEl.removeChild(asksEl.firstChild);
+        for (var i = asks.length - 1; i >= 0; i--) {
+            var a = asks[i];
+            var li = make('li');
+            li.setAttribute('data-s', a.state);
+            li.appendChild(make('p', 'q', a.text));
+            li.appendChild(make('p', 'st', phrase(a)));
+            asksEl.appendChild(li);
+        }
+    };
+    var drawPill = function () {
+        var latest = asks.length ? asks[asks.length - 1] : null;
+        var done = latest && (latest.visibleAt || latest.failedAt || 0);
+        var showAsk = latest && (ACTIVE.indexOf(latest.state) !== -1 || clock() - done < 20000);
+        if (showAsk) {
+            wrap.setAttribute('data-ask-state', latest.state);
+            count.textContent = phrase(latest);
+            return 'ask';
+        }
+        wrap.removeAttribute('data-ask-state');
+        count.textContent = lastState ? lastState.pill : 'Live edit';
+        return 'state';
+    };
+
+    // An ask is visible once the session marked it edited and the page shows it: the text it expects
+    // is on the page, or, with no text named, the page changed after the edit. A preview of the same
+    // text does not count until the page itself rewrote it.
+    var bodyText = function () { return document.body ? String(document.body.innerText || '') : ''; };
+    var checkVisible = function () {
+        var sent = [];
+        for (var i = 0; i < asks.length; i++) {
+            var a = asks[i];
+            if (a.state !== 'edited' || reported[a.id]) continue;
+            var mine = previews.filter(function (p) { return p.ask === a.id && p.kind === 'text'; });
+            var landed = mine.every(function (p) { return p.touchedAt || p.node.isConnected === false; });
+            var shown = a.expect ? landed && bodyText().indexOf(a.expect) !== -1 : landed && lastMutationAt >= a.editedAt;
+            if (!shown) continue;
+            reported[a.id] = true;
+            sent.push(post(ask.seenUrl, { id: a.id, instance: instance }));
+        }
+        return sent.length;
+    };
+    var onMutations = function (records) {
+        var t = clock();
+        for (var i = 0; i < records.length; i++) {
+            var r = records[i];
+            if (r.target === document.documentElement && r.addedNodes && Array.prototype.indexOf.call(r.addedNodes, host) !== -1) continue;
+            lastMutationAt = t;
+            for (var k = 0; k < previews.length; k++) {
+                if (previews[k].kind === 'text' && previews[k].node === r.target && r.oldValue === previews[k].value) previews[k].touchedAt = t;
+            }
+        }
+        return checkVisible();
+    };
+
+    var applyFeed = function (feed) {
+        var fresh = false;
+        if (feed.reset) { surfaces = kit.newState(); surfaceAsk = {}; after = 0; }
+        for (var i = 0; i < feed.messages.length; i++) {
+            var m = feed.messages[i];
+            if (m.seq <= after) continue;
+            var r = kit.checkAgentMessage(m.msg, surfaces);
+            after = m.seq;
+            if (!r.ok) {
+                var sid = m.msg && typeof m.msg === 'object' ? (m.msg.createSurface || m.msg.updateComponents || m.msg.updateDataModel || m.msg.deleteSurface || {}).surfaceId : null;
+                post(ask.errorUrl, { version: '1.0', error: { code: 'VALIDATION_FAILED', surfaceId: String(sid || 'unknown'), path: r.path || '/', message: r.message } });
+                continue;
+            }
+            var touched = kit.apply(surfaces, m.msg);
+            if (m.msg.createSurface) fresh = true;
+            if (touched) surfaceAsk[touched] = m.ask;
+        }
+        var before = {};
+        for (var b = 0; b < asks.length; b++) before[asks[b].id] = asks[b].state;
+        asks = feed.asks;
+        listening = Boolean(feed.listening);
+        for (var k = 0; k < asks.length; k++) {
+            var a = asks[k];
+            if ((a.state === 'failed' && before[a.id] !== 'failed') || (a.state === 'visible' && before[a.id] !== 'visible')) restorePreviews(a.id);
+        }
+        renderSurfaces();
+        if (fresh) setOpen(true);
+        drawAsks();
+        drawPill();
+        checkVisible();
+        return fresh;
+    };
+    var pollFeed = function () {
+        return send(ask.feedUrl + '?after=' + after, { cache: 'no-store', headers: { 'x-live-edit-key': key } })
+            .then(function (res) { return res.status === 200 ? res.json() : null; })
+            .then(function (feed) { if (feed) applyFeed(feed); return feed; }, function () { return null; });
+    };
+    var feedLoop = function () {
+        pollFeed().then(function () {
+            var busy = asks.some(function (a) { return ACTIVE.indexOf(a.state) !== -1; });
+            later(feedLoop, busy ? 400 : config.pollMs);
+        });
+    };
+
+    if (ask) {
+        wrap.setAttribute('data-ask', ask.layout);
+        var head = make('div', 'head');
+        head.appendChild(make('p', 'h', 'Ask for a change'));
+        var close = labelled('tb x', 'Close');
+        close.addEventListener('click', function () { setOpen(false); });
+        head.appendChild(close);
+        panel.appendChild(head);
+        if (key) {
+            var form = make('form', 'ask');
+            input = make('textarea');
+            input.setAttribute('rows', '2');
+            input.setAttribute('maxlength', String(ask.maxChars));
+            input.setAttribute('aria-label', 'Ask for a change');
+            input.setAttribute('placeholder', 'For example: make the hero button say Book a call');
+            targetEl = make('div', 'target');
+            targetEl.setAttribute('hidden', '');
+            var tools = make('div', 'tools');
+            if (ask.point) {
+                pointBtn = labelled('tb', 'Point');
+                pointBtn.setAttribute('aria-pressed', 'false');
+                pointBtn.setAttribute('title', 'Tap the part of the page this is about. Alt-click also works.');
+                pointBtn.addEventListener('click', function (e) { if (e.isTrusted === true) setPointing(!pointing); });
+                tools.appendChild(pointBtn);
+            }
+            if (Recognition) {
+                micBtn = labelled('tb', 'Dictate');
+                micBtn.setAttribute('aria-pressed', 'false');
+                micBtn.setAttribute('title', 'English. The browser\'s speech service may send the audio off this machine.');
+                micBtn.addEventListener('click', dictate);
+                tools.appendChild(micBtn);
+            }
+            sendBtn = labelled('tb primary', 'Send');
+            sendBtn.addEventListener('click', function (e) { if (e.isTrusted === true) sendAsk(); });
+            tools.appendChild(sendBtn);
+            form.addEventListener('submit', function (e) { e.preventDefault(); });
+            input.addEventListener('keydown', function (e) {
+                if (e.key !== 'Enter' || e.shiftKey || e.isComposing) return;
+                e.preventDefault();
+                if (e.isTrusted === true) sendAsk();
+            });
+            formNote = make('p', 'note');
+            form.appendChild(targetEl);
+            form.appendChild(input);
+            form.appendChild(tools);
+            form.appendChild(formNote);
+            panel.appendChild(form);
+            asksEl = make('ul', 'asks');
+            surfacesEl = make('div', 'surfaces');
+            panel.appendChild(surfacesEl);
+            panel.appendChild(asksEl);
+            listen('click', onPageClick, true);
+            listen('pointermove', onPageMove, true);
+            listen('keydown', onPageKey, true);
+        } else {
+            panel.appendChild(make('p', 'note', 'Reload this page to ask for a change: this copy of the overlay has no key.'));
+        }
+        root.appendChild(mark);
+        root.appendChild(badge);
+    }
+    panel.appendChild(info);
 
     var attach = function () {
         if (host.isConnected) return false;
@@ -483,43 +1252,48 @@ function overlayClient(window, document, config) {
 
     var draw = function (state) {
         var e = state.eta;
+        lastState = state;
         wrap.setAttribute('data-state', !state.ok ? 'stale' : !state.changes.count ? 'idle' : e ? 'ready' : 'unmeasured');
-        count.textContent = state.pill;
+        drawPill();
         eta.textContent = '';
         if (e) {
             eta.appendChild(make('b', '', e.view.text));
             eta.appendChild(document.createTextNode(' · ' + e.view.clock));
         }
-        while (panel.firstChild) panel.removeChild(panel.firstChild);
-        if (!state.ok) { panel.appendChild(make('p', 'note', state.why)); return; }
+        while (info.firstChild) info.removeChild(info.firstChild);
+        if (!state.ok) { info.appendChild(make('p', 'note', state.why)); return; }
         if (e) {
-            panel.appendChild(make('p', 'h', 'Live in production in about'));
-            panel.appendChild(make('p', 'big', e.view.text + ', at ' + e.view.clock));
-            panel.appendChild(make('p', 'sub', 'Range ' + e.view.rangeText));
+            info.appendChild(make('p', 'h', 'Live in production in about'));
+            info.appendChild(make('p', 'big', e.view.text + ', at ' + e.view.clock));
+            info.appendChild(make('p', 'sub', 'Range ' + e.view.rangeText));
             var rows = make('dl', 'rows');
             for (var i = 0; i < e.view.rows.length; i++) {
                 rows.appendChild(make('dt', '', e.view.rows[i].label));
                 rows.appendChild(make('dd', '', e.view.rows[i].text));
             }
-            panel.appendChild(rows);
+            info.appendChild(rows);
         }
         if (state.changes.count) {
             var head = make('p', 'h', 'Pending changes');
             head.setAttribute('style', e ? 'margin-top:12px' : '');
-            panel.appendChild(head);
+            info.appendChild(head);
             var list = make('ul', 'list');
             for (var k = 0; k < state.changes.lines.length; k++) list.appendChild(make('li', '', state.changes.lines[k]));
             if (state.changes.more > 0) list.appendChild(make('li', 'note', 'and ' + state.changes.more + ' earlier'));
-            panel.appendChild(list);
-            panel.appendChild(make('p', 'note', state.changes.summary));
+            info.appendChild(list);
+            info.appendChild(make('p', 'note', state.changes.summary));
         }
-        if (state.etaNote) panel.appendChild(make('p', 'note', state.etaNote));
+        if (state.etaNote) info.appendChild(make('p', 'note', state.etaNote));
     };
 
     var refresh = function () {
-        return window.fetch(config.stateUrl, { cache: 'no-store' })
+        return send(config.stateUrl, { cache: 'no-store' })
             .then(function (res) { return res.json(); })
-            .then(function (state) { draw(state); place(!placed); placed = true; return state; })
+            .then(function (state) {
+                draw(state);
+                if (host.isConnected) { place(!placed); placed = true; }
+                return state;
+            })
             .catch(function () {
                 wrap.setAttribute('data-state', 'stale');
                 count.textContent = 'Live edit helper stopped';
@@ -528,36 +1302,197 @@ function overlayClient(window, document, config) {
             });
     };
 
-    pill.addEventListener('click', function () {
-        open = !open;
-        wrap.setAttribute('data-open', String(open));
-        pill.setAttribute('aria-expanded', String(open));
-    });
-    window.addEventListener('resize', function () { place(true); });
-    attach();
-    if (window.MutationObserver) new window.MutationObserver(attach).observe(document.documentElement, { childList: true });
-    var api = { host: host, wrap: wrap, pill: pill, panel: panel, draw: draw, place: place, refresh: refresh, attach: attach };
-    window.__liveEditOverlay = api;
+    pill.addEventListener('click', function () { setOpen(!open); });
+    listen('resize', function () { place(true); });
+    var mount = function () {
+        attach();
+        if (window.MutationObserver) {
+            new window.MutationObserver(attach).observe(document.documentElement, { childList: true });
+            if (ask && key) new window.MutationObserver(onMutations).observe(document.documentElement, { childList: true, subtree: true, characterData: true, characterDataOldValue: true });
+        }
+        if (placed) place(true);
+    };
+    if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', mount); else mount();
     refresh();
     window.setInterval(refresh, config.pollMs);
-    return api;
+    if (ask && key) feedLoop();
+    // The handle goes to the caller only. The page sees a marker that this overlay is mounted, nothing it can call.
+    return {
+        host: host, root: root, wrap: wrap, pill: pill, panel: panel, info: info, draw: draw, place: place, refresh: refresh, attach: attach,
+        input: input, sendBtn: sendBtn, pointBtn: pointBtn, micBtn: micBtn, targetEl: targetEl, note: function () { return formNote ? formNote.textContent : null; },
+        asksEl: asksEl, surfacesEl: surfacesEl, mark: mark, badge: badge, sendAsk: sendAsk, pollFeed: pollFeed, applyFeed: applyFeed, checkVisible: checkVisible,
+        onMutations: onMutations, onPageClick: onPageClick, onPageMove: onPageMove, onPageKey: onPageKey, describe: describe, drawPill: drawPill,
+        state: function () { return { asks: asks, after: after, surfaces: surfaces, previews: previews, target: target, pointing: pointing, instance: instance, open: open }; },
+    };
 }
 /* eslint-enable no-var */
 
-/** The script the proxy serves: the overlay's source applied to this page. */
-function overlayScript(variant) {
-    const config = { variant, css: OVERLAY_CSS, stateUrl: `${PREFIX}state`, pollMs: 2000, corners: ['bottom-left', 'bottom-right', 'top-right', 'top-left', 'right', 'left'] };
-    return `(${overlayClient.toString()})(window, document, ${JSON.stringify(config)});\n`;
+/**
+ * The script the proxy serves: the overlay's source applied to this page, with
+ * the checks' source beside it. `ask` is null for a read-only overlay, or
+ * { layout, point, preview, key } where key is null when this copy earned none.
+ */
+function overlayScript(variant, ask = null) {
+    const config = { variant, css: OVERLAY_CSS, stateUrl: `${PREFIX}state`, pollMs: 2000, corners: ['bottom-left', 'bottom-right', 'top-right', 'top-left', 'right', 'left'], ask: null };
+    if (ask && ask.layout !== 'off') {
+        config.ask = {
+            layout: ask.layout, point: Boolean(ask.point), preview: Boolean(ask.preview), key: ask.key || null, maxChars: ASK_MAX,
+            askUrl: `${PREFIX}ask`, actionUrl: `${PREFIX}action`, seenUrl: `${PREFIX}seen`, errorUrl: `${PREFIX}error`, feedUrl: `${PREFIX}feed`,
+        };
+    }
+    return `(${overlayClient.toString()})(window, document, ${JSON.stringify(config)}, (${a2ui.a2uiKit.toString()})());\n`;
 }
+
 
 // ---------------------------------------------------------------------------
 // The proxy
 // ---------------------------------------------------------------------------
 
-/** The script tag, carrying the page's own nonce when its policy pins scripts by nonce. */
-function scriptTag(csp) {
+/**
+ * The script tag, carrying the page's own nonce when its policy pins scripts by nonce.
+ * With a ticket the tag is synchronous, so the overlay runs before any script the page loads.
+ */
+function scriptTag(csp, ticket = null) {
     const m = /'nonce-([A-Za-z0-9+/=_-]+)'/.exec(String(csp || ''));
-    return `<script src="${PREFIX}overlay.js" defer${m ? ` nonce="${m[1]}"` : ''}></script>`;
+    const src = ticket ? `${PREFIX}overlay.js?t=${ticket}` : `${PREFIX}overlay.js`;
+    return `<script src="${src}"${ticket ? '' : ' defer'}${m ? ` nonce="${m[1]}"` : ''}></script>`;
+}
+
+const RATE = { ask: 6, action: 30, seen: 60, error: 30 };
+const TICKET_MS = 60e3;
+const TICKETS_MAX = 256;
+
+/**
+ * The asks' gate. One key per run, handed only to a script the browser fetched
+ * as a script, from this origin, with a ticket the proxy put in a page it served
+ * moments ago. A ticket works once. Every write must carry the key in a header,
+ * come from this origin, be JSON, fit the size cap and the rate.
+ */
+function askGate({ clock = Date.now } = {}) {
+    const key = crypto.randomBytes(24).toString('base64url');
+    const keyBuf = Buffer.from(key);
+    const tickets = new Map();
+    const hits = new Map();
+    const sweep = (now) => { for (const [t, at] of tickets) if (now - at > TICKET_MS) tickets.delete(t); };
+    return {
+        ticket() {
+            const now = clock();
+            sweep(now);
+            while (tickets.size >= TICKETS_MAX) tickets.delete(tickets.keys().next().value);
+            const t = crypto.randomBytes(16).toString('base64url');
+            tickets.set(t, now);
+            return t;
+        },
+        /** The key for a script request that earns it, else null. Spends the ticket either way. */
+        redeem(ticket, headers) {
+            const now = clock();
+            sweep(now);
+            if (typeof ticket !== 'string' || !tickets.has(ticket)) return null;
+            tickets.delete(ticket);
+            if (headers['sec-fetch-dest'] !== 'script' || headers['sec-fetch-site'] !== 'same-origin') return null;
+            return key;
+        },
+        keyOk(value) {
+            const v = Buffer.from(String(value || ''));
+            return v.length === keyBuf.length && crypto.timingSafeEqual(v, keyBuf);
+        },
+        /** True when one more request named `name` fits in the last minute. */
+        rate(name) {
+            const now = clock();
+            const list = (hits.get(name) || []).filter((t) => now - t < MIN);
+            if (list.length >= (RATE[name] || 30)) { hits.set(name, list); return false; }
+            list.push(now);
+            hits.set(name, list);
+            return true;
+        },
+        key,
+    };
+}
+
+/** Why a request to the asks' API is refused before its body is read, as [status, why], or null. */
+function refuseRequest(req, gate, name, write) {
+    const h = req.headers;
+    const origin = `http://${h.host}`;
+    if (h['sec-fetch-site'] !== undefined && h['sec-fetch-site'] !== 'same-origin') return [403, 'not from this page'];
+    if (write) {
+        if (req.method !== 'POST') return [405, 'POST only'];
+        if (h.origin !== origin) return [403, 'not from this page'];
+        if (!/^application\/json(;|$)/i.test(String(h['content-type'] || ''))) return [415, 'JSON only'];
+    } else if (req.method !== 'GET') return [405, 'GET only'];
+    if (!gate.keyOk(h['x-live-edit-key'])) return [403, 'no valid key'];
+    if (write && !gate.rate(name)) return [429, 'too many in a minute'];
+    return null;
+}
+
+/** The body as JSON, refused past `max` bytes while it streams. Resolves [status, value]. */
+function readBody(req, max) {
+    return new Promise((resolve) => {
+        const declared = Number(req.headers['content-length']);
+        if (Number.isFinite(declared) && declared > max) { req.resume(); resolve([413, 'too large']); return; }
+        const parts = [];
+        let size = 0;
+        let over = false;
+        req.on('data', (c) => {
+            if (over) return;
+            size += c.length;
+            if (size > max) { over = true; parts.length = 0; return; }
+            parts.push(c);
+        });
+        req.on('end', () => {
+            if (over) { resolve([413, 'too large']); return; }
+            try { resolve([200, JSON.parse(Buffer.concat(parts).toString('utf8'))]); } catch { resolve([400, 'not JSON']); }
+        });
+        req.on('error', () => resolve([400, 'unreadable body']));
+    });
+}
+
+/** The ask a drawn surface belongs to. */
+function surfaceOwner(events, surfaceId) {
+    let owner = null;
+    for (const e of events) if (e.type === 'a2ui' && e.msg && e.msg.createSurface && e.msg.createSurface.surfaceId === surfaceId) owner = e.ask;
+    return owner;
+}
+
+/**
+ * Handles one write to the asks' API with an already checked body.
+ * Returns [status, body]. Pure over the queue, so the suite drives it directly.
+ */
+function handleAskApi(name, body, q, now) {
+    const plain = body && typeof body === 'object' && !Array.isArray(body);
+    if (!plain) return [400, { why: 'the body is not an object' }];
+    if (name === 'ask') {
+        const extra = Object.keys(body).filter((k) => !['text', 'target', 'instance'].includes(k));
+        if (extra.length) return [400, { why: `unknown field ${extra[0]}` }];
+        const text = typeof body.text === 'string' ? body.text.replace(/\s+/g, ' ').trim() : '';
+        if (!text) return [400, { why: 'no text' }];
+        if (text.length > ASK_MAX) return [413, { why: `over ${ASK_MAX} characters` }];
+        return [200, { id: addAsk(q, { text, target: body.target, instance: body.instance }, now) }];
+    }
+    const events = readEvents(q);
+    const asks = askView(events);
+    if (name === 'action') {
+        const shape = a2ui.checkRendererMessage(body);
+        if (!shape.ok || !body.action) return [400, { why: shape.message || 'not an action' }];
+        const ask = surfaceOwner(events, body.action.surfaceId);
+        const a = asks.find((x) => x.id === ask);
+        if (!a || a.state === 'visible' || a.state === 'failed') return [409, { why: 'that choice is no longer open' }];
+        const tap = a2ui.checkTap(body, surfaceStateFrom(events));
+        if (!tap.ok) return [400, { why: tap.message }];
+        return [200, { id: addAction(q, { ask, msg: body }, now) }];
+    }
+    if (name === 'seen') {
+        const a = asks.find((x) => x.id === body.id);
+        if (!a || a.state !== 'edited') return [409, { why: 'that ask is not waiting to be seen' }];
+        const tap = Number.isFinite(a.tapAt) && a.tapAt >= a.at ? now - a.tapAt : null;
+        setAskState(q, a.id, 'visible', { ms: now - a.at, fromEditMs: now - a.editedAt, fromTapMs: tap, sameInstance: Boolean(a.instance) && body.instance === a.instance }, now);
+        return [200, { ok: true }];
+    }
+    if (name === 'error') {
+        const shape = a2ui.checkRendererMessage(body);
+        if (!shape.ok || !body.error) return [400, { why: shape.message || 'not an error' }];
+        return [200, { id: addRendererError(q, { ask: body.error.surfaceId ? surfaceOwner(events, body.error.surfaceId) : null, msg: body }, now) }];
+    }
+    return [404, { why: 'not found' }];
 }
 
 /**
@@ -623,19 +1558,44 @@ function upstreamHeaders(headers, upstream) {
 
 /**
  * The proxy server, not yet listening. `upstream` is a URL object; `getState`
- * returns the state object; `variant` picks the overlay's look.
+ * returns the state object; `variant` picks the overlay's look. `ask` turns on
+ * the ask box: { layout, point, preview, queue, clock }, or null for none.
  */
-function createProxy({ upstream, getState, variant = 'pill', log = () => {} }) {
+function createProxy({ upstream, getState, variant = 'pill', log = () => {}, ask = null }) {
+    const asking = Boolean(ask && ask.layout !== 'off' && ask.queue);
+    const clock = (ask && ask.clock) || Date.now;
+    const gate = asking ? askGate({ clock }) : null;
+    const reply = (res, status, body) => { res.writeHead(status, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' }); res.end(JSON.stringify(body)); };
     const waiting = '<!doctype html><meta charset="utf-8"><meta http-equiv="refresh" content="1"><title>Starting</title>'
         + '<body style="font:16px system-ui;padding:24px">The dev server is starting. This page reloads by itself.</body>';
     const server = http.createServer((req, res) => {
         if (!loopbackHost(req.headers.host)) { res.writeHead(403, { 'content-type': 'text/plain' }); res.end('live-edit serves this machine only\n'); return; }
         if (foreignOrigin(req.headers)) { res.writeHead(403, { 'content-type': 'text/plain' }); res.end('live-edit answers its own pages only\n'); return; }
         if (req.url.startsWith(PREFIX)) {
-            const name = req.url.slice(PREFIX.length).split('?')[0];
+            const url = new URL(req.url, 'http://local');
+            const name = url.pathname.slice(PREFIX.length);
             const send = (type, body) => { res.writeHead(200, { 'content-type': type, 'cache-control': 'no-store' }); res.end(body); };
-            if (name === 'overlay.js') return send('application/javascript; charset=utf-8', overlayScript(variant));
+            if (name === 'overlay.js') {
+                const key = asking ? gate.redeem(url.searchParams.get('t'), req.headers) : null;
+                return send('application/javascript; charset=utf-8', overlayScript(variant, asking ? { ...ask, key } : null));
+            }
             if (name === 'state') return send('application/json; charset=utf-8', JSON.stringify(getState()));
+            if (asking && ['ask', 'action', 'seen', 'error', 'feed'].includes(name)) {
+                const write = name !== 'feed';
+                const refused = refuseRequest(req, gate, name, write);
+                if (refused) { req.resume(); return reply(res, refused[0], { why: refused[1] }); }
+                if (!write) {
+                    const after = Number(url.searchParams.get('after')) || 0;
+                    return reply(res, 200, feedView(readEvents(ask.queue), after, isListening(ask.queue, clock())));
+                }
+                readBody(req, BODY_MAX).then(([status, body]) => {
+                    if (status !== 200) return reply(res, status, { why: body });
+                    let out;
+                    try { out = handleAskApi(name, body, ask.queue, clock()); } catch (e) { out = [500, { why: 'the queue could not be written' }]; log(`${TAG} ${name}: ${e.message}`); }
+                    return reply(res, out[0], out[1]);
+                });
+                return;
+            }
             res.writeHead(404, { 'content-type': 'text/plain' });
             res.end('not found\n');
             return;
@@ -647,7 +1607,13 @@ function createProxy({ upstream, getState, variant = 'pill', log = () => {} }) {
             const html = /text\/html/i.test(String(headers['content-type'] || '')) && req.method !== 'HEAD' && ![204, 304].includes(up.statusCode);
             if (!html) { res.writeHead(up.statusCode, headers); up.pipe(res); return; }
             delete headers['content-length'];
-            const inject = injector(scriptTag(headers['content-security-policy']));
+            if (asking) {
+                // A page that is served again must earn a new ticket: no copy of it may be kept.
+                headers['cache-control'] = 'no-store';
+                delete headers.etag;
+                delete headers['last-modified'];
+            }
+            const inject = injector(scriptTag(headers['content-security-policy'], asking ? gate.ticket() : null));
             res.writeHead(up.statusCode, headers);
             up.on('data', (chunk) => { const b = inject.push(chunk); if (b.length) res.write(b); });
             up.on('end', () => res.end(inject.end()));
@@ -660,6 +1626,7 @@ function createProxy({ upstream, getState, variant = 'pill', log = () => {} }) {
         });
         req.pipe(out);
     });
+    server.liveEditGate = gate;
     // Hot reload rides a websocket: hand the raw socket to the dev server and step aside.
     const sockets = new Set();
     server.liveEditSockets = sockets;
@@ -731,7 +1698,10 @@ async function serve(o, log = console.log) {
         if (!cache || now - cache.at > 1000) cache = { at: now, state: computeState({ dir, baseRef: o.base, calibrationFile: o.calibration, headline: o.headline, now }) };
         return cache.state;
     };
-    const server = createProxy({ upstream, getState, variant: o.variant, log });
+    const ask = o.ask && o.ask !== 'off' ? { layout: o.ask, point: o.point !== 'off', preview: o.preview !== 'off', queue: queuePaths(dir) } : null;
+    if (ask && !ask.queue) throw new Error(`${dir} is not inside a git repository, so asks have nowhere to wait`);
+    if (ask) ensureQueue(ask.queue);
+    const server = createProxy({ upstream, getState, variant: o.variant, log, ask });
     let closed = false;
     // Once only: ends the dev server, the hot-reload sockets and the listener, so the process can exit.
     const close = () => {
@@ -747,7 +1717,7 @@ async function serve(o, log = console.log) {
     try {
         await new Promise((resolve, reject) => { server.once('error', reject); server.listen(Number(o.port), '127.0.0.1', resolve); });
     } catch (e) { close(); throw e; }
-    log(`${TAG} http://localhost:${server.address().port} -> ${upstream.origin}, overlay "${o.variant}", changes since ${o.base}`);
+    log(`${TAG} http://localhost:${server.address().port} -> ${upstream.origin}, overlay "${o.variant}", ask box ${ask ? `"${ask.layout}"` : 'off'}, changes since ${o.base}`);
     return { server, child, upstream, close };
 }
 
@@ -903,7 +1873,7 @@ function backtest(calibration, cases) {
 // CLI
 // ---------------------------------------------------------------------------
 
-const VALUE_FLAGS = ['dir', 'port', 'upstream', 'base', 'calibration', 'variant', 'headline', 'text', 'repo', 'out', 'locks-dir', 'min-hold', 'fast-receipts', 'review-receipts', 'deployments', 'merges', 'land-minutes', 'since', 'cases'];
+const VALUE_FLAGS = ['dir', 'port', 'upstream', 'base', 'calibration', 'variant', 'headline', 'text', 'ask', 'point', 'preview', 'id', 'state', 'expect', 'reason', 'file', 'timeout', 'repo', 'out', 'locks-dir', 'min-hold', 'fast-receipts', 'review-receipts', 'deployments', 'merges', 'land-minutes', 'since', 'cases'];
 const BOOL_FLAGS = ['help', 'json', 'review-any-repo'];
 
 function parseArgs(argv) {
@@ -924,9 +1894,12 @@ function parseArgs(argv) {
 
 function help() {
     return [
-        'usage: node live-edit.js <serve|state|note|calibrate|backtest> [options]',
+        'usage: node live-edit.js <serve|state|note|wait|reply|show|calibrate|backtest> [options]',
         '  serve     --dir SITE --port N [--upstream URL | -- COMMAND...] [--base REF] [--calibration FILE]',
-        '            [--variant pill|bar|dot] [--headline queue|direct]',
+        '            [--variant pill|bar|dot] [--headline queue|direct] [--ask panel|sheet|side|off] [--point on|off] [--preview on|off]',
+        '  wait      --dir SITE [--timeout SECONDS]   blocks until the page sends an ask or a pick, prints it as JSON',
+        '  reply     --dir SITE --id ASK --state working|edited|failed [--expect "text now on the page"] [--reason "why"]',
+        '  show      --dir SITE --id ASK --file MESSAGES   draws choices on the page: A2UI v1.0 messages in our catalog',
         '  state     --dir SITE [--base REF] [--calibration FILE] [--headline queue|direct]',
         '  note      --dir SITE --text "what changed" [--base REF]',
         '  calibrate --repo OWNER/NAME --out FILE [--locks-dir DIR] [--min-hold MIN] [--fast-receipts PATHS] [--review-receipts PATHS]',
@@ -938,6 +1911,43 @@ function help() {
 
 function defaultLocksDir() {
     return path.dirname(path.resolve(process.env.AUTODEV_GATE_LOCK_PATH || path.join(os.homedir(), '.claude', 'autodev', 'locks', 'full-gate.lock')));
+}
+
+/** The defaults `serve` uses for the ask box. The options page holds the other variants. */
+const ASK_DEFAULTS = { layout: 'panel', point: 'on', preview: 'on' };
+
+/** wait, reply and show: the session's side of the asks. Resolves an exit code. */
+async function askCommand(cmd, o, out, fail) {
+    const dir = path.resolve(o.dir);
+    const q = queuePaths(dir);
+    if (!q) return fail(`${dir} is not inside a git repository`);
+    if (cmd === 'wait') {
+        const seconds = o.timeout === undefined ? 540 : Number(o.timeout);
+        if (!Number.isFinite(seconds) || seconds < 0) return fail('--timeout is a number of seconds');
+        const item = await waitForItem(q, { timeoutMs: seconds * 1000 });
+        if (!item) { out(`${TAG} nothing asked in ${seconds} s. Run wait again to keep listening.`); return 2; }
+        const top = git(dir, ['rev-parse', '--show-toplevel']);
+        out(JSON.stringify(describeItem(item, top.ok ? top.stdout.trim() : dir), null, 2));
+        return 0;
+    }
+    const ask = askView(readEvents(q)).find((a) => a.id === o.id);
+    if (!o.id || !ask) return fail(`${cmd} needs --id of an ask this page sent`);
+    if (cmd === 'reply') {
+        if (!REPLY_STATES.includes(o.state)) return fail(`--state is one of ${REPLY_STATES.join(', ')}`);
+        if (ask.state === 'visible') return fail(`${o.id} is already visible`);
+        const clean = (v, n) => (typeof v === 'string' ? v.replace(/\s+/g, ' ').trim().slice(0, n) : '');
+        const extra = o.state === 'edited' ? { expect: clean(o.expect, 200) || null } : o.state === 'failed' ? { reason: clean(o.reason, 300) || 'no reason given' } : {};
+        setAskState(q, o.id, o.state, extra, Date.now());
+        out(`${TAG} ${o.id} is ${o.state}${extra.expect ? `, the page reports it visible once it shows "${extra.expect}"` : ''}`);
+        return 0;
+    }
+    if (!o.file) return fail('show needs --file with A2UI messages');
+    let messages;
+    try { messages = parseMessages(fs.readFileSync(path.resolve(o.file), 'utf8')); } catch (e) { return fail(`cannot read ${o.file}: ${e.message}`); }
+    const r = showMessages(q, o.id, messages, Date.now());
+    if (!r.ok) return fail(`refused: ${r.why}`);
+    out(`${TAG} drew ${r.count} message(s) for ${o.id}. Run wait for the owner's pick.`);
+    return 0;
 }
 
 async function main(argv = process.argv.slice(2), out = (s) => process.stdout.write(s + '\n'), err = (s) => process.stderr.write(s + '\n')) {
@@ -952,7 +1962,11 @@ async function main(argv = process.argv.slice(2), out = (s) => process.stdout.wr
     if (!VARIANTS.includes(variant)) return fail(`--variant is one of ${VARIANTS.join(', ')}`);
     const headline = o.headline || 'queue';
     if (!['queue', 'direct'].includes(headline)) return fail('--headline is queue or direct');
-    if (['serve', 'state', 'note'].includes(cmd) && !o.dir) return fail(`${cmd} needs --dir SITE`);
+    if (['serve', 'state', 'note', 'wait', 'reply', 'show'].includes(cmd) && !o.dir) return fail(`${cmd} needs --dir SITE`);
+    const layout = o.ask || ASK_DEFAULTS.layout;
+    if (!LAYOUTS.includes(layout)) return fail(`--ask is one of ${LAYOUTS.join(', ')}`);
+    for (const flag of ['point', 'preview']) if (o[flag] !== undefined && !['on', 'off'].includes(o[flag])) return fail(`--${flag} is on or off`);
+    if (['wait', 'reply', 'show'].includes(cmd)) return askCommand(cmd, o, out, fail);
     if (cmd === 'state') {
         out(JSON.stringify(computeState({ dir: path.resolve(o.dir), baseRef: base, calibrationFile: o.calibration || null, headline }), null, 2));
         return 0;
@@ -996,7 +2010,9 @@ async function main(argv = process.argv.slice(2), out = (s) => process.stdout.wr
     if (cmd === 'serve') {
         if (!o.port || !/^\d+$/.test(o.port)) return fail('serve needs --port N');
         let running;
-        try { running = await serve({ dir: o.dir, port: o.port, upstream: o.upstream, base, calibration: o.calibration || null, variant, headline, command: o.command }, out); } catch (e) { return fail(`cannot serve on port ${o.port}: ${e.code || e.message}`); }
+        const point = o.point || ASK_DEFAULTS.point;
+        const preview = o.preview || ASK_DEFAULTS.preview;
+        try { running = await serve({ dir: o.dir, port: o.port, upstream: o.upstream, base, calibration: o.calibration || null, variant, headline, command: o.command, ask: layout, point, preview }, out); } catch (e) { return fail(`cannot serve on port ${o.port}: ${e.code || e.message}`); }
         process.once('SIGINT', running.close);
         process.once('SIGTERM', running.close);
         process.once('exit', running.close);
@@ -1011,6 +2027,10 @@ module.exports = {
     overlayClient, overlayScript, OVERLAY_CSS, scriptTag, injector, loopbackHost, foreignOrigin, upstreamHeaders, createProxy,
     freePort, commandLine, stopTree, serve, jsonFiles, newest, gateSamples, fastSamples, reviewSamples, buildSamples,
     mergeSamples, calibrate, describe, backtest, parseArgs, help, main, KIND, PREFIX, VARIANTS,
+    ASK_STATES, REPLY_STATES, LAYOUTS, ASK_MAX, BODY_MAX, MESSAGE_MAX, ASK_DEFAULTS, RATE, queuePaths, ensureQueue, readEvents,
+    appendEvent, newId, enqueue, cleanTarget, addAsk, addAction, addRendererError, setAskState, claimNext, askView,
+    surfaceStateFrom, isListening, feedView, showMessages, parseMessages, waitForItem, describeItem, askGate, refuseRequest,
+    readBody, surfaceOwner, handleAskApi, askCommand,
 };
 
 if (require.main === module) {
