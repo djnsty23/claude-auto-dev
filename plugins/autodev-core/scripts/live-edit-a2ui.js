@@ -196,7 +196,9 @@ function a2uiKit() {
     };
 
     var checkSelector = function (v, path) {
-        return typeof v === 'string' && v.length > 0 && v.length <= MAX_SELECTOR && !/[{}<>]/.test(v) ? OK : bad(path, 'a CSS selector of at most ' + MAX_SELECTOR + ' characters');
+        // Selectors only ever reach querySelectorAll. ">" is a combinator the overlay itself
+        // writes when the owner points at an element, so it must pass.
+        return typeof v === 'string' && v.length > 0 && v.length <= MAX_SELECTOR && !/[{}<]/.test(v) ? OK : bad(path, 'a CSS selector of at most ' + MAX_SELECTOR + ' characters, without { } or <');
     };
     var checkStyle = function (prop, value, path) {
         if (STYLE_PROPS.indexOf(prop) === -1) return bad(path, '"' + prop + '" is not a style live edit previews');
