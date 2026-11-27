@@ -595,13 +595,28 @@ function loopbackHost(header) {
     return LOOPBACK.has(host) || host.endsWith('.localhost');
 }
 
-/** The request headers as the dev server should see them: its own host, its own origin, no compression. */
+/** True when the header names a page this proxy served: its host is the one the request was sent to. */
+function ownPage(value, host) {
+    try { return new URL(value).host === String(host || '').toLowerCase(); } catch { return false; }
+}
+
+/** True when a page on another site sent the request: it carries an Origin that is not this proxy. */
+function foreignOrigin(headers) {
+    return headers.origin !== undefined && !ownPage(headers.origin, headers.host);
+}
+
+/**
+ * The request headers as the dev server should see them: its own host, no compression.
+ * Only this proxy's own origin and referer are rewritten to the dev server's. Any other is
+ * dropped, so a page on another site never reaches the dev server looking same-origin.
+ */
 function upstreamHeaders(headers, upstream) {
     const out = { ...headers, host: upstream.host };
     delete out['accept-encoding'];
     for (const key of ['origin', 'referer']) {
         if (!out[key]) continue;
-        try { const u = new URL(out[key]); u.protocol = 'http:'; u.host = upstream.host; out[key] = key === 'origin' ? u.origin : u.href; } catch { delete out[key]; }
+        if (!ownPage(out[key], headers.host)) { delete out[key]; continue; }
+        const u = new URL(out[key]); u.protocol = 'http:'; u.host = upstream.host; out[key] = key === 'origin' ? u.origin : u.href;
     }
     return out;
 }
@@ -615,6 +630,7 @@ function createProxy({ upstream, getState, variant = 'pill', log = () => {} }) {
         + '<body style="font:16px system-ui;padding:24px">The dev server is starting. This page reloads by itself.</body>';
     const server = http.createServer((req, res) => {
         if (!loopbackHost(req.headers.host)) { res.writeHead(403, { 'content-type': 'text/plain' }); res.end('live-edit serves this machine only\n'); return; }
+        if (foreignOrigin(req.headers)) { res.writeHead(403, { 'content-type': 'text/plain' }); res.end('live-edit answers its own pages only\n'); return; }
         if (req.url.startsWith(PREFIX)) {
             const name = req.url.slice(PREFIX.length).split('?')[0];
             const send = (type, body) => { res.writeHead(200, { 'content-type': type, 'cache-control': 'no-store' }); res.end(body); };
@@ -648,7 +664,7 @@ function createProxy({ upstream, getState, variant = 'pill', log = () => {} }) {
     const sockets = new Set();
     server.liveEditSockets = sockets;
     server.on('upgrade', (req, socket, head) => {
-        if (!loopbackHost(req.headers.host)) { socket.destroy(); return; }
+        if (!loopbackHost(req.headers.host) || foreignOrigin(req.headers)) { socket.destroy(); return; }
         const up = net.connect(Number(upstream.port), upstream.hostname, () => {
             const headers = upstreamHeaders(req.headers, upstream);
             const lines = [`${req.method} ${req.url} HTTP/1.1`];
@@ -992,7 +1008,7 @@ async function main(argv = process.argv.slice(2), out = (s) => process.stdout.wr
 module.exports = {
     stats, fmtDuration, fmtClock, parseLandMinutes, nextSlot, lastSlot, readCalibration, estimate, headlineView,
     countLines, pendingFiles, journalPath, defaultCalibration, addNote, readNotes, classifyLane, computeState,
-    overlayClient, overlayScript, OVERLAY_CSS, scriptTag, injector, loopbackHost, upstreamHeaders, createProxy,
+    overlayClient, overlayScript, OVERLAY_CSS, scriptTag, injector, loopbackHost, foreignOrigin, upstreamHeaders, createProxy,
     freePort, commandLine, stopTree, serve, jsonFiles, newest, gateSamples, fastSamples, reviewSamples, buildSamples,
     mergeSamples, calibrate, describe, backtest, parseArgs, help, main, KIND, PREFIX, VARIANTS,
 };
