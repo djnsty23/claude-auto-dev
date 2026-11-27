@@ -164,4 +164,7 @@ function main() {
   process.stdout.write(opts.json ? JSON.stringify(s, null, 2) + '\n' : render(s, skipped));
 }
 
-main();
+// live-edit.js reads the same records for its gate samples: one parser, not two.
+module.exports = { RECORD, readRecord };
+
+if (require.main === module) main();
