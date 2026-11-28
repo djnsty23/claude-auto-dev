@@ -879,6 +879,13 @@ async function stripSuite() {
   const pillCount = api.pill.children.find((c) => c.className === 'count').textContent;
   same('the strip shows the pill\'s state beside the title, since the pill is hidden', [(titleRow.children.find((c) => c.className === 'strip-state') || {}).textContent, pillCount.length > 0], [pillCount, true]);
   same('two groups mark the strip as many, so Previous and Next show', api.wrap.getAttribute('data-strip-many'), 'true');
+  const shownAsk = api.state().asks[api.state().asks.length - 1];
+  const askWas = shownAsk.state;
+  shownAsk.state = 'working';
+  api.drawPill();
+  same('a later state change reaches the strip, not only the pill', [(titleRow.children.find((c) => c.className === 'strip-state') || {}).textContent, api.pill.children.find((c) => c.className === 'count').textContent], ['Working on it', 'Working on it']);
+  shownAsk.state = askWas;
+  api.drawPill();
   same('the picked chip is scrolled into the middle of the row', secs[0].scrollLeft, 410);
   same('with chips past both edges, both edges fade', secs[0].getAttribute('data-more'), 'both');
   secs[0].scrollLeft = 0;
@@ -900,6 +907,7 @@ async function stripSuite() {
   same('Previous from the first group goes to the last', strip(), ['', [null, ''], '2 of 2']);
   ctl('Show every choice and ask').listeners.click();
   same('All ends the strip, so every group and the ask log show again', strip().slice(0, 2), [null, [null, null]]);
+  same('ending the strip clears its many mark too', api.wrap.getAttribute('data-strip-many'), null);
 
   // At phone width: the previewed element is kept above the sheet, and the sheet clears a corner badge.
   const scrolled = [];
