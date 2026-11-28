@@ -1424,13 +1424,12 @@ function overlayClient(window, document, config, kit) {
         // floating pill, which would otherwise sit over the page's text mid-screen.
         stripTitle = make('div', 'strip-title');
         stripName = make('span', 'strip-name');
-        stripState = make('span', 'strip-state');
-        var stripStateText = make('span', 'strip-state-text');
-        stripState.appendChild(make('span', 'dot'));
-        stripState.appendChild(stripStateText);
+        var stripStateBox = make('span', 'strip-state');
+        stripState = make('span', 'strip-state-text');
+        stripStateBox.appendChild(make('span', 'dot'));
+        stripStateBox.appendChild(stripState);
         stripTitle.appendChild(stripName);
-        stripTitle.appendChild(stripState);
-        stripState = stripStateText;
+        stripTitle.appendChild(stripStateBox);
         panel.appendChild(head);
         if (key && ask.box) {
             var form = make('form', 'ask');
