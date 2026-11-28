@@ -20,7 +20,10 @@
  *   3. A SKIPPED check is not a passing check. A draft PR whose gate carries
  *      `draft == false` reports SKIPPED, and the rollup then looks untroubled
  *      while carrying no evidence at all. `[measured 2026-09-05]` a draft sat
- *      MERGEABLE/CLEAN with its main gate never run.
+ *      MERGEABLE/CLEAN with its main gate never run. The one exception is an
+ *      app in OPT_IN_SKIP_APPS whose check GitHub reports as not required:
+ *      that skip means nobody asked for the run, so it is set aside and
+ *      counted apart. It is never evidence either way.
  *   4. Rollups carry an entry with a null name, null status and null conclusion
  *      on every PR in every repo checked. It is an artifact, not a check, and
  *      counting it as unknown makes every PR permanently unmergeable.
@@ -60,6 +63,29 @@ const NOT_EVIDENCE = new Set(['SKIPPED']);
 // pending is a state this script knows and waits on. EXPECTED is GitHub's
 // "required check not yet reported".
 const STILL_RUNNING = new Set(['PENDING', 'EXPECTED', 'QUEUED', 'IN_PROGRESS', 'WAITING', 'REQUESTED']);
+
+// Apps whose SKIPPED check means "nobody asked for this run", not "a gate was
+// skipped". A skip is ignored only when GitHub names the check run's app here
+// AND reports the check as not required by the base branch's protection. Any
+// other app, a required check, or an answer GitHub did not give keeps the skip
+// counted, so an app missing from this list fails closed.
+const OPT_IN_SKIP_APPS = Object.freeze({
+    // Blacksmith posts a check on every PR and runs it only on dispatch or a
+    // label, so every PR that did not ask for it carries a SKIPPED entry.
+    'blacksmith-sh': 'runs only when requested, and reports SKIPPED on every other PR',
+});
+
+// `--repo` takes a checkout path or an owner/name slug. A slug has no local
+// checkout, so it goes to gh as -R and the trunk's workflow files cannot be read.
+const SLUG = /^[A-Za-z0-9](?:[A-Za-z0-9-]{0,38})\/[A-Za-z0-9._-]+$/;
+
+/** @returns {{cwd:string, slug:string|null}|{error:string}} */
+function resolveRepo(value, fs = require('fs')) {
+    if (value === undefined) return { cwd: process.cwd(), slug: null };
+    try { if (fs.statSync(value).isDirectory()) return { cwd: value, slug: null }; } catch (e) { /* not a path */ }
+    if (SLUG.test(value)) return { cwd: process.cwd(), slug: value };
+    return { error: '--repo takes an existing directory (a checkout) or an owner/name slug, and ' + JSON.stringify(value) + ' is neither' };
+}
 
 function gh(args, cwd) {
     try {
@@ -127,15 +153,64 @@ function findTestEdits(diffText) {
     };
 }
 
+const CHECK_APPS_QUERY = 'query($owner:String!,$name:String!,$n:Int!){repository(owner:$owner,name:$name){pullRequest(number:$n){'
+    + 'commits(last:1){nodes{commit{oid statusCheckRollup{contexts(first:100){pageInfo{hasNextPage} nodes{__typename '
+    + '... on CheckRun{name conclusion isRequired(pullRequestNumber:$n) checkSuite{app{slug}}}}}}}}}}}}';
+
+/**
+ * Which app posted each check run on the PR's head, and whether the base
+ * branch requires it. The rollup gh pr view returns carries neither, and a
+ * check NAME says nothing about who posted it.
+ * @returns {{runs:Array<{name:string, app:string|null, required:boolean|null}>}|{error:string}}
+ */
+function checkRunApps(repoSlug, prNumber, headOid, cwd) {
+    const [owner, name] = String(repoSlug || '').split('/');
+    if (!owner || !name) return { error: 'the repository slug is unknown' };
+    const raw = gh(['api', 'graphql', '-f', 'query=' + CHECK_APPS_QUERY, '-F', 'owner=' + owner, '-F', 'name=' + name,
+        '-F', 'n=' + prNumber], cwd);
+    if (raw === null) return { error: 'gh api graphql gave no answer' };
+    let commit;
+    try { commit = JSON.parse(raw).data.repository.pullRequest.commits.nodes[0].commit; } catch (e) {
+        return { error: 'gh api graphql returned an unexpected shape' };
+    }
+    if (!commit || !present(commit.oid) || commit.oid !== headOid) return { error: 'the head commit moved between the two reads' };
+    const contexts = commit.statusCheckRollup && commit.statusCheckRollup.contexts;
+    if (!contexts || !Array.isArray(contexts.nodes)) return { error: 'the head commit carries no check list' };
+    if (!contexts.pageInfo || contexts.pageInfo.hasNextPage !== false) return { error: 'the check list runs past one page' };
+    const runs = contexts.nodes.filter((c) => c && c.__typename === 'CheckRun').map((c) => ({
+        name: c.name,
+        conclusion: present(c.conclusion) ? String(c.conclusion).toUpperCase() : null,
+        app: c.checkSuite && c.checkSuite.app && present(c.checkSuite.app.slug) ? c.checkSuite.app.slug : null,
+        required: typeof c.isRequired === 'boolean' ? c.isRequired : null,
+    }));
+    return { runs };
+}
+
+/**
+ * A skipped check is ignorable only when EVERY check run of that name on the
+ * head comes from an allowlisted app, GitHub says none of them is required, and
+ * at least one of them is the skip. Names are not identities, so one run of
+ * the name that fails any of these keeps the skip counted.
+ * @returns {string|null} the app slug when ignorable, else null
+ */
+function optInApp(label, runs) {
+    const same = runs.filter((r) => r.name === label);
+    if (!same.some((r) => r.conclusion === 'SKIPPED')) return null;
+    if (!same.every((r) => r.app !== null && Object.prototype.hasOwnProperty.call(OPT_IN_SKIP_APPS, r.app) && r.required === false)) return null;
+    const apps = new Set(same.map((r) => r.app));
+    return apps.size === 1 ? [...apps][0] : null;
+}
+
 /**
  * @returns {{verdict:'READY'|'NOT_READY'|'CANNOT_TELL', reasons:string[],
  *            population:object, checks:Array}}
  */
-function checkPrReady(prNumber, cwd) {
-    const raw = gh(['pr', 'view', String(prNumber), '--json',
-        'number,state,isDraft,mergeable,mergeStateStatus,statusCheckRollup,baseRefName,headRefName,files'], cwd);
+function checkPrReady(prNumber, cwd, slug = null) {
+    const repoArgs = slug ? ['-R', slug] : [];
+    const raw = gh(['pr', 'view', String(prNumber), ...repoArgs, '--json',
+        'number,state,isDraft,mergeable,mergeStateStatus,statusCheckRollup,baseRefName,url,headRefOid,headRefName,files'], cwd);
     if (raw === null) {
-        return { verdict: 'CANNOT_TELL', reasons: ['gh could not answer for PR ' + prNumber + ' in ' + (cwd || process.cwd())], population: {}, checks: [] };
+        return { verdict: 'CANNOT_TELL', reasons: ['gh could not answer for PR ' + prNumber + ' in ' + (slug || cwd || process.cwd())], population: {}, checks: [] };
     }
     let pr;
     try { pr = JSON.parse(raw); } catch (e) {
@@ -169,9 +244,24 @@ function checkPrReady(prNumber, cwd) {
         unknown++; checks.push([label, 'UNRECOGNISED:' + concl]);
     }
 
+    // An opt-in app's skip is the app not being asked, so it is set aside. It
+    // is not evidence either way, which is why it leaves the emptiness test.
+    let optIn = 0, optInLookup = null;
+    if (skipped > 0) {
+        const m = /^https:\/\/github\.com\/([^/]+\/[^/]+)\/pull\/\d+$/.exec(String(pr.url || ''));
+        optInLookup = checkRunApps(slug || (m && m[1]), prNumber, pr.headRefOid, cwd);
+        if (optInLookup.runs) {
+            for (const row of checks) {
+                if (row[1] !== 'SKIPPED') continue;
+                const app = optInApp(row[0], optInLookup.runs);
+                if (app) { row[1] = 'SKIPPED/opt-in ' + app + ', ignored'; optIn++; skipped--; }
+            }
+        }
+    }
+
     const population = {
         rollupEntries: rollup.length, passing: good, failing: bad,
-        pending, skipped, rollupArtifacts: artifact, unrecognised: unknown,
+        pending, skipped, optInSkipped: optIn, rollupArtifacts: artifact, unrecognised: unknown,
     };
 
     if (pr.state !== 'OPEN') reasons.push('state is ' + pr.state + ', not OPEN');
@@ -196,7 +286,8 @@ function checkPrReady(prNumber, cwd) {
     if (skipped > 0) {
         const names = checks.filter(([, state]) => state === 'SKIPPED').map(([name]) => name);
         reasons.push(skipped + ' check(s) were SKIPPED: ' + names.join(', ')
-            + '; their required/optional status is not established, so other successful checks cannot certify readiness');
+            + '; their required/optional status is not established, so other successful checks cannot certify readiness'
+            + (optInLookup && optInLookup.error ? ' (the opt-in app lookup failed: ' + optInLookup.error + ')' : ''));
     }
     // An empty rollup looks identical to a clean one and is not. But it has two
     // causes with opposite meanings: every PR-firing workflow path-filtered the
@@ -205,9 +296,10 @@ function checkPrReady(prNumber, cwd) {
     let pathFilter = null;
     // Artifacts are not checks. A rollup containing only artifacts has exactly
     // the same missing evidence as an empty array and needs the same analysis.
-    if (checks.length === 0) {
+    if (checks.length - optIn === 0) {
         const files = Array.isArray(pr.files) ? pr.files.map((f) => f.path).filter(Boolean) : [];
-        if (files.length && cwd) {
+        // A slug names no checkout, so the trunk's workflows cannot be read here.
+        if (files.length && cwd && !slug) {
             try {
                 const { explainEmptyRollup } = require(require('path').join(__dirname, 'pr-path-filters.js'));
                 pathFilter = explainEmptyRollup(cwd, 'origin/' + (pr.baseRefName || 'main'), files, pr.baseRefName);
@@ -227,7 +319,8 @@ function checkPrReady(prNumber, cwd) {
                 + (pathFilter.failure || unreadable.map((w) => w.name + ' (' + w.why + ')').join(', ')));
         } else {
             reasons.push('the rollup is EMPTY, which looks identical to a clean one and is not'
-                + (files.length ? '' : '; could not read the changed files to tell whether a gate was due'));
+                + (files.length ? '' : '; could not read the changed files to tell whether a gate was due')
+                + (files.length && slug ? '; --repo was a slug, so there is no checkout to read the trunk workflows from' : ''));
         }
     }
 
@@ -236,7 +329,7 @@ function checkPrReady(prNumber, cwd) {
     const blocking = reasons.filter((r) => !r.startsWith('mergeStateStatus is UNSTABLE with no')
         && !r.startsWith('the rollup is EMPTY and that is the path filter working'));
     // Advisory: read after the verdict is fixed, and nothing below feeds it.
-    const diff = gh(['pr', 'diff', String(prNumber)], cwd);
+    const diff = gh(['pr', 'diff', String(prNumber), ...repoArgs], cwd);
     const edits = diff === null ? { testEdits: null, population: null } : findTestEdits(diff);
     return { verdict: blocking.length === 0 ? 'READY' : 'NOT_READY', reasons, population, checks, pr,
         testEdits: edits.testEdits, testEditsPopulation: edits.population };
@@ -251,7 +344,7 @@ function render(r) {
     const p = r.population;
     out.push('  population: ' + (p.rollupEntries || 0) + ' rollup entries = '
         + (p.passing || 0) + ' passing, ' + (p.failing || 0) + ' failing, '
-        + (p.pending || 0) + ' pending, ' + (p.skipped || 0) + ' skipped, '
+        + (p.pending || 0) + ' pending, ' + (p.skipped || 0) + ' skipped, ' + (p.optInSkipped || 0) + ' opt-in skipped, '
         + (p.rollupArtifacts || 0) + ' artifact, ' + (p.unrecognised || 0) + ' unrecognised');
     for (const [n, s] of r.checks) out.push('    ' + n + ': ' + s);
     if (r.reasons.length) { out.push('  why not ready:'); for (const x of r.reasons) out.push('    - ' + x); }
@@ -292,13 +385,14 @@ function selftest() {
     return fail === 0;
 }
 
-module.exports = { checkPrReady, present, render, parseDiff, findTestEdits };
+module.exports = { checkPrReady, present, render, parseDiff, findTestEdits, resolveRepo, optInApp, OPT_IN_SKIP_APPS };
 
 function main() {
     const argv = process.argv.slice(2);
     if (argv.includes('--selftest')) return selftest() ? 0 : 1;
     if (argv.includes('--help') || argv.length === 0) {
-        console.log('check-pr-ready.js <pr-number> [--repo <path>] [--json]\n'
+        console.log('check-pr-ready.js <pr-number> [--repo <path|owner/repo>] [--json]\n'
+            + '--repo is a checkout directory, or an owner/name slug passed to gh (default: the current directory).\n'
             + 'Answers whether a PR is safe to merge, treating an unrecognised state as NOT ready.\n'
             + 'TEST-EDITS lists assertion lines a code-changing PR removes from its tests (advisory).\n'
             + 'Exit 0 ready, 2 not ready, 3 could not tell.');
@@ -306,9 +400,10 @@ function main() {
     }
     const num = argv.find((a) => /^\d+$/.test(a));
     const ri = argv.indexOf('--repo');
-    const cwd = ri !== -1 ? argv[ri + 1] : process.cwd();
+    const repo = resolveRepo(ri !== -1 ? (argv[ri + 1] === undefined ? '' : argv[ri + 1]) : undefined);
+    if (repo.error) { console.error(repo.error); return 2; }
     if (!num) { console.error('need a PR number'); return 3; }
-    const r = checkPrReady(num, cwd);
+    const r = checkPrReady(num, repo.cwd, repo.slug);
     if (argv.includes('--json')) console.log(JSON.stringify(r, null, 2));
     else console.log(render(r));
     return r.verdict === 'READY' ? 0 : r.verdict === 'NOT_READY' ? 2 : 3;

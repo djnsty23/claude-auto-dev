@@ -110,8 +110,8 @@ check('unknown checks are named as a reason for not-ready',
     /unrecognised.*not-ready|counted as not-ready/.test(SRC));
 check('a DRAFT is refused regardless of what its rollup says',
     /isDraft\)\s*reasons\.push/.test(SRC.replace(/\s+/g, ' ')));
-check('an EMPTY effective rollup is inspected after artifacts are excluded',
-    /checks\.length === 0/.test(SRC));
+check('an EMPTY effective rollup is inspected after artifacts and ignored opt-in skips are excluded',
+    /checks\.length - optIn === 0/.test(SRC));
 check('every-check-skipped is refused even with no failures',
     /if \(skipped > 0\)/.test(SRC));
 
@@ -184,22 +184,55 @@ check('the changed-file list is requested from gh, or the helper has nothing to 
             "const cp = require('child_process');",
             'const original = cp.execFileSync;',
             'cp.execFileSync = function(command, args, options) {',
-            "  if (command === 'gh') return require('fs').readFileSync(process.env.PR_READY_FIXTURE, 'utf8');",
+            "  if (command === 'gh') {",
+            "    const fs = require('fs');",
+            "    if (process.env.PR_READY_ARGV) fs.appendFileSync(process.env.PR_READY_ARGV, JSON.stringify(args) + '\\n');",
+            // A real spawn refuses a cwd that does not exist, which is how a
+            // slug taken as a directory used to fail. The stub must too.
+            "    if (options && options.cwd && !fs.existsSync(options.cwd)) throw new Error('spawn gh ENOENT: no such cwd');",
+            "    if (args[0] === 'api') {",
+            "      if (!process.env.PR_READY_GRAPHQL) throw new Error('no graphql fixture for this case');",
+            "      return fs.readFileSync(process.env.PR_READY_GRAPHQL, 'utf8');",
+            '    }',
+            "    return fs.readFileSync(process.env.PR_READY_FIXTURE, 'utf8');",
+            '  }',
             '  return original.call(this, command, args, options);',
             '};',
         ].join('\n'));
+        const HEAD = 'a'.repeat(40);
         const base = { number: 1, state: 'OPEN', isDraft: false, mergeable: 'MERGEABLE',
-            mergeStateStatus: 'CLEAN', baseRefName: 'main', headRefName: 'feature', files: [{ path: 'src/app.js' }] };
+            mergeStateStatus: 'CLEAN', baseRefName: 'main', url: 'https://github.com/example-owner/example-repo/pull/1',
+            headRefOid: HEAD, headRefName: 'feature', files: [{ path: 'src/app.js' }] };
         const success = { name: 'lint', status: 'COMPLETED', conclusion: 'SUCCESS' };
         const artifact = { name: null, status: null, conclusion: null };
-        function invoke(statusCheckRollup, extra = {}) {
+        const graphqlFile = path.join(tmp, 'github-graphql.json');
+        const argvLog = path.join(tmp, 'gh-argv.log');
+        // The GraphQL answer GitHub gives for the head's check runs: who posted
+        // each one and whether the base branch requires it. Hand-written here,
+        // never read out of the subject's allowlist, so shrinking the allowlist
+        // cannot shrink these cases with it.
+        function graphql(runs, oid = HEAD) {
+            fs.writeFileSync(graphqlFile, JSON.stringify({ data: { repository: { pullRequest: { commits: { nodes: [{ commit: {
+                oid, statusCheckRollup: { contexts: { pageInfo: { hasNextPage: false }, nodes: runs.map(([name, conclusion, app, isRequired]) => ({
+                    __typename: 'CheckRun', name, conclusion, isRequired, checkSuite: { app: { slug: app } } })) } },
+            } }] } } } } }));
+            return graphqlFile;
+        }
+        function invoke(statusCheckRollup, extra = {}, opts = {}) {
             fs.writeFileSync(response, JSON.stringify({ ...base, statusCheckRollup, ...extra }));
-            const r = spawnSync(process.execPath, ['--require', preload, subject, '1', '--repo', tmp, '--json'], {
-                cwd: tmp, encoding: 'utf8', env: { ...process.env, PR_READY_FIXTURE: response },
+            fs.writeFileSync(argvLog, '');
+            const env = { ...process.env, PR_READY_FIXTURE: response, PR_READY_ARGV: argvLog };
+            delete env.PR_READY_GRAPHQL;
+            if (opts.graphql) env.PR_READY_GRAPHQL = opts.graphql;
+            const repo = opts.repo === undefined ? tmp : opts.repo;
+            const r = spawnSync(process.execPath, ['--require', preload, subject, '1', '--repo', repo, '--json'], {
+                cwd: tmp, encoding: 'utf8', env,
             });
             let result;
             try { result = JSON.parse(r.stdout); } catch { result = {}; }
-            return { exit: r.status, result, detail: JSON.stringify({ status: r.status, stdout: r.stdout, stderr: r.stderr }) };
+            const calls = fs.readFileSync(argvLog, 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l));
+            return { exit: r.status, result, calls, stderr: r.stderr,
+                detail: JSON.stringify({ status: r.status, stdout: r.stdout.slice(0, 1500), stderr: r.stderr, calls }) };
         }
         let r = invoke([success, { name: 'test', status: 'COMPLETED', conclusion: 'SUCCESS' }, artifact]);
         check('CLI: two successful jobs plus an artifact are ready',
@@ -229,6 +262,52 @@ check('the changed-file list is requested from gh, or the helper has nothing to 
         r = invoke([artifact], { files: [] });
         check('CLI: artifact-only rollup without changed files cannot claim readiness',
             r.exit === 2 && r.result.reasons?.some(x => /could not read the changed files/.test(x)), r.detail);
+
+        // ---- --repo takes a checkout path or an owner/name slug -------------
+        // A slug used to be taken as a working directory, so gh failed and every
+        // run read CANNOT_TELL. The argv log shows what gh was actually asked.
+        const prView = (calls) => calls.find((a) => a[0] === 'pr' && a[1] === 'view') || [];
+        r = invoke([success], {}, { repo: 'example-owner/example-repo' });
+        check('CLI: --repo owner/name is a slug: READY, not CANNOT_TELL',
+            r.exit === 0 && r.result.verdict === 'READY', r.detail);
+        check('  and gh pr view was asked with -R owner/name',
+            prView(r.calls).join(' ').includes('-R example-owner/example-repo'), r.detail);
+        r = invoke([success], {}, { repo: tmp });
+        check('CLI: --repo <existing directory> is a path: READY, and gh gets no -R',
+            r.exit === 0 && r.result.verdict === 'READY' && prView(r.calls).length > 0 && !prView(r.calls).includes('-R'), r.detail);
+        r = invoke([success], {}, { repo: 'neither a/path/nor-a-slug' });
+        check('CLI: a --repo that is neither a directory nor owner/name exits 2 and names both forms',
+            r.exit === 2 && /directory/.test(r.stderr) && /owner\/name/.test(r.stderr), r.detail);
+        check('  and gh is never called for it', r.calls.length === 0, r.detail);
+
+        // ---- an opt-in app's SKIPPED check ---------------------------------
+        // An app that only runs when asked reports SKIPPED on every other PR.
+        // The skip is ignored only for an allowlisted app AND a check the base
+        // branch does not require. 'blacksmith-sh' is hardcoded here on purpose.
+        const proof = { name: 'Proof', status: 'COMPLETED', conclusion: 'SKIPPED' };
+        r = invoke([success, proof], {}, { graphql: graphql([['lint', 'SUCCESS', 'github-actions', false], ['Proof', 'SKIPPED', 'blacksmith-sh', false]]) });
+        check('CLI: an allowlisted app\'s skipped optional check is ignored: READY',
+            r.exit === 0 && r.result.verdict === 'READY' && r.result.population?.optInSkipped === 1 && r.result.population?.skipped === 0, r.detail);
+        check('  and the check list still names it as an ignored opt-in skip',
+            r.result.checks?.some(([n, s]) => n === 'Proof' && /opt-in blacksmith-sh, ignored/.test(s)), r.detail);
+        r = invoke([success, proof], {}, { graphql: graphql([['lint', 'SUCCESS', 'github-actions', false], ['Proof', 'SKIPPED', 'blacksmith-sh', true]]) });
+        check('CLI: a REQUIRED skipped job from the same allowlisted app still blocks',
+            r.exit === 2 && r.result.verdict === 'NOT_READY' && r.result.reasons?.some((x) => /SKIPPED: Proof/.test(x)), r.detail);
+        r = invoke([success, proof], {}, { graphql: graphql([['lint', 'SUCCESS', 'github-actions', false], ['Proof', 'SKIPPED', 'example-unlisted-app', false]]) });
+        check('CLI: an unknown app\'s skipped optional check still counts as not established',
+            r.exit === 2 && r.result.verdict === 'NOT_READY' && r.result.reasons?.some((x) => /SKIPPED: Proof/.test(x)), r.detail);
+        r = invoke([success, proof], {}, { graphql: graphql([['lint', 'SUCCESS', 'github-actions', false], ['Proof', 'SKIPPED', 'blacksmith-sh', false], ['Proof', 'SUCCESS', 'github-actions', false]]) });
+        check('CLI: a same-name run from another app keeps the skip counted',
+            r.exit === 2 && r.result.reasons?.some((x) => /SKIPPED: Proof/.test(x)), r.detail);
+        r = invoke([success, proof], {}, { graphql: graphql([['Proof', 'SKIPPED', 'blacksmith-sh', false]], 'b'.repeat(40)) });
+        check('CLI: a lookup answering for another head commit keeps the skip counted, and says why',
+            r.exit === 2 && r.result.reasons?.some((x) => /SKIPPED: Proof/.test(x) && /head commit moved/.test(x)), r.detail);
+        r = invoke([success, proof], {});
+        check('CLI: a failed lookup keeps the skip counted',
+            r.exit === 2 && r.result.reasons?.some((x) => /SKIPPED: Proof/.test(x) && /lookup failed/.test(x)), r.detail);
+        r = invoke([proof], {}, { graphql: graphql([['Proof', 'SKIPPED', 'blacksmith-sh', false]]) });
+        check('CLI: an ignored opt-in skip is not evidence: alone it is an empty rollup, refused as DUE',
+            r.exit === 2 && r.result.population?.passing === 0 && r.result.reasons?.some((x) => /EMPTY/.test(x) && /DUE/.test(x)), r.detail);
 
         // A FAILED git CALL IS NOT AN ANSWER. The docs-only READY above is the
         // control for both: the same PR against a trunk git cannot list, then
