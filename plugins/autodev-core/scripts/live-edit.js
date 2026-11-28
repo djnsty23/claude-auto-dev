@@ -745,7 +745,12 @@ const OVERLAY_CSS = [
     '.le[data-strip] .pos{display:block;margin-right:auto;color:var(--le-muted);white-space:nowrap}',
     '.le[data-strip][data-strip-many="true"] .pg,.le[data-strip] .all{display:inline-flex}',
     '.le[data-strip] .tb{min-height:44px;min-width:44px;justify-content:center}',
-    '.le[data-strip] .strip-title{display:block;margin:0 0 8px;font-weight:650;white-space:nowrap;overflow-x:clip;text-overflow:ellipsis}',
+    '.le[data-strip] .strip-title{display:flex;align-items:center;gap:8px;margin:0 0 8px;font-weight:650;white-space:nowrap}',
+    '.le[data-strip] .strip-name{flex:1 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis}',
+    '.le[data-strip] .strip-state{flex:0 1 auto;max-width:50%;display:inline-flex;align-items:center;gap:6px;overflow:hidden;font-weight:500;color:var(--le-muted)}',
+    '.le[data-strip] .strip-state-text{overflow:hidden;text-overflow:ellipsis}',
+    // The open strip carries the pill's state, so the floating pill leaves the page's text uncovered.
+    '.le[data-ask][data-strip][data-open="true"] .pill{display:none}',
     '.le[data-strip] .surface[data-on]{position:relative;display:flex;flex-wrap:nowrap;gap:8px;overflow-x:auto;margin:0;padding:0;border-top:0;scrollbar-width:none}',
     '.le[data-strip] .surface[data-on] .a2-col,.le[data-strip] .surface[data-on] .a2-row{display:contents}',
     '.le[data-strip] .surface[data-on] .a2-btn{flex:0 0 auto;width:auto;white-space:nowrap}.le[data-strip] .surface[data-on] .a2-slider{flex:0 0 200px}',
@@ -843,7 +848,7 @@ function overlayClient(window, document, config, kit) {
     var surfaceAsk = {};
     var bound = [];
     var previews = [];
-    var stripId = null, stripPos = null, stripTitle = null;
+    var stripId = null, stripPos = null, stripTitle = null, stripName = null, stripState = null;
     var PHONE = '(max-width:640px)';
     var reported = {};
     var beforeText = {};
@@ -1236,7 +1241,8 @@ function overlayClient(window, document, config, kit) {
         wrap.setAttribute('data-strip-many', String(secs.length > 1));
         stripPos.textContent = (at + 1) + ' of ' + secs.length;
         var heading = findIn(secs[at], 'a2-text-heading');
-        stripTitle.textContent = heading ? heading.textContent : '';
+        stripName.textContent = heading ? heading.textContent : '';
+        stripState.textContent = count.textContent;
         if (phone()) setLift();
         scrollChip(secs[at]);
     };
@@ -1301,10 +1307,12 @@ function overlayClient(window, document, config, kit) {
         if (showAsk) {
             wrap.setAttribute('data-ask-state', latest.state);
             count.textContent = phrase(latest);
+            if (stripState) stripState.textContent = count.textContent;
             return 'ask';
         }
         wrap.removeAttribute('data-ask-state');
         count.textContent = lastState ? lastState.pill : 'Live edit';
+        if (stripState) stripState.textContent = count.textContent;
         return 'state';
     };
 
@@ -1412,7 +1420,17 @@ function overlayClient(window, document, config, kit) {
         var close = labelled('tb x', 'Close');
         close.addEventListener('click', function () { setOpen(false); });
         head.appendChild(close);
-        stripTitle = make('p', 'strip-title');
+        // The group's title, and the pill's state beside it: at phone width the open strip hides the
+        // floating pill, which would otherwise sit over the page's text mid-screen.
+        stripTitle = make('div', 'strip-title');
+        stripName = make('span', 'strip-name');
+        stripState = make('span', 'strip-state');
+        var stripStateText = make('span', 'strip-state-text');
+        stripState.appendChild(make('span', 'dot'));
+        stripState.appendChild(stripStateText);
+        stripTitle.appendChild(stripName);
+        stripTitle.appendChild(stripState);
+        stripState = stripStateText;
         panel.appendChild(head);
         if (key && ask.box) {
             var form = make('form', 'ask');
