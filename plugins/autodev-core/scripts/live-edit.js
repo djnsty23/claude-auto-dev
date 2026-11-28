@@ -1217,11 +1217,12 @@ function overlayClient(window, document, config, kit) {
         }
         wrap.style.setProperty('--le-lift', lift + 'px');
     };
-    // The previewed element sits above the strip, with room over it for its Preview badge.
+    // The previewed element sits above the strip, with room over it for its Preview badge. An element
+    // taller than that gap keeps its top and badge in view: the top wins over the bottom.
     var keepInView = function () {
         if (!stripId || !badgeOn || !phone() || !window.scrollBy) return;
         var r = badgeOn.getBoundingClientRect(), floor = panel.getBoundingClientRect().top - 12;
-        var by = r.bottom > floor ? r.bottom - floor : r.top < 40 ? r.top - 40 : 0;
+        var by = r.bottom > floor ? Math.min(r.bottom - floor, r.top - 40) : r.top < 40 ? r.top - 40 : 0;
         if (by) window.scrollBy(0, by);
     };
     var markStrip = function () {
@@ -1571,7 +1572,8 @@ function overlayClient(window, document, config, kit) {
     };
 
     pill.addEventListener('click', function () { setOpen(!open); });
-    listen('resize', function () { place(true); placeBadge(); });
+    // A rotation or a resize changes the lift and which chips fit, so the strip measures again.
+    listen('resize', function () { place(true); placeBadge(); if (stripId) markStrip(); });
     listen('scroll', function () { placeBadge(); }, { capture: true, passive: true });
     var mount = function () {
         attach();
