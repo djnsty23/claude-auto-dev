@@ -775,7 +775,7 @@ async function overlaySuite() {
   const noKeyApi = le.overlayClient(keyless.window, keyless.document, servedConfig({ layout: 'sheet', box: true, point: true, preview: true, key: null }), kit.a2uiKit());
   await flush();
   same('an overlay with no key shows how to get one and asks for nothing', [noKeyApi.input, noKeyApi.panel.textContent.includes('Reload this page to ask'), keyless.fetches.some(([u]) => String(u).startsWith('/__live-edit/feed')), noKeyApi.wrap.getAttribute('data-ask')], [null, true, false, 'sheet']);
-  noKeyApi.panel.children[0].children[1].listeners.click();
+  noKeyApi.panel.children[0].children.find((c) => c.className === 'tb x').listeners.click();
   same('Close closes the panel', noKeyApi.wrap.getAttribute('data-open'), 'false');
   const pickOnly = pageDom();
   const pickConfig = servedConfig({ layout: 'panel', point: true, preview: true, key: KEY });
@@ -823,6 +823,102 @@ async function overlaySuite() {
 }
 
 // ---------------------------------------------------------------------------
+// ---------------------------------------------------------------------------
+// The strip: at phone width a previewed group shrinks to one sideways row, so the page stays in view.
+// Seen at 390 on a real page: the choices panel ran past the viewport, covered the previewed element,
+// and the framework's dev badge sat over its ask log.
+// ---------------------------------------------------------------------------
+
+async function stripSuite() {
+  console.log('the strip at phone width');
+  const css = le.OVERLAY_CSS;
+  const media = '@media (max-width:640px){';
+  const start = css.indexOf(media);
+  const end = start === -1 ? -1 : css.indexOf('}}', start);
+  const inside = (i) => start !== -1 && i > start && i < end + 2;
+  const stripAt = [];
+  for (let i = css.indexOf('[data-strip]'); i !== -1; i = css.indexOf('[data-strip]', i + 1)) stripAt.push(i);
+  same('every strip rule sits inside the phone media query, so the desktop panel is unchanged', [stripAt.length > 10, stripAt.every(inside)], [true, true]);
+  same('the strip sheet is capped under a third of the viewport, with its own scroll', /\.le\[data-ask\]\[data-strip\]\[data-open="true"\] \.panel\{[^}]*max-height:calc\(33vh - 8px\);overflow:auto/.test(css), true);
+  same('the strip sheet sits on the corner-badge lift, 12px when there is none', /\.le\[data-ask\]\[data-strip\]\[data-open="true"\] \.panel\{[^}]*bottom:var\(--le-lift,12px\)/.test(css), true);
+  same('a row that runs past its right edge fades there, so a cut chip reads as "this scrolls"', /\.surface\[data-on\]\[data-more="right"\]\{[^}]*mask-image:linear-gradient\(to right,#000 calc\(100% - 48px\),rgba\(0,0,0,\.3\)\)/.test(css), true);
+  same('the strip\'s controls are at least 44px, Close included', /\.le\[data-strip\] \.tb\{min-height:44px;min-width:44px/.test(css), true);
+
+  const dom = pageDom();
+  const config = servedConfig({ layout: 'panel', box: true, point: true, preview: true, key: KEY });
+  const msgs = [...choices('hero'), ...choices('hero2')].map((msg, i) => ({ seq: i + 1, ask: 'a1', msg }));
+  const feed = feedOf([{ id: 'a1', text: 'Show me versions of the hero', at: Date.now(), state: 'choices', instance: 'x' }], msgs);
+  dom.routes['/__live-edit/state'] = () => reply(200, { ok: true, pill: 'No pending changes', changes: { count: 0, lines: [] }, eta: null, etaNote: '' });
+  dom.routes['/__live-edit/feed'] = () => reply(200, feed);
+  dom.routes['/__live-edit/action'] = () => reply(200, { id: 't1' });
+  dom.routes['/__live-edit/seen'] = () => reply(200, { ok: true });
+  const ctaText = textNode('Book now');
+  const ctaBox = { left: 10, right: 110, top: 700, bottom: 744, width: 100, height: 44 };
+  const cta = pageEl(ctaText, { getBoundingClientRect: () => ctaBox });
+  dom.page['#cta'] = [cta];
+  const api = le.overlayClient(dom.window, dom.document, config, kit.a2uiKit());
+  await flush();
+  await api.pollFeed();
+  const secs = api.surfacesEl.children;
+  const head = api.panel.children[0];
+  const ctl = (label) => head.children.find((c) => c.attrs['aria-label'] === label);
+  const strip = () => [api.wrap.getAttribute('data-strip'), secs.map((s) => s.getAttribute('data-on')), head.children.find((c) => c.className === 'pos').textContent];
+  same('before any preview there is no strip and every group is drawn', [strip()[0], strip()[1], secs.length], [null, [null, null], 2]);
+
+  const v1 = secs[0].children[0].children.find((c) => c.attrs['data-id'] === 'v1');
+  v1.offsetLeft = 500;
+  v1.offsetWidth = 120;
+  Object.assign(secs[0], { scrollWidth: 900, clientWidth: 300, scrollLeft: 0 });
+  v1.listeners.click(trusted());
+  await flush();
+  same('a previewed choice turns its group into the strip and says which group of how many', strip(), ['', ['', null], '1 of 2']);
+  same('the strip names its group above the row', api.panel.children.find((c) => c.className === 'strip-title').textContent, 'Pick the hero button copy');
+  same('the picked chip is scrolled into the middle of the row', secs[0].scrollLeft, 410);
+  same('with chips past both edges, both edges fade', secs[0].getAttribute('data-more'), 'both');
+  secs[0].scrollLeft = 0;
+  secs[0].listeners.scroll();
+  same('scrolled to the start, only the right edge fades', secs[0].getAttribute('data-more'), 'right');
+  secs[0].scrollLeft = 600;
+  secs[0].listeners.scroll();
+  same('scrolled to the end, only the left edge fades', secs[0].getAttribute('data-more'), 'left');
+  secs[0].scrollWidth = 300;
+  secs[0].scrollLeft = 0;
+  secs[0].listeners.scroll();
+  same('a row that fits has no fade', secs[0].getAttribute('data-more'), null);
+
+  ctl('Next group').listeners.click();
+  same('Next pages the strip to the other group', strip(), ['', [null, ''], '2 of 2']);
+  ctl('Next group').listeners.click();
+  same('Next from the last group comes back to the first', strip(), ['', ['', null], '1 of 2']);
+  ctl('Previous group').listeners.click();
+  same('Previous from the first group goes to the last', strip(), ['', [null, ''], '2 of 2']);
+  ctl('Show every choice and ask').listeners.click();
+  same('All ends the strip, so every group and the ask log show again', strip().slice(0, 2), [null, [null, null]]);
+
+  // At phone width: the previewed element is kept above the sheet, and the sheet clears a corner badge.
+  const scrolled = [];
+  dom.window.matchMedia = (q) => ({ matches: q === '(max-width:640px)' });
+  dom.window.scrollBy = (x, y) => scrolled.push(y);
+  dom.window.innerWidth = 390;
+  dom.window.innerHeight = 844;
+  api.panel.getBoundingClientRect = () => ({ left: 12, right: 378, top: 640, bottom: 780, width: 366, height: 140 });
+  const devBadge = { nodeType: 1, fixed: true, parentElement: null, getBoundingClientRect: () => ({ left: 20, right: 56, top: 788, bottom: 824, width: 36, height: 36 }) };
+  const banner = { nodeType: 1, fixed: true, parentElement: null, getBoundingClientRect: () => ({ left: 0, right: 390, top: 700, bottom: 844, width: 390, height: 144 }) };
+  dom.document.elementsFromPoint = (x) => (x < 100 ? [dom.host(), devBadge, banner] : [dom.host(), banner]);
+  dom.window.getComputedStyle = (el) => ({ position: el.fixed ? 'fixed' : 'static' });
+  v1.listeners.click(trusted());
+  await flush();
+  same('at phone width the sheet sits 8px above a small fixed badge in a bottom corner, not above a wide banner', api.wrap.style.getPropertyValue('--le-lift'), '64px');
+  same('a previewed element under the sheet is scrolled up above it', scrolled, [744 - (640 - 12)]);
+  dom.document.elementsFromPoint = () => [dom.host()];
+  ctaBox.top = 200;
+  ctaBox.bottom = 244;
+  scrolled.length = 0;
+  v1.listeners.click(trusted());
+  await flush();
+  same('with no corner badge the lift is 12px, and an element already in view is not scrolled', [api.wrap.style.getPropertyValue('--le-lift'), scrolled], ['12px', []]);
+}
+
 async function cliSuite({ site, q }) {
   console.log('the session\'s commands');
   const out = [];
@@ -913,6 +1009,7 @@ const watchdog = setTimeout(() => {
   const ctx = await queueSuite();
   await proxySuite(ctx);
   await overlaySuite();
+  await stripSuite();
   await cliSuite(ctx);
   await serveSuite(ctx);
 })().catch((e) => {
