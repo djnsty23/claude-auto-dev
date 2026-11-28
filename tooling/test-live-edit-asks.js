@@ -843,7 +843,7 @@ async function stripSuite() {
   same('the strip sheet sits on the corner-badge lift, 12px when there is none', /\.le\[data-ask\]\[data-strip\]\[data-open="true"\] \.panel\{[^}]*bottom:var\(--le-lift,12px\)/.test(css), true);
   same('a row that runs past its right edge fades there, so a cut chip reads as "this scrolls"', /\.surface\[data-on\]\[data-more="right"\]\{[^}]*mask-image:linear-gradient\(to right,#000 calc\(100% - 48px\),rgba\(0,0,0,\.3\)\)/.test(css), true);
   same('the strip\'s controls are at least 44px, Close included', /\.le\[data-strip\] \.tb\{min-height:44px;min-width:44px/.test(css), true);
-  same('Previous and Next show only when the strip has more than one group', /\.le\[data-strip\]\[data-strip-many="true"\] \.pg[,{]/.test(css), true);
+  same('Previous and Next show only when the strip has more than one group', [/(^|\})\.pos,\.pg,\.all,\.strip-title\{display:none\}/.test(css), /\.le\[data-strip\]\[data-strip-many="true"\] \.pg,\.le\[data-strip\] \.all\{display:inline-flex\}/.test(css)], [true, true]);
   same('the open strip hides the floating pill, so it covers none of the page\'s text', /\.le\[data-ask\]\[data-strip\]\[data-open="true"\] \.pill\{display:none\}/.test(css), true);
 
   const dom = pageDom();
