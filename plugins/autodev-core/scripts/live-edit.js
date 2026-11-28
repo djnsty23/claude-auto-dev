@@ -1236,7 +1236,7 @@ function overlayClient(window, document, config, kit) {
         for (i = 0; i < secs.length; i++) if (secs[i].getAttribute('data-surface') === stripId) at = i;
         if (at === -1) stripId = null;
         for (i = 0; i < secs.length; i++) { if (i === at) secs[i].setAttribute('data-on', ''); else secs[i].removeAttribute('data-on'); }
-        if (stripId === null) { wrap.removeAttribute('data-strip'); return; }
+        if (stripId === null) { wrap.removeAttribute('data-strip'); wrap.removeAttribute('data-strip-many'); return; }
         wrap.setAttribute('data-strip', '');
         wrap.setAttribute('data-strip-many', String(secs.length > 1));
         stripPos.textContent = (at + 1) + ' of ' + secs.length;
