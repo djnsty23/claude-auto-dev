@@ -843,6 +843,8 @@ async function stripSuite() {
   same('the strip sheet sits on the corner-badge lift, 12px when there is none', /\.le\[data-ask\]\[data-strip\]\[data-open="true"\] \.panel\{[^}]*bottom:var\(--le-lift,12px\)/.test(css), true);
   same('a row that runs past its right edge fades there, so a cut chip reads as "this scrolls"', /\.surface\[data-on\]\[data-more="right"\]\{[^}]*mask-image:linear-gradient\(to right,#000 calc\(100% - 48px\),rgba\(0,0,0,\.3\)\)/.test(css), true);
   same('the strip\'s controls are at least 44px, Close included', /\.le\[data-strip\] \.tb\{min-height:44px;min-width:44px/.test(css), true);
+  same('Previous and Next show only when the strip has more than one group', /\.le\[data-strip\]\[data-strip-many="true"\] \.pg[,{]/.test(css), true);
+  same('the open strip hides the floating pill, so it covers none of the page\'s text', /\.le\[data-ask\]\[data-strip\]\[data-open="true"\] \.pill\{display:none\}/.test(css), true);
 
   const dom = pageDom();
   const config = servedConfig({ layout: 'panel', box: true, point: true, preview: true, key: KEY });
@@ -872,7 +874,11 @@ async function stripSuite() {
   v1.listeners.click(trusted());
   await flush();
   same('a previewed choice turns its group into the strip and says which group of how many', strip(), ['', ['', null], '1 of 2']);
-  same('the strip names its group above the row', api.panel.children.find((c) => c.className === 'strip-title').textContent, 'Pick the hero button copy');
+  const titleRow = api.panel.children.find((c) => c.className === 'strip-title');
+  same('the strip names its group above the row', titleRow.children.find((c) => c.className === 'strip-name').textContent, 'Pick the hero button copy');
+  const pillCount = api.pill.children.find((c) => c.className === 'count').textContent;
+  same('the strip shows the pill\'s state beside the title, since the pill is hidden', [(titleRow.children.find((c) => c.className === 'strip-state') || {}).textContent, pillCount.length > 0], [pillCount, true]);
+  same('two groups mark the strip as many, so Previous and Next show', api.wrap.getAttribute('data-strip-many'), 'true');
   same('the picked chip is scrolled into the middle of the row', secs[0].scrollLeft, 410);
   same('with chips past both edges, both edges fade', secs[0].getAttribute('data-more'), 'both');
   secs[0].scrollLeft = 0;
@@ -931,6 +937,32 @@ async function stripSuite() {
   v1.listeners.click(trusted());
   await flush();
   same('a previewed element taller than the gap is scrolled only until its top reaches 40px', scrolled, [300 - 40]);
+
+  // A framework badge drawn inside its own shadow root: the host is not fixed, the badge inside it is.
+  const inner = { nodeType: 1, fixed: false, parentElement: null, getBoundingClientRect: () => ({ left: 20, right: 56, top: 788, bottom: 824, width: 36, height: 36 }) };
+  inner.parentElement = { nodeType: 1, fixed: true, parentElement: null, getBoundingClientRect: inner.getBoundingClientRect };
+  const portal = { nodeType: 1, fixed: false, parentElement: null, shadowRoot: { elementsFromPoint: (x) => (x < 100 ? [inner] : []) }, getBoundingClientRect: () => ({ left: 0, right: 0, top: 0, bottom: 0, width: 0, height: 0 }) };
+  dom.document.elementsFromPoint = () => [dom.host(), portal];
+  ctaBox.top = 200;
+  ctaBox.bottom = 244;
+  v1.listeners.click(trusted());
+  await flush();
+  same('a corner badge inside a shadow root lifts the sheet too', api.wrap.style.getPropertyValue('--le-lift'), '64px');
+
+  // One group alone: nothing to page to, so Previous and Next stay hidden.
+  const one = pageDom();
+  const oneFeed = feedOf([{ id: 'a1', text: 'Show me versions of the hero', at: Date.now(), state: 'choices', instance: 'x' }], choices('hero').map((msg, i) => ({ seq: i + 1, ask: 'a1', msg })));
+  one.routes['/__live-edit/state'] = () => reply(200, { ok: true, pill: 'No pending changes', changes: { count: 0, lines: [] }, eta: null, etaNote: '' });
+  one.routes['/__live-edit/feed'] = () => reply(200, oneFeed);
+  one.routes['/__live-edit/action'] = () => reply(200, { id: 't1' });
+  one.routes['/__live-edit/seen'] = () => reply(200, { ok: true });
+  one.page['#cta'] = [pageEl(textNode('Book now'), { getBoundingClientRect: () => ({ left: 10, right: 110, top: 200, bottom: 244, width: 100, height: 44 }) })];
+  const oneApi = le.overlayClient(one.window, one.document, servedConfig({ layout: 'panel', box: true, point: true, preview: true, key: KEY }), kit.a2uiKit());
+  await flush();
+  await oneApi.pollFeed();
+  oneApi.surfacesEl.children[0].children[0].children.find((c) => c.attrs['data-id'] === 'v1').listeners.click(trusted());
+  await flush();
+  same('one group alone is not many, so Previous and Next stay hidden', [oneApi.wrap.getAttribute('data-strip'), oneApi.wrap.getAttribute('data-strip-many')], ['', 'false']);
 }
 
 async function cliSuite({ site, q }) {
