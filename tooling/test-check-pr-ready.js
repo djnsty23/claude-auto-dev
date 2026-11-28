@@ -211,9 +211,9 @@ check('the changed-file list is requested from gh, or the helper has nothing to 
         // each one and whether the base branch requires it. Hand-written here,
         // never read out of the subject's allowlist, so shrinking the allowlist
         // cannot shrink these cases with it.
-        function graphql(runs, oid = HEAD) {
+        function graphql(runs, oid = HEAD, pageInfo = { hasNextPage: false }) {
             fs.writeFileSync(graphqlFile, JSON.stringify({ data: { repository: { pullRequest: { commits: { nodes: [{ commit: {
-                oid, statusCheckRollup: { contexts: { pageInfo: { hasNextPage: false }, nodes: runs.map(([name, conclusion, app, isRequired]) => ({
+                oid, statusCheckRollup: { contexts: { ...(pageInfo === null ? {} : { pageInfo }), nodes: runs.map(([name, conclusion, app, isRequired]) => ({
                     __typename: 'CheckRun', name, conclusion, isRequired, checkSuite: { app: { slug: app } } })) } },
             } }] } } } } }));
             return graphqlFile;
@@ -308,6 +308,43 @@ check('the changed-file list is requested from gh, or the helper has nothing to 
         r = invoke([proof], {}, { graphql: graphql([['Proof', 'SKIPPED', 'blacksmith-sh', false]]) });
         check('CLI: an ignored opt-in skip is not evidence: alone it is an empty rollup, refused as DUE',
             r.exit === 2 && r.result.population?.passing === 0 && r.result.reasons?.some((x) => /EMPTY/.test(x) && /DUE/.test(x)), r.detail);
+
+        // ---- the GraphQL lookup sends owner and name as raw strings --------
+        // gh's -F turns 2026, true, false and null into typed JSON, which a
+        // String! variable refuses. The stub cannot coerce, so the argv is the
+        // assertion: -f for owner and name, -F only for the Int.
+        const gqlCall = (calls) => calls.find((a) => a[0] === 'api' && a[1] === 'graphql') || [];
+        const pair = (a, flag, value) => a.some((x, i) => x === flag && a[i + 1] === value);
+        r = invoke([success, proof], { url: 'https://github.com/example-owner/2026/pull/1' },
+            { repo: 'example-owner/2026', graphql: graphql([['lint', 'SUCCESS', 'github-actions', false], ['Proof', 'SKIPPED', 'blacksmith-sh', false]]) });
+        check('CLI: a numeric-looking repo name goes to GraphQL as -f name=2026, not -F',
+            pair(gqlCall(r.calls), '-f', 'name=2026') && !pair(gqlCall(r.calls), '-F', 'name=2026'), r.detail);
+        check('  and the owner as -f owner=, the PR number as -F n=',
+            pair(gqlCall(r.calls), '-f', 'owner=example-owner') && pair(gqlCall(r.calls), '-F', 'n=1'), r.detail);
+        check('  and that PR is READY, since the opt-in skip was set aside', r.exit === 0 && r.result.verdict === 'READY', r.detail);
+
+        // ---- one page of checks, or no answer --------------------------------
+        const twoRuns = [['lint', 'SUCCESS', 'github-actions', false], ['Proof', 'SKIPPED', 'blacksmith-sh', false]];
+        r = invoke([success, proof], {}, { graphql: graphql(twoRuns, HEAD, { hasNextPage: true }) });
+        check('CLI: a check list with another page keeps the skip counted, and says why',
+            r.exit === 2 && r.result.reasons?.some((x) => /SKIPPED: Proof/.test(x) && /past one page/.test(x)), r.detail);
+        r = invoke([success, proof], {}, { graphql: graphql(twoRuns, HEAD, null) });
+        check('CLI: a check list with no pageInfo keeps the skip counted, and says why',
+            r.exit === 2 && r.result.reasons?.some((x) => /SKIPPED: Proof/.test(x) && /past one page/.test(x)), r.detail);
+
+        // ---- a slug has no checkout to read workflows from -------------------
+        // The run's cwd is this fixture repo, whose trunk carries a workflow
+        // that path-filters *.md out. In slug mode that is an unrelated repo,
+        // so a docs-only PR must NOT be explained by it as READY.
+        r = invoke([], { files: [{ path: 'README.md' }] }, { repo: 'example-owner/example-repo' });
+        check('CLI: slug mode with an empty rollup does not read the cwd\'s workflows: NOT_READY, and says it was a slug',
+            r.exit === 2 && r.result.reasons?.some((x) => /EMPTY/.test(x) && /was a slug/.test(x))
+            && !r.result.reasons?.some((x) => /path filter working/.test(x)), r.detail);
+        r = invoke([proof], { files: [{ path: 'README.md' }] },
+            { repo: 'example-owner/example-repo', graphql: graphql([['Proof', 'SKIPPED', 'blacksmith-sh', false]]) });
+        check('CLI: slug mode with an opt-in-only rollup is the same: NOT_READY, and says it was a slug',
+            r.exit === 2 && r.result.population?.optInSkipped === 1 && r.result.reasons?.some((x) => /EMPTY/.test(x) && /was a slug/.test(x))
+            && !r.result.reasons?.some((x) => /path filter working/.test(x)), r.detail);
 
         // A FAILED git CALL IS NOT AN ANSWER. The docs-only READY above is the
         // control for both: the same PR against a trunk git cannot list, then

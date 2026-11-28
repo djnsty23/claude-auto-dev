@@ -166,7 +166,9 @@ const CHECK_APPS_QUERY = 'query($owner:String!,$name:String!,$n:Int!){repository
 function checkRunApps(repoSlug, prNumber, headOid, cwd) {
     const [owner, name] = String(repoSlug || '').split('/');
     if (!owner || !name) return { error: 'the repository slug is unknown' };
-    const raw = gh(['api', 'graphql', '-f', 'query=' + CHECK_APPS_QUERY, '-F', 'owner=' + owner, '-F', 'name=' + name,
+    // -f sends a raw string. -F would turn a repo named 2026 or true into a
+    // number or boolean, and the String! variables would then fail to bind.
+    const raw = gh(['api', 'graphql', '-f', 'query=' + CHECK_APPS_QUERY, '-f', 'owner=' + owner, '-f', 'name=' + name,
         '-F', 'n=' + prNumber], cwd);
     if (raw === null) return { error: 'gh api graphql gave no answer' };
     let commit;
