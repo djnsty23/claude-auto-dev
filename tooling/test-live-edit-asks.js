@@ -917,6 +917,20 @@ async function stripSuite() {
   v1.listeners.click(trusted());
   await flush();
   same('with no corner badge the lift is 12px, and an element already in view is not scrolled', [api.wrap.style.getPropertyValue('--le-lift'), scrolled], ['12px', []]);
+
+  // A rotation or resize measures the strip again: the badge lift and the fade follow the new width.
+  dom.document.elementsFromPoint = (x) => (x < 100 ? [dom.host(), devBadge] : [dom.host()]);
+  Object.assign(secs[0], { scrollWidth: 900, scrollLeft: 0 });
+  dom.listeners.resize();
+  same('a resize while the strip is up measures the lift and the fade again', [api.wrap.style.getPropertyValue('--le-lift'), secs[0].getAttribute('data-more')], ['64px', 'both']);
+
+  // An element taller than the gap above the sheet keeps its top (and its Preview badge) in view.
+  ctaBox.top = 300;
+  ctaBox.bottom = 900;
+  scrolled.length = 0;
+  v1.listeners.click(trusted());
+  await flush();
+  same('a previewed element taller than the gap is scrolled only until its top reaches 40px', scrolled, [300 - 40]);
 }
 
 async function cliSuite({ site, q }) {
