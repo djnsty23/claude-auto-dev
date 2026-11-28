@@ -737,6 +737,22 @@ const OVERLAY_CSS = [
     // Where the ask box lives. panel: the pill's own panel. sheet: a bottom sheet. side: a full-height side panel.
     '.le[data-ask="sheet"][data-open="true"] .panel{position:fixed;left:0;right:0;bottom:0;margin:0 auto;width:min(560px,100vw);max-height:min(80vh,640px);border-radius:16px 16px 0 0;border-bottom-width:0}',
     '.le[data-ask="side"][data-open="true"] .panel{position:fixed;top:0;right:0;bottom:0;margin:0;width:min(380px,100vw);max-height:none;border-radius:0;border-width:0 0 0 1px}',
+    // The strip: at phone width a previewed group is one sideways row in a short sheet, so the page stays in view.
+    '.pos,.pg,.all,.strip-title{display:none}',
+    '@media (max-width:640px){',
+    '.le[data-ask][data-strip][data-open="true"] .panel{position:fixed;left:12px;right:12px;top:auto;bottom:var(--le-lift,12px);margin:0;width:auto;max-height:calc(33vh - 8px);overflow:auto;border-radius:16px;border-width:1px;padding:10px 12px}',
+    '.le[data-strip] .ask,.le[data-strip] .asks,.le[data-strip] .info,.le[data-strip] .surface:not([data-on]),.le[data-strip] .head .h,.le[data-strip] .surface[data-on] .a2-text-heading{display:none}',
+    '.le[data-strip] .pos{display:block;margin-right:auto;color:var(--le-muted);white-space:nowrap}',
+    '.le[data-strip][data-strip-many="true"] .pg,.le[data-strip] .all{display:inline-flex}',
+    '.le[data-strip] .tb{min-height:44px;min-width:44px;justify-content:center}',
+    '.le[data-strip] .strip-title{display:block;margin:0 0 8px;font-weight:650;white-space:nowrap;overflow-x:clip;text-overflow:ellipsis}',
+    '.le[data-strip] .surface[data-on]{position:relative;display:flex;flex-wrap:nowrap;gap:8px;overflow-x:auto;margin:0;padding:0;border-top:0;scrollbar-width:none}',
+    '.le[data-strip] .surface[data-on] .a2-col,.le[data-strip] .surface[data-on] .a2-row{display:contents}',
+    '.le[data-strip] .surface[data-on] .a2-btn{flex:0 0 auto;width:auto;white-space:nowrap}.le[data-strip] .surface[data-on] .a2-slider{flex:0 0 200px}',
+    '.le[data-strip] .surface[data-on][data-more="right"]{-webkit-mask-image:linear-gradient(to right,#000 calc(100% - 48px),rgba(0,0,0,.3));mask-image:linear-gradient(to right,#000 calc(100% - 48px),rgba(0,0,0,.3))}',
+    '.le[data-strip] .surface[data-on][data-more="left"]{-webkit-mask-image:linear-gradient(to left,#000 calc(100% - 48px),rgba(0,0,0,.3));mask-image:linear-gradient(to left,#000 calc(100% - 48px),rgba(0,0,0,.3))}',
+    '.le[data-strip] .surface[data-on][data-more="both"]{-webkit-mask-image:linear-gradient(to right,rgba(0,0,0,.3),#000 48px,#000 calc(100% - 48px),rgba(0,0,0,.3));mask-image:linear-gradient(to right,rgba(0,0,0,.3),#000 48px,#000 calc(100% - 48px),rgba(0,0,0,.3))}',
+    '}',
 ].join('');
 
 /* eslint-disable no-var */
@@ -827,6 +843,8 @@ function overlayClient(window, document, config, kit) {
     var surfaceAsk = {};
     var bound = [];
     var previews = [];
+    var stripId = null, stripPos = null, stripTitle = null;
+    var PHONE = '(max-width:640px)';
     var reported = {};
     var beforeText = {};
     var sending = false;
@@ -1067,7 +1085,11 @@ function overlayClient(window, document, config, kit) {
         // A page loaded after the ask has no snapshot from the send: take it at the first pick, before any preview.
         var owner = surfaceAsk[surface.id];
         if (typeof beforeText[owner] !== 'string' && !previews.some(function (p) { return p.ask === owner; })) beforeText[owner] = bodyText();
-        if (ask.preview && comp.preview) applyPreview(comp.preview, surfaceAsk[surface.id]);
+        if (ask.preview && comp.preview && applyPreview(comp.preview, surfaceAsk[surface.id])) {
+            stripId = surface.id;
+            markStrip();
+            keepInView();
+        }
         say('Sent your pick.');
         return post(ask.actionUrl, msg).then(function (r) {
             if (r.status !== 200) { say(refusal(r)); return null; }
@@ -1136,6 +1158,96 @@ function overlayClient(window, document, config, kit) {
         el.setAttribute('data-id', c.id);
         return el;
     };
+    // ---- the strip: at phone width, a previewed group shrinks to one sideways row ----
+    // The panel would otherwise cover the element being previewed. The strip shows only that group,
+    // pages to the others, and "All" brings back the whole panel, so nothing becomes unreachable.
+    var phone = function () { return Boolean(window.matchMedia && window.matchMedia(PHONE).matches); };
+    var hasClass = function (n, cls) { return (' ' + (n.className || '') + ' ').indexOf(' ' + cls + ' ') !== -1; };
+    var findIn = function (n, cls) {
+        var kids = n.children || [];
+        for (var i = 0; i < kids.length; i++) { if (hasClass(kids[i], cls)) return kids[i]; var deep = findIn(kids[i], cls); if (deep) return deep; }
+        return null;
+    };
+    // Fade the edge that has more chips past it, so a cut chip reads as "this row scrolls".
+    var hint = function (sec) {
+        var sw = sec.scrollWidth, cw = sec.clientWidth, sl = sec.scrollLeft || 0;
+        if (typeof sw !== 'number' || typeof cw !== 'number') return;
+        var left = sl > 1, right = sw - cw - sl > 1;
+        if (left || right) sec.setAttribute('data-more', left && right ? 'both' : left ? 'left' : 'right');
+        else sec.removeAttribute('data-more');
+    };
+    var scrollChip = function (sec) {
+        var el = sec.querySelectorAll('[data-picked]')[0];
+        if (el && typeof el.offsetLeft === 'number' && typeof sec.clientWidth === 'number') {
+            var sl = sec.scrollLeft || 0;
+            if (el.offsetLeft < sl || el.offsetLeft + el.offsetWidth > sl + sec.clientWidth) sec.scrollLeft = Math.max(0, el.offsetLeft - (sec.clientWidth - el.offsetWidth) / 2);
+        }
+        hint(sec);
+    };
+    // A small fixed badge in a bottom corner (a framework's dev badge, a chat bubble) lifts the strip
+    // 8px above it. A wide bar, such as a cookie banner, does not: the strip may cover it.
+    var fixedOf = function (n) {
+        for (var k = 0; n && k < 12; k++) {
+            if (n.nodeType === 1 && /^(fixed|sticky)$/.test(window.getComputedStyle(n).position)) return n;
+            n = n.parentElement || (n.parentNode && n.parentNode.host) || null;
+        }
+        return null;
+    };
+    var hitsAt = function (scope, x, y, depth) {
+        var out = [];
+        var list = scope.elementsFromPoint ? scope.elementsFromPoint(x, y) || [] : [];
+        for (var i = 0; i < list.length; i++) {
+            if (list[i] === host) continue;
+            out.push(list[i]);
+            if (depth < 3 && list[i].shadowRoot && list[i].shadowRoot !== scope) out = out.concat(hitsAt(list[i].shadowRoot, x, y, depth + 1));
+        }
+        return out;
+    };
+    var setLift = function () {
+        var vw = window.innerWidth || 0, vh = window.innerHeight || 0, lift = 12;
+        var points = [[24, vh - 24], [44, vh - 44], [vw - 24, vh - 24], [vw - 44, vh - 44]];
+        for (var p = 0; vw && vh && p < points.length; p++) {
+            var hits = hitsAt(document, points[p][0], points[p][1], 0);
+            for (var i = 0; i < hits.length; i++) {
+                var f = fixedOf(hits[i]);
+                if (!f) continue;
+                var r = f.getBoundingClientRect();
+                if (r.width <= 120 && r.height <= 120 && r.bottom >= vh - 96 && r.top < vh) lift = Math.max(lift, Math.ceil(vh - r.top + 8));
+            }
+        }
+        wrap.style.setProperty('--le-lift', lift + 'px');
+    };
+    // The previewed element sits above the strip, with room over it for its Preview badge.
+    var keepInView = function () {
+        if (!stripId || !badgeOn || !phone() || !window.scrollBy) return;
+        var r = badgeOn.getBoundingClientRect(), floor = panel.getBoundingClientRect().top - 12;
+        var by = r.bottom > floor ? r.bottom - floor : r.top < 40 ? r.top - 40 : 0;
+        if (by) window.scrollBy(0, by);
+    };
+    var markStrip = function () {
+        if (!surfacesEl || !stripPos) return;
+        var secs = surfacesEl.children || [], at = -1, i;
+        for (i = 0; i < secs.length; i++) if (secs[i].getAttribute('data-surface') === stripId) at = i;
+        if (at === -1) stripId = null;
+        for (i = 0; i < secs.length; i++) { if (i === at) secs[i].setAttribute('data-on', ''); else secs[i].removeAttribute('data-on'); }
+        if (stripId === null) { wrap.removeAttribute('data-strip'); return; }
+        wrap.setAttribute('data-strip', '');
+        wrap.setAttribute('data-strip-many', String(secs.length > 1));
+        stripPos.textContent = (at + 1) + ' of ' + secs.length;
+        var heading = findIn(secs[at], 'a2-text-heading');
+        stripTitle.textContent = heading ? heading.textContent : '';
+        if (phone()) setLift();
+        scrollChip(secs[at]);
+    };
+    var pageStrip = function (step) {
+        var secs = surfacesEl.children || [];
+        for (var i = 0; i < secs.length; i++) {
+            if (secs[i].getAttribute('data-surface') !== stripId) continue;
+            stripId = secs[(i + step + secs.length) % secs.length].getAttribute('data-surface');
+            break;
+        }
+        markStrip();
+    };
     var renderSurfaces = function () {
         if (!surfacesEl) return 0;
         while (surfacesEl.firstChild) surfacesEl.removeChild(surfacesEl.firstChild);
@@ -1146,9 +1258,11 @@ function overlayClient(window, document, config, kit) {
             var box = make('section', 'surface');
             box.setAttribute('data-surface', s.id);
             box.appendChild(renderNode(s, 'root', 0, []));
+            box.addEventListener('scroll', function () { hint(box); });
             surfacesEl.appendChild(box);
             drawn++;
         });
+        markStrip();
         return drawn;
     };
 
@@ -1279,9 +1393,25 @@ function overlayClient(window, document, config, kit) {
         wrap.setAttribute('data-ask', ask.layout);
         var head = make('div', 'head');
         head.appendChild(make('p', 'h', ask.box ? 'Ask for a change' : 'Choices'));
+        // The strip's own controls, shown only while a group is previewed at phone width.
+        stripPos = make('span', 'pos');
+        head.appendChild(stripPos);
+        var stripPrev = labelled('tb pg', '‹');
+        stripPrev.setAttribute('aria-label', 'Previous group');
+        stripPrev.addEventListener('click', function () { pageStrip(-1); });
+        var stripNext = labelled('tb pg', '›');
+        stripNext.setAttribute('aria-label', 'Next group');
+        stripNext.addEventListener('click', function () { pageStrip(1); });
+        var stripAll = labelled('tb all', 'All');
+        stripAll.setAttribute('aria-label', 'Show every choice and ask');
+        stripAll.addEventListener('click', function () { stripId = null; markStrip(); });
+        head.appendChild(stripPrev);
+        head.appendChild(stripNext);
+        head.appendChild(stripAll);
         var close = labelled('tb x', 'Close');
         close.addEventListener('click', function () { setOpen(false); });
         head.appendChild(close);
+        stripTitle = make('p', 'strip-title');
         panel.appendChild(head);
         if (key && ask.box) {
             var form = make('form', 'ask');
@@ -1326,6 +1456,7 @@ function overlayClient(window, document, config, kit) {
         if (key) {
             asksEl = make('ul', 'asks');
             surfacesEl = make('div', 'surfaces');
+            panel.appendChild(stripTitle);
             panel.appendChild(surfacesEl);
             panel.appendChild(asksEl);
             listen('click', onPageClick, true);
